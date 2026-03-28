@@ -1,0 +1,69 @@
+# Example: Kubernetes Ingress with HTTPS (TLS)
+# Use with NGINX Ingress Controller; cert-manager can provision the Certificate.
+# All application services are exposed via this Ingress (or per-host Ingress resources).
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: paas-apps
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"   # if using cert-manager
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.example.com
+        - api.example.com
+      secretName: paas-tls
+  rules:
+    # Application UI/API
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: paas-control-plane
+                port:
+                  number: 80
+    # Optional: API subdomain
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: paas-control-plane
+                port:
+                  number: 80
+---
+# Example: Per-app Ingress (single app)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sample-app
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - sample-app.example.com
+      secretName: sample-app-tls
+  rules:
+    - host: sample-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sample-app
+                port:
+                  number: 80

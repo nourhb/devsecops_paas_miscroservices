@@ -1,0 +1,83 @@
+﻿pipeline {
+  agent any
+
+  environment {
+    DOCKER_IMAGE = "${HARBOR_PROJECT}/${PROJECT_NAME}:${BUILD_NUMBER}"
+    SONAR_HOST_URL = credentials('sonar-host-url')
+    SONAR_TOKEN = credentials('sonar-token')
+    HARBOR_CREDS = credentials('harbor-creds')
+    COSIGN_PRIVATE_KEY = credentials('cosign-private-key')
+    COSIGN_PASSWORD = credentials('cosign-password')
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('SonarQube Scan') {
+      steps {
+        sh 'sonar-scanner -Dsonar.projectKey=${PROJECT_NAME} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}'
+      }
+    }
+
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+
+    stage('Dependency Scan') {
+      steps {
+        sh 'dependency-check.sh --project ${PROJECT_NAME} --scan . --format XML --out reports/'
+      }
+    }
+
+    stage('Build Image') {
+      steps {
+        sh 'docker build -t ${DOCKER_IMAGE} .'
+      }
+    }
+
+    stage('Trivy Scan') {
+      steps {
+        sh 'trivy image --exit-code 1 --severity CRITICAL ${DOCKER_IMAGE}'
+      }
+    }
+
+    stage('Cosign Sign') {
+      steps {
+        sh 'cosign sign --key ${COSIGN_PRIVATE_KEY} ${DOCKER_IMAGE}'
+      }
+    }
+
+    stage('Push Harbor') {
+      steps {
+        sh 'echo ${HARBOR_CREDS_PSW} | docker login ${HARBOR_REGISTRY} -u ${HARBOR_CREDS_USR} --password-stdin'
+        sh 'docker push ${DOCKER_IMAGE}'
+      }
+    }
+
+    stage('GitOps Update') {
+      steps {
+        sh './scripts/update-helm-values.sh ${PROJECT_NAME} ${BUILD_NUMBER}'
+      }
+    }
+
+    stage('ArgoCD Sync') {
+      steps {
+        sh 'argocd app sync ${ARGOCD_APP_PREFIX}-${PROJECT_NAME}'
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+    }
+  }
+}

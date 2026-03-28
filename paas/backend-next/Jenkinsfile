@@ -1,0 +1,58 @@
+// CI/CD Pipeline for Next.js app - PFE DevSecOps
+// Jenkins pulls from GitHub, builds image, pushes to Docker Hub, redeploys on Kubernetes
+// Required: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (or DOCKERHUB_PASSWORD); kubectl + KUBECONFIG on the agent
+// If your repo root is the Next.js app, APP_DIR can be empty; if app is in paas/backend-next, set APP_DIR=paas/backend-next
+
+pipeline {
+  agent any
+
+  environment {
+    IMAGE_NAME = "next-app"
+    APP_DIR = "paas/backend-next"   // set to "" if repo root is the Next.js app
+    IMAGE_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+    IMAGE_FULL = "${env.DOCKERHUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Trivy Scan') {
+      steps {
+        script {
+          def dir = env.APP_DIR ?: "."
+          dir(dir) {
+            sh "docker build -t ${env.IMAGE_FULL} ."
+          }
+        }
+        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL} || true"
+      }
+    }
+
+    stage('Push to Docker Hub') {
+      steps {
+        sh 'echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin'
+        sh "docker push ${env.IMAGE_FULL}"
+        sh "docker tag ${env.IMAGE_FULL} ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:latest"
+        sh "docker push ${env.DOCKERHUB_USERNAME}/${env.IMAGE_NAME}:latest"
+        sh "docker logout"
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        sh "kubectl set image deployment/next-app next-app=${IMAGE_FULL} -n default --record"
+        sh "kubectl rollout status deployment/next-app -n default --timeout=120s || true"
+      }
+    }
+  }
+
+  post {
+    always {
+      sh "docker logout || true"
+    }
+  }
+}

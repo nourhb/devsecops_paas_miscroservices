@@ -1,0 +1,82 @@
+pipeline {
+  agent any
+
+  environment {
+    REGISTRY_URL   = credentials('harbor-registry-url')
+    REGISTRY_CREDS = credentials('harbor-credentials')
+    SONAR_TOKEN    = credentials('sonar-token')
+    COSIGN_KEY     = credentials('cosign-key')
+    GITOPS_REPO    = credentials('gitops-repo-url')
+    PROJECT_NAME   = "${env.PROJECT_NAME}"
+    IMAGE_TAG      = "${env.GIT_COMMIT ?: 'latest'}"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Build & Test') {
+      steps {
+        sh 'npm ci'
+        sh 'npm test'
+      }
+    }
+
+    stage('Trivy Scan') {
+      steps {
+        sh 'trivy fs --exit-code 0 --severity HIGH,CRITICAL .'
+      }
+    }
+
+    stage('SonarQube Analysis') {
+      steps {
+        withSonarQubeEnv('sonarqube') {
+          sh 'sonar-scanner'
+        }
+      }
+    }
+
+    stage('Docker Build') {
+      steps {
+        sh 'docker build -t $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG .'
+      }
+    }
+
+    stage('Trivy Image Scan') {
+      steps {
+        sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG'
+      }
+    }
+
+    stage('Cosign Sign') {
+      steps {
+        sh 'cosign sign --key env://COSIGN_KEY $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG'
+      }
+    }
+
+    stage('Push to Harbor') {
+      steps {
+        sh 'echo $REGISTRY_CREDS_PSW | docker login $REGISTRY_URL -u $REGISTRY_CREDS_USR --password-stdin'
+        sh 'docker push $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG'
+      }
+    }
+
+    stage('Update GitOps Repo') {
+      steps {
+        sh '''
+        git clone $GITOPS_REPO gitops-repo
+        cd gitops-repo
+        # TODO: update Helm values.yaml with new image tag
+        git config user.email "jenkins@local"
+        git config user.name "Jenkins"
+        git commit -am "Update $PROJECT_NAME image to $IMAGE_TAG" || echo "No changes to commit"
+        git push origin HEAD
+        '''
+      }
+    }
+  }
+}
+

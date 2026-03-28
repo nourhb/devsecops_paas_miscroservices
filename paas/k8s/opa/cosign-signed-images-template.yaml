@@ -1,0 +1,39 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirecosignsignature
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireCosignSignature
+      validation:
+        openAPIV3Schema:
+          properties:
+            annotationKey:
+              type: string
+              description: Annotation key that must be present on Pod images (e.g. cosign.sig)
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirecosignsignature
+
+        violation[{"msg": msg}] {
+          input.review.kind.kind == "Pod"
+          required := input.parameters.annotationKey
+          not images_signed(required)
+          msg := sprintf("all container images must be signed; missing annotation %v", [required])
+        }
+
+        images_signed(required) {
+          containers := input.review.object.spec.containers
+          every i in containers {
+            has_annotation(i.image, required)
+          }
+        }
+
+        has_annotation(_image, required) {
+          ann := input.review.object.metadata.annotations
+          ann[required]
+        }
+

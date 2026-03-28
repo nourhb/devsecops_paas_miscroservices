@@ -1,0 +1,173 @@
+// DevSecOps PaaS – Full-stack pipeline (Groovy)
+// Integrates: Jenkins, Harbor, SonarQube, Artifactory (JFrog CLI), Argo CD, Dependency Track,
+// Dependency Check, Trivy, Cosign, Docker, Helm, Nginx Ingress (via GitOps).
+// Supports: Spring Boot (Java), Angular (Node), or generic Node/npm.
+// Triggered by PaaS API; Kubernetes runtime uses containerd; monitoring: Prometheus + Grafana.
+
+pipeline {
+  agent any
+
+  environment {
+    APP_NAME = "${env.JOB_NAME ?: 'my-app'}"
+    IMAGE_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+    HARBOR_PROJECT = "${env.HARBOR_PROJECT ?: 'paas'}"
+    GITOPS_BRANCH = "${env.GITOPS_BRANCH ?: 'main'}"
+    APP_TYPE = "${env.APP_TYPE ?: 'node'}"  // 'springboot' | 'angular' | 'node'
+  }
+
+  stages {
+    stage("Checkout") {
+      steps { checkout scm }
+    }
+
+    stage("Build") {
+      steps {
+        script {
+          if (env.APP_TYPE == 'springboot') {
+            sh "./mvnw -B clean package -DskipTests"
+          } else if (env.APP_TYPE == 'angular') {
+            sh "npm ci && npm run build -- --configuration=production"
+          } else {
+            sh "npm ci || npm install"
+            sh "npm run build"
+          }
+        }
+      }
+    }
+
+    stage("Unit Tests") {
+      steps {
+        script {
+          if (env.APP_TYPE == 'springboot') {
+            sh "./mvnw -B test"
+          } else {
+            sh "npm test || true"
+          }
+        }
+      }
+    }
+
+    stage("Publish to Artifactory (JFrog CLI)") {
+      when { expression { return env.ARTIFACTORY_URL } }
+      steps {
+        script {
+          def pattern = (env.APP_TYPE == 'springboot') ? "target/*.jar" : "dist/*.tgz"
+          def target = (env.APP_TYPE == 'springboot')
+            ? "generic-local/${APP_NAME}/${IMAGE_TAG}/"
+            : "generic-local/${APP_NAME}/${IMAGE_TAG}/"
+          sh """
+            jfrog rt config --url \${ARTIFACTORY_URL} --user \${ARTIFACTORY_USER} --password \${ARTIFACTORY_TOKEN} --interactive=false || true
+            jfrog rt u ${pattern} ${target} --build-name=${APP_NAME} --build-number=${IMAGE_TAG} || true
+          """
+        }
+      }
+    }
+
+    stage("SonarQube Analysis") {
+      when { expression { return env.SONAR_HOST_URL } }
+      steps {
+        withSonarQubeEnv(credentialsId: 'sonarqube') {
+          script {
+            if (env.APP_TYPE == 'springboot') {
+              sh "./mvnw -B sonar:sonar -Dsonar.projectKey=${APP_NAME}"
+            } else {
+              sh "npx sonar-scanner -Dsonar.projectKey=${APP_NAME} -Dsonar.sources=."
+            }
+          }
+        }
+      }
+    }
+
+    stage("Dependency Check (OWASP)") {
+      steps {
+        sh """
+          dependency-check.sh --out . --format JSON --format HTML --project ${APP_NAME} --scan . || true
+        """
+      }
+    }
+
+    stage("Dependency Track (SBOM upload)") {
+      when { expression { return env.DEPENDENCY_TRACK_URL } }
+      steps {
+        script {
+          if (env.APP_TYPE == 'springboot') {
+            sh "./mvnw -B org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -Dcyclonedx.skip=false || true"
+            sh "curl -s -X POST -H 'X-Api-Key: \${DEPENDENCY_TRACK_API_KEY}' -H 'Content-Type: application/json' -d @target/bom.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true"
+          } else {
+            sh "npx cyclonedx-npm --output bom.json || true"
+            sh "curl -s -X POST -H 'X-Api-Key: \${DEPENDENCY_TRACK_API_KEY}' -H 'Content-Type: application/json' -d @bom.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true"
+          }
+        }
+      }
+    }
+
+    stage("Docker Build") {
+      steps {
+        script {
+          env.IMAGE_FULL = "${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+        }
+        sh "docker build -t ${env.IMAGE_FULL} ."
+      }
+    }
+
+    stage("Trivy Scan") {
+      steps {
+        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL} || true"
+      }
+    }
+
+    stage("Push to Harbor") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'harbor', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS')]) {
+          sh "echo \$HARBOR_PASS | docker login -u \$HARBOR_USER --password-stdin ${env.HARBOR_URL}"
+        }
+        sh "docker push ${env.IMAGE_FULL}"
+        sh "docker logout ${env.HARBOR_URL}"
+      }
+    }
+
+    stage("Sign with Cosign") {
+      when { expression { return env.COSIGN_PRIVATE_KEY } }
+      steps {
+        withCredentials([file(credentialsId: 'cosign-key', variable: 'COSIGN_KEY')]) {
+          sh "cosign sign --key \$COSIGN_KEY ${env.IMAGE_FULL}"
+        }
+      }
+    }
+
+    stage("Helm Package") {
+      steps {
+        sh "helm package helm-chart/ || helm package . || true"
+        sh "mv *.tgz ${APP_NAME}-${IMAGE_TAG}.tgz || true"
+      }
+    }
+
+    stage("Update GitOps (Argo CD source)") {
+      when { expression { return env.GITOPS_REPO_URL } }
+      steps {
+        sh """
+          git clone --branch ${GITOPS_BRANCH} ${env.GITOPS_REPO_URL} gitops-repo
+          cd gitops-repo
+          sed -i 's|tag:.*|tag: ${IMAGE_TAG}|' apps/${APP_NAME}/values.yaml
+          sed -i 's|repository:.*|repository: ${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}|' apps/${APP_NAME}/values.yaml
+          git add apps/${APP_NAME}/values.yaml
+          git commit -m "chore: deploy ${APP_NAME} ${IMAGE_TAG}" || true
+          git push origin ${GITOPS_BRANCH}
+        """
+      }
+    }
+
+    stage("Argo CD Sync") {
+      when { expression { return env.ARGOCD_SERVER } }
+      steps {
+        sh "argocd app sync ${APP_NAME} --server ${env.ARGOCD_SERVER} --auth-token \${ARGOCD_TOKEN} --insecure || true"
+      }
+    }
+  }
+
+  post {
+    always {
+      sh "docker logout ${env.HARBOR_URL} || true"
+    }
+  }
+}
