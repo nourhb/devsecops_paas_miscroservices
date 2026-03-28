@@ -1,0 +1,23 @@
+# Ingress for Next.js app (use after NGINX Ingress Controller is installed)
+# Access via host: next-app.local or the host you configure
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: next-app
+  labels:
+    app: next-app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: next-app.local   # Add this to /etc/hosts or use your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: next-app
+                port:
+                  number: 80

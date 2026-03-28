@@ -1,0 +1,432 @@
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  Activity,
+  ArrowLeft,
+  Box,
+  CheckCircle2,
+  ChevronRight,
+  Circle,
+  GitBranch,
+  Loader2,
+  Rocket,
+  RotateCcw,
+  Server,
+  Shield,
+  Workflow,
+  Wrench
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { argocdApi, pipelineApi, projectApi } from "@/lib/api";
+import type { DeploymentStatus } from "@/types";
+import { cn } from "@/lib/utils";
+
+const STAGES = [
+  { key: "build", label: "Build", description: "Jenkins compile & image" },
+  { key: "gates", label: "Gates", description: "Sonar, Trivy, Cosign, OPA" },
+  { key: "registry", label: "Registry", description: "Harbor / push" },
+  { key: "gitops", label: "GitOps", description: "Helm values commit" },
+  { key: "argo", label: "Argo CD", description: "Cluster sync" }
+] as const;
+
+function stageState(
+  index: number,
+  buildOk: boolean,
+  deployOk: boolean,
+  deployFailed: boolean
+): "done" | "active" | "pending" | "error" {
+  if (deployFailed && index >= 1) {
+    return index === 1 ? "error" : "pending";
+  }
+  if (deployOk) {
+    return "done";
+  }
+  if (buildOk && index === 0) {
+    return "done";
+  }
+  if (buildOk && index === 1) {
+    return "active";
+  }
+  if (!buildOk && index === 0) {
+    return "active";
+  }
+  return "pending";
+}
+
+function ArgoHealthBadge({ health }: { health: string | undefined }) {
+  const h = (health || "").toLowerCase();
+  if (h === "healthy" || h === "progressing") {
+    return <Badge variant="success">Health: {health ?? "—"}</Badge>;
+  }
+  if (h === "degraded" || h === "missing" || h === "unknown" || h === "suspended") {
+    return <Badge variant="warning">Health: {health ?? "—"}</Badge>;
+  }
+  if (h.includes("fail") || h === "unhealthy") {
+    return <Badge variant="danger">Health: {health ?? "—"}</Badge>;
+  }
+  return <Badge variant="outline">Health: {health ?? "—"}</Badge>;
+}
+
+export default function PipelinePage() {
+  const params = useParams<{ id: string }>();
+  const projectId = params.id;
+  const queryClient = useQueryClient();
+
+  const projectQuery = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => projectApi.getProject(projectId)
+  });
+
+  const statusQuery = useQuery({
+    queryKey: ["status", projectId],
+    queryFn: () => pipelineApi.getStatus(projectId) as Promise<DeploymentStatus>,
+    refetchInterval: 8000
+  });
+
+  const argoQuery = useQuery({
+    queryKey: ["argocd", projectId],
+    queryFn: () => argocdApi.getStatus(projectId),
+    refetchInterval: 12_000
+  });
+
+  const buildMutation = useMutation({
+    mutationFn: () => pipelineApi.triggerBuild(projectId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success(data.message || "Build triggered");
+    },
+    onError: (e: unknown) => {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? String((e as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : e instanceof Error
+            ? e.message
+            : "Build failed to start";
+      toast.error(msg || "Build failed to start");
+    }
+  });
+
+  const deployMutation = useMutation({
+    mutationFn: () => pipelineApi.deploy(projectId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success(data.message || "Deployment finished");
+    },
+    onError: (e: unknown) => {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? String((e as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : e instanceof Error
+            ? e.message
+            : "Deployment blocked or failed";
+      toast.error(msg || "Deployment blocked or failed");
+    }
+  });
+
+  const rollbackMutation = useMutation({
+    mutationFn: () => pipelineApi.rollback(projectId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
+      toast.success(data.message || "Rollback completed");
+    },
+    onError: () => toast.error("Rollback failed")
+  });
+
+  if (projectQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-4 w-56" />
+        <Skeleton className="h-10 w-2/3 max-w-lg" />
+        <Skeleton className="h-24 w-full" />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-72" />
+        </div>
+      </div>
+    );
+  }
+
+  if (projectQuery.isError || !projectQuery.data) {
+    return (
+      <Card className="border-danger/30">
+        <CardHeader>
+          <CardTitle>Pipeline unavailable</CardTitle>
+          <CardDescription>We could not load this project. Check the ID and your permissions.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/projects">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Projects
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const project = projectQuery.data;
+  const status = statusQuery.data;
+  const refreshing = statusQuery.isFetching && !statusQuery.isLoading;
+
+  const buildOk = (project.buildStatus || "").toUpperCase() === "SUCCESS";
+  const deployOk = (status?.lastDeploymentStatus || project.lastDeploymentStatus || "").toUpperCase() === "SUCCESS";
+  const deployFailed = (status?.lastDeploymentStatus || "").toUpperCase() === "FAILED";
+
+  return (
+    <div className="space-y-8">
+      <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
+        <Link href="/projects" className="hover:text-foreground">
+          Projects
+        </Link>
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <Link href={`/projects/${projectId}`} className="max-w-[200px] truncate hover:text-foreground">
+          {project.projectName}
+        </Link>
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <span className="text-foreground">Pipeline</span>
+      </nav>
+
+      <header className="flex flex-col gap-6 border-b border-border pb-8 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex items-center gap-2 text-primary">
+            <Workflow className="h-8 w-8 shrink-0" />
+            <span className="text-xs font-semibold uppercase tracking-wider">CI/CD</span>
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">Pipeline</h1>
+          <p className="text-sm text-muted">
+            <span className="font-medium text-foreground">{project.projectName}</span>
+            <span className="mx-2 text-border">·</span>
+            <span className="font-mono text-xs">{project.branch}</span>
+            <span className="mx-2 text-border">·</span>
+            <span className="font-mono text-xs">{project.namespace}</span>
+          </p>
+          <p className="break-all font-mono text-xs text-muted">{project.gitRepositoryUrl}</p>
+          {refreshing ? (
+            <p className="flex items-center gap-2 text-xs text-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Refreshing status…
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Badge variant={buildOk ? "success" : "warning"}>Build: {project.buildStatus}</Badge>
+          <Badge variant={deployOk ? "success" : deployFailed ? "danger" : "outline"}>
+            Deploy: {status?.lastDeploymentStatus ?? project.lastDeploymentStatus}
+          </Badge>
+          <Badge variant="outline">Pod: {status?.podStatus ?? project.podStatus}</Badge>
+        </div>
+      </header>
+
+      {/* Visual stage strip */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Delivery path</CardTitle>
+          <CardDescription>Typical flow for a full deploy (build → policy → registry → GitOps → Argo).</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
+            {STAGES.map((stage, index) => {
+              const state = stageState(index, buildOk, deployOk, deployFailed);
+              return (
+                <li key={stage.key} className="flex flex-col items-center text-center">
+                  <div
+                    className={cn(
+                      "mb-3 flex h-12 w-12 items-center justify-center rounded-full border-2 transition-colors",
+                      state === "done" && "border-success bg-success/15 text-success",
+                      state === "active" && "border-primary bg-primary/10 text-primary",
+                      state === "error" && "border-danger bg-danger/15 text-danger",
+                      state === "pending" && "border-border bg-muted/30 text-muted"
+                    )}
+                  >
+                    {state === "done" ? (
+                      <CheckCircle2 className="h-6 w-6" />
+                    ) : state === "error" ? (
+                      <Circle className="h-6 w-6" />
+                    ) : state === "active" ? (
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    ) : (
+                      <Circle className="h-5 w-5" />
+                    )}
+                  </div>
+                  <p className="text-sm font-medium">{stage.label}</p>
+                  <p className="mt-1 text-xs text-muted">{stage.description}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <GitBranch className="h-5 w-5 text-primary" />
+              Jenkins
+            </CardTitle>
+            <CardDescription>
+              Parameterized builds against your controller. Set{" "}
+              <code className="rounded bg-muted/60 px-1">JENKINS_*</code> env vars for live integration.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
+                {buildMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Wrench className="mr-2 h-4 w-4" />
+                )}
+                Trigger build
+              </Button>
+              <Button onClick={() => deployMutation.mutate()} disabled={deployMutation.isPending}>
+                {deployMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Rocket className="mr-2 h-4 w-4" />
+                )}
+                Full deploy
+              </Button>
+            </div>
+            <Button
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={() => rollbackMutation.mutate()}
+              disabled={rollbackMutation.isPending}
+            >
+              {rollbackMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="mr-2 h-4 w-4" />
+              )}
+              Rollback
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Server className="h-5 w-5 text-primary" />
+              Argo CD
+            </CardTitle>
+            <CardDescription>
+              Application health and sync state. Full deploy runs sync after gates and GitOps update.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {argoQuery.isLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-muted">Application</span>
+                  <code className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">
+                    {argoQuery.data?.appName ?? "—"}
+                  </code>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <ArgoHealthBadge health={argoQuery.data?.health} />
+                  <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "—"}</Badge>
+                </div>
+              </>
+            )}
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted">
+              <p>
+                Image in use:{" "}
+                <span className="font-mono text-foreground/90">
+                  {status?.imageTag || project.imageTag || "—"}
+                </span>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/projects/${projectId}`}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Project
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/docker/${projectId}`}>
+            <Box className="mr-2 h-4 w-4" />
+            Docker
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/security/${projectId}`}>
+            <Shield className="mr-2 h-4 w-4" />
+            Security
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/monitoring/${projectId}`}>
+            <Activity className="mr-2 h-4 w-4" />
+            Monitoring
+          </Link>
+        </Button>
+      </div>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Build console</CardTitle>
+            <CardDescription>Jenkins and compile output</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {statusQuery.isLoading ? (
+              <Skeleton className="h-80 w-full" />
+            ) : (
+              <pre
+                className={cn(
+                  "max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed",
+                  "bg-background/80 font-mono"
+                )}
+              >
+                {status?.buildLogs?.trim() || "No build output yet. Trigger a build to stream logs here."}
+              </pre>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Deployment &amp; GitOps</CardTitle>
+            <CardDescription>Registry, policy gates, Helm, and Argo CD trail</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {statusQuery.isLoading ? (
+              <Skeleton className="h-80 w-full" />
+            ) : (
+              <pre
+                className={cn(
+                  "max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed",
+                  "bg-background/80 font-mono"
+                )}
+              >
+                {status?.deploymentLogs?.trim() ||
+                  "No deployment logs yet. Run a full deploy after a successful build path."}
+              </pre>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+    </div>
+  );
+}

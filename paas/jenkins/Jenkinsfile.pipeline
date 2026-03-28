@@ -1,0 +1,142 @@
+// DevSecOps PaaS – Main pipeline (example)
+// Triggered by PaaS API; developers do not access Jenkins directly.
+// Stages: Checkout → Build → SAST (SonarQube) → SCA (Dependency-Check) → Docker build →
+//         Trivy → Push Harbor → Cosign sign → Helm package → GitOps update → ArgoCD sync
+
+pipeline {
+  agent any
+
+  environment {
+    APP_NAME = "my-app"
+    IMAGE_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+    HARBOR_PROJECT = "${env.HARBOR_PROJECT ?: 'paas'}"
+    GITOPS_BRANCH = "${env.GITOPS_BRANCH ?: 'main'}"
+  }
+
+  stages {
+    stage("Checkout") {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage("Build") {
+      steps {
+        sh "npm ci || npm install"
+        sh "npm run build"
+        sh "npm test"
+      }
+    }
+
+    stage("Publish Artifacts") {
+      when { expression { return env.ARTIFACTORY_URL } }
+      steps {
+        sh """
+          curl -u \${ARTIFACTORY_USER}:\${ARTIFACTORY_TOKEN} \
+            -T dist/*.tgz \${ARTIFACTORY_URL}/generic-local/\${APP_NAME}/\${IMAGE_TAG}/ || true
+        """
+      }
+    }
+
+    stage("SonarQube Analysis") {
+      when { expression { return env.SONAR_HOST_URL } }
+      steps {
+        withSonarQubeEnv(credentialsId: 'sonarqube') {
+          sh "npx sonar-scanner -Dsonar.projectKey=\${APP_NAME} -Dsonar.sources=."
+        }
+      }
+    }
+
+    stage("Dependency Check") {
+      when { expression { return env.DEPENDENCY_TRACK_URL } }
+      steps {
+        sh """
+          dependency-check.sh --out . --format JSON --project \${APP_NAME} || true
+          curl -X POST -H 'Content-Type: application/json' \
+            -d @dependency-check-report.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true
+        """
+      }
+    }
+
+    stage("Docker Build") {
+      steps {
+        script {
+          env.IMAGE_FULL = "${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+        }
+        sh "docker build -t ${env.IMAGE_FULL} ."
+      }
+    }
+
+    stage("Trivy Scan") {
+      steps {
+        sh """
+          trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL} || true
+        """
+      }
+    }
+
+    stage("Push to Harbor") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'harbor', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS')]) {
+          sh "echo \$HARBOR_PASS | docker login -u \$HARBOR_USER --password-stdin ${env.HARBOR_URL}"
+        }
+        sh "docker push ${env.IMAGE_FULL}"
+        sh "docker logout ${env.HARBOR_URL}"
+      }
+    }
+
+    stage("Sign with Cosign") {
+      when { expression { return env.COSIGN_PRIVATE_KEY } }
+      steps {
+        withCredentials([file(credentialsId: 'cosign-key', variable: 'COSIGN_KEY')]) {
+          sh "cosign sign --key \$COSIGN_KEY ${env.IMAGE_FULL}"
+        }
+      }
+    }
+
+    stage("Helm Package") {
+      steps {
+        sh "helm package helm-chart/"
+        sh "mv *.tgz \${APP_NAME}-\${IMAGE_TAG}.tgz"
+      }
+    }
+
+    stage("Update GitOps") {
+      when { expression { return env.GITOPS_REPO_URL } }
+      steps {
+        sh """
+          git clone --branch ${GITOPS_BRANCH} ${env.GITOPS_REPO_URL} gitops-repo
+          cd gitops-repo
+          # Update values.yaml for this app (image tag)
+          sed -i 's|tag:.*|tag: ${IMAGE_TAG}|' apps/${APP_NAME}/values.yaml
+          sed -i 's|repository:.*|repository: ${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}|' apps/${APP_NAME}/values.yaml
+          git add apps/${APP_NAME}/values.yaml
+          git commit -m "chore: deploy ${APP_NAME} ${IMAGE_TAG}" || true
+          git push origin ${GITOPS_BRANCH}
+        """
+      }
+    }
+
+    stage("ArgoCD Sync") {
+      when { expression { return env.ARGOCD_SERVER } }
+      steps {
+        sh """
+          argocd app sync ${APP_NAME} --server ${env.ARGOCD_SERVER} --auth-token \${ARGOCD_TOKEN} || true
+        """
+      }
+    }
+
+    stage("DAST (OWASP ZAP)") {
+      when { expression { return env.ZAP_TARGET_URL } }
+      steps {
+        sh "docker run --rm -v \$(pwd):/zap/wrk owasp/zap2docker-stable zap-baseline.py -t \${ZAP_TARGET_URL} -r zap-report.html || true"
+      }
+    }
+  }
+
+  post {
+    always {
+      sh "docker logout ${env.HARBOR_URL} || true"
+    }
+  }
+}

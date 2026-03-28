@@ -1,0 +1,43 @@
+# Example Terraform – Dev environment (skeleton)
+# Adapt provider and module sources to your cloud (AWS / Azure / GCP).
+
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    # aws = { source = "hashicorp/aws", version = "~> 5.0" }
+    # google = { source = "hashicorp/google", version = "~> 5.0" }
+    # azurerm = { source = "hashicorp/azurerm", version = "~> 3.0" }
+  }
+  backend "s3" {
+    # bucket = "paas-terraform-state"
+    # key    = "dev/terraform.tfstate"
+    # region = "eu-west-1"
+  }
+}
+
+# provider "aws" {
+#   region = var.aws_region
+# }
+
+# module "network" {
+#   source   = "../../modules/network"
+#   env      = var.env
+#   vpc_cidr = var.vpc_cidr
+# }
+
+# module "eks" {
+#   source          = "../../modules/kubernetes"
+#   cluster_name    = "paas-${var.env}"
+#   vpc_id          = module.network.vpc_id
+#   subnet_ids      = module.network.private_subnet_ids
+#   node_group_size = var.node_count
+# }
+
+# output "kubeconfig" {
+#   value     = module.eks.kubeconfig
+#   sensitive = true
+# }
+
+# output "cluster_endpoint" {
+#   value = module.eks.cluster_endpoint
+# }

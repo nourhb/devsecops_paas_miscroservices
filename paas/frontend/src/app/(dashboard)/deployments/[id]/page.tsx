@@ -1,0 +1,208 @@
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, ChevronRight, ClipboardList, ExternalLink, Hash, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DeploymentLogsView,
+  deploymentFailureStageLabel
+} from "@/components/deployments/deployment-logs-view";
+import { pipelineApi, projectApi } from "@/lib/api";
+
+function deploymentStatusVariant(
+  status: string
+): "success" | "danger" | "warning" {
+  const s = status.toUpperCase();
+  if (s === "SUCCESS" || s === "DEPLOYED") {
+    return "success";
+  }
+  if (s === "FAILED") {
+    return "danger";
+  }
+  if (s === "DEPLOYING" || s === "PENDING") {
+    return "warning";
+  }
+  return "warning";
+}
+
+export default function DeploymentDetailPage() {
+  const params = useParams<{ id: string }>();
+  const deploymentId = params.id;
+
+  const query = useQuery({
+    queryKey: ["deployment", deploymentId],
+    queryFn: () => pipelineApi.getDeployment(deploymentId),
+    refetchInterval: 5000
+  });
+
+  const reachQuery = useQuery({
+    queryKey: ["app-reachability", query.data?.projectId],
+    queryFn: () => projectApi.getAppReachability(query.data!.projectId),
+    enabled: Boolean(query.data?.url && query.data?.projectId),
+    refetchInterval: 15_000
+  });
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-4 w-56" />
+        <Skeleton className="h-10 w-2/3 max-w-md" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <Card className="border-danger/30">
+        <CardHeader>
+          <CardTitle>Deployment not found</CardTitle>
+          <CardDescription>You may not have access, or the ID is invalid.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" asChild>
+            <Link href="/projects">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to projects
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const d = query.data;
+  const live = query.isFetching && !query.isLoading;
+  const isFailed = d.status.toUpperCase() === "FAILED";
+
+  return (
+    <div className="space-y-8">
+      <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
+        <Link href="/projects" className="hover:text-foreground">
+          Projects
+        </Link>
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <Link href={`/projects/${d.projectId}`} className="hover:text-foreground">
+          Project
+        </Link>
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <span className="truncate font-mono text-xs text-foreground">Deployment</span>
+      </nav>
+
+      <header className="flex flex-col gap-4 border-b border-border pb-8 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-primary">
+            <ClipboardList className="h-7 w-7 shrink-0" aria-hidden />
+            <span className="text-xs font-semibold uppercase tracking-wider">Deployment</span>
+          </div>
+          <h1 className="font-mono text-xl font-semibold tracking-tight sm:text-2xl">{d.id}</h1>
+          <p className="text-xs text-muted">
+            Auto-refresh every 5s
+            {live ? (
+              <span className="ml-2 inline-flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Updating…
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="h-9 px-3 py-1.5" variant={deploymentStatusVariant(d.status)}>
+            {d.status}
+          </Badge>
+          <Badge variant="outline" className="h-9 gap-1.5 px-3 py-1.5 font-mono text-xs">
+            <Hash className="h-3.5 w-3.5" />
+            Build {d.buildNumber ?? "—"}
+          </Badge>
+        </div>
+      </header>
+
+      {isFailed ? (
+        <Card className="border-danger/50 bg-danger/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-danger">Deployment failed</CardTitle>
+            <CardDescription className="text-danger/90">
+              {d.failureReason ? (
+                <>
+                  <span className="font-semibold text-foreground">
+                    {deploymentFailureStageLabel(d.failureReason)}
+                  </span>
+                  {d.failureMessage ? (
+                    <>
+                      {" — "}
+                      <span className="text-foreground/90">{d.failureMessage}</span>
+                    </>
+                  ) : null}
+                </>
+              ) : d.failureMessage ? (
+                <span className="text-foreground/90">{d.failureMessage}</span>
+              ) : (
+                "See console output below for details."
+              )}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      {d.url ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Live application</CardTitle>
+            <CardDescription>URL recorded when this deployment reached DEPLOYED.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <a
+              href={d.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all font-mono text-sm text-primary hover:underline"
+            >
+              {d.url}
+            </a>
+            <Button variant="outline" size="sm" asChild>
+              <a href={d.url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open app
+              </a>
+            </Button>
+            {reachQuery.data ? (
+              <Badge variant={reachQuery.data.reachable ? "success" : "warning"}>
+                {reachQuery.data.reachable
+                  ? `Reachable · ${reachQuery.data.statusCode ?? "?"}`
+                  : reachQuery.data.error === "no_url"
+                    ? "No URL on project"
+                    : "Probe failed / timeout"}
+              </Badge>
+            ) : reachQuery.isFetching ? (
+              <Badge variant="outline">Probing…</Badge>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Console output</CardTitle>
+          <CardDescription>
+            Last 5000 characters; error lines are highlighted in red when the deployment failed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DeploymentLogsView logs={d.logs ?? ""} failed={isFailed} />
+        </CardContent>
+      </Card>
+
+      <Button variant="outline" asChild>
+        <Link href={`/projects/${d.projectId}`}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to project
+        </Link>
+      </Button>
+    </div>
+  );
+}

@@ -1,0 +1,66 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paas-frontend
+  namespace: devsecops-paas
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: paas-frontend
+  template:
+    metadata:
+      labels:
+        app: paas-frontend
+    spec:
+      containers:
+        - name: nextjs
+          image: harbor.local/paas/paas-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_BASE_URL
+              value: ""
+            - name: NEXT_PUBLIC_GRAFANA_URL
+              value: https://grafana.local
+            - name: NEXT_PUBLIC_PROMETHEUS_URL
+              value: https://prometheus.local
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: paas-secrets
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: paas-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXPIRES_IN
+              valueFrom:
+                secretKeyRef:
+                  name: paas-secrets
+                  key: JWT_EXPIRES_IN
+            - name: COSIGN_ENFORCE_SIGNED
+              value: "true"
+            - name: OPA_ENFORCE_SIGNED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

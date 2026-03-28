@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 218 29% 7%;
+  --foreground: 210 20% 96%;
+  --card: 220 28% 10%;
+  --border: 218 20% 20%;
+  --primary: 188 95% 45%;
+  --muted: 215 18% 64%;
+  --success: 142 72% 45%;
+  --warning: 38 92% 50%;
+  --danger: 0 86% 62%;
+}
+
+.light {
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --border: 214 32% 91%;
+  --primary: 188 85% 38%;
+  --muted: 215 16% 47%;
+  --success: 142 71% 36%;
+  --warning: 32 95% 44%;
+  --danger: 0 72% 51%;
+}
+
+.light body {
+  background:
+    radial-gradient(circle at 10% 20%, rgba(0, 160, 180, 0.08), transparent 35%),
+    radial-gradient(circle at 90% 5%, rgba(100, 150, 255, 0.06), transparent 30%),
+    hsl(var(--background));
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background:
+    radial-gradient(circle at 10% 20%, rgba(0, 160, 180, 0.18), transparent 35%),
+    radial-gradient(circle at 90% 5%, rgba(100, 150, 255, 0.14), transparent 30%),
+    hsl(var(--background));
+  color: hsl(var(--foreground));
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 999px;
+}
