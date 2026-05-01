@@ -1,8 +1,8 @@
 # DevSecOps PaaS – Technical Architecture
 
-## Executive Summary
+## Overview
 
-The platform is moving from a Jenkins-centric deployment path to a provider-neutral build architecture. The control plane remains the single entry point for developers, while the build execution layer can be backed by Jenkins for compatibility or by Tekton for Kubernetes-native execution.
+We've been shifting away from Jenkins as the only way to run builds toward a backend that doesn't care whether the pipeline is Jenkins, Tekton, or something else. The web app stays the front door for developers; under the hood we pick Jenkins when you need parity with existing jobs, or Tekton when you'd rather stay in Kubernetes-native land.
 
 ## Target Flow
 
@@ -83,7 +83,7 @@ Reference manifests:
 ## Reliability Controls
 
 - build backend selection is explicit in environment configuration
-- registry mirror and package proxy settings are first-class environment variables
+- registry mirror and package proxy are plain environment variables (nothing hidden behind toggles)
 - deployment stages are normalized for the UI:
   - queued
   - building

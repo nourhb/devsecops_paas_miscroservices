@@ -296,8 +296,10 @@ export const artifactApi = {
     }
 };
 export const jenkinsUi = {
-    suggest: (body: Record<string, unknown>) => apiClient.post("/api/ai/suggest", body).then((r) => r.data),
-    analyze: (body: Record<string, unknown>) => apiClient.post("/api/ai/analyze", body).then((r) => r.data),
+    suggest: (body: Record<string, unknown>) =>
+        apiClient.post("/api/helpers/suggest-build", body).then((r) => r.data),
+    analyze: (body: Record<string, unknown>) =>
+        apiClient.post("/api/helpers/analyze-build-log", body).then((r) => r.data),
     trigger: (jobName: string, parameters: Record<string, string>) => apiClient.post("/api/jenkins/build", { jobName, parameters }).then((r) => r.data),
     builds: (jobName: string, signal?: AbortSignal) => apiClient.get("/api/jenkins/builds", { params: { jobName }, signal }).then((r) => r.data),
     logs: (jobName: string, buildId: string | number, signal?: AbortSignal) => apiClient.get(`/api/jenkins/logs/${encodeURIComponent(String(buildId))}`, {
