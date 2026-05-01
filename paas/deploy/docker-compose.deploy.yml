@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../paas/deploy/backend-spring.Dockerfile
+    container_name: devsecops-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend-spring.env
+    environment:
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+
+  # Optional: only enable this if you want a local Jenkins container.
+  # If you already use a managed or existing Jenkins instance,
+  # keep this service disabled and point JENKINS_BASE_URL to that server instead.
+  # jenkins:
+  #   image: jenkins/jenkins:lts-jdk17
+  #   container_name: devsecops-jenkins
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8081:8080"
+  #   volumes:
+  #     - jenkins_home:/var/jenkins_home
+
+# volumes:
+#   jenkins_home:

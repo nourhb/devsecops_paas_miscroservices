@@ -1,0 +1,791 @@
+\chapter{Installation et configuration des composants}
+\label{ch:install}
+
+\section{Introduction :}
+
+Dans ce chapitre, nous allons se concentrer sur l’installation de différents outils qui sont définis comme des tâches dans Jira.
+
+\section{Objectif de sprint :}
+
+Ce Sprint, Installations et configuration des outils, est l’endroit où nous allons faire l’installation et la configuration de nous, serveurs.
+
+\begin{figure}[h]
+\centering
+% image ici
+\caption{Début du Sprint 3}
+\end{figure}
+
+\subsection*{Terraform}
+
+Terraform est un outil open-source de provisionnement d’infrastructure. Il est utilisé pour décrire l’infrastructure en tant que code, ce qui permet de la versionner, de la partager et de la gérer plus facilement. Nous avons installé Terraform en suivant les étapes suivantes :
+
+\begin{enumerate}
+\item Téléchargement de la dernière version de Terraform depuis le site officiel :  
+\texttt{https://www.terraform.io/downloads.html.}
+\end{enumerate}
+\begin{enumerate}
+\setcounter{enumi}{1}
+\item Extraction de l’archive Terraform dans le répertoire /usr/local/bin :  
+\texttt{sudo unzip terraform\_0.15.0\_linux\_amd64.zip -d /usr/local/bin}
+
+\item Vérification de l’installation :  
+\texttt{terraform -v}
+\end{enumerate}
+
+\subsection*{AWS CLI}
+
+AWS CLI est un outil en ligne de commande qui permet de gérer les services AWS. Nous avons utilisé AWS CLI pour configurer notre accès à AWS. Voici comment nous avons procédé :
+
+\begin{enumerate}
+\item Installation de AWS CLI en tapant la commande suivante :  
+\texttt{sudo apt-get install awscli}
+
+\item Configuration de AWS CLI en tapant la commande suivante :  
+\texttt{aws configure}  
+
+Nous avons fourni notre clé d’accès et notre secret d’accès pour notre compte AWS.
+\end{enumerate}
+
+\subsection*{Git}
+
+Git est un système de contrôle de version. Nous avons utilisé Git pour partager notre code et travailler en collaboration. Nous avons installé Git en tapant la commande suivante :  
+\texttt{sudo apt-get install git}
+
+En résumé, nous avons installé Terraform, AWS CLI et Git en suivant les étapes ci-dessus. Ces outils nous ont permis de gérer facilement l’infrastructure AWS et de travailler en collaboration sur le projet.
+
+\subsection*{Installation et configuration Jenkins}
+
+Dans cette section, on va décrire en détail le processus d’installation de Jenkins, en fournissant les étapes nécessaires ainsi que les configurations requises.
+
+\subsubsection*{Prérequis :}
+
+\begin{itemize}
+\item RAM : Minimum 2 Go.
+\item JAVA : Oracle JDK 11 installé préalablement ou plus.
+\item CPU : 1
+\end{itemize}
+\subsubsection*{Installation :}
+
+Pour installer Jenkins, il suffit de suivre les étapes suivantes :
+
+\begin{itemize}
+\item Téléchargez et ajoutez la clé du référentiel Jenkins à votre trousseau de clés en exécutant la commande suivante :  
+\texttt{wget -q -O - https://pkg.jenkins.io/debian-stable/jenkins.io.key | sudo apt-key add -}
+
+\item Ajoutez la source du référentiel Jenkins en exécutant la commande suivante :  
+\texttt{sudo sh -c 'echo deb http://pkg.jenkins.io/debian-stable binary/ > /etc/apt/sources.list.d/jenkins.list'}
+
+\item Mettez à jour la liste des packages disponibles en exécutant la commande suivante :  
+\texttt{sudo apt-get update}
+
+\item Installez Jenkins en exécutant la commande suivante :  
+\texttt{sudo apt-get install jenkins}
+
+\item Activer et démarrer le service Jenkins :  
+\texttt{systemctl enable --now jenkins}
+\end{itemize}
+
+\subsubsection*{Utilisation de Jenkins :}
+
+Une fois Jenkins installée, on peut commencer à exploiter ses fonctionnalités puissantes pour automatiser nos processus de développement logiciel. Voici quelques exemples d’utilisations :
+
+\begin{enumerate}
+\item Configuration des projets :
+
+\begin{itemize}
+\item Créez des projets Jenkins pour vos différents logiciels en spécifiant les sources de code, les étapes de build, les tests et les déploiements.
+
+\item Utilisez le langage de script Groovy pour définir vos pipelines Jenkins, qui représentent le flux d’exécution de votre projet.
+\end{itemize}
+
+\item Intégration continue avec le langage Groovy :
+
+\begin{itemize}
+\item Dans votre pipeline Jenkins, utilisez le langage Groovy pour décrire les différentes étapes de votre processus d’intégration continue.
+\end{itemize}
+
+\item Utilisation du DSL Jenkins :
+
+\begin{itemize}
+\item Jenkins fournit un DSL (Domain-Specific Language) basé sur Groovy qui permet de définir des pipelines en utilisant un code Groovy plus concis et structuré.
+
+\item Le DSL Jenkins simplifie la création et la gestion des pipelines en offrant des abstractions et des méthodes spécifiques à Jenkins.
+\end{itemize}
+
+\end{enumerate}
+\subsection*{Groovy :}
+
+Avantages des pipelines scriptés Jenkins (Groovy) :
+
+\begin{itemize}
+\item Le langage Groovy offre une grande flexibilité pour personnaliser vos pipelines selon vos besoins spécifiques.
+
+\item Vous pouvez utiliser les fonctionnalités de Groovy, telles que les boucles, les conditions, les méthodes personnalisées, pour créer des pipelines dynamiques et modulaires.
+
+\item Groovy vous permet également d’accéder à l’API Jenkins pour effectuer des opérations avancées telles que la manipulation des jobs, la gestion des plugins, etc.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+% image ici
+\caption{Serveur Jenkins}
+\end{figure}
+
+\subsection*{Installation et configuration Harbor}
+
+\subsubsection*{Introduction :}
+
+Dans cette section, nous décrirons le processus d’installation de Harbor avec l’intégration de Trivy pour l’analyse de vulnérabilités des images Docker et ChartMuseum pour la gestion des charts Helm. De plus, nous utiliserons des certificats SSL auto-signés pour sécuriser les communications avec Harbor.
+\subsection*{Prérequis :}
+
+Avant d’installer Harbor, on doit s’assurer de disposer de l’environnement suivant :
+
+\begin{itemize}
+\item RAM : 8 Go
+\item CPU : 4
+\item Stockage : 50 Go
+\item Docker, Docker compose installé
+\end{itemize}
+
+\subsection*{Installation :}
+
+Pour installer Harbor, on doit télécharger le binaire d’installation à partir du site officiel :
+
+\begin{verbatim}
+wget https://github.com/goharbor/harbor/releases/download/v2.6.1/harbor-online-installer-v2.6.1.tgz
+\end{verbatim}
+
+\begin{itemize}
+\item On s’assure que Docker et Docker compose sont installés.
+\item On modifie le fichier de configuration "harbor.yml" selon nos besoins. Par notre cas on a spécifié l’adresse IP du serveur, les certificats SSL auto-signés.
+\item Configuration de Trivy :
+\item On a ajouté la configuration de Trivy dans le fichier "harbor.yml", en spécifiant les paramètres nécessaires pour l’analyse des vulnérabilités des images Docker.
+\item Configuration de ChartMuseum :
+\item On a ajouté la configuration de ChartMuseum dans le fichier "harbor.yml", en spécifiant les paramètres requis pour la gestion des chart Helm.
+\item Génération de certificats SSL auto-signés : On a utilisé openssl outil de génération de certificats SSL pour créer un certificat auto-signé pour Harbor. On a modifié le fichier de configuration "harbor.yml". Quelques commandes qu’on a utilisées pour la génération du certificat auto-signé :
+\end{itemize}
+
+\begin{verbatim}
+# Génération de la clé privée pour l’autorité de certification (CA)
+openssl genrsa -out ca.key 4096
+
+# Génération du certificat auto-signé de l’autorité de certification (CA)
+openssl req -x509 -new -nodes -sha512 -days 3650 \
+-subj "/C=CN/ST=Abylsen/L=Abylsen/O=harbor/OU=Stage/CN=abylsen-devops" \
+-key ca.key -out ca.crt
+
+# Génération de la clé privée pour le certificat du serveur Harbor
+openssl genrsa -out harbor.key 4096
+
+# Création de la demande de signature de certificat (CSR) pour le certificat du serveur Harbor
+openssl req -sha512 -new \
+-subj "/C=CN/ST=Abylsen/L=Abylsen/O=harbor/OU=Stage/CN=abylsen-devops" \
+-key harbor.key -out harbor.csr
+\end{verbatim}
+
+\begin{itemize}
+\item Installation de Harbor :
+\end{itemize}
+
+\begin{verbatim}
+./install.sh --with-trivy --with-chartmuseum
+\end{verbatim}
+
+Le script d’installation automatique de Harbor configurera les conteneurs Docker nécessaires.
+\begin{itemize}
+\item On a vérifié que tous les conteneurs fonctionnent avec la commande suivante :
+\begin{verbatim}
+docker ps
+\end{verbatim}
+\end{itemize}
+
+\begin{center}
+Figure 5.3 – Serveur Harbor
+\end{center}
+
+\section*{Installation et configuration Helm}
+
+\subsection*{Introduction :}
+
+Dans cette section, on va détaillé le processus d’installation de Helm, un outil de gestion de packages pour Kubernetes. Helm facilite le déploiement et la gestion des applications conteneurisées sur des clusters Kubernetes. On va fournir les étapes nécessaires pour installer Helm sur un système Linux, en mettant l’accent sur les prérequis et la procédure d’installation.
+
+\subsection*{Prérequis :}
+
+Avant de procéder à l’installation de Helm, on doit s’assurer de disposer des éléments suivants :
+
+\begin{itemize}
+\item Système d’exploitation : Linux
+\item Accès à un cluster kubernetes fonctionnel
+\item Accès privilégié pour installer des packages sur le système
+\end{itemize}
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a téléchargé les binaires Helm : \\
+\texttt{wget https://get.helm.sh/helm-v3.7.1-linux-amd64.tar.gz}
+
+\item On a extrait les binaires Helm : \\
+\texttt{tar -zxvf helm-v3.7.1-linux-amd64.tar.gz}
+
+\item On a déplacé les binaires Helm dans le PATH : \\
+\texttt{sudo mv linux-amd64/helm /usr/local/bin/helm}
+
+\item On a initialisé Helm : \\
+\texttt{helm init}
+
+\item On a vérifié l’installation : \\
+\texttt{helm version}
+
+\item On a ajouté le registre Harbor dans le fichier hosts : \\
+\texttt{echo 10.0.1.151 harbor-stage-abylsen.com >> /etc/hosts}
+
+\item On a ajouté les certificats de Harbor dans le serveur de Jenkins sous \\
+\texttt{/etc/docker/certs.d/domaine-name}
+
+\item On a ajouté le registre Harbor dans la liste des référentiels Helm : \\
+\texttt{helm repo add --username=******* --password=******* harbor-abylsen https://harbor-stage-abylsen.com/chartrepo/abylsen}
+
+\item On a ajouté la plugin helm-push
+
+\item On a vérifié avec une chart de Nginx : \\
+\texttt{helm cm-push nginx.tgz harbor-abylsen}
+\end{itemize}
+
+\section*{Installation et configuration Cosign}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a présenté le processus d’installation de Cosign, un outil open-source permettant de signer et de vérifier les conteneurs d’image afin d’améliorer la sécurité et la confiance lors du déploiement d’applications conteneurisées. on a expliqué les étapes nécessaires pour installer Cosign sur un système Linux, en mettant l’accent sur les prérequis et la procédure d’installation.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Système d’exploitation : Linux
+\item Docker installé et configuré sur notre système
+\item Accès privilégié pour installer des packages sur le système
+\end{itemize}
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a téléchargé les binaires Cosign : \\
+\texttt{wget "https://github.com/sigstore/cosign/releases/download/v1.13.1/cosign-linux-amd64"}
+
+\item On a déplacé les binaires Helm dans le PATH : \\
+\texttt{mv cosign-linux-amd64 /usr/local/bin/cosign}
+
+\item On a modifié les permissions du fichier : \\
+\texttt{chmod +x /usr/local/bin/cosign}
+
+\item On a généré la clé privée : \\
+\texttt{cosign generate-key-pair}
+
+\item On a exporté la variable COSIGN\_PASSWORD : \\
+\texttt{export COSIGN\_PASSWORD=*******}
+
+\item On a signé une image docker avec Cosign : \\
+\texttt{cosign sign --key cosign.key harbor-stage-abylsen.com/abylsen/web/nginx:latest}
+\end{itemize}
+
+\section*{Installation et configuration SonarQube}
+
+\subsection*{Introduction :}
+
+Dans cette section, On a abordé l’installation de SonarQube, une plateforme d’analyse statique du code qui permet de détecter les problèmes de qualité et de sécurité dans les projets logiciels. Nous expliquerons les étapes nécessaires pour installer SonarQube sur un serveur Linux.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Système d’exploitation : Linux
+\item RAM : 8 Go
+\item CPU : 4
+\item Stockage : 100 Go
+\item Version Java : JDK 11 ou supérieur
+\item Base de données : MySQL 5.7/8.0 ou PostgreSQL 9.3/9.4/9.5/9.6/10/11/12/13
+\end{itemize}
+
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a modifié le fichier de configuration "sysctl" pour répondre à l’exigence de SonarQube, on ajoutant les deux lignes suivantes :
+\end{itemize}
+
+\begin{verbatim}
+vm.max_map_count=262144
+fs.file-max=65536
+sudo sysctl --system
+\end{verbatim}
+\begin{itemize}
+\item On a installé PostgreSQL : \\
+\texttt{sudo apt install postgresql postgresql-contrib}
+
+\item On a démarré le service PostgreSQL : \\
+\texttt{sudo systemctl enable --now postgresql}
+
+\item Pour configurer la base de données Sonar, nous avons modifié le mot de passe de l’utilisateur postgres, créé un utilisateur et une base de données Sonar dédiée, et accordé les permissions nécessaires pour la manipulation de la base de données.
+
+\item On a téléchargé les binaires SonarQube : \\
+\texttt{wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-9.1.0.47736.zip}
+
+\item Nous avons configuré un service pour SonarQube et le démarrer : \\
+\texttt{systemctl enable --now sonarqube}
+\end{itemize}
+
+\begin{center}
+Figure 5.4 – Serveur Sonarqube
+\end{center}
+
+\section*{Installation et configuration Artifactory}
+
+Dans cette section, on a abordé l’installation d’Artifactory, un outil de gestion de référentiels d’artefacts. On a expliqué les étapes nécessaires pour installer Artifactory sur un serveur Linux.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Système d’exploitation : Linux
+\end{itemize}
+\begin{itemize}
+\item RAM : 8 Go
+\item CPU : 4
+\item Stockage : 100 Go
+\item Version Java : JDK 11 ou supérieur
+\item Base de données : MySQL 5.7/8.0, PostgreSQL 9.6/10/11/12, ou Oracle 12c/18c/19c
+\end{itemize}
+
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a configuré la base de données : \\
+On a créé une base de données vide dans MySQL, PostgreSQL ou Oracle pour Artifactory, avoir les permissions sur les informations de connexion à la base de données.
+
+\item On a téléchargé les binaires Artifactory : \\
+\texttt{wget -qO - https://releases.jfrog.io/artifactory/api/gpg/key/public | sudo apt-key add -;}
+
+\item On a ajouté le dépôt jfrog-artifactory-oss au sources.list apt : \\
+\texttt{echo "deb https://releases.jfrog.io/artifactory/artifactory-pro-debs distribution main" | sudo tee -a /etc/apt/sources.list;}
+
+\item Installation : \\
+\texttt{sudo apt install jfrog-artifactory-oss}
+
+\item On a démarré le service : \\
+\texttt{systemctl enable --now artifactory}
+\end{itemize}
+
+\begin{center}
+Figure 5.5 – Serveur Artifactory
+\end{center}
+\section*{Installation et configuration Dependency Track}
+
+\subsection*{Introduction :}
+
+Dans cette section, nous aborderons l’installation de Dependency Track. Nous expliquerons les étapes nécessaires pour installer Dependency-Check sur un environnement de développement.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Système d’exploitation : Linux
+\item RAM : 8 Go
+\item CPU : 4
+\item Stockage : 100 Go
+\item Version Java : JDK 8 ou supérieure
+\end{itemize}
+
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a téléchargé les binaires Dependency Track : \\
+\texttt{wget https://github.com/DependencyTrack/dependencytrack/archive/refs/tags/4.7.1.tar.gz}
+
+\item On a extrait le fichier binaire : \\
+\texttt{tar xvzf 4.7.1.tar.gz}
+
+\item On a modifié le fichier docker compose et ajouter l’adresse ip externe du serveur : \\
+\texttt{API\_BASE\_URL=http://13.37.11.210:8083}
+
+\item On a exécuté le fichier docker compose : \\
+\texttt{docker-compose up -d docker-compose.yaml}
+\end{itemize}
+
+\begin{center}
+Figure 5.6 – Serveur Artifactory
+\end{center}
+\begin{itemize}
+
+\item On a généré un fichier de configuration par défaut pour containerd : \\
+\texttt{containerd config default > /etc/containerd/config.toml}
+
+\item On a activé le service containerd pour qu’il démarre automatiquement au démarrage du système : \\
+\texttt{systemctl enable --now containerd}
+
+\item On a activé le service Kubelet : \\
+\texttt{systemctl enable kubelet}
+
+\item On a téléchargé les images Docker requises pour kubernetes : \\
+\texttt{kubeadm config images pull}
+
+\item On a initialisé le cluster Kubernetes : \\
+\texttt{kubeadm init --control-plane-endpoint="ip-10-0-1-147" --upload-certs --apiserver-advertise-address=10.0.1.147 --pod-network-cidr=192.168.0.0/16}
+
+\item On a installé le CNI weave net (Container Network Interface), fournir une connectivité réseau entre les différents conteneurs et nœuds : \\
+\texttt{kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml}
+
+\item On a ajouté les nodes avec kubeadm : \\
+\texttt{kubeadm join "Token"}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.7 – Cluster Kubernetes
+\end{center}
+
+\section*{Installation et configuration Nginx Ingress Controller}
+
+\subsection*{Introduction :}
+
+Dans cette section, On a abordé l’installation du contrôleur Nginx Ingress, qui est utilisé pour gérer le trafic entrant vers les services d’une application déployée dans un cluster Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer le contrôleur Nginx Ingress sur un cluster Kubernetes.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item On a besoin d’un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\end{itemize}
+\begin{itemize}
+\item On a besoin d’un domaine ou une adresse IP publique associée à notre application pour laquelle nous souhaitons gérer le trafic entrant.
+\end{itemize}
+
+\section*{Installation :}
+
+\begin{itemize}
+
+\item On a déployé nginx ingress controller : \\
+\texttt{kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.2.0/deploy/static/provider/cloud/deploy.yaml}
+
+\item On a créé un fichier ingress-svc.yaml : \\
+\texttt{kubectl apply -f ingress-svc.yaml}
+
+\item On a copié les certificats générés ca.crt et harbor.crt sous /usr/share/ca-certificates.
+
+\item On a appliqué les modifications : \\
+\texttt{dpkg-reconfigure ca-certificates}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.8 – Fichier ingress-svc
+\end{center}
+
+\section*{Installation et configuration HAProxy}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation et la configuration de HAProxy. HAProxy est un équilibreur de charge open-source et largement utilisé qui peut être déployé en tant que proxy inversé pour gérer le trafic entrant vers les services d’une application dans un cluster Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer HAProxy pour l’équilibrage de charge.
+\section*{Prérequis :}
+
+\begin{itemize}
+\item On a besoin d’un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\item On a besoin d’un domaine ou une adresse IP publique associée à notre application pour laquelle nous souhaitons gérer le trafic entrant.
+\end{itemize}
+
+\section*{Installation :}
+
+\begin{itemize}
+
+\item On installe HAProxy : \\
+\texttt{apt install -y haproxy}
+
+\item On a copié les certificats générés ca.crt harbor.crt sous /usr/share/ca-certificates.
+
+\item On a appliqué les modifications : \\
+\texttt{dpkg-reconfigure ca-certificates}
+
+\item On a copié les certificats dans /etc/haproxy : \\
+\texttt{cp harbor.crt harbor.key ca.crt /etc/haproxy/}
+
+\item On a modifié le fichier de configuration du haproxy.cfg.
+
+\item On a appliqué les modifications : \\
+\texttt{haproxy -f /etc/haproxy/haproxy.cfg -c}
+
+\item On a redémarré le service de HAProxy : \\
+\texttt{systemctl restart haproxy}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.9 – Configuration Haproxy.cfg
+\end{center}
+
+\section*{Installation et configuration ArgoCD}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation d’Argo CD, une plateforme open-source dédiée au déploiement continu et à la gestion des applications dans un cluster Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer Argo CD.
+\section*{Prérequis :}
+
+\begin{itemize}
+\item Un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\item Accès administrateur au cluster Kubernetes pour déployer des ressources et configurer les autorisations.
+\end{itemize}
+
+\section*{Installation :}
+
+\begin{itemize}
+
+\item On a créé le namespace argocd : \\
+\texttt{kubectl create namespace argocd}
+
+\item On a installé ArgoCD : \\
+\texttt{kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/core-install.yaml}
+
+\item On a créé ingress pour argocd avec le manifest file ingress-argocd.yaml.
+
+\item On applique le fichier : \\
+\texttt{kubectl apply -f ingress-argocd.yaml}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.10 – Fichier ingress-argocd.yaml
+\end{center}
+\begin{center}
+Figure 5.11 – Serveur ArgoCD
+\end{center}
+
+\section*{Installation et configuration Grafana \& Prometheus}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation de Grafana, une plateforme open-source de visualisation et de monitoring des métriques dans un environnement de déploiement basé sur Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer Grafana et Prometheus.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\item Accès administratif au cluster Kubernetes pour déployer des ressources et configurer les autorisations.
+\end{itemize}
+
+\section*{Installation :}
+
+\begin{itemize}
+
+\item On a téléchargé les fichiers d’installation : \\
+\texttt{wget https://github.com/prometheus-operator/kube-prometheus.git}
+
+\item On a déployé Prometheus et Grafana
+
+\end{itemize}
+\begin{itemize}
+
+\item \texttt{kubectl apply -f manifests/setup}
+\item \texttt{kubectl wait --for condition=Established --all CustomResourceDefinition --namespace=monitoring}
+\item \texttt{kubectl apply -f manifests/}
+
+\item On a déployé une base de données avec argocd, créer un utilisateur, mot de passe, nom du base de données.
+
+\item On a édité le fichier grafana.ini et le mettre dans un configMap.
+
+\item \texttt{root\_url = serve\_from\_sub\_path = true}
+
+You can configure the database connection by specifying type, host, name, user and password as separate properties or as a connection string using the url property.
+
+Either "mysql", "postgres" or "sqlite3", it’s your choice
+
+type = postgres \\
+host = grafanadb-postgresql:5432 \\
+name = monitoring \\
+user = ******
+
+If the password contains or ; you have to wrap it with triple quotes. Ex """password""" \\
+password = ******
+
+\item On a appliqué le fichier de ConfigMap grafana-ini-cm.yaml \\
+\texttt{kubectl apply -f grafana-ini-cm.yaml}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.12 – Fichier grafana-ini-cm.yaml
+\end{center}
+
+\begin{verbatim}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /grafana
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              name: http
+\end{verbatim}
+\section*{Installation et configuration OPA GateKeeper}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation de OPA GateKeeper, un outil open-source qui permet de valider les politiques de conformité dans un cluster Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer OPA GateKeeper.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\item Accès administratif au cluster Kubernetes pour déployer des ressources et configurer les autorisations.
+\end{itemize}
+
+\section*{Installation :}
+
+\begin{itemize}
+
+\item On a installé OPA GateKeeper avec Helm : \\
+\texttt{helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts}
+
+\end{itemize}
+
+\begin{center}
+Figure 5.13 – Serveur Grafana
+\end{center}
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{grafana.png}
+\caption{Serveur Grafana}
+\end{figure}
+
+\section*{Installation et configuration OPA GetKeeper}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation de OPA GetKeeper, un outil open-source qui permet de valider les politiques de conformité dans un cluster Kubernetes. On a expliqué les étapes nécessaires pour installer et configurer OPA GetKeeper.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item Un cluster Kubernetes en cours d’exécution avec les nœuds prêts et fonctionnels.
+\item Accès administratif au cluster Kubernetes pour déployer des ressources et configurer les autorisations.
+\end{itemize}
+
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a installé OPA GetKeeper avec Helm :\\
+\texttt{helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts}
+\end{itemize}
+\begin{itemize}
+\item On a créé le manifest du ConstraintTemplate.yaml
+\item On a créé le manifest du constraint.yaml et on l’a appliqué :
+\texttt{K apply -f constraint.yaml -n gatekeeper-work}
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{constraint-template.png}
+\caption{Manifest constraintTemplate.yaml}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{constraint.png}
+\caption{Manifest constraint.yaml}
+\end{figure}
+\section*{Installation et configuration JFrog CLI}
+
+\subsection*{Introduction :}
+
+Dans cette section, on a abordé l’installation de JFrog CLI, une interface de ligne de commande fournie par JFrog, pour la gestion des artefacts et le déploiement d’artefacts vers un référentiel Artifactory. On a expliqué les étapes nécessaires pour installer JFrog CLI.
+
+\subsection*{Prérequis :}
+
+\begin{itemize}
+\item On a besoin d’un accès au référentiel Artifactory où vous souhaitez gérer les artefacts.
+\item On a besoin des informations d’authentification (nom d’utilisateur, mot de passe ou clés d’API) pour accéder au référentiel Artifactory.
+\end{itemize}
+
+\subsection*{Installation :}
+
+\begin{itemize}
+\item On a récupéré la clé publique GPG pour la signature des packages JFrog :\\
+\texttt{wget -qO - https://releases.jfrog.io/artifactory/jfrog-gpg-public/jfrog\_public\_gpg.key | sudo apt-key add -}
+
+\item On a ajouté le dépôt de packages JFrog à la liste des sources APT :\\
+\texttt{echo "deb https://releases.jfrog.io/artifactory/jfrog-debs xenial contrib" | sudo tee -a /etc/apt/sources.list}
+
+\item On a mis à jour la liste des paquets disponibles :\\
+\texttt{sudo apt update}
+
+\item On a installé le client JFrog CLI :\\
+\texttt{apt install -y jfrog-cli-v2}
+
+\item On a ajouté le certificat Authority (CA) :\\
+\texttt{dpkg-reconfigure ca-certificates}
+
+\item On a configuré JFrog pour ajouter le serveur Artifactory :\\
+\texttt{jfrog config add}
+
+\item On a ajouté location of certification .crt et key.
+
+\item On a testé si CLI peut accéder au serveur Artifactory :\\
+\texttt{jfrog rt ping}
+\end{itemize}
+
+\section*{Installation et configuration reverse proxy}
+
+On a configuré Nginx en tant que reverse proxy pour fournir un accès sécurisé (HTTPS) à nos applications qui ne sont pas accessibles directement depuis l’extérieur. Nginx agit en tant qu’intermédiaire entre les utilisateurs et les applications, permettant ainsi d’assurer la confidentialité et l’intégrité des données échangées.
+\section*{Accrochage de outils avec Jenkins :}
+
+L’accrochage des outils avec Jenkins permet d’automatiser et de gérer de manière efficace les différentes étapes du processus de développement logiciel, ce qui améliore la qualité et la collaboration au sein de l’équipe.
+
+\subsection*{Credentials :}
+
+Dans Jenkins, les "credentials" (ou "identifiants") font référence aux informations d’identification utilisées pour accéder à des ressources externes, telles que des dépôts de code, des serveurs de bases de données, des services cloud, etc. Ils sont stockés de manière sécurisée et utilisés dans les pipelines Jenkins pour permettre aux jobs d’interagir avec ces ressources. Il existe plusieurs types de credentials, tels que :
+
+\begin{enumerate}
+\item \textbf{Username and password :} Ces credentials comprennent un nom d’utilisateur et un mot de passe pour l’authentification.
+\item \textbf{Certificates :} Ces credentials sont utilisés pour fournir des certificats X.509 pour l’authentification et le chiffrement.
+\item \textbf{SSH Username with private key :} Ces credentials sont utilisés pour l’authentification via SSH. Un nom d’utilisateur est associé à une clé privée.
+\item \textbf{Secret text :} Ces credentials sont utilisés pour stocker des valeurs sensibles, telles que des clés d’API, des mots de passe, etc.
+\end{enumerate}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{jenkins-credentials.png}
+\caption{Credentials dans Jenkins}
+\end{figure}
+
+\subsection*{Configuration globale :}
+
+Il s’agit des paramètres qui affectent l’ensemble de l’instance Jenkins, tels que la configuration du serveur de messagerie, les emplacements des outils et des plugins, les variables d’environnement globales, etc.
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{shared-library.png}
+\caption{Configuration globale Shared Library}
+\end{figure}
+
+\section*{Configuration globale des outils :}
+
+Dans Jenkins, la section "Tools" fait référence aux outils et aux logiciels tiers qui sont nécessaires pour exécuter les différentes étapes d’un pipeline ou d’un travail (job) Jenkins. Les outils dans Jenkins peuvent être configurés et gérés via la section "Global Tool Configuration" accessible depuis le tableau de bord Jenkins. Cette configuration permet de spécifier les versions des outils à utiliser, les chemins d’installation, les paramètres de personnalisation, etc. Certains exemples courants d’outils qui peuvent être configurés dans Jenkins incluent :
+\begin{itemize}
+\item \textbf{Maven :} un outil de gestion de projet utilisé pour la construction, les tests et le déploiement d’applications Java.
+\item \textbf{Node.js :} un environnement d’exécution JavaScript qui permet d’exécuter des scripts et des tâches basées sur Node.js dans les travaux Jenkins.
+\item \textbf{Git :} un système de contrôle de version distribué utilisé pour la gestion du code source.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{sonarscanner.png}
+\caption{Sonarscanner}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{jdk.png}
+\caption{JDK}
+\end{figure}

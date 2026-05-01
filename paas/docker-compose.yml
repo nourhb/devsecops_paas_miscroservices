@@ -1,19 +1,22 @@
-﻿version: "3.9"
-
+# Development-only compose stack. Production uses Kubernetes plus managed or operator-backed PostgreSQL.
+# Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
+# run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@localhost:5432/paas in .env.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: paas-postgres
+    # English errors so Prisma parses "column does not exist" correctly (French "colonne" breaks Prisma P2022).
+    command: ["postgres", "-c", "lc_messages=C"]
     environment:
       POSTGRES_DB: paas
-      POSTGRES_USER: paas
-      POSTGRES_PASSWORD: paas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paas -d paas"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d paas"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,7 +32,7 @@ services:
     env_file:
       - frontend/.env
     environment:
-      DATABASE_URL: postgresql://paas:paas@postgres:5432/paas
+      DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
     ports:
       - "3000:3000"

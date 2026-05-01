@@ -3,19 +3,19 @@ import { requireAuth } from "@/server/auth/auth-guard";
 import { getRuntimeMetrics } from "@/server/metrics/metrics-service";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-
 export const runtime = "nodejs";
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
-  try {
-    const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
-    await assertProjectAccess(params.projectId, auth.userId, auth.role);
-    const response = await getRuntimeMetrics(params.projectId);
-    return ok(response);
-  } catch (error) {
-    return fail(error);
-  }
+export async function GET(request: NextRequest, { params }: {
+    params: {
+        projectId: string;
+    };
+}) {
+    try {
+        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await assertProjectAccess(params.projectId, auth.userId, auth.role);
+        const response = await getRuntimeMetrics(params.projectId);
+        return ok(response);
+    }
+    catch (error) {
+        return fail(error);
+    }
 }

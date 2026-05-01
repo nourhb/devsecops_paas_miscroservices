@@ -1,0 +1,9 @@
+\chapter*{Conclusion Générale}
+\label{ch:conclusion}
+\addcontentsline{toc}{chapter}{\protect\numberline{}Conclusion}
+
+Ce rapport a décrit~\textbf{l'application PaaS} réalisée pour le projet de fin d'études~(code~\texttt{paas/})~: un~\emph{plan de contrôle} Next.js où la persistance~(Prisma), les~\texttt{Route Handlers}, le~\emph{BuildPlanner} et les fichiers~\texttt{paas/frontend/src/server/build-backend-jenkins.ts} et~\texttt{paas/frontend/src/server/build-backend-tekton.ts} constituent le logiciel utilisé lorsque~\texttt{BUILD\_BACKEND}, Harbor, GitOps~\texttt{GITOPS\_*} et Argo~\texttt{ARGOCD\_*} sont renseignés.
+
+Les garanties fonctionnelles visées correspondent à~\textbf{l'outil livré dans le dépôt Git}~(parcours onboarding dans l'IU, exécution locale~\texttt{npm run dev}, contrôles~\texttt{npm run typecheck},~\texttt{npm test}) et à~\textbf{l'histoire de livraison}~(métadonnées exploitables quel que soit le moteur de build choisi pour un même projet, promotions orientées image et digest lorsque~\texttt{BUILD\_ENFORCE\_ARTIFACT\_DIGEST} l'exige)~, comme déjà résumées dans~\texttt{paas/README.md} et~\texttt{paas/TESTING.md}.
+
+Les perspectives prolongent~\textbf{cette même base technique}~(étendre les profils Tekton au-delà du premier~\texttt{paas-node-build}, renforcer les tests bout en bout sur un environnement représentatif, durcir les politiques~\texttt{COSIGN\_*} et~\texttt{POLICY\_ENGINE}) sans changer l'orientation du produit~: la PaaS est le code que nous développons sous~\texttt{paas/frontend}.

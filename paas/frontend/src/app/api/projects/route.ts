@@ -1,5 +1,2 @@
-/**
- * REST-style plural alias for `/api/project`.
- * Same auth, validation, and Jenkins createPipeline hook as the singular route.
- */
-export { GET, POST, runtime } from "../project/route";
+export { GET, POST } from "../project/route";
+export const runtime = "nodejs";

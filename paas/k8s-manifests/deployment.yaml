@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: paas-frontend
@@ -13,10 +13,18 @@ spec:
       labels:
         app: paas-frontend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: nextjs
-          image: harbor.local/paas/paas-frontend:latest
-          imagePullPolicy: Always
+          image: harbor.local/paas/paas-frontend@sha256:replace-with-real-image-digest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
           ports:
             - containerPort: 3000
           env:

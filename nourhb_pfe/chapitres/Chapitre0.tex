@@ -1,0 +1,52 @@
+
+\chapter{Cadre général du projet}
+\label{ch:cadre}
+
+\section{Contexte et objectifs}
+
+Ce projet de fin d'études consiste à concevoir et livrer une \emph{plate-forme logicielle DevSecOps} : un environnement où les équipes enregistrent leurs projets applicatifs, déclenchent des builds, stockent les images dans un registre, propagent les livrables via une approche de type GitOps et observent déploiements et signaux de sécurité jusqu'au runtime sur Kubernetes.
+
+L'implémentation suivie dans le dépôt \texttt{paas/}~(documentation \texttt{paas/README.md} et dossier \texttt{paas/docs/}) s'articule autour du dossier~\textbf{\texttt{paas/frontend}}~: une application Next.js~(App Router) avec persistance \textbf{Prisma~/~PostgreSQL}~(\texttt{DATABASE\_URL}), authentification par sessions \textbf{JWT}~(\texttt{JWT\_SECRET}), routes API métier~(projets, déploiements, intégrations), et un mode~\textbf{démonstration sans cluster réel}~(\texttt{DEVSECOPS\_ALLOW\_SIMULATION}) pour valider les parcours en local.
+
+Côté livraison, le même code active soit \textbf{Jenkins}~(\texttt{JENKINS\_*}), soit~\textbf{Tekton}~(\texttt{TEKTON\_\*}, \texttt{PipelineRun}), selon~\texttt{BUILD\_BACKEND}. Le registre cible~\textbf{Harbor}, la promotion passe par un dépôt~\textbf{GitOps}~\texttt{GITOPS\_*}~(commit d'image ~/~valeurs Helm)~; \textbf{Argo CD} et le cluster~\textbf{Kubernetes} matérialisent l'état désiré. Les connecteurs~(SonarQube, Dependency-Track, Prometheus, scanners, Cosign, politiques) sont configurés comme variables d'environnement côté serveur~: ils alimentent l'IU et les agrégats du produit lui-même.
+
+\section{Mission confiée}
+
+L'enjeu fonctionnel peut se résumer ainsi~:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{réduire la friction} pour l'onboarding d'un projet (URL de dépôt, paramètres de build, environnements)~;
+\item \textbf{automatisier} compilation, création d'image, promotion et traçabilité des artefacts sans exposer tous les détails Jenkins ou cluster aux développeurs~;
+\item \textbf{garder une surface homogène} entre moteurs de build (méta-données d'exécution, digest d'image, étapes)~;
+\item \textbf{ancrer la sécurité} dans la chaîne~(analyses, inventaires de dépendances, vulnérabilités, politiques)~;
+\item \textbf{garder auditabilité du chemin ``code $\rightarrow$ image $\rightarrow$ cluster''}.
+\end{itemize}
+
+\section{Cahier des charges synthétique}
+
+Les exigences retenues alignent le développement sur les pratiques actuelles~:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Orchestration}~: cluster Kubernetes~(ingress, namespaces, observabilité de base)~;
+\item \textbf{Registre}~: Harbor~(images OCI/Docker)~; Helm pour le packaging lorsque pertinent~;
+\item \textbf{CI/CD}~: Jenkins~\emph{et/ou} pipelines Tekton côté cluster~;
+\item \textbf{GitOps}~: Argo CD pour appliquer l'état désiré à partir du dépôt manifestes~;
+\item \textbf{Dépôt applicatif}~: Git~(GitLab, GitHub, etc.), webhooks lorsque configurés~;
+\item \textbf{Artefacts}~: gestion~(par ex.\ Artifactory ou équivalent) lorsque prévu par l'environnement~;
+\item \textbf{Sécurité}~: SonarQube, analyse de dépendances~(Dependency-Track / OWASP Dependency-Check)~; Cosign~(signature)~; Trivy~(scan)~; OPA/Gatekeeper~(politiques)~;
+\item \textbf{Supervision}~: exemple type Prometheus~/~Grafana pour les métriques~;
+\item \textbf{Provisioning}~(optionnel)~: Terraform~/~cloud selon stratégie d'hébergement.
+\end{itemize}
+
+L'accent particulier du travail présenté ici réside dans l'application~\textbf{pilotée par navigateur}: un développeur n'a pas besoin d'administrer directement Jenkins pour la routine du projet.
+
+\section{Problématique}
+
+Au-delà de l'enchaînement technologique (CI, registre, GitOps, cluster), quelques questions guident les choix présentés dans la suite du rapport~:
+
+\begin{enumerate}[leftmargin=*]
+\item comment offrir une IHM lisible~(projets, builds, promotions, santé)~;
+\item comment abstraire~\emph{tout en restant vérifiable} les détails Jenkins~/~Tekton et les événements du cluster~;
+\item comment faire coexister outillage existant~(Jenkins)~et exécution ``cloud-native''~(Tekton)~sans dupliquer l'usage côté utilisateur~?
+\end{enumerate}
+

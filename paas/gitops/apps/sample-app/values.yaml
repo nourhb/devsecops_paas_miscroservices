@@ -1,6 +1,14 @@
 image:
-  repository: harbor.example.com/project/image
-  tag: latest
+  repository: gcr.io/google-samples/hello-app
+  tag: "1.0"
+  digest: ""
+
+# Set to pull from private registries, e.g. [{ name: harbor-regcred }]
+imagePullSecrets: []
+
+# hello-app image runs as UID 65532 (user "nonroot"); numeric UID required when runAsNonRoot is set.
+podSecurityContext:
+  runAsUser: 65532
 
 resources:
   limits:
