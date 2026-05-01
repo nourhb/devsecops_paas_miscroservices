@@ -1,0 +1,14 @@
+{
+  "exec": "next dev",
+  "watch": [
+    "next.config.mjs",
+    "tailwind.config.ts",
+    "postcss.config.js",
+    "prisma",
+    "src/server",
+    "src/app/api"
+  ],
+  "ext": "ts,tsx,mjs,js,json",
+  "ignore": ["node_modules", ".next", "**/*.test.ts", "**/*.spec.ts", "**/e2e/**"],
+  "delay": 500
+}

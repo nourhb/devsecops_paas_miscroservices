@@ -1,0 +1,407 @@
+\chapter{Architecture déployée}
+\label{ch:infra}
+
+\section{Introduction :}
+
+Dans ce chapitre, nous présentons les différentes architectures mises en place dans le cadre de notre projet. Chaque architecture est décrite en détail afin de mieux comprendre son rôle, son fonctionnement et son intégration dans l’ensemble de la solution.
+
+\section{Objectif du Sprint :}
+
+Dans ce Sprint dédié aux architectures, notre objectif est de concevoir et de présenter les différentes architectures nécessaires à la mise en œuvre de notre projet. Cela inclut notamment l’architecture de l’infrastructure cloud, l’architecture du cluster Kubernetes ainsi que l’architecture des pipelines CI/CD.
+
+Ces architectures constituent une base essentielle pour assurer la cohérence, la performance, la sécurité et la scalabilité de notre solution.
+\section{Architecture d’infrastructure sur AWS}
+
+\subsection{Description :}
+
+L’architecture de la plateforme DevSecOps, déployée sur AWS, est conçue pour offrir une infrastructure sécurisée, scalable et hautement disponible. Elle repose sur plusieurs composants essentiels permettant d’isoler les ressources, contrôler les accès et assurer la communication avec Internet.
+
+Les principaux éléments de cette architecture sont les suivants :
+
+\begin{itemize}
+    \item \textbf{Virtual Private Cloud (VPC)} : Le VPC constitue le socle de l’infrastructure. Il permet de créer un réseau privé isolé dans lequel sont déployées les ressources. Dans notre cas, le VPC est configuré avec une plage d’adresses IP (CIDR) dédiée, garantissant un environnement sécurisé et contrôlé.
+
+    \item \textbf{Zone de disponibilité (Availability Zone - AZ)} : L’infrastructure est déployée dans une zone de disponibilité spécifique (eu-west-3a – région Paris). Cela permet d’assurer une meilleure tolérance aux pannes et d’améliorer la résilience des services.
+
+    \item \textbf{Sous-réseau public (Public Subnet)} : Un sous-réseau public est créé afin d’héberger les instances accessibles depuis Internet. Ce sous-réseau est associé à une table de routage permettant la communication avec l’extérieur via une passerelle Internet.
+
+    \item \textbf{Internet Gateway} : La passerelle Internet permet aux ressources du sous-réseau public de communiquer avec Internet. Elle est reliée au VPC et configurée dans la table de routage.
+
+    \item \textbf{Table de routage (Route Table)} : Une table de routage personnalisée est mise en place pour diriger le trafic réseau. Elle contient une route locale pour le trafic interne au VPC et une route vers Internet (0.0.0.0/0) via l’Internet Gateway.
+
+    \item \textbf{Instances EC2} : Les différentes machines virtuelles sont déployées sous forme d’instances EC2. Elles hébergent les services de la plateforme DevSecOps tels que :
+    \begin{itemize}
+        \item Jenkins (CI/CD)
+        \item SonarQube (analyse de code)
+        \item Artifactory (gestion des artefacts)
+        \item Harbor (registry de conteneurs)
+        \item HAProxy (load balancer)
+        \item Cluster Kubernetes (Master et Worker)
+    \end{itemize}
+
+    \item \textbf{Groupes de sécurité (Security Groups)} : Les groupes de sécurité agissent comme des pare-feu virtuels au niveau des instances EC2. Ils permettent de contrôler les flux entrants et sortants en fonction des ports, protocoles et adresses IP.
+
+\end{itemize}
+
+Cette architecture permet de garantir une isolation réseau efficace, une exposition contrôlée des services à Internet, ainsi qu’une base solide pour le déploiement d’une plateforme DevSecOps complète sur AWS.
+\section{Architecture Cluster Kubernetes}
+
+\subsection{Description :}
+
+L’architecture du cluster Kubernetes mise en place dans notre projet vise à fournir un environnement de déploiement robuste, scalable et hautement disponible pour les applications conteneurisées. Elle repose sur une organisation claire entre les composants de contrôle et les nœuds d’exécution.
+
+Les principaux éléments de cette architecture sont les suivants :
+
+\begin{itemize}
+    \item \textbf{Plan de contrôle (Control Plane)} : Il constitue le cerveau du cluster Kubernetes. Il est responsable de la gestion globale du cluster, notamment la planification des pods, la gestion de l’état du système et la communication entre les composants. Il inclut :
+    \begin{itemize}
+        \item \textbf{API Server} : point d’entrée du cluster permettant l’interaction avec les utilisateurs et les outils externes.
+        \item \textbf{Scheduler} : responsable de l’affectation des pods aux nœuds disponibles.
+        \item \textbf{Controller Manager} : gère les contrôleurs assurant l’état désiré du cluster.
+        \item \textbf{etcd} : base de données distribuée stockant la configuration et l’état du cluster.
+    \end{itemize}
+
+    \item \textbf{Nœuds Workers} : Ce sont les machines qui exécutent réellement les applications conteneurisées. Chaque nœud worker contient :
+    \begin{itemize}
+        \item \textbf{kubelet} : agent qui assure la communication avec le control plane.
+        \item \textbf{Container Runtime} (ex: containerd) : responsable de l’exécution des conteneurs.
+        \item \textbf{kube-proxy} : gère le routage réseau et la communication entre les services.
+    \end{itemize}
+
+    \item \textbf{Base de données (DB)} : Une base de données est intégrée dans l’architecture pour stocker les données applicatives. Elle est accessible depuis les services déployés dans le cluster.
+
+    \item \textbf{HAProxy} : Utilisé comme point d’entrée externe, HAProxy agit comme un load balancer permettant de répartir le trafic entrant vers les services du cluster Kubernetes. Il améliore la disponibilité et la tolérance aux pannes.
+
+    \item \textbf{Réseau et communication} : Le cluster repose sur un réseau interne permettant la communication entre les pods, les services et les différents nœuds. Kubernetes assure l’isolation et la gestion des communications internes.
+
+    \item \textbf{Accès utilisateur (Admin/User)} : Les utilisateurs accèdent au cluster via l’API Kubernetes. Les administrateurs peuvent gérer le cluster à l’aide d’outils comme \texttt{kubectl}, tandis que les utilisateurs interagissent avec les applications déployées via des endpoints exposés.
+
+\end{itemize}
+
+Cette architecture garantit une séparation claire des responsabilités, une haute disponibilité des services et une capacité d’adaptation aux besoins croissants du projet grâce à la scalabilité offerte par Kubernetes.
+\section{Architecture Terraform}
+
+\subsection{Description :}
+
+L’architecture Terraform adoptée dans notre projet permet de gérer l’infrastructure de la plateforme DevSecOps de manière automatisée, cohérente et reproductible grâce au concept d’Infrastructure as Code (IaC). Terraform agit comme un intermédiaire entre les fichiers de configuration définis par les développeurs et le fournisseur cloud AWS.
+
+Les principaux composants de cette architecture sont les suivants :
+
+\begin{itemize}
+    \item \textbf{Terraform Core} : C’est le cœur de Terraform. Il interprète les fichiers de configuration écrits en langage HCL (HashiCorp Configuration Language), construit un plan d’exécution (\textit{execution plan}) et applique les changements nécessaires à l’infrastructure.
+
+    \item \textbf{Fichiers de configuration (main.tf)} : Le fichier principal \texttt{main.tf} contient la définition des ressources à créer (instances EC2, VPC, réseaux, etc.) ainsi que les paramètres associés. Il constitue la base de la configuration de l’infrastructure.
+
+    \item \textbf{Variables} : Des variables sont définies afin de rendre la configuration dynamique et réutilisable. Elles permettent de modifier facilement certains paramètres (région, tailles des instances, noms, etc.) sans altérer le code principal.
+
+    \item \textbf{Providers} : Les providers représentent les fournisseurs de services cloud. Dans notre cas, le provider AWS permet à Terraform d’interagir avec les services AWS et de provisionner les ressources nécessaires.
+
+    \item \textbf{Provisioners} : Ils permettent d’exécuter des scripts ou des commandes sur les ressources après leur création (par exemple : configuration initiale des machines).
+
+    \item \textbf{Plugins} : Terraform utilise des plugins pour interagir avec les APIs des providers. Ces plugins permettent d’étendre les fonctionnalités et d’assurer la communication avec les services cloud.
+
+    \item \textbf{State File (terraform.tfstate)} : Ce fichier stocke l’état actuel de l’infrastructure. Il permet à Terraform de suivre les ressources créées et de déterminer les modifications à appliquer lors des mises à jour.
+
+    \item \textbf{Workflow Terraform} :
+    \begin{itemize}
+        \item \textbf{terraform init} : initialise le projet et télécharge les providers nécessaires.
+        \item \textbf{terraform plan} : génère un plan d’exécution des changements à effectuer.
+        \item \textbf{terraform apply} : applique les modifications et crée l’infrastructure.
+    \end{itemize}
+
+\end{itemize}
+
+Cette architecture permet d’automatiser entièrement le déploiement de l’infrastructure sur AWS, tout en garantissant la reproductibilité, la traçabilité des changements et une meilleure collaboration entre les équipes DevOps.
+\section{Architecture Terraform}
+
+\subsection{Description :}
+
+L’infrastructure de notre plateforme DevSecOps est déployée sur le fournisseur cloud AWS en utilisant Terraform. Cet outil nous permet de définir l’infrastructure en tant que code (Infrastructure as Code – IaC), ce qui garantit un déploiement automatisé, cohérent et reproductible.
+
+Dans notre implémentation, nous avons structuré notre projet Terraform comme suit :
+
+\begin{itemize}
+    \item \textbf{Répertoire de travail Terraform} : Nous avons créé un espace dédié contenant l’ensemble des fichiers nécessaires à la définition de l’infrastructure.
+
+    \item \textbf{Fichier principal \texttt{main.tf}} : Ce fichier contient la configuration principale de l’infrastructure. Il permet de définir :
+    \begin{itemize}
+        \item Le \textbf{provider AWS}, qui établit la connexion avec les services cloud.
+        \item Les \textbf{ressources} à déployer (instances EC2, VPC, réseau, etc.).
+    \end{itemize}
+
+    \item \textbf{Variables} : Afin de rendre notre configuration plus flexible et réutilisable, nous avons défini des variables dans le fichier Terraform. Cela permet de modifier certains paramètres (comme la région, les types d’instances, ou les noms des ressources) sans modifier directement le code principal.
+
+    \item \textbf{Gestion de l’état (State)} : Terraform maintient un fichier d’état (\texttt{terraform.tfstate}) qui permet de suivre les ressources créées et d’assurer la synchronisation entre la configuration définie et l’infrastructure réelle.
+
+    \item \textbf{Cycle de déploiement} :
+    \begin{itemize}
+        \item \textbf{terraform init} : initialise le projet et installe les dépendances nécessaires (providers).
+        \item \textbf{terraform plan} : génère un plan d’exécution des ressources à créer ou modifier.
+        \item \textbf{terraform apply} : applique le plan et déploie l’infrastructure sur AWS.
+    \end{itemize}
+\end{itemize}
+
+Cette approche permet d’automatiser entièrement la création et la gestion de l’infrastructure tout en facilitant la maintenance, la collaboration entre les équipes et la traçabilité des changements.
+\section{Architecture de la plateforme PAAS}
+
+\subsection{Description :}
+
+Notre plateforme PAAS est conçue pour automatiser, orchestrer et sécuriser le processus de construction, de déploiement et de gestion des applications au sein de l’équipe de développement. Elle s’appuie sur une chaîne DevSecOps complète intégrant plusieurs outils et composants interconnectés.
+
+Le fonctionnement global de la plateforme se déroule selon les étapes suivantes :
+
+\begin{enumerate}
+    \item \textbf{Déclenchement via l’IHM} :  
+    L’utilisateur (développeur) interagit avec une interface web (IHM) permettant de saisir les paramètres nécessaires à la construction de son application (nom, dépôt, configuration, etc.). Une fois le formulaire validé, une requête est envoyée vers l’API backend.
+
+    \item \textbf{Appel de l’API} :  
+    L’API reçoit les informations et déclenche automatiquement le pipeline CI/CD en communiquant avec Jenkins.
+
+    \item \textbf{Pipeline Jenkins (CI/CD)} :  
+    Jenkins orchestre les différentes étapes du pipeline :
+    \begin{itemize}
+        \item Récupération du code source depuis le dépôt Git
+        \item Construction de l’application (build)
+        \item Exécution des tests
+        \item Analyse de qualité du code via SonarQube
+    \end{itemize}
+
+    \item \textbf{Analyse de sécurité} :  
+    Des outils de sécurité comme Trivy ou Dependency-Check sont utilisés pour analyser les vulnérabilités dans le code et les dépendances.
+
+    \item \textbf{Création et stockage de l’image Docker} :  
+    Après validation, une image Docker est construite puis stockée dans un registre de conteneurs tel que Harbor.
+
+    \item \textbf{Gestion des artefacts} :  
+    Les artefacts générés sont stockés et versionnés dans Artifactory pour assurer la traçabilité.
+
+    \item \textbf{Déploiement via ArgoCD (CD)} :  
+    ArgoCD récupère les configurations Kubernetes (manifests) et déploie automatiquement l’application dans le cluster Kubernetes.
+
+    \item \textbf{Orchestration Kubernetes} :  
+    Kubernetes gère le déploiement, la mise à l’échelle et la disponibilité des applications conteneurisées.
+
+    \item \textbf{Exposition des services} :  
+    L’accès aux applications est assuré via un Ingress Controller (Nginx) et un reverse proxy (HAProxy), permettant de router le trafic HTTP/HTTPS.
+
+    \item \textbf{Stockage des données} :  
+    Les données persistantes sont stockées via des volumes persistants (PV) associés à des solutions de stockage dédiées.
+
+    \item \textbf{Supervision et monitoring} :  
+    Des outils comme Prometheus et Grafana permettent de surveiller les performances, collecter les métriques et visualiser l’état du système.
+
+\end{enumerate}
+
+\subsection{Descriptions :}
+
+Notre plateforme PAAS est conçue pour automatiser, orchestrer et sécuriser le processus de construction et de déploiement des applications de l’équipe de développement. Voici les différentes étapes qui la composent :
+
+\begin{enumerate}
+    \item \textbf{Déclenchement de construction à partir de l’IHM} :  
+    Notre PAAS permet de lancer la construction des applications via une interface utilisateur (IHM) que nous avons développée. Cette interface fournit un formulaire permettant aux utilisateurs (développeurs) de saisir les paramètres nécessaires à la construction, tels que le nom du projet, le nom du groupe, ainsi que d’autres informations spécifiques.
+
+    \item \textbf{Envoi de la requête vers Jenkins} :  
+    Une fois le formulaire complété et validé par l’utilisateur, une requête est automatiquement envoyée à l’API de Jenkins afin de déclencher le pipeline de construction correspondant.
+
+    \item \textbf{Automatisation du processus CI/CD} :  
+    Jenkins prend en charge l’exécution des différentes étapes du pipeline, incluant la récupération du code source, la construction de l’application, l’exécution des tests ainsi que les vérifications nécessaires.
+
+    \item \textbf{Gestion et déploiement} :  
+    Après validation, l’application est conteneurisée et déployée automatiquement sur l’infrastructure cible (cluster Kubernetes), garantissant ainsi une mise en production rapide et fiable.
+
+\end{enumerate}
+
+Cette approche permet de simplifier le processus pour les développeurs tout en assurant un haut niveau d’automatisation, de cohérence et de sécurité dans le cycle de vie des applications.
+\subsection{Descriptions :}
+
+Notre plateforme PAAS est conçue pour automatiser, orchestrer et sécuriser le processus de construction et de déploiement des applications de l’équipe de développement. Voici les différentes étapes qui la composent :
+
+\begin{enumerate}
+    \item \textbf{Déclenchement de construction à partir de l’IHM} :  
+    Notre PAAS permet de lancer la construction des applications via une interface utilisateur (IHM) que nous avons développée. Cette interface fournit un formulaire permettant aux utilisateurs (développeurs) de saisir les paramètres nécessaires à la construction, tels que le nom du projet, le nom du groupe, ainsi que d’autres informations spécifiques.
+
+    \item \textbf{Envoi de la requête vers Jenkins} :  
+    Une fois le formulaire complété et validé par l’utilisateur, une requête est automatiquement envoyée à l’API de Jenkins afin de déclencher le pipeline de construction correspondant.
+
+    \item \textbf{Automatisation du processus CI/CD} :  
+    Jenkins prend en charge l’exécution des différentes étapes du pipeline, incluant la récupération du code source, la construction de l’application, l’exécution des tests ainsi que les vérifications nécessaires.
+
+    \item \textbf{Gestion et déploiement} :  
+    Après validation, l’application est conteneurisée et déployée automatiquement sur l’infrastructure cible (cluster Kubernetes), garantissant ainsi une mise en production rapide et fiable.
+
+\end{enumerate}
+
+Cette approche permet de simplifier le processus pour les développeurs tout en assurant un haut niveau d’automatisation, de cohérence et de sécurité dans le cycle de vie des applications.
+\subsection{Étapes détaillées du pipeline PAAS :}
+
+Le pipeline CI/CD de notre plateforme PAAS est composé des étapes suivantes :
+
+\begin{enumerate}
+    \item \textbf{Checkout du code} :  
+    Le pipeline commence par récupérer le code source de l’application depuis le dépôt Git spécifié.
+
+    \item \textbf{Tests de conformité (SCA)} :  
+    Une analyse des dépendances est effectuée à l’aide d’outils comme OWASP Dependency-Check. Un rapport SBOM (Software Bill of Materials) est généré afin d’identifier les vulnérabilités connues.
+
+    \item \textbf{Tests de sécurité statique (SAST)} :  
+    Le code source est analysé avec SonarQube pour détecter les failles de sécurité, les bugs et les mauvaises pratiques de développement.
+
+    \item \textbf{Construction de l’application} :  
+    L’application est compilée en fonction du type de projet (Java, Node.js, etc.), générant ainsi un artefact prêt à être déployé.
+
+    \item \textbf{Création de l’image Docker} :  
+    Une image Docker est construite à partir de l’artefact généré lors de l’étape précédente.
+
+    \item \textbf{Packaging avec Helm} :  
+    Un package Helm est créé afin de définir les configurations nécessaires au déploiement de l’application sur Kubernetes.
+
+    \item \textbf{Publication des artefacts} :  
+    Les artefacts générés sont stockés dans Artifactory, servant de référentiel centralisé.
+
+    \item \textbf{Publication de l’image Docker} :  
+    L’image Docker est poussée vers un registre privé tel que Harbor.
+
+    \item \textbf{Signature de l’image Docker} :  
+    L’image est signée à l’aide de Cosign afin de garantir son intégrité et son authenticité.
+
+    \item \textbf{Publication des charts Helm} :  
+    Les charts Helm sont également publiés dans le registre privé Harbor.
+
+    \item \textbf{Déploiement avec Argo CD} :  
+    Argo CD est utilisé pour orchestrer et automatiser le déploiement de l’application sur le cluster Kubernetes.
+
+    \item \textbf{Synchronisation des configurations} :  
+    Argo CD assure la cohérence entre les fichiers de configuration et l’état réel du cluster en appliquant les changements nécessaires.
+
+\end{enumerate}
+
+Ce pipeline garantit une intégration continue et une livraison continue sécurisée, en intégrant des contrôles de qualité, des analyses de sécurité et des mécanismes de déploiement automatisés.
+\section{Mise en place de l’infrastructure}
+
+\subsection{Introduction}
+
+Le but de cette section est de décrire la manière dont nous avons provisionné notre infrastructure AWS à l’aide de Terraform. L’objectif de cette étape est de créer rapidement et efficacement les ressources nécessaires au bon fonctionnement de notre plateforme PAAS. Nous présentons ci-dessous les étapes suivies pour utiliser Terraform afin de créer et provisionner les ressources sur AWS.
+
+\subsection{Processus de provisionnement}
+
+Avant d’utiliser Terraform pour créer des ressources sur AWS, il est nécessaire de configurer les informations d’identification AWS dans notre environnement. Pour cela, nous avons défini des variables d’environnement sur notre machine locale.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{images/terraform-user.png}
+\caption{Création d’un utilisateur Terraform dans AWS}
+\end{figure}
+
+La configuration des variables d’environnement se fait comme suit :
+
+\begin{enumerate}
+    \item Ouvrir un terminal de commande.
+    
+    \item Définir l’identifiant de la clé d’accès :
+    \begin{verbatim}
+setx AWS_ACCESS_KEY_ID "votre_clé_d_accès"
+    \end{verbatim}
+
+    \item Définir la clé secrète :
+    \begin{verbatim}
+setx AWS_SECRET_ACCESS_KEY "votre_clé_secrète"
+    \end{verbatim}
+
+    \item Définir la région AWS par défaut :
+    \begin{verbatim}
+setx AWS_DEFAULT_REGION "votre_région_aws"
+    \end{verbatim}
+\end{enumerate}
+
+Pour le provisionnement de l’infrastructure AWS, nous avons utilisé Terraform afin de créer différentes ressources, notamment :
+
+\begin{itemize}
+    \item des instances EC2,
+    \item des groupes de sécurité,
+    \item un VPC,
+    \item un Internet Gateway,
+    \item des sous-réseaux (subnets),
+    \item et une table de routage.
+\end{itemize}
+
+Nous avons également utilisé des modules Terraform afin d’automatiser le processus de provisionnement. Par ailleurs, plusieurs variables ont été définies pour paramétrer les ressources, telles que :
+
+\begin{itemize}
+    \item le type des instances,
+    \item les adresses IP,
+    \item l’identifiant de l’AMI,
+    \item la zone de disponibilité.
+\end{itemize}
+
+Grâce à ces variables, nous avons pu adapter et personnaliser notre infrastructure en fonction de nos besoins spécifiques.
+\subsection{Définir les instances EC2}
+
+Dans cette section, nous présentons le fichier Terraform contenant la configuration nécessaire pour définir une instance EC2 (Elastic Compute Cloud).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{images/ec2-config.png}
+\caption{Définition des instances EC2}
+\end{figure}
+
+\subsection{Définir la partie réseau}
+
+Dans cette section, nous présentons le fichier Terraform qui contient la configuration de la partie réseau, incluant la création d’un VPC (Virtual Private Cloud), d’un sous-réseau (subnet) et d’une passerelle Internet (Internet Gateway).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{images/vpc-subnet.png}
+\caption{Définition du VPC et du sous-réseau}
+\end{figure}
+\subsection{Définir la table de routage}
+
+Dans cette section, nous présentons le fichier Terraform contenant la configuration nécessaire pour définir la table de routage en tant que code.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{images/route-table.png}
+\caption{Définition de la table de routage}
+\end{figure}
+
+\subsection{Définir le groupe de sécurité}
+
+Dans cette section, nous présentons le fichier Terraform permettant de définir un groupe de sécurité en tant que code.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{images/security-group.png}
+\caption{Définition du groupe de sécurité}
+\end{figure}
+\subsection{Définir le fichier des variables}
+
+Dans cette section, nous présentons le fichier Terraform contenant les variables utilisées pour paramétrer l’infrastructure. Ces variables permettent de rendre la configuration plus flexible, réutilisable et facilement adaptable à différents environnements.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{images/variables.png}
+\caption{Définition des variables}
+\end{figure}
+
+\subsection{Résultat du projet Terraform}
+
+Dans cette section, nous présentons le résultat obtenu après l’exécution du projet Terraform. Les ressources créées sont visibles sur la plateforme AWS, notamment les différentes instances EC2 déployées.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{images/terraform-result.png}
+\caption{Résultat du déploiement Terraform dans AWS}
+\end{figure}
+\section{Revue de sprint 2}
+
+Le sprint est désormais terminé. Cette étape constitue une phase essentielle dans notre processus de développement, permettant d’évaluer les résultats obtenus et de valider l’atteinte des objectifs fixés. L’ensemble des tâches planifiées pour ce sprint a été réalisé avec succès.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{images/sprint2.png}
+\caption{Fin du Sprint 2}
+\end{figure}
+\section{Conclusion}
+
+Dans ce chapitre, nous avons présenté les différentes architectures retenues ainsi que le processus de mise en place de l’infrastructure. Nous avons pu déployer avec succès notre environnement sur AWS en utilisant Terraform, ce qui nous a permis d’assurer une gestion automatisée, cohérente et reproductible des ressources.
+
+Cette étape constitue une base solide pour la suite du projet, notamment pour l’installation et la configuration des outils DevSecOps. Le chapitre suivant sera ainsi consacré à la mise en place de ces outils afin de compléter notre plateforme.

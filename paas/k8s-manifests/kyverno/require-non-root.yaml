@@ -1,0 +1,36 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                # Pod only: Kyverno autogen expands this to Deployment/StatefulSet/DaemonSet
+                # with the correct spec.template.spec path. Matching Deployment directly with a
+                # Pod-shaped pattern rejects valid Deployments (spec.containers is under template).
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - argocd
+                - harbor
+                - jenkins
+                - kube-system
+                - kyverno
+                - ingress-nginx
+      validate:
+        message: "Containers must run as non-root."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+            containers:
+              - securityContext:
+                  runAsNonRoot: true

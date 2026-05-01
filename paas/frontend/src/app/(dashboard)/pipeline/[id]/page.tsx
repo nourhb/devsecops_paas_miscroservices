@@ -1,165 +1,152 @@
 "use client";
-
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  Activity,
-  ArrowLeft,
-  Box,
-  CheckCircle2,
-  ChevronRight,
-  Circle,
-  GitBranch,
-  Loader2,
-  Rocket,
-  RotateCcw,
-  Server,
-  Shield,
-  Workflow,
-  Wrench
-} from "lucide-react";
+import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, GitBranch, Loader2, Rocket, RotateCcw, Server, Shield, Workflow, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { argocdApi, pipelineApi, projectApi } from "@/lib/api";
+import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
+import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
 import { cn } from "@/lib/utils";
-
 const STAGES = [
-  { key: "build", label: "Build", description: "Jenkins compile & image" },
-  { key: "gates", label: "Gates", description: "Sonar, Trivy, Cosign, OPA" },
-  { key: "registry", label: "Registry", description: "Harbor / push" },
-  { key: "gitops", label: "GitOps", description: "Helm values commit" },
-  { key: "argo", label: "Argo CD", description: "Cluster sync" }
+    { key: "build", label: "Build", description: "Jenkins compile & image" },
+    { key: "gates", label: "Gates", description: "Sonar, Trivy, Cosign, OPA" },
+    { key: "registry", label: "Registry", description: "Harbor / push" },
+    { key: "gitops", label: "GitOps", description: "Helm values commit" },
+    { key: "argo", label: "Argo CD", description: "Cluster sync" }
 ] as const;
-
-function stageState(
-  index: number,
-  buildOk: boolean,
-  deployOk: boolean,
-  deployFailed: boolean
-): "done" | "active" | "pending" | "error" {
-  if (deployFailed && index >= 1) {
-    return index === 1 ? "error" : "pending";
-  }
-  if (deployOk) {
-    return "done";
-  }
-  if (buildOk && index === 0) {
-    return "done";
-  }
-  if (buildOk && index === 1) {
-    return "active";
-  }
-  if (!buildOk && index === 0) {
-    return "active";
-  }
-  return "pending";
+function stageState(index: number, buildOk: boolean, deployOk: boolean, deployFailed: boolean): "done" | "active" | "pending" | "error" {
+    if (deployFailed && index >= 1) {
+        return index === 1 ? "error" : "pending";
+    }
+    if (deployOk) {
+        return "done";
+    }
+    if (buildOk && index === 0) {
+        return "done";
+    }
+    if (buildOk && index === 1) {
+        return "active";
+    }
+    if (!buildOk && index === 0) {
+        return "active";
+    }
+    return "pending";
 }
-
-function ArgoHealthBadge({ health }: { health: string | undefined }) {
-  const h = (health || "").toLowerCase();
-  if (h === "healthy" || h === "progressing") {
-    return <Badge variant="success">Health: {health ?? "—"}</Badge>;
-  }
-  if (h === "degraded" || h === "missing" || h === "unknown" || h === "suspended") {
-    return <Badge variant="warning">Health: {health ?? "—"}</Badge>;
-  }
-  if (h.includes("fail") || h === "unhealthy") {
-    return <Badge variant="danger">Health: {health ?? "—"}</Badge>;
-  }
-  return <Badge variant="outline">Health: {health ?? "—"}</Badge>;
+function ArgoHealthBadge({ health }: {
+    health: string | undefined;
+}) {
+    const h = (health || "").toLowerCase();
+    if (h === "healthy" || h === "progressing") {
+        return <Badge variant="success">Health: {health ?? "—"}</Badge>;
+    }
+    if (h === "degraded" || h === "missing" || h === "unknown" || h === "suspended") {
+        return <Badge variant="warning">Health: {health ?? "—"}</Badge>;
+    }
+    if (h.includes("fail") || h === "unhealthy") {
+        return <Badge variant="danger">Health: {health ?? "—"}</Badge>;
+    }
+    return <Badge variant="outline">Health: {health ?? "—"}</Badge>;
 }
-
 export default function PipelinePage() {
-  const params = useParams<{ id: string }>();
-  const projectId = params.id;
-  const queryClient = useQueryClient();
-
-  const projectQuery = useQuery({
-    queryKey: ["project", projectId],
-    queryFn: () => projectApi.getProject(projectId)
-  });
-
-  const statusQuery = useQuery({
-    queryKey: ["status", projectId],
-    queryFn: () => pipelineApi.getStatus(projectId) as Promise<DeploymentStatus>,
-    refetchInterval: 8000
-  });
-
-  const argoQuery = useQuery({
-    queryKey: ["argocd", projectId],
-    queryFn: () => argocdApi.getStatus(projectId),
-    refetchInterval: 12_000
-  });
-
-  const buildMutation = useMutation({
-    mutationFn: () => pipelineApi.triggerBuild(projectId),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      toast.success(data.message || "Build triggered");
-    },
-    onError: (e: unknown) => {
-      const msg =
-        e && typeof e === "object" && "response" in e
-          ? String((e as { response?: { data?: { message?: string } } }).response?.data?.message)
-          : e instanceof Error
-            ? e.message
-            : "Build failed to start";
-      toast.error(msg || "Build failed to start");
-    }
-  });
-
-  const deployMutation = useMutation({
-    mutationFn: () => pipelineApi.deploy(projectId),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      toast.success(data.message || "Deployment finished");
-    },
-    onError: (e: unknown) => {
-      const msg =
-        e && typeof e === "object" && "response" in e
-          ? String((e as { response?: { data?: { message?: string } } }).response?.data?.message)
-          : e instanceof Error
-            ? e.message
-            : "Deployment blocked or failed";
-      toast.error(msg || "Deployment blocked or failed");
-    }
-  });
-
-  const rollbackMutation = useMutation({
-    mutationFn: () => pipelineApi.rollback(projectId),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["status", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
-      toast.success(data.message || "Rollback completed");
-    },
-    onError: () => toast.error("Rollback failed")
-  });
-
-  if (projectQuery.isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-4 w-56" />
-        <Skeleton className="h-10 w-2/3 max-w-lg" />
-        <Skeleton className="h-24 w-full" />
+    const params = useParams<{
+        id: string;
+    }>();
+    const projectId = params.id;
+    const queryClient = useQueryClient();
+    const projectQuery = useQuery({
+        queryKey: ["project", projectId],
+        queryFn: () => projectApi.getProject(projectId)
+    });
+    const statusQuery = useQuery({
+        queryKey: ["status", projectId],
+        queryFn: () => pipelineApi.getStatus(projectId) as Promise<DeploymentStatus>,
+        refetchInterval: 8000
+    });
+    const argoQuery = useQuery({
+        queryKey: ["argocd", projectId],
+        queryFn: () => argocdApi.getStatus(projectId),
+        refetchInterval: 12000
+    });
+    const securityQuery = useQuery({
+        queryKey: ["dependency-track", projectId],
+        queryFn: () => securityApi.getDependencyTrack(projectId),
+        refetchInterval: 12000
+    });
+    const buildMutation = useMutation({
+        mutationFn: () => pipelineApi.triggerBuild(projectId),
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+            toast.success(data.message || "Build triggered");
+        },
+        onError: (e: unknown) => {
+            const msg = queryHttpMessage(e, "Build failed to start");
+            const details = queryHttpDetails(e);
+            const data = queryHttpData(e);
+            const jobUrl = typeof data?.jobUrl === "string" ? data.jobUrl : null;
+            toast.error(msg, {
+                ...(details ? { description: details.replace(/\s+/g, " ").trim().slice(0, 280) } : {}),
+                ...(jobUrl
+                    ? {
+                        action: {
+                            label: "Open Jenkins",
+                            onClick: () => window.open(jobUrl, "_blank", "noopener,noreferrer")
+                        }
+                    }
+                    : {})
+            });
+        }
+    });
+    const deployMutation = useMutation({
+        mutationFn: () => pipelineApi.deploy(projectId),
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+            toast.success(data.message || "Deployment finished");
+        },
+        onError: (e: unknown) => {
+            const msg = e && typeof e === "object" && "response" in e
+                ? String((e as {
+                    response?: {
+                        data?: {
+                            message?: string;
+                        };
+                    };
+                }).response?.data?.message)
+                : e instanceof Error
+                    ? e.message
+                    : "Deployment blocked or failed";
+            toast.error(msg || "Deployment blocked or failed");
+        }
+    });
+    const rollbackMutation = useMutation({
+        mutationFn: () => pipelineApi.rollback(projectId),
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
+            toast.success(data.message || "Rollback completed");
+        },
+        onError: () => toast.error("Rollback failed")
+    });
+    if (projectQuery.isLoading) {
+        return (<div className="space-y-6">
+        <Skeleton className="h-4 w-56"/>
+        <Skeleton className="h-10 w-2/3 max-w-lg"/>
+        <Skeleton className="h-24 w-full"/>
         <div className="grid gap-4 lg:grid-cols-2">
-          <Skeleton className="h-72" />
-          <Skeleton className="h-72" />
+          <Skeleton className="h-72"/>
+          <Skeleton className="h-72"/>
         </div>
-      </div>
-    );
-  }
-
-  if (projectQuery.isError || !projectQuery.data) {
-    return (
-      <Card className="border-danger/30">
+      </div>);
+    }
+    if (projectQuery.isError || !projectQuery.data) {
+        return (<Card className="border-danger/30">
         <CardHeader>
           <CardTitle>Pipeline unavailable</CardTitle>
           <CardDescription>We could not load this project. Check the ID and your permissions.</CardDescription>
@@ -167,41 +154,37 @@ export default function PipelinePage() {
         <CardContent className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
             <Link href="/projects">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+              <ArrowLeft className="mr-2 h-4 w-4"/>
               Projects
             </Link>
           </Button>
         </CardContent>
-      </Card>
-    );
-  }
-
-  const project = projectQuery.data;
-  const status = statusQuery.data;
-  const refreshing = statusQuery.isFetching && !statusQuery.isLoading;
-
-  const buildOk = (project.buildStatus || "").toUpperCase() === "SUCCESS";
-  const deployOk = (status?.lastDeploymentStatus || project.lastDeploymentStatus || "").toUpperCase() === "SUCCESS";
-  const deployFailed = (status?.lastDeploymentStatus || "").toUpperCase() === "FAILED";
-
-  return (
-    <div className="space-y-8">
+      </Card>);
+    }
+    const project = projectQuery.data;
+    const status = statusQuery.data;
+    const refreshing = statusQuery.isFetching && !statusQuery.isLoading;
+    const buildOk = (project.buildStatus || "").toUpperCase() === "SUCCESS";
+    const deployOk = (status?.lastDeploymentStatus || project.lastDeploymentStatus || "").toUpperCase() === "SUCCESS";
+    const deployFailed = (status?.lastDeploymentStatus || "").toUpperCase() === "FAILED";
+    const securityMetrics = securityQuery.data?.metrics;
+    return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
           Projects
         </Link>
-        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60"/>
         <Link href={`/projects/${projectId}`} className="max-w-[200px] truncate hover:text-foreground">
           {project.projectName}
         </Link>
-        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
+        <ChevronRight className="h-4 w-4 shrink-0 opacity-60"/>
         <span className="text-foreground">Pipeline</span>
       </nav>
 
       <header className="flex flex-col gap-6 border-b border-border pb-8 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-2 text-primary">
-            <Workflow className="h-8 w-8 shrink-0" />
+            <Workflow className="h-8 w-8 shrink-0"/>
             <span className="text-xs font-semibold uppercase tracking-wider">CI/CD</span>
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">Pipeline</h1>
@@ -213,12 +196,10 @@ export default function PipelinePage() {
             <span className="font-mono text-xs">{project.namespace}</span>
           </p>
           <p className="break-all font-mono text-xs text-muted">{project.gitRepositoryUrl}</p>
-          {refreshing ? (
-            <p className="flex items-center gap-2 text-xs text-muted">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {refreshing ? (<p className="flex items-center gap-2 text-xs text-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin"/>
               Refreshing status…
-            </p>
-          ) : null}
+            </p>) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -230,7 +211,7 @@ export default function PipelinePage() {
         </div>
       </header>
 
-      {/* Visual stage strip */}
+      
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Delivery path</CardTitle>
@@ -239,33 +220,15 @@ export default function PipelinePage() {
         <CardContent>
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
             {STAGES.map((stage, index) => {
-              const state = stageState(index, buildOk, deployOk, deployFailed);
-              return (
-                <li key={stage.key} className="flex flex-col items-center text-center">
-                  <div
-                    className={cn(
-                      "mb-3 flex h-12 w-12 items-center justify-center rounded-full border-2 transition-colors",
-                      state === "done" && "border-success bg-success/15 text-success",
-                      state === "active" && "border-primary bg-primary/10 text-primary",
-                      state === "error" && "border-danger bg-danger/15 text-danger",
-                      state === "pending" && "border-border bg-muted/30 text-muted"
-                    )}
-                  >
-                    {state === "done" ? (
-                      <CheckCircle2 className="h-6 w-6" />
-                    ) : state === "error" ? (
-                      <Circle className="h-6 w-6" />
-                    ) : state === "active" ? (
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    ) : (
-                      <Circle className="h-5 w-5" />
-                    )}
+            const state = stageState(index, buildOk, deployOk, deployFailed);
+            return (<li key={stage.key} className="flex flex-col items-center text-center">
+                  <div className={cn("mb-3 flex h-12 w-12 items-center justify-center rounded-full border-2 transition-colors", state === "done" && "border-success bg-success/15 text-success", state === "active" && "border-primary bg-primary/10 text-primary", state === "error" && "border-danger bg-danger/15 text-danger", state === "pending" && "border-border bg-muted/30 text-muted")}>
+                    {state === "done" ? (<CheckCircle2 className="h-6 w-6"/>) : state === "error" ? (<Circle className="h-6 w-6"/>) : state === "active" ? (<Loader2 className="h-6 w-6 animate-spin"/>) : (<Circle className="h-5 w-5"/>)}
                   </div>
                   <p className="text-sm font-medium">{stage.label}</p>
                   <p className="mt-1 text-xs text-muted">{stage.description}</p>
-                </li>
-              );
-            })}
+                </li>);
+        })}
           </ul>
         </CardContent>
       </Card>
@@ -274,7 +237,7 @@ export default function PipelinePage() {
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <GitBranch className="h-5 w-5 text-primary" />
+              <GitBranch className="h-5 w-5 text-primary"/>
               Jenkins
             </CardTitle>
             <CardDescription>
@@ -285,33 +248,16 @@ export default function PipelinePage() {
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
-                {buildMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Wrench className="mr-2 h-4 w-4" />
-                )}
+                {buildMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<Wrench className="mr-2 h-4 w-4"/>)}
                 Trigger build
               </Button>
               <Button onClick={() => deployMutation.mutate()} disabled={deployMutation.isPending}>
-                {deployMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Rocket className="mr-2 h-4 w-4" />
-                )}
+                {deployMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<Rocket className="mr-2 h-4 w-4"/>)}
                 Full deploy
               </Button>
             </div>
-            <Button
-              variant="destructive"
-              className="w-full sm:w-auto"
-              onClick={() => rollbackMutation.mutate()}
-              disabled={rollbackMutation.isPending}
-            >
-              {rollbackMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RotateCcw className="mr-2 h-4 w-4" />
-              )}
+            <Button variant="destructive" className="w-full sm:w-auto" onClick={() => rollbackMutation.mutate()} disabled={rollbackMutation.isPending}>
+              {rollbackMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<RotateCcw className="mr-2 h-4 w-4"/>)}
               Rollback
             </Button>
           </CardContent>
@@ -320,7 +266,7 @@ export default function PipelinePage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Server className="h-5 w-5 text-primary" />
+              <Server className="h-5 w-5 text-primary"/>
               Argo CD
             </CardTitle>
             <CardDescription>
@@ -328,10 +274,7 @@ export default function PipelinePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {argoQuery.isLoading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : (
-              <>
+            {argoQuery.isLoading ? (<Skeleton className="h-20 w-full"/>) : (<>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm text-muted">Application</span>
                   <code className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">
@@ -339,11 +282,10 @@ export default function PipelinePage() {
                   </code>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <ArgoHealthBadge health={argoQuery.data?.health} />
+                  <ArgoHealthBadge health={argoQuery.data?.health}/>
                   <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "—"}</Badge>
                 </div>
-              </>
-            )}
+              </>)}
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted">
               <p>
                 Image in use:{" "}
@@ -356,28 +298,112 @@ export default function PipelinePage() {
         </Card>
       </section>
 
+      <section className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield className="h-5 w-5 text-primary"/>
+              Security Analysis
+            </CardTitle>
+            <CardDescription>
+              Dependency-Track metrics linked to the pipeline outcome so the dashboard shows build plus security, not just build alone.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted">
+              <p className="font-medium text-foreground">{securityQuery.data?.summary ?? "Waiting for Dependency-Track metrics."}</p>
+              {securityQuery.data?.projectUuid ? <p className="mt-2 font-mono text-xs">Dependency-Track UUID: {securityQuery.data.projectUuid}</p> : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border border-danger/30 bg-danger/5 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Critical</p>
+                <p className="mt-2 text-2xl font-semibold text-danger">{securityMetrics?.critical ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">High</p>
+                <p className="mt-2 text-2xl font-semibold text-orange-500">{securityMetrics?.high ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Medium</p>
+                <p className="mt-2 text-2xl font-semibold text-yellow-500">{securityMetrics?.medium ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-success/30 bg-success/5 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Low</p>
+                <p className="mt-2 text-2xl font-semibold text-success">{securityMetrics?.low ?? 0}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Build + Security</CardTitle>
+            <CardDescription>The jury-facing DevSecOps summary.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              <span className="text-muted">Build</span>
+              <Badge variant={buildOk ? "success" : "warning"}>{project.buildStatus}</Badge>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              <span className="text-muted">Security</span>
+              <Badge variant={(securityMetrics?.critical ?? 0) > 0 ? "danger" : (securityMetrics?.high ?? 0) > 0 ? "warning" : "success"}>
+                {(securityMetrics?.critical ?? 0) > 0
+            ? `${securityMetrics?.critical ?? 0} critical`
+            : (securityMetrics?.high ?? 0) > 0
+                ? `${securityMetrics?.high ?? 0} high`
+                : "Clear"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              <span className="text-muted">Policy enforcement</span>
+              <Badge variant={securityQuery.data?.findings ? ((securityMetrics?.critical ?? 0) > 0 ? "warning" : "success") : "outline"}>
+                {(securityMetrics?.critical ?? 0) > 0 ? "Needs action" : "Validated"}
+              </Badge>
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted">Enforcement</p>
+              <p className="mt-2 text-muted">
+                {project.buildStatus === "SUCCESS"
+            ? ((securityMetrics?.critical ?? 0) > 0
+                ? `Build passed, but ${securityMetrics?.critical ?? 0} critical vulnerabilities still require action before production rollout.`
+                : "Build passed and the security gate is clear for trusted deployment.")
+            : "Run a build to refresh supply-chain and policy signals."}
+              </p>
+            </div>
+            {securityQuery.data?.findings?.[0] ? <div className="rounded-lg border border-border bg-background/50 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">AI explanation</p>
+                <p className="mt-2 font-medium text-foreground">{securityQuery.data.findings[0].title}</p>
+                <p className="mt-1 text-muted">
+                  {securityQuery.data.findings[0].recommendation || "Review the vulnerable component and upgrade to a patched version."}
+                </p>
+              </div> : null}
+          </CardContent>
+        </Card>
+      </section>
+
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline" size="sm">
           <Link href={`/projects/${projectId}`}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft className="mr-2 h-4 w-4"/>
             Project
           </Link>
         </Button>
         <Button asChild variant="outline" size="sm">
           <Link href={`/docker/${projectId}`}>
-            <Box className="mr-2 h-4 w-4" />
+            <Box className="mr-2 h-4 w-4"/>
             Docker
           </Link>
         </Button>
         <Button asChild variant="outline" size="sm">
           <Link href={`/security/${projectId}`}>
-            <Shield className="mr-2 h-4 w-4" />
+            <Shield className="mr-2 h-4 w-4"/>
             Security
           </Link>
         </Button>
         <Button asChild variant="outline" size="sm">
           <Link href={`/monitoring/${projectId}`}>
-            <Activity className="mr-2 h-4 w-4" />
+            <Activity className="mr-2 h-4 w-4"/>
             Monitoring
           </Link>
         </Button>
@@ -390,18 +416,9 @@ export default function PipelinePage() {
             <CardDescription>Jenkins and compile output</CardDescription>
           </CardHeader>
           <CardContent>
-            {statusQuery.isLoading ? (
-              <Skeleton className="h-80 w-full" />
-            ) : (
-              <pre
-                className={cn(
-                  "max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed",
-                  "bg-background/80 font-mono"
-                )}
-              >
+            {statusQuery.isLoading ? (<Skeleton className="h-80 w-full"/>) : (<pre className={cn("max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono")}>
                 {status?.buildLogs?.trim() || "No build output yet. Trigger a build to stream logs here."}
-              </pre>
-            )}
+              </pre>)}
           </CardContent>
         </Card>
 
@@ -411,22 +428,12 @@ export default function PipelinePage() {
             <CardDescription>Registry, policy gates, Helm, and Argo CD trail</CardDescription>
           </CardHeader>
           <CardContent>
-            {statusQuery.isLoading ? (
-              <Skeleton className="h-80 w-full" />
-            ) : (
-              <pre
-                className={cn(
-                  "max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed",
-                  "bg-background/80 font-mono"
-                )}
-              >
+            {statusQuery.isLoading ? (<Skeleton className="h-80 w-full"/>) : (<pre className={cn("max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono")}>
                 {status?.deploymentLogs?.trim() ||
-                  "No deployment logs yet. Run a full deploy after a successful build path."}
-              </pre>
-            )}
+                "No deployment logs yet. Run a full deploy after a successful build path."}
+              </pre>)}
           </CardContent>
         </Card>
       </section>
-    </div>
-  );
+    </div>);
 }

@@ -1,33 +1,24 @@
-# Git Workflow and Pipeline Triggers
+# Git Workflow and Build Triggers
 
-## Git workflow (branch strategy)
+## Branch Strategy
 
-- **main** (or **master**): Production-ready code; pipeline builds, scans, deploys to production (or staging) via GitOps.
-- **develop** (optional): Integration branch; pipeline builds and deploys to dev namespace only.
-- **feature/*** : Feature branches; pipeline runs build + test + SAST/SCA only; no deploy.
+- `main` is the primary promotion branch.
+- optional feature branches can run validation-only builds.
+- production deployment remains artifact-driven through GitOps.
 
-## Pipeline trigger explanation
+## Trigger Flow
 
-1. **Developer** pushes to Git (GitLab or GitHub).
-2. **Webhook** from Git targets the **PaaS control plane** (e.g. `POST /api/webhooks/git`) with payload (repo, branch, commit).
-3. **PaaS API** identifies the project linked to that repo/branch, then calls **Jenkins API** to start the corresponding pipeline job (e.g. `POST /job/<job-name>/buildWithParameters` with `BRANCH=main`).
-4. **Jenkins** runs the pipeline (checkout that branch, build, scan, push, update GitOps, etc.); no direct Jenkins access for the developer.
-5. **Optional:** Jenkins can also use SCM polling instead of webhooks; PaaS still triggers “deploy” or “release” actions via API.
+1. A developer pushes code or a webhook fires.
+2. The PaaS control plane matches the repository and branch to a project.
+3. `BuildPlanner` selects the managed profile and build mode.
+4. The configured backend starts the build:
+   - Jenkins adapter in compatibility mode
+   - Tekton `PipelineRun` in Kubernetes-native mode
+5. The produced artifact is promoted through the GitOps repository.
+6. Argo CD syncs the new desired state into the cluster.
 
-## GitLab webhook example
+## Black-box Developer Experience
 
-- URL: `https://paas.example.com/api/webhooks/gitlab`
-- Events: Push events, Merge request events (optional)
-- Secret: Shared secret for payload verification
-
-## GitHub webhook example
-
-- URL: `https://paas.example.com/api/webhooks/github`
-- Content type: `application/json`
-- Events: Push, Pull request (optional)
-- Secret: Webhook secret for HMAC verification
-
-## Black box behavior
-
-- Developer sees: “Build started”, “Build passed/failed”, “Deployed to dev/prod”.
-- Developer does **not** see: Jenkins UI, Jenkinsfile details, or infrastructure. All interaction is via PaaS UI and Git push.
+- Developers use the PaaS UI and Git only.
+- They see build provider, run status, deployment logs, and resulting application URLs.
+- They do not need direct access to Jenkins or Tekton internals.

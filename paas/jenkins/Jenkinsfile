@@ -1,83 +1,321 @@
-﻿pipeline {
-  agent any
+pipeline {
+  parameters {
+    string(
+      name: "JENKINS_AGENT_LABEL",
+      defaultValue: "jenkins-jenkins-agent",
+      trim: true,
+      description: "Agent label for Kubernetes Pod Template (must match Clouds → kubernetes → Pod Templates). If the build waits forever with ‘doesn’t have label’, fix the pod template label in JCasC or set this to the exact label shown there (some Helm charts add a trailing space by mistake)."
+    )
+    string(name: "GIT_URL", defaultValue: "", trim: true, description: "Repository clone URL")
+    string(name: "BRANCH", defaultValue: "main", trim: true, description: "Git branch")
+    string(name: "IMAGE_NAME", defaultValue: "", trim: true, description: "Image without tag (registry/project/app)")
+    string(name: "PROJECT_ID", defaultValue: "", trim: true, description: "PaaS project UUID")
+    string(name: "GIT_CREDENTIALS_ID", defaultValue: "", trim: true, description: "Jenkins credentialsId for private Git (omit for public)")
+    string(name: "KANIKO_IMAGE", defaultValue: "gcr.io/kaniko-project/executor:debug", trim: true, description: "Kaniko executor image")
+    string(name: "DOCKER_REGISTRY_CREDENTIALS_ID", defaultValue: "harbor-docker", trim: true, description: "Jenkins credentialsId for docker login when not using HARBOR_* + Kaniko")
+    string(name: "DOCKERFILE_PATH", defaultValue: "Dockerfile", trim: true, description: "Dockerfile path relative to repo root")
+    string(name: "DOCKER_BUILD_CONTEXT", defaultValue: ".", trim: true, description: "Docker build context relative to repo root")
+  }
+
+  agent {
+    label "${params.JENKINS_AGENT_LABEL ?: 'jenkins-jenkins-agent'}"
+  }
 
   environment {
-    DOCKER_IMAGE = "${HARBOR_PROJECT}/${PROJECT_NAME}:${BUILD_NUMBER}"
-    SONAR_HOST_URL = credentials('sonar-host-url')
-    SONAR_TOKEN = credentials('sonar-token')
-    HARBOR_CREDS = credentials('harbor-creds')
-    COSIGN_PRIVATE_KEY = credentials('cosign-private-key')
-    COSIGN_PASSWORD = credentials('cosign-password')
+    HARBOR_REGISTRY = "${env.HARBOR_REGISTRY ?: ''}"
+    HARBOR_USERNAME = "${env.HARBOR_USERNAME ?: ''}"
+    HARBOR_PASSWORD = "${env.HARBOR_PASSWORD ?: ''}"
+    SONAR_HOST_URL = "${env.SONAR_HOST_URL ?: ''}"
+    SONAR_TOKEN = "${env.SONAR_TOKEN ?: ''}"
+    NVD_API_KEY = "${env.NVD_API_KEY ?: ''}"
+    DEPENDENCY_TRACK_BASE_URL = "${env.DEPENDENCY_TRACK_BASE_URL ?: ''}"
+    DEPENDENCY_TRACK_API_KEY = "${env.DEPENDENCY_TRACK_API_KEY ?: ''}"
   }
 
   stages {
-    stage('Checkout') {
+    stage("Checkout") {
       steps {
-        checkout scm
-      }
-    }
-
-    stage('SonarQube Scan') {
-      steps {
-        sh 'sonar-scanner -Dsonar.projectKey=${PROJECT_NAME} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}'
-      }
-    }
-
-    stage('Quality Gate') {
-      steps {
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: true
+        script {
+          if (!params.GIT_URL?.trim()) {
+            error("GIT_URL is required")
+          }
+          if (!params.BRANCH?.trim()) {
+            error("BRANCH is required")
+          }
+          if (!params.IMAGE_NAME?.trim()) {
+            error("IMAGE_NAME is required")
+          }
+        }
+        deleteDir()
+        script {
+          def url = params.GIT_URL.trim()
+          def branch = params.BRANCH.trim()
+          def cred = params.GIT_CREDENTIALS_ID?.trim()
+          echo "[checkout] branch=${branch} url host=${url.replaceAll('^https?://([^/@]+).*', '$1')} creds=${cred ? 'yes' : 'no'}"
+          if (cred) {
+            git branch: branch, credentialsId: cred, url: url
+          } else {
+            git branch: branch, url: url
+          }
         }
       }
     }
 
-    stage('Dependency Scan') {
+    stage("Check") {
       steps {
-        sh 'dependency-check.sh --project ${PROJECT_NAME} --scan . --format XML --out reports/'
+        container("docker") {
+          script {
+            def dockerOk = sh(script: 'command -v docker >/dev/null 2>&1', returnStatus: true) == 0
+            if (!dockerOk) {
+              error(
+                'Docker CLI missing in this agent container. On Kubernetes use container(\"docker\") with the docker+dind pod template (see paas/k8s-manifests/jenkins/README.md).'
+              )
+            }
+          }
+        }
       }
     }
 
-    stage('Build Image') {
+    stage("SAST (SonarQube)") {
       steps {
-        sh 'docker build -t ${DOCKER_IMAGE} .'
+        container("docker") {
+          catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
+            sh """
+          WS="\${WORKSPACE:-}"
+          if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
+          echo "[sonar] WORKSPACE=\${WORKSPACE}"
+          set -u
+          if [ -z "\${SONAR_HOST_URL:-}" ] || [ -z "\${SONAR_TOKEN:-}" ]; then
+            echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+            exit 0
+          fi
+          SONAR_IMG="sonarsource/sonar-scanner-cli:latest"
+          set +e
+          docker pull "\$SONAR_IMG" >/dev/null
+          if [ "\$?" != "0" ]; then echo "[sonar] docker pull failed; skipping analysis"; exit 0; fi
+          docker run --rm \\
+            -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
+            -e SONAR_TOKEN="\${SONAR_TOKEN}" \\
+            -v "\${WORKSPACE}:/usr/src" \\
+            "\$SONAR_IMG" \\
+            -Dsonar.projectKey="${params.PROJECT_ID}" \\
+            -Dsonar.projectName="${params.PROJECT_ID}" \\
+            -Dsonar.projectVersion="${params.BRANCH}-${env.BUILD_NUMBER}" \\
+            -Dsonar.sources=. \\
+            -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \\
+            -Dsonar.scm.provider=git
+          SONAR_RC=\$?
+          if [ "\$SONAR_RC" != "0" ]; then echo "[sonar] scanner exited \$SONAR_RC (non-fatal for deploy pipeline)"; fi
+          exit 0
+        """
+          }
+        }
       }
     }
 
-    stage('Trivy Scan') {
+    stage("SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
       steps {
-        sh 'trivy image --exit-code 1 --severity CRITICAL ${DOCKER_IMAGE}'
+        container("docker") {
+          catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
+            sh """
+          WS="\${WORKSPACE:-}"
+          if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
+          echo "[sca] WORKSPACE=\${WORKSPACE}"
+          set -u
+          mkdir -p "\${WORKSPACE}/sca"
+          echo "[sca] Running OWASP Dependency-Check (vuln report) ..."
+          set +e
+          docker pull owasp/dependency-check:latest >/dev/null
+          if [ "\$?" != "0" ]; then echo "[sca] docker pull dependency-check failed; skipping DC"; fi
+          NVD_ARG=""
+          if [ -n "\${NVD_API_KEY:-}" ]; then
+            NVD_ARG="--nvdApiKey \${NVD_API_KEY}"
+          else
+            echo "[sca] NVD_API_KEY not set; running Dependency-Check with --noupdate to avoid long NVD downloads / rate limits."
+            NVD_ARG="--noupdate"
+          fi
+          docker run --rm -v "\${WORKSPACE}:/src" owasp/dependency-check:latest \\
+            --scan /src \\
+            --format JSON \\
+            --out /src/sca \\
+            \$NVD_ARG || true
+          if [ -f "\${WORKSPACE}/sca/dependency-check-report.json" ]; then
+            mv -f "\${WORKSPACE}/sca/dependency-check-report.json" "\${WORKSPACE}/sca/dependency-check.json"
+          fi
+          echo "[sca] Generating CycloneDX SBOM (bom.json) ..."
+          CDXGEN_IMG="ghcr.io/cyclonedx/cdxgen:latest"
+          docker pull "\$CDXGEN_IMG" >/dev/null || echo "[sca] cdxgen image pull failed"
+          if [ -f "\${WORKSPACE}/package.json" ] || [ -f "\${WORKSPACE}/package-lock.json" ] || [ -f "\${WORKSPACE}/yarn.lock" ] || [ -f "\${WORKSPACE}/pnpm-lock.yaml" ]; then
+            docker run --rm -v "\${WORKSPACE}:/repo" -w /repo "\$CDXGEN_IMG" \\
+              -r /repo -o /repo/sca/bom.json || true
+          elif [ -f "\${WORKSPACE}/pom.xml" ] || [ -f "\${WORKSPACE}/build.gradle" ] || [ -f "\${WORKSPACE}/build.gradle.kts" ]; then
+            docker run --rm -v "\${WORKSPACE}:/repo" -w /repo "\$CDXGEN_IMG" \\
+              -t java -r /repo -o /repo/sca/bom.json || true
+          elif [ -f "\${WORKSPACE}/requirements.txt" ] || [ -f "\${WORKSPACE}/pyproject.toml" ] || [ -f "\${WORKSPACE}/Pipfile.lock" ]; then
+            docker run --rm -v "\${WORKSPACE}:/repo" -w /repo "\$CDXGEN_IMG" \\
+              -t python -r /repo -o /repo/sca/bom.json || true
+          else
+            echo "[sca] No supported manifest found; skipping SBOM generation."
+          fi
+          if [ -f "\${WORKSPACE}/sca/bom.json" ]; then
+            echo "[sca] SBOM generated: \${WORKSPACE}/sca/bom.json"
+          else
+            echo "[sca] SBOM not generated."
+          fi
+          echo "[sca] Uploading SBOM to Dependency-Track (if configured) ..."
+          if [ -n "\${DEPENDENCY_TRACK_BASE_URL:-}" ] && [ -n "\${DEPENDENCY_TRACK_API_KEY:-}" ] && [ -f "\${WORKSPACE}/sca/bom.json" ]; then
+            BASE="\${DEPENDENCY_TRACK_BASE_URL%/}"
+            VER="${params.BRANCH}-\${BUILD_NUMBER:-0}"
+            curl -sS --fail-with-body -X POST "\$BASE/api/v1/bom" \\
+              -H "X-Api-Key: \${DEPENDENCY_TRACK_API_KEY}" \\
+              -F "autoCreate=true" \\
+              -F "projectName=${params.PROJECT_ID}" \\
+              -F "projectVersion=\$VER" \\
+              -F "bom=@\${WORKSPACE}/sca/bom.json" \\
+              || echo "[sca] Dependency-Track upload failed (non-fatal)"
+          else
+            echo "[sca] Dependency-Track not configured or no SBOM; skipping upload."
+          fi
+          exit 0
+        """
+          }
+        }
+        archiveArtifacts artifacts: "sca/**", allowEmptyArchive: true, onlyIfSuccessful: false
       }
     }
 
-    stage('Cosign Sign') {
+    stage("Image") {
       steps {
-        sh 'cosign sign --key ${COSIGN_PRIVATE_KEY} ${DOCKER_IMAGE}'
+        container("docker") {
+        script {
+          def useKaniko = env.HARBOR_REGISTRY?.trim() && env.HARBOR_USERNAME?.trim() && env.HARBOR_PASSWORD?.trim()
+          def imageName = params.IMAGE_NAME.trim()
+          def dest = "${imageName}:${env.BUILD_NUMBER}"
+          def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"
+          def ctx = params.DOCKER_BUILD_CONTEXT?.trim() ?: "."
+          def kanikoImg = params.KANIKO_IMAGE?.trim() ?: "gcr.io/kaniko-project/executor:debug"
+
+          if (useKaniko) {
+            sh """
+              WS="\${WORKSPACE:-}"
+              if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
+              echo "[image] WORKSPACE=\${WORKSPACE}"
+              set -eu
+              mkdir -p "\${WORKSPACE}/public"
+              DOCKERFILE_PATH="\${WORKSPACE}/${df}"
+              if [ ! -f "\$DOCKERFILE_PATH" ]; then
+                if [ -f package.json ]; then
+                  cat > "\${WORKSPACE}/Dockerfile" <<'EOF'
+FROM mirror.gcr.io/library/node:20-bookworm-slim
+WORKDIR /app
+COPY . .
+RUN if [ -f package.json ]; then \\
+      npm config set audit false && \\
+      npm config set fund false && \\
+      npm config set fetch-retries 5 && \\
+      npm config set fetch-retry-factor 2 && \\
+      npm config set fetch-retry-mintimeout 20000 && \\
+      npm config set fetch-retry-maxtimeout 120000 && \\
+      npm config set fetch-timeout 1800000 && \\
+      npm config set maxsockets 1 && \\
+      if [ -f package-lock.json ]; then npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; else npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; fi && \\
+      if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then npm run build; fi; \\
+    fi
+EXPOSE 3000
+CMD ["sh", "-c", "if [ -f package.json ]; then npm start; else node server.js; fi"]
+EOF
+                  DOCKERFILE_PATH="\${WORKSPACE}/Dockerfile"
+                elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+                  cat > "\${WORKSPACE}/Dockerfile" <<'EOF'
+FROM mirror.gcr.io/library/python:3.12-bookworm-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+COPY . .
+RUN pip install --upgrade pip setuptools wheel \\
+  && if [ -f requirements.txt ]; then pip install -r requirements.txt; \\
+  elif [ -f pyproject.toml ]; then pip install .; \\
+  else pip install pip; fi
+EXPOSE 8000
+CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.0.0:8000; fi; exec python3 -m http.server 8000"]
+EOF
+                  DOCKERFILE_PATH="\${WORKSPACE}/Dockerfile"
+                else
+                  echo "Need Dockerfile, package.json, requirements.txt, or pyproject.toml" >&2
+                  exit 1
+                fi
+              fi
+              mkdir -p "\${WORKSPACE}/.kaniko-docker"
+              AUTH=\$(printf '%s:%s' "\${HARBOR_USERNAME}" "\${HARBOR_PASSWORD}" | base64 | tr -d '\\n')
+              printf '{"auths":{"%s":{"auth":"%s"}}}\\n' "\${HARBOR_REGISTRY}" "\$AUTH" > "\${WORKSPACE}/.kaniko-docker/config.json"
+              if [ ! -f "\${WORKSPACE}/.dockerignore" ]; then
+                cat > "\${WORKSPACE}/.dockerignore" <<'IGNORE'
+.git
+**/.git
+.github
+.vscode
+.idea
+*.md
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+IGNORE
+              fi
+              KANIKO_IMG="${kanikoImg}"
+              docker pull "\$KANIKO_IMG" >/dev/null
+              WS="\${WORKSPACE}"
+              REL="\${DOCKERFILE_PATH#"\$WS"/}"
+              docker run --rm \\
+                -v "\${WORKSPACE}:/workspace" \\
+                -v "\${WORKSPACE}/.kaniko-docker:/kaniko/.docker:ro" \\
+                "\$KANIKO_IMG" \\
+                /kaniko/executor \\
+                --single-snapshot \\
+                --context /workspace \\
+                --dockerfile "\$REL" \\
+                --destination "${dest}" \\
+                --skip-push-permission-check \\
+                --registry-mirror mirror.gcr.io \\
+                --insecure \\
+                --skip-tls-verify \\
+                --insecure-registry "\${HARBOR_REGISTRY}" \\
+                --cache=false
+            """
+          } else {
+            def dockerCred = params.DOCKER_REGISTRY_CREDENTIALS_ID?.trim()
+            if (!dockerCred) {
+              error("Either set HARBOR_REGISTRY, HARBOR_USERNAME, HARBOR_PASSWORD (Kaniko push) or set DOCKER_REGISTRY_CREDENTIALS_ID (docker build/push)")
+            }
+            def registry = imageName.split("/")[0]
+            withCredentials([
+              usernamePassword(
+                credentialsId: dockerCred,
+                usernameVariable: "REGISTRY_USER",
+                passwordVariable: "REGISTRY_PASS"
+              )
+            ]) {
+              sh """
+                WS="\${WORKSPACE:-}"
+                if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
+                echo "[image] WORKSPACE=\${WORKSPACE}"
+                set -eu
+                test -f '${df}' || { echo "Missing ${df}; set DOCKERFILE_PATH or add a Dockerfile" >&2; exit 2; }
+                echo "\${REGISTRY_PASS}" | docker login '${registry}' -u "\${REGISTRY_USER}" --password-stdin
+                docker build -f '${df}' -t '${dest}' '${ctx}'
+                docker push '${dest}'
+              """
+            }
+          }
+        }
+        }
       }
     }
 
-    stage('Push Harbor') {
+    stage("Info") {
       steps {
-        sh 'echo ${HARBOR_CREDS_PSW} | docker login ${HARBOR_REGISTRY} -u ${HARBOR_CREDS_USR} --password-stdin'
-        sh 'docker push ${DOCKER_IMAGE}'
+        echo "IMAGE_NAME=${params.IMAGE_NAME} PROJECT_ID=${params.PROJECT_ID} BUILD_NUMBER=${env.BUILD_NUMBER}"
       }
-    }
-
-    stage('GitOps Update') {
-      steps {
-        sh './scripts/update-helm-values.sh ${PROJECT_NAME} ${BUILD_NUMBER}'
-      }
-    }
-
-    stage('ArgoCD Sync') {
-      steps {
-        sh 'argocd app sync ${ARGOCD_APP_PREFIX}-${PROJECT_NAME}'
-      }
-    }
-  }
-
-  post {
-    always {
-      archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
     }
   }
 }

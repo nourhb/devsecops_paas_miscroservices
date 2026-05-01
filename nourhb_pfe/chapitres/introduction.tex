@@ -1,0 +1,11 @@
+\chapter*{Introduction Générale}
+\label{ch:intro-generale}
+\addcontentsline{toc}{chapter}{\protect\numberline{}Introduction}
+
+Les entreprises et les laboratoires qui livrent des services logiciels cherchent à réduire le délai entre une idée et une mise en production sans sacrifier la qualité ni la sécurité. Les pratiques \emph{DevOps} ont popularisé l'automatisation des chaînes d'intégration et de déploiement continus~; l'approche \emph{DevSecOps} va plus loin en intégrant la sécurité et la conformité dès la conception et tout au long du cycle de vie. Parallèlement, l'orchestration par conteneurs et les clusters Kubernetes sont devenus un socle répandu pour exécuter des charges applicatives à l'échelle.
+
+Le mémoire porte exclusivement sur la réalisation de cette~\textbf{application PaaS} stockée sous~\texttt{paas/}~(répertoire frontal~\texttt{paas/frontend}).
+
+Le développement du dépôt vise tout particulièrement~: onboarding via cette même interface ; suivi jusqu'au~(ou échec)~déploiement depuis Prisma jusqu'à Argo~; exposition lisible des artefacts avec digest facultatif lorsque~\texttt{BUILD\_ENFORCE\_ARTIFACT\_DIGEST} l'exige~; activation des modules Sonar, Dependency Track, Prometheus, etc.\ lorsque les URLs et jetons sont fournis dans~\texttt{paas/frontend/.env}.
+
+Après cette introduction générale, le rapport présente~\textbf{l'organisation du dossier projet~(\texttt{paas/docs/}, exemples~\texttt{.env.example})}, le~\textbf{BuildPlanner}, les backends Jenkins~/~Tekton et le flux jusqu'à Harbor puis GitOps. Les inventaires technique et infra décrivent l'environnement sur lequel l'~\emph{exécutable métier Next.js} doit s'intégrer. La~\emph{réalisation} détaille l'IU et les adaptateurs puis une synthèse avant la~\textbf{conclusion}.

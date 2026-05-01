@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+                - Deployment
+                - StatefulSet
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - argocd
+                - devsecops-paas
+                - food-delivery-devsecops
+                - harbor
+                - jenkins
+                - kube-system
+                - kyverno
+                - ingress-nginx
+      verifyImages:
+        - imageReferences:
+            - "*"
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      # Replace this sample key with your real cosign public key.
+                      -----BEGIN PUBLIC KEY-----
+                      REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY
+                      -----END PUBLIC KEY-----

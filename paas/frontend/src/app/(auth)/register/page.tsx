@@ -1,6 +1,6 @@
-﻿"use client";
-
-import { FormEvent, useState } from "react";
+"use client";
+import axios from "axios";
+import { FormEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,38 +8,61 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
-import type { UserRole } from "@/types";
-
 export default function RegisterPage() {
-  const router = useRouter();
-  const { register } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-
-    const formData = new FormData(event.currentTarget);
-
-    try {
-      await register({
-        fullName: String(formData.get("fullName") || ""),
-        email: String(formData.get("email") || ""),
-        password: String(formData.get("password") || ""),
-        role: String(formData.get("role") || "DEVELOPER") as UserRole
-      });
-      router.replace("/dashboard");
-    } catch {
-      setError("Unable to register with provided details.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    const { register, login } = useAuth();
+    const router = useRouter();
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
+    const submitSeq = useRef(0);
+    const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (loading) {
+            return;
+        }
+        const seq = ++submitSeq.current;
+        setLoading(true);
+        setError(null);
+        setSuccess(null);
+        const formData = new FormData(event.currentTarget);
+        try {
+            const response = await register({
+                fullName: String(formData.get("fullName") || "").trim(),
+                email: String(formData.get("email") || "").trim(),
+                password: String(formData.get("password") || ""),
+                role: "DEVELOPER"
+            });
+            if (seq !== submitSeq.current) {
+                return;
+            }
+            const email = String(formData.get("email") || "").trim();
+            const password = String(formData.get("password") || "");
+            await login({ email, password });
+            if (seq !== submitSeq.current) {
+                return;
+            }
+            setSuccess(response.message || "Account created. Redirecting to dashboard...");
+            setError(null);
+            router.replace("/dashboard");
+        }
+        catch (err) {
+            if (seq !== submitSeq.current) {
+                return;
+            }
+            let msg = "Unable to register with provided details.";
+            if (axios.isAxiosError(err) && typeof err.response?.data?.message === "string") {
+                msg = err.response.data.message;
+            }
+            setError(msg);
+            setSuccess(null);
+        }
+        finally {
+            if (seq === submitSeq.current) {
+                setLoading(false);
+            }
+        }
+    };
+    return (<div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-md backdrop-blur">
         <CardHeader>
           <CardTitle>Create your account</CardTitle>
@@ -49,28 +72,18 @@ export default function RegisterPage() {
           <form className="space-y-4" onSubmit={onSubmit}>
             <div className="space-y-2">
               <Label htmlFor="fullName">Full Name</Label>
-              <Input id="fullName" name="fullName" required />
+              <Input id="fullName" name="fullName" required/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" required />
+              <Input id="email" name="email" type="email" required/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" required />
+              <Input id="password" name="password" type="password" required minLength={8} autoComplete="new-password"/>
+              <p className="text-xs text-muted">At least 8 characters.</p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="role">Role</Label>
-              <select
-                id="role"
-                name="role"
-                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                defaultValue="DEVELOPER"
-              >
-                <option value="DEVELOPER">DEVELOPER</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </div>
+            {success ? <p className="text-sm text-success">{success}</p> : null}
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Register"}
@@ -81,6 +94,5 @@ export default function RegisterPage() {
           </p>
         </CardContent>
       </Card>
-    </div>
-  );
+    </div>);
 }

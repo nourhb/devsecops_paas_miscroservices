@@ -1,0 +1,67 @@
+\chapter{Planification et architecture}
+\label{ch:archi}
+
+\section{Introduction}
+
+Ce chapitre décrit l'organisation du travail et l'architecture de~\textbf{l'application PaaS} implémentée dans \texttt{paas/}~(voir \texttt{paas/docs/DEVSOPS\_PAAS\_ARCHITECTURE.md}). Il ne s'agit pas d'une vision générique du marché~: tout élément cité existe dans le dépôt ou y est explicitement prévu~(manifestes~\texttt{k8s-manifests/tekton/}, exemples~\texttt{.env.example}).
+
+\section{Approche projet et jalons types}
+
+Une planification préconise répartir le travail en cycles courts avec livrables testables à chaque fin de cycle. Dans le cadre du PFE, on peut schématiser des jalons tels que~:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Sprint 1 — Fondations} — initialisation du dépôt, modèle de données (projets, déploiements), authentification et garde-fous minimaux au niveau API.
+\item \textbf{Sprint 2 — Intégration build} — branchement du \emph{BuildPlanner}, premier déclenchement via Jenkins puis, optionnellement, via Tekton~; normalisation des métadonnées (fournisseur, identifiant d'exécution, digest d'image).
+\item \textbf{Sprint 3 — GitOps et déploiement} — écriture des manifests ou Helm générés/committés dans le dépôt GitOps, liaison Argo CD, affichage des étapes (mis en file, compilation, poussoir d'images, promotion, déployé ou échec).
+\item \textbf{Sprint 4 — Sécurité et supervision} — raccords aux scanners et tableaux de bord, préparation aux politiques d'admission.
+\end{enumerate}
+
+Ces sprints sont indicatifs et peuvent être fusionnés ou redécoupés selon la charge encadrement et la maturité de l'infrastructure fournie par l'organisme d'accueil.
+
+\section{Vue d'ensemble du flux}
+
+Le flux cible peut être résumé par la chaîne suivante~:
+
+\begin{center}
+\texttt{Git / Webhook} $\rightarrow$ \texttt{API PaaS} $\rightarrow$ \texttt{BuildPlanner} $\rightarrow$ \texttt{Jenkins ou Tekton} $\rightarrow$ \texttt{Harbor} $\rightarrow$ \texttt{commit GitOps} $\rightarrow$ \texttt{Argo CD} $\rightarrow$ \texttt{Kubernetes}.
+\end{center}
+
+L'utilisateur ou le webhook déclenche une route API~; le module serveur~\emph{BuildPlanner} rattache le dépôt à un~\textbf{profil}~\texttt{node}\,/\,\texttt{python}\,/\,\texttt{java}\,/\,\texttt{static}\,/\,\texttt{custom}, choisit un~\textbf{template plate-forme} ou un contrat~\textbf{Dockerfile} personnalisé, puis le backend sélectionné exécute le build. L'artefact est poussé vers Harbor~; la plate-forme~(service de promotion)~met à jour le dépôt GitOps~\texttt{GITOPS\_REPO\_URL}~(chemin valeurs défini par \texttt{GITOPS\_VALUES\_PATH\_PATTERN}). Argo CD synchronise alors le cluster selon~\texttt{ARGOCD\_*}.
+
+\subsection*{Étapes normalisées dans l'IU}
+
+Pour l'utilisateur, le parcours d'un déploiement est découpé dans le code~(et la doc)~en phases lisibles~(ex.~:~«~en attente~\emph{(queued)}, build, push registre, promotion GitOps, déploiement, succès ou échec~»), indépendamment du fait que~\texttt{BUILD\_BACKEND} pointe Jenkins ou Tekton.
+
+\section{Sous-architectures détaillées}
+
+\subsection{Côté plan de contrôle (\texttt{paas/frontend})}
+
+Le dossier~\texttt{paas/frontend} contient la seule façade applicative~(tableaux de bord, onboarding projet, suivis)~et les~\emph{Route Handlers}/API qui s'appuient sur Prisma et les modules~\texttt{paas/frontend/src/server/deploy/},~\texttt{paas/frontend/src/server/build-planner.ts},~\texttt{paas/frontend/src/server/build-backend-jenkins.ts},~\texttt{paas/frontend/src/server/build-backend-tekton.ts}, etc.~\texttt{BUILD\_BACKEND}=\texttt{jenkins}\,|\,\texttt{tekton} sélectionne l'adaptateur côté serveur sans changer l'API vue par l'IU.
+
+\subsection{Backends de build}
+
+\paragraph{Jenkins.}
+Mode de compatibilité pour les environnements disposant déjà de jobs ou de pipelines éprouvés. L'intégration utilise les API Jenkins pour déclencher et suivre une exécution.
+
+\paragraph{Tekton.}
+Chemin défini dans le code~(namespace~\texttt{TEKTON\_NAMESPACE}, compte~\texttt{TEKTON\_SERVICE\_ACCOUNT}, pipelines par défaut \texttt{TEKTON\_NODE\_PIPELINE\_NAME} ~/ \texttt{TEKTON\_DEFAULT\_PIPELINE\_NAME}) avec manifestes d'exemple sous~\texttt{k8s-manifests/tekton/}: la plate-forme matérialise des ressources \texttt{PipelineRun} et suit le statut jusqu'à l'alignement Harbor~/~promotion comme pour Jenkins.
+
+\subsection{Registre et promotion}
+
+Harbor joue le rôle de registre d'images. La promotion GitOps utilise le dépôt Git configuré comme source de vérité pour les manifests désirés~; chaque mise à jour d'image y est auditée comme un commit Git.
+
+\subsection{Synchronisation runtime}
+
+Argo CD observe le dépôt GitOps et applique les changements sur Kubernetes. Les déploiements sont suivis jusqu'à leur état final (avec étapes UI normalisées~: en attente, build, push, promotion, déploiement, succès ou échec).
+
+\subsection{Couche DevSecOps}
+
+Dans l'application, les clients~(SonarQube \texttt{SONAR\_*}, Dependency-Track~\texttt{DEPENDENCY\_TRACK\_*}, Trivy, Cosign, moteur de politiques~\texttt{POLICY\_ENGINE} avec valeurs~\texttt{kyverno~/~opa~/~\dots}) sont sollicités uniquement lorsque les URL et jetons correspondent~: l'IU permet d'agréger des signaux quand ils sont configurés, sans préjuger du déploiement complet de chaque outillage par le lecteur.
+
+\subsection{Observabilité}
+
+Prometheus collecte les métriques~; Grafana les visualise. Ces composants complètent le diagnostic opérationnel une fois l'application déployée.
+
+\section{Bilan de ce chapitre}
+
+Le texte précédent reflète~\textbf{les artefacts et docs du même dépôt Git}~\texttt{(paas/docs/*.md, paas/README.md)}, et non une vision générique du marché. Les jalons~(sprints)~restent~\emph{guides pédagogiques} pour la soutenance lorsqu'il faut relier votre planning à des livrables testables~\texttt{(npm test, npm run dev)} dans~\texttt{paas/frontend}.

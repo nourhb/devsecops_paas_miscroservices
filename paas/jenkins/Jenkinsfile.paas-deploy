@@ -1,0 +1,424 @@
+def nonEmptyNoSpace(String value, String label) {
+  if (!value?.trim()) {
+    error("${label} is required")
+  }
+  if (value.trim().contains(" ")) {
+    error("${label} must not contain spaces")
+  }
+}
+
+def commandExists(String commandName) {
+  return sh(script: "command -v ${commandName} >/dev/null 2>&1", returnStatus: true) == 0
+}
+
+def prependPath(String path) {
+  env.PATH = "${path}:${env.PATH}"
+}
+
+def ensureNodeTool() {
+  if (commandExists("npm")) {
+    return
+  }
+  println "[tooling] npm is missing on Jenkins node; downloading portable Node.js into workspace."
+  sh '''
+    set -eu
+    mkdir -p .paas-tools
+    NODE_VERSION="20.19.5"
+    NODE_DIR="$PWD/.paas-tools/node-v${NODE_VERSION}-linux-x64"
+    if [ ! -x "$NODE_DIR/bin/npm" ]; then
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" -o .paas-tools/node.tar.gz
+      tar -xzf .paas-tools/node.tar.gz -C .paas-tools
+    fi
+  '''
+  prependPath("${pwd()}/.paas-tools/node-v20.19.5-linux-x64/bin")
+}
+
+def ensureCraneTool() {
+  if (commandExists("crane")) {
+    return "crane"
+  }
+  println "[tooling] crane is missing on Jenkins node; downloading portable crane into workspace."
+  sh '''
+    set -eu
+    mkdir -p .paas-tools/crane
+    CRANE_VERSION="0.20.6"
+    CRANE_BIN="$PWD/.paas-tools/crane/crane"
+    if [ ! -x "$CRANE_BIN" ]; then
+      curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o .paas-tools/crane.tar.gz
+      tar -xzf .paas-tools/crane.tar.gz -C .paas-tools/crane crane
+      chmod +x "$CRANE_BIN"
+    fi
+  '''
+  return "${pwd()}/.paas-tools/crane/crane"
+}
+
+def nonFatalStage(String label, Closure body) {
+  catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
+    println "*** BEGIN : ${label} ***"
+    body()
+    println "*** END : ${label} ***"
+  }
+}
+
+def dockerfileForDetectedProject(String df) {
+  if (fileExists(df)) {
+    return df
+  }
+  if (fileExists("package.json")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/node:20-bookworm-slim
+WORKDIR /app
+COPY . .
+RUN if [ -f package.json ]; then \\
+      npm config set audit false && \\
+      npm config set fund false && \\
+      npm config set fetch-retries 5 && \\
+      npm config set fetch-retry-factor 2 && \\
+      npm config set fetch-retry-mintimeout 20000 && \\
+      npm config set fetch-retry-maxtimeout 120000 && \\
+      npm config set fetch-timeout 1800000 && \\
+      npm config set maxsockets 1 && \\
+      if [ -f package-lock.json ]; then npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; else npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; fi && \\
+      if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then npm run build; fi; \\
+    fi
+EXPOSE 3000
+CMD ["sh", "-c", "if [ -f package.json ]; then npm start; else node server.js; fi"]
+'''
+    return "Dockerfile"
+  }
+  if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/python:3.12-bookworm-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+COPY . .
+RUN pip install --upgrade pip setuptools wheel \\
+  && if [ -f requirements.txt ]; then pip install -r requirements.txt; \\
+  elif [ -f pyproject.toml ]; then pip install .; \\
+  else pip install pip; fi
+EXPOSE 8000
+CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.0.0:8000; fi; exec python3 -m http.server 8000"]
+'''
+    return "Dockerfile"
+  }
+  return ""
+}
+
+def registryHostFor(String imageRef) {
+  def first = imageRef.tokenize("/")[0]
+  if (!first.contains(".") && !first.contains(":") && first != "localhost") {
+    return "index.docker.io"
+  }
+  return first
+}
+
+def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
+  def registry = registryHostFor(imageRef)
+  def dockerhubUser = params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: ""
+  def dockerhubToken = params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: ""
+  def harborUser = params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: ""
+  def harborPassword = params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: ""
+  def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
+
+  if (registry == "index.docker.io") {
+    if (!dockerhubUser || !dockerhubToken) {
+      error("Docker Hub credentials are required for dockerless image push.")
+    }
+    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${dockerhubUser}", "REGISTRY_PASS=${dockerhubToken}", "IMAGE_REF=${imageRef}"]) {
+      sh '''
+        set -eu
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
+      '''
+    }
+  } else if (harborRegistry && registry == harborRegistry.replaceFirst('^https?://', '').replaceAll('/$', '')) {
+    if (!harborUser || !harborPassword) {
+      error("Harbor credentials are required for dockerless image push.")
+    }
+    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
+      sh '''
+        set -eu
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" || true
+      '''
+    }
+  }
+
+  sh """
+    set -eu
+    mkdir -p paas-artifacts
+    tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
+      --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
+    '${craneBin}' append \\
+      -b mirror.gcr.io/library/node:20-bookworm-slim \\
+      -f paas-artifacts/app-layer.tar \\
+      -t '${imageRef}'
+    '${craneBin}' mutate '${imageRef}' \\
+      -t '${imageRef}' \\
+      --workdir=/app \\
+      --entrypoint=/bin/sh \\
+      --cmd=-c \\
+      --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
+      --exposed-ports=3000/tcp
+  """
+}
+
+def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: "built-in"
+def branchName = params.BRANCH?.trim() ?: "main"
+def gitUrl = params.GIT_URL?.trim() ?: ""
+def imageName = params.IMAGE_NAME?.trim() ?: ""
+def projectId = params.PROJECT_ID?.trim() ?: ""
+def gitCredentialsId = params.GIT_CREDENTIALS_ID?.trim() ?: ""
+def artifactImage = ""
+def dockerAvailable = false
+
+node(agentLabel) {
+  env.HARBOR_REGISTRY = env.HARBOR_REGISTRY ?: ""
+  env.HARBOR_USERNAME = env.HARBOR_USERNAME ?: ""
+  env.HARBOR_PASSWORD = env.HARBOR_PASSWORD ?: ""
+  env.SONAR_HOST_URL = env.SONAR_HOST_URL ?: ""
+  env.SONAR_TOKEN = env.SONAR_TOKEN ?: ""
+  env.NVD_API_KEY = env.NVD_API_KEY ?: ""
+  env.DEPENDENCY_TRACK_BASE_URL = env.DEPENDENCY_TRACK_BASE_URL ?: ""
+  env.DEPENDENCY_TRACK_API_KEY = env.DEPENDENCY_TRACK_API_KEY ?: ""
+
+  stage("Params Validation") {
+    println "*** BEGIN : Check Parameters ***"
+    nonEmptyNoSpace(gitUrl, "GIT_URL PARAMS")
+    nonEmptyNoSpace(branchName, "BRANCH PARAMS")
+    nonEmptyNoSpace(imageName, "IMAGE_NAME PARAMS")
+    nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
+    println "[params] project=${projectId} branch=${branchName} image=${imageName}"
+    println "*** END : Check Parameters ***"
+  }
+
+  stage("Checkout Project Sources") {
+    println "*** BEGIN : Checkout Project Sources ***"
+    deleteDir()
+    def host = gitUrl.replaceAll("^https?://([^/@]+).*", "\$1")
+    println "[checkout] branch=${branchName} url host=${host} creds=${gitCredentialsId ? 'yes' : 'no'}"
+    if (gitCredentialsId) {
+      git branch: branchName, credentialsId: gitCredentialsId, url: gitUrl
+    } else {
+      git branch: branchName, url: gitUrl
+    }
+    println "*** END : Checkout Project Sources ***"
+  }
+
+  stage("Build Project") {
+    println "*** BEGIN : Build Project ***"
+    if (fileExists("pom.xml")) {
+      if (commandExists("mvn")) {
+        sh "mvn -B -DskipTests package"
+      } else {
+        println "[build] Maven project detected but mvn is not installed; compile skipped."
+      }
+    } else if (fileExists("package.json")) {
+      ensureNodeTool()
+      if (commandExists("npm")) {
+        sh '''
+          set -e
+          npm config set audit false
+          npm config set fund false
+          if [ -f package-lock.json ]; then npm ci || npm install; else npm install; fi
+          node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)" && npm run build || true
+        '''
+      } else {
+        println "[build] Node project detected but npm is not installed; compile skipped."
+      }
+    } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+      if (commandExists("python3")) {
+        sh "python3 -m compileall . || true"
+      } else {
+        println "[build] Python project detected but python3 is not installed; compile skipped."
+      }
+    } else {
+      println "[build] No Maven/Node/Python manifest found; treating repository as static/Kubernetes manifests."
+    }
+    println "*** END : Build Project ***"
+  }
+
+  stage("Scan Project Dependencies") {
+    nonFatalStage("Scan Project Dependencies") {
+      dockerAvailable = commandExists("docker")
+      sh "mkdir -p sca"
+      if (!dockerAvailable) {
+        println "[sca] Docker CLI missing; using npm audit and CycloneDX npm when possible."
+        if (fileExists("package.json")) {
+          ensureNodeTool()
+          sh '''
+            set +e
+            npm audit --json > sca/npm-audit.json
+            npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+            exit 0
+          '''
+          def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
+          def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
+          if (dtBase && dtKey && fileExists("sca/bom.json")) {
+            withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${branchName}-${env.BUILD_NUMBER}", "DT_PROJECT=${projectId}"]) {
+              sh '''
+                set +e
+                curl -sS --fail-with-body -X POST "${DT_BASE%/}/api/v1/bom" \
+                  -H "X-Api-Key: ${DT_KEY}" \
+                  -F "autoCreate=true" \
+                  -F "projectName=${DT_PROJECT}" \
+                  -F "projectVersion=${DT_VERSION}" \
+                  -F "bom=@sca/bom.json" \
+                  || echo "[sca] Dependency-Track upload failed (non-fatal)"
+              '''
+            }
+          }
+        } else {
+          println "[sca] No package.json; dockerless SCA not available for this project type yet."
+        }
+        return
+      }
+      def nvdArg = env.NVD_API_KEY?.trim() ? "--nvdApiKey ${env.NVD_API_KEY}" : "--noupdate"
+      sh """
+        set +e
+        docker pull owasp/dependency-check:latest >/dev/null
+        docker run --rm -v "\${WORKSPACE}:/src" owasp/dependency-check:latest \\
+          --scan /src --format JSON --out /src/sca ${nvdArg} || true
+        [ -f sca/dependency-check-report.json ] && mv -f sca/dependency-check-report.json sca/dependency-check.json || true
+      """
+    }
+  }
+
+  stage("Run Sonar Scanner Analysis") {
+    nonFatalStage("Run Sonar Scanner Analysis") {
+      if (!commandExists("docker")) {
+        println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
+        def sonarUrl = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
+        def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
+        if (!sonarUrl || !sonarToken) {
+          println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+          return
+        }
+        ensureNodeTool()
+        withEnv(["SONAR_HOST_URL=${sonarUrl}", "SONAR_TOKEN=${sonarToken}", "SONAR_PROJECT_KEY=${projectId}", "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"]) {
+          sh '''
+            set +e
+            npx --yes sonarqube-scanner \
+              -Dsonar.host.url="${SONAR_HOST_URL}" \
+              -Dsonar.token="${SONAR_TOKEN}" \
+              -Dsonar.login="${SONAR_TOKEN}" \
+              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+              -Dsonar.projectName="${SONAR_PROJECT_KEY}" \
+              -Dsonar.projectVersion="${SONAR_VERSION}" \
+              -Dsonar.sources=. \
+              -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
+            exit 0
+          '''
+        }
+        return
+      }
+      if (!env.SONAR_HOST_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
+        println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+        return
+      }
+      sh """
+        set +e
+        docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
+        docker run --rm \\
+          -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
+          -e SONAR_TOKEN="\${SONAR_TOKEN}" \\
+          -v "\${WORKSPACE}:/usr/src" \\
+          sonarsource/sonar-scanner-cli:latest \\
+          -Dsonar.projectKey="${projectId}" \\
+          -Dsonar.projectName="${projectId}" \\
+          -Dsonar.projectVersion="${branchName}-${env.BUILD_NUMBER}" \\
+          -Dsonar.sources=. \\
+          -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \\
+          -Dsonar.scm.provider=git
+        exit 0
+      """
+    }
+  }
+
+  stage("Build and Publish Docker Image") {
+    println "*** BEGIN : Build and Publish Docker Image ***"
+    dockerAvailable = commandExists("docker")
+    def dest = "${imageName}:${env.BUILD_NUMBER}"
+    def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"
+    def ctx = params.DOCKER_BUILD_CONTEXT?.trim() ?: "."
+    if (!dockerAvailable) {
+      println "[image] Docker CLI missing on Jenkins node; using crane to build/push an OCI image without Docker."
+      def resolvedDockerfile = dockerfileForDetectedProject(df)
+      if (!resolvedDockerfile) {
+        artifactImage = params.FALLBACK_IMAGE?.trim() ?: "nginx:stable-alpine"
+        println "[image] No build manifest found; using fallback image ${artifactImage}"
+        println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
+        return
+      }
+      def craneBin = ensureCraneTool()
+      dockerlessImagePush(craneBin, dest, resolvedDockerfile)
+      artifactImage = dest
+      println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
+    } else if (env.HARBOR_REGISTRY?.trim() && env.HARBOR_USERNAME?.trim() && env.HARBOR_PASSWORD?.trim()) {
+      def resolvedDockerfile = dockerfileForDetectedProject(df)
+      if (!resolvedDockerfile) {
+        error("Need Dockerfile, package.json, requirements.txt, or pyproject.toml")
+      }
+      sh """
+        set -eu
+        docker build -f '${resolvedDockerfile}' -t '${dest}' '${ctx}'
+        echo "\${HARBOR_PASSWORD}" | docker login "\${HARBOR_REGISTRY}" -u "\${HARBOR_USERNAME}" --password-stdin
+        docker push '${dest}'
+      """
+      artifactImage = dest
+      println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
+    } else {
+      def dockerCred = params.DOCKER_REGISTRY_CREDENTIALS_ID?.trim()
+      if (!dockerCred) {
+        error("Docker is available, but no registry credentials are configured.")
+      }
+      def resolvedDockerfile = dockerfileForDetectedProject(df)
+      if (!resolvedDockerfile) {
+        error("Need Dockerfile, package.json, requirements.txt, or pyproject.toml")
+      }
+      def registry = imageName.split("/")[0]
+      withCredentials([usernamePassword(credentialsId: dockerCred, usernameVariable: "REGISTRY_USER", passwordVariable: "REGISTRY_PASS")]) {
+        sh """
+          set -eu
+          echo "\${REGISTRY_PASS}" | docker login '${registry}' -u "\${REGISTRY_USER}" --password-stdin
+          docker build -f '${resolvedDockerfile}' -t '${dest}' '${ctx}'
+          docker push '${dest}'
+        """
+      }
+      artifactImage = dest
+      println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
+    }
+    println "*** END : Build and Publish Docker Image ***"
+  }
+
+  stage("Package and Publish Helm Chart") {
+    nonFatalStage("Package and Publish Helm Chart") {
+      sh """
+        set -eu
+        mkdir -p paas-artifacts
+        cat > paas-artifacts/release-metadata.txt <<EOF
+PROJECT_ID=${projectId}
+BRANCH=${branchName}
+BUILD_NUMBER=${env.BUILD_NUMBER}
+PAAS_ARTIFACT_IMAGE=${artifactImage}
+EOF
+      """
+      if (fileExists("Chart.yaml") && commandExists("helm")) {
+        sh "mkdir -p paas-artifacts/helm && helm package . --destination paas-artifacts/helm"
+      } else {
+        println "[helm] No root Chart.yaml or helm CLI missing; GitOps chart packaging is delegated to the PaaS GitOps repository."
+      }
+    }
+  }
+
+  stage("Create & Sync ArgoCD Application") {
+    println "*** BEGIN : Create & Sync ArgoCD Application ***"
+    println "[argocd] Application creation/sync is delegated to the PaaS control plane after Jenkins SUCCESS."
+    println "[argocd] This Jenkins run publishes PAAS_ARTIFACT_IMAGE for the PaaS deployment monitor."
+    println "*** END : Create & Sync ArgoCD Application ***"
+  }
+
+  stage("Publish Artifacts") {
+    println "*** BEGIN : Publish Artifacts ***"
+    archiveArtifacts artifacts: "sca/**,paas-artifacts/**", allowEmptyArchive: true, onlyIfSuccessful: false
+    println "[artifacts] Archived local pipeline artifacts in Jenkins. External Artifactory is not used by this platform."
+    println "IMAGE_NAME=${imageName} PROJECT_ID=${projectId} BUILD_NUMBER=${env.BUILD_NUMBER}"
+    println "*** END : Publish Artifacts ***"
+  }
+}

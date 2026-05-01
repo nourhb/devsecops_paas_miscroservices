@@ -1,14 +1,14 @@
 // DevSecOps PaaS – Main pipeline (example)
 // Triggered by PaaS API; developers do not access Jenkins directly.
 // Stages: Checkout → Build → SAST (SonarQube) → SCA (Dependency-Check) → Docker build →
-//         Trivy → Push Harbor → Cosign sign → Helm package → GitOps update → ArgoCD sync
+//         Trivy → Push Harbor → Cosign sign → Helm package → GitOps update
 
 pipeline {
   agent any
 
   environment {
     APP_NAME = "my-app"
-    IMAGE_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+    IMAGE_TAG = "${env.BUILD_NUMBER ?: '0'}"
     HARBOR_PROJECT = "${env.HARBOR_PROJECT ?: 'paas'}"
     GITOPS_BRANCH = "${env.GITOPS_BRANCH ?: 'main'}"
   }
@@ -28,13 +28,30 @@ pipeline {
       }
     }
 
-    stage("Publish Artifacts") {
+    stage("Upload to Artifactory") {
       when { expression { return env.ARTIFACTORY_URL } }
       steps {
-        sh """
-          curl -u \${ARTIFACTORY_USER}:\${ARTIFACTORY_TOKEN} \
-            -T dist/*.tgz \${ARTIFACTORY_URL}/generic-local/\${APP_NAME}/\${IMAGE_TAG}/ || true
-        """
+        withCredentials([usernamePassword(credentialsId: 'artifactory-creds', usernameVariable: 'ARTIFACTORY_USER', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
+          script {
+            def repository = env.ARTIFACTORY_REPOSITORY ?: "libs-release-local"
+            sh """
+              set -eu
+              uploaded=0
+              for file in dist/*.tgz; do
+                if [ ! -f "\$file" ]; then
+                  continue
+                fi
+                artifact_name=\$(basename "\$file")
+                curl --fail --silent --show-error \
+                  -u "\$ARTIFACTORY_USER:\$ARTIFACTORY_PASSWORD" \
+                  -X PUT -T "\$file" \
+                  "${ARTIFACTORY_URL}/${repository}/${APP_NAME}/${IMAGE_TAG}/\${artifact_name}"
+                uploaded=1
+              done
+              test "\$uploaded" = "1"
+            """
+          }
+        }
       }
     }
 
@@ -48,13 +65,17 @@ pipeline {
     }
 
     stage("Dependency Check") {
-      when { expression { return env.DEPENDENCY_TRACK_URL } }
       steps {
         sh """
-          dependency-check.sh --out . --format JSON --project \${APP_NAME} || true
-          curl -X POST -H 'Content-Type: application/json' \
-            -d @dependency-check-report.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true
+          dependency-check.sh --scan ./ --format XML --out . --project \${APP_NAME}
         """
+      }
+    }
+
+    stage("Publish to Dependency-Track") {
+      when { expression { return env.DEPENDENCY_TRACK_URL && env.DEPENDENCY_TRACK_API_KEY } }
+      steps {
+        dependencyTrackPublisher artifact: 'dependency-check-report.xml'
       }
     }
 
@@ -70,7 +91,7 @@ pipeline {
     stage("Trivy Scan") {
       steps {
         sh """
-          trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL} || true
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL}
         """
       }
     }
@@ -81,15 +102,29 @@ pipeline {
           sh "echo \$HARBOR_PASS | docker login -u \$HARBOR_USER --password-stdin ${env.HARBOR_URL}"
         }
         sh "docker push ${env.IMAGE_FULL}"
+        script {
+          env.IMAGE_DIGEST_REF = sh(returnStdout: true, script: "docker inspect --format='{{index .RepoDigests 0}}' ${env.IMAGE_FULL}").trim()
+          if (!env.IMAGE_DIGEST_REF) {
+            error("Unable to resolve immutable image digest after docker push.")
+          }
+          env.IMAGE_DIGEST = env.IMAGE_DIGEST_REF.tokenize("@")[-1]
+        }
         sh "docker logout ${env.HARBOR_URL}"
       }
     }
 
     stage("Sign with Cosign") {
-      when { expression { return env.COSIGN_PRIVATE_KEY } }
       steps {
         withCredentials([file(credentialsId: 'cosign-key', variable: 'COSIGN_KEY')]) {
-          sh "cosign sign --key \$COSIGN_KEY ${env.IMAGE_FULL}"
+          sh "cosign sign --yes --key \$COSIGN_KEY ${env.IMAGE_DIGEST_REF}"
+        }
+      }
+    }
+
+    stage("Verify Image Signature") {
+      steps {
+        withCredentials([file(credentialsId: 'cosign-pub', variable: 'COSIGN_PUB')]) {
+          sh "cosign verify --key \$COSIGN_PUB ${env.IMAGE_DIGEST_REF}"
         }
       }
     }
@@ -105,23 +140,15 @@ pipeline {
       when { expression { return env.GITOPS_REPO_URL } }
       steps {
         sh """
+          set -eu
           git clone --branch ${GITOPS_BRANCH} ${env.GITOPS_REPO_URL} gitops-repo
           cd gitops-repo
-          # Update values.yaml for this app (image tag)
-          sed -i 's|tag:.*|tag: ${IMAGE_TAG}|' apps/${APP_NAME}/values.yaml
+          sed -i 's|tag:.*|tag: ""|' apps/${APP_NAME}/values.yaml
+          sed -i 's|digest:.*|digest: ${env.IMAGE_DIGEST}|' apps/${APP_NAME}/values.yaml
           sed -i 's|repository:.*|repository: ${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}|' apps/${APP_NAME}/values.yaml
           git add apps/${APP_NAME}/values.yaml
           git commit -m "chore: deploy ${APP_NAME} ${IMAGE_TAG}" || true
           git push origin ${GITOPS_BRANCH}
-        """
-      }
-    }
-
-    stage("ArgoCD Sync") {
-      when { expression { return env.ARGOCD_SERVER } }
-      steps {
-        sh """
-          argocd app sync ${APP_NAME} --server ${env.ARGOCD_SERVER} --auth-token \${ARGOCD_TOKEN} || true
         """
       }
     }

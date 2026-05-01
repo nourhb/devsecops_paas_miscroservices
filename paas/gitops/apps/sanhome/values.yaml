@@ -1,0 +1,33 @@
+image:
+  repository: 192.168.56.129:30002/paas/sanhome
+  tag: "latest"
+  digest: ""
+
+# Required for private Harbor (see paas/scripts/ensure_harbor_pull_secret_ssh.py + EXT_ENDPOINT)
+imagePullSecrets:
+  - name: harbor-regcred
+
+# hello-app (used until Jenkins builds real sanhome) listens on 8080; align Service targetPort.
+service:
+  targetPort: 8080
+
+podSecurityContext:
+  runAsUser: 65532
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+env: []
+
+# Exposes the app on the same host pattern as APPS_PUBLIC_URL_TEMPLATE (nip.io → cluster ingress NodePort).
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: sanhome.192.168.56.129.nip.io
+  tls: []

@@ -1,237 +1,134 @@
-# DevSecOps PaaS – End-to-End Testing Guide
+# DevSecOps PaaS Testing Guide
 
-This guide describes how to **test your PaaS platform end-to-end**: from code push → CI/CD pipeline → container build → security scans → GitOps deployment → monitoring. Use it to validate the platform and to demonstrate it during a PFE defense.
+This guide validates the modernized platform flow:
 
----
+`repo event or user action -> PaaS API -> BuildPlanner -> Jenkins or Tekton -> Harbor artifact -> GitOps -> Argo CD -> Kubernetes`
 
-## Prerequisites
+## Local Verification
 
-Before testing, ensure:
-
-- **Kubernetes cluster** is up (e.g. kubeadm with 1 master + 2 workers).
-- **Infrastructure is running**: Jenkins (Helm), Harbor, ArgoCD, Prometheus/Grafana (kube-prometheus-stack), OPA Gatekeeper, SonarQube, Trivy (in Jenkins or cluster).
-- **PaaS backend & frontend** are running (see [README.md](./README.md)) with correct `.env` / environment variables.
-- You have **one project** created in the PaaS UI with a linked Git repo and a Jenkins pipeline job (`project-<projectId>`).
-
----
-
-## 1. Test the Application Build (CI)
-
-Verify that the **CI pipeline runs** when you push code or trigger a build from the PaaS.
-
-### Option A: Trigger from PaaS UI
-
-1. Open the PaaS dashboard (e.g. `http://localhost:3000`).
-2. Go to **Projects** → select your project → **Build** or **Deploy** (one-click deploy).
-3. Or call the API:
-
-   ```bash
-   curl -X POST http://localhost:4000/api/deploy \
-     -H "Content-Type: application/json" \
-     -d '{"projectId":"<your-project-id>","branch":"main","commitSha":"HEAD"}'
-   ```
-
-### Option B: Push from application repo
-
-1. Go to your **application repository** (the one linked to the project in the PaaS).
-2. Make a small change (e.g. edit README or add a log line).
-3. Commit and push:
-
-   ```bash
-   git add .
-   git commit -m "test pipeline"
-   git push
-   ```
-
-### Expected result
-
-- In **Jenkins** you should see a pipeline start (either by webhook or by the job you created via PaaS).
-- Pipeline stages (from `paas/jenkins/Jenkinsfile.template`) should run in order:
-  - **Checkout**
-  - **Build & Test** (`npm ci`, `npm test`)
-  - **Trivy Scan** (filesystem)
-  - **SonarQube Analysis**
-  - **Docker Build**
-  - **Trivy Image Scan** (container image; fails on HIGH/CRITICAL)
-  - **Cosign Sign**
-  - **Push to Harbor**
-  - **Update GitOps Repo**
-
-If the pipeline runs successfully through these stages → **CI is working**.
-
----
-
-## 2. Test Security Scanning
-
-### SonarQube
-
-- **Check**: Code quality analysis runs in the pipeline; Quality Gate is evaluated.
-- **Expected**: If the Quality Gate **fails**, the pipeline should stop (configure `waitForQualityGate()` in Jenkins if needed).
-- **Where to look**: SonarQube UI → your project → Quality Gate status and issues.
-
-### Trivy
-
-- **Filesystem scan**: Runs in CI on source (e.g. `trivy fs --severity HIGH,CRITICAL`).
-- **Image scan**: Runs on the built Docker image before push; typically `--exit-code 1` for HIGH/CRITICAL so the pipeline fails on critical vulnerabilities.
-- **Expected**: If **CRITICAL** (or configured HIGH) vulnerabilities exist, the pipeline fails → **DevSecOps enforcement** is working.
-- **PaaS**: Scan results can be stored in the database via `trivy.ts` and shown under **Security** in the dashboard.
-
----
-
-## 3. Test Container Registry (Harbor)
-
-After a successful pipeline run:
-
-1. Open **Harbor** (URL from `HARBOR_URL`).
-2. Navigate to the project and repository that match your app (e.g. from `registryRepo` in the PaaS project).
-3. Verify:
-   - A **new image** is present.
-   - **Tag** is updated (e.g. commit SHA or `latest`).
-   - If Cosign is configured, the image is **signed** (Harbor may show signature or you can verify with `cosign verify`).
-
----
-
-## 4. Test GitOps Deployment (CD)
-
-### Steps
-
-1. **Check the GitOps repository** (the one ArgoCD watches, e.g. from `GITOPS_REPO_URL`).
-2. After the Jenkins “Update GitOps Repo” stage, the Helm **values** (or kustomize overlay) should be updated with the new image tag, for example:
-
-   ```yaml
-   image:
-     repository: harbor.example.com/myproject/myapp
-     tag: abc1234
-   ```
-
-3. **ArgoCD** detects the change and syncs.
-
-### Expected result
-
-- ArgoCD Application (e.g. `project-<projectId>`) shows **Synced** and **Healthy**.
-- New pods are deployed with the updated image:
-
-  ```bash
-  kubectl get pods -n <app-namespace>
-  kubectl describe pod <pod-name> -n <app-namespace>   # check image tag
-  ```
-
-If the new pod is running with the new tag → **CD is working**.
-
----
-
-## 5. Test Runtime Security (OPA Gatekeeper)
-
-Verify that the cluster **blocks unsigned or non-compliant images**.
-
-### Test: Deploy an unsigned image
-
-1. Create a minimal Deployment manifest that uses an **unsigned** image (or one without the required `cosign.sig` annotation, depending on your OPA constraint).
-2. Try to apply it:
-
-   ```bash
-   kubectl apply -f unsigned-deployment.yaml
-   ```
-
-### Expected result
-
-- The **admission controller** (OPA Gatekeeper) **rejects** the deployment with a message indicating that the image must be signed or that the required annotation is missing.
-- This confirms **runtime security policies** are enforced.
-
-Your constraint lives under `paas/k8s/opa/` (e.g. `cosign-signed-images-constraint.yaml`). Ensure the constraint and ConstraintTemplate are applied to the cluster.
-
----
-
-## 6. Test Monitoring
-
-### Prometheus
-
-- **Metrics**: Ensure Prometheus is scraping the cluster and your app (if metrics are exposed).
-  ```bash
-  # If Prometheus is exposed (e.g. port-forward):
-  kubectl port-forward svc/prometheus-kube-prometheus-stack-prometheus -n monitoring 9090:9090
-  # Then open http://localhost:9090 and run a query, e.g. up
-  ```
-- **PaaS**: The dashboard uses `GET /api/metrics`, which aggregates Prometheus data (node count, CPU, memory) when `PROMETHEUS_URL` is set.
-
-### Grafana
-
-- Open **Grafana** (URL from `GRAFANA_URL` or `NEXT_PUBLIC_GRAFANA_URL`).
-- Check dashboards for:
-  - **Pod CPU / memory usage**
-  - **Application metrics** (if your app exposes them and they are scraped).
-- The PaaS **Monitoring** page can embed a Grafana dashboard URL for the project.
-
----
-
-## 7. Test Failure Scenarios
-
-A robust platform should **fail fast** on security or quality issues.
-
-| Case | Action | Expected result |
-|------|--------|-----------------|
-| **Vulnerable dependency** | Add a known vulnerable library to the app and run the pipeline. | **Trivy** (or dependency check) fails the pipeline. |
-| **Code quality failure** | Introduce bad code (e.g. security hotspot, bug) that fails the Sonar Quality Gate. | **SonarQube** fails the pipeline. |
-| **Bad deployment** | Break the Helm chart (e.g. invalid value, wrong image pull secret). | **ArgoCD** reports sync failure / degraded; pod may not start. |
-| **Unsigned image** | Try to deploy a pod with an unsigned image (see §5). | **OPA Gatekeeper** blocks the admission. |
-
----
-
-## 8. Final End-to-End Test
-
-Run one full cycle and confirm each step:
-
-1. **Developer** pushes code (or triggers deploy from PaaS).
-2. **Jenkins** pipeline starts (Build → Test → Trivy → Sonar → Docker build → Trivy image → Cosign → Push to Harbor → Update GitOps).
-3. **Security scans** run (SonarQube + Trivy); pipeline fails if policy is violated.
-4. **Docker image** is built and pushed to **Harbor**.
-5. **GitOps repo** is updated with the new image tag.
-6. **ArgoCD** syncs and deploys the new version to Kubernetes.
-7. **Prometheus** collects metrics from the cluster (and app if configured).
-8. **Grafana** displays monitoring for the workload.
-
-If all steps succeed → **your PaaS works correctly** end-to-end.
-
----
-
-## Summary Checklist
-
-| Layer | What to test | How |
-|-------|----------------|-----|
-| **CI** | Jenkins pipeline execution | Push code or trigger via PaaS; check Jenkins job and stages. |
-| **Security** | SonarQube + Trivy | Run pipeline; confirm quality gate and vulnerability checks pass/fail as expected. |
-| **Registry** | Image in Harbor | After pipeline, check Harbor for new image and tag; optional Cosign signature. |
-| **CD** | ArgoCD deployment | Confirm GitOps repo updated; ArgoCD syncs; new pods with correct image. |
-| **Runtime** | OPA policies | Try to deploy unsigned image; admission must block. |
-| **Observability** | Prometheus + Grafana | Check metrics and dashboards for cluster and app. |
-
----
-
-## Quick Health Check (PaaS API)
-
-Before deep testing, ensure the PaaS can talk to all services:
+Run these checks from `paas/frontend` before any cluster-level validation:
 
 ```bash
-BASE=http://localhost:4000
-curl -s $BASE/api/health | jq .
-curl -s $BASE/api/test/jenkins | jq .
-curl -s $BASE/api/test/harbor | jq .
-curl -s $BASE/api/test/argocd | jq .
-curl -s $BASE/api/test/kubernetes | jq .
+npm run typecheck
+npm test
 ```
 
-All should return `"ok": true` when credentials and endpoints are correctly set in `.env`.
+These cover:
 
----
+- provider-neutral deployment payloads
+- build profile detection
+- Tekton run creation
+- artifact metadata handling
+- deployment promotion logic
 
-## 5 Demo Tests for PFE Defense
+## Runtime Prerequisites
 
-Typical evaluation scenarios for a DevSecOps platform:
+- Kubernetes is reachable when `BUILD_BACKEND=tekton`.
+- Harbor, Argo CD, and the GitOps repository are configured for real promotion.
+- Jenkins is configured only if `BUILD_BACKEND=jenkins`.
+- `DEVSECOPS_ALLOW_SIMULATION=true` is used only for local demo mode.
 
-1. **Create project & trigger pipeline** – In the PaaS UI, create a project (or use existing), link repo, trigger deploy; show Jenkins pipeline running and completing.
-2. **Show security in the pipeline** – Open SonarQube and Trivy results; show that a failed quality gate or critical CVE fails the build.
-3. **Show GitOps deployment** – Show ArgoCD UI with the application synced; show `kubectl get pods` with the new image tag after a pipeline run.
-4. **Show policy enforcement** – Apply a manifest with an unsigned image and show that Gatekeeper denies it.
-5. **Show monitoring** – Open Grafana dashboard with CPU/memory (and app metrics if available) for the deployed workload.
+## 1. Validate Build Backend Readiness
 
-Use this document and the checklist above to prepare and document your testing for the defense.
+Confirm the platform reports the correct backend and prerequisites:
+
+```bash
+curl -s http://localhost:3000/api/platform/deploy-readiness | jq .
+```
+
+Expected:
+
+- `buildBackend.selected` matches `BUILD_BACKEND`
+- `buildBackend.configured` is `true` for the chosen backend
+- `tekton` reports namespace and pipeline when Tekton mode is selected
+
+## 2. Validate Project Onboarding
+
+1. Open the PaaS UI.
+2. Create a project with a Git repository and branch.
+3. Confirm the project shows:
+   - detected build profile
+   - build mode
+   - selected backend
+   - template name/version
+
+Expected result:
+
+- Node-style repos default to the managed Node template.
+- Unsupported stacks fall back to the custom Dockerfile contract.
+
+## 3. Validate Build Triggering
+
+Trigger a build from the project page.
+
+Expected result:
+
+- The response contains provider-neutral run information.
+- In Jenkins mode, a Jenkins job is triggered through the adapter.
+- In Tekton mode, a `PipelineRun` is created in `TEKTON_NAMESPACE`.
+- Build logs include build metadata markers for provider, run ID, artifact image, and optional digest.
+
+Useful checks:
+
+```bash
+kubectl get pipelineruns -n tekton-pipelines
+kubectl describe pipelinerun <run-name> -n tekton-pipelines
+```
+
+## 4. Validate Artifact Promotion
+
+After a successful build:
+
+1. Confirm Harbor contains the produced image.
+2. Confirm the deployment record exposes `artifactImage` and, when available, `artifactDigest`.
+3. Confirm the GitOps repository is updated with the artifact reference used for promotion.
+
+Expected result:
+
+- Promotion is driven by the produced artifact reference, not by a Jenkins build number alone.
+- The deployment UI shows run ID, provider, and artifact information.
+
+## 5. Validate GitOps and Argo CD
+
+After deployment:
+
+1. Check the GitOps repository update.
+2. Check the Argo CD application health and sync.
+3. Check Kubernetes pods in the project namespace.
+
+```bash
+kubectl get pods -n <project-namespace>
+kubectl describe pod <pod-name> -n <project-namespace>
+```
+
+Expected result:
+
+- Argo CD shows `Synced` and healthy status.
+- Pods run the artifact generated by the selected build backend.
+
+## 6. Validate Failure Handling
+
+Test these failure modes:
+
+| Case | Expected result |
+|------|-----------------|
+| build backend unavailable | deploy readiness reports missing requirements and deploy trigger fails clearly |
+| invalid GitOps credentials | deployment fails in the GitOps stage with preserved logs |
+| Argo CD sync failure | deployment fails after promotion with visible failure reason |
+| unsigned or disallowed image | policy enforcement blocks runtime admission |
+
+## 7. Validate Security and Observability
+
+- SonarQube and Trivy still provide build-time quality and vulnerability signals.
+- OPA/Cosign rules still enforce runtime policy.
+- Prometheus/Grafana still surface runtime health after deployment.
+
+## Demo Flow
+
+For an end-to-end demonstration:
+
+1. Create a project and show detected build profile.
+2. Trigger a deployment and show the provider-neutral run metadata.
+3. Show the produced image in Harbor.
+4. Show the GitOps update and Argo CD sync.
+5. Show the deployed workload and monitoring view.

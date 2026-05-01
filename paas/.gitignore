@@ -1,4 +1,4 @@
-﻿# Node / Next
+# Node / Next
 frontend/node_modules
 frontend/.next
 frontend/.turbo
@@ -6,6 +6,14 @@ frontend/.env
 
 # Prisma
 frontend/prisma/migrations
+
+# Playwright (frontend)
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
+# Jenkins (generated locally by paas/scripts/jenkins_create_paas_deploy_job.py --dry-run)
+jenkins/paas-deploy-job.generated.xml
 
 # Logs
 *.log

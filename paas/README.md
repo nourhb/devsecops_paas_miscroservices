@@ -1,120 +1,92 @@
-# DevSecOps PaaS – Local Development
-
-This project provides a DevSecOps PaaS control plane on top of your Kubernetes cluster.
-
-It orchestrates:
-- Jenkins (CI/CD pipelines)
-- Harbor (container registry)
-- ArgoCD (GitOps deployments)
-- Trivy & SonarQube (security & quality)
-- Cosign & OPA Gatekeeper (image signing & policy)
-- Prometheus & Grafana (monitoring)
-
-## Prerequisites
-
-- Kubernetes cluster (kubeadm or similar)
-- Node.js 20+
-- A running instance of:
-  - Jenkins (with API token)
-  - Harbor
-  - ArgoCD
-  - Prometheus (for cluster metrics)
-  - PostgreSQL (for the PaaS database)
-
-## Required environment variables
-
-Export the following before running the platform:
-
-```bash
-export DATABASE_URL="postgresql://user:pass@host:5432/paas"
-
-export JENKINS_URL="https://jenkins.example.com"
-export JENKINS_USER="jenkins-user"
-export JENKINS_TOKEN="jenkins-api-token"
-
-export HARBOR_URL="https://harbor.example.com"
-export HARBOR_USERNAME="harbor-user"
-export HARBOR_PASSWORD="harbor-password"
-
-export ARGOCD_URL="https://argocd.example.com"
-export ARGOCD_TOKEN="argocd-api-token"
-
-export PROMETHEUS_URL="http://prometheus.kube-system.svc:9090"
-
-export GITOPS_REPO_URL="git@github.com:ORG/gitops-repo.git"
-export GITOPS_BRANCH="main"
-```
-
-Additional (optional) variables:
-
-- `HARBOR_TEST_PROJECT` – Harbor project used for health checks (default: `library`)
-- `ARGOCD_TEST_APP` – ArgoCD Application name used for health checks
-- `KUBECONFIG` – path to kubeconfig when not running in-cluster
-
-## One‑command dev bootstrap
-
-From the `paas` directory:
-
-```bash
-cd paas
-./scripts/dev.sh
-```
-
-The script will:
-
-1. **Verify environment variables** – checks all required variables and exits with an error if any are missing.
-2. **Install backend dependencies** – runs `npm install` in `backend-next`.
-3. **Run backend Prisma migrations** – runs `npm run prisma:generate` and `npm run prisma:migrate`.
-4. **Start backend** – runs `npm run dev` on port `4000`.
-5. **Install frontend dependencies** – runs `npm install` in `frontend` and ensures `.env` exists.
-6. **Start frontend** – runs `npm run dev` on port `3000`.
-7. **Run health checks** – calls:
-   - `/api/health`
-   - `/api/jenkins/test`
-   - `/api/harbor/test`
-   - `/api/argocd/test`
-   - `/api/kubernetes/test`
-8. **Run integration tests** – executes `npm run verify-all` in `backend-next`.
-
-If any health check or test fails, the script prints a clear error and stops both backend and frontend processes.
-
-When everything is healthy you will see:
-
-- Backend running at `http://localhost:4000`
-- Frontend running at `http://localhost:3000`
-
-Log in to the UI, create a project, and trigger pipelines to exercise the full DevSecOps flow.
-
 # DevSecOps PaaS
 
-This workspace contains a Next.js frontend and a Next.js-based backend scaffold (`paas/backend-next`) that implements the required REST APIs and JWT auth as a starting point.
+This workspace contains a Next.js control plane that manages application onboarding, build orchestration, GitOps promotion, deployment status, security signals, and monitoring for a Kubernetes-based platform.
 
-Key folders:
-- `paas/frontend` — Next.js (App Router) frontend (existing)
-- `paas/backend-next` — Next.js API backend scaffold (this change)
-- `helm-charts` — helm chart templates (existing)
-- `k8s-manifests` — kubernetes manifests (existing)
-- `terraform` — terraform skeleton for AWS (existing)
+## Platform Direction
 
-Local quickstart (requires Docker):
+The platform now supports a provider-neutral build model:
+
+- `BUILD_BACKEND=jenkins` keeps the existing Jenkins integration for backward compatibility.
+- `BUILD_BACKEND=tekton` uses Kubernetes-native `PipelineRun` resources and platform-managed templates.
+- Project state and deployment history are exposed in neutral terms: build provider, run ID, artifact image, and artifact digest.
+
+The target production flow is:
+
+`Git/Webhook -> PaaS API -> BuildPlanner -> Jenkins or Tekton -> Harbor artifact -> GitOps commit -> Argo CD sync -> Kubernetes`
+
+## Main Components
+
+- `paas/frontend` - Next.js app router UI and API.
+- `paas/k8s-manifests/tekton` - starter Tekton tasks, pipelines, and secret examples.
+- `paas/k8s-manifests` - platform Kubernetes manifests.
+- `paas/docs` - architecture, workflow, and integration documents.
+
+## Quickstart
+
+1. Copy `paas/.env.example` or `paas/frontend/.env.example` to `.env`.
+2. Set at minimum `DATABASE_URL` and `JWT_SECRET`.
+3. For local demo mode, enable `DEVSECOPS_ALLOW_SIMULATION=true`.
+4. For Jenkins mode, configure `JENKINS_*`.
+5. For Tekton mode, set `BUILD_BACKEND=tekton`, `KUBERNETES_ENABLED=true`, and the `TEKTON_*` values.
+6. Start the frontend from `paas/frontend`:
 
 ```bash
-docker-compose up --build
+npm install
+npm run prisma:generate
+npm run dev
 ```
 
-Backend API endpoints (examples):
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/project` (create)
-- `GET /api/project` (list)
-- `POST /api/build/{projectId}`
-- `POST /api/deploy/{projectId}`
-- `POST /api/rollback/{projectId}`
-- `GET /api/security/{projectId}`
-- `GET /api/metrics/{projectId}`
+## Key Environment Variables
 
-Next steps:
-- Replace in-memory DB with persistent DB + Prisma
-- Implement integration services (Jenkins/Harbor/ArgoCD/Sonar/Trivy/Cosign/OPA)
-- Add Helm chart templates and k8s manifests for the backend
-- Add CI/CD Jenkinsfile template and pipeline steps
+```bash
+DATABASE_URL=postgresql://postgres:root@localhost:5432/paas
+JWT_SECRET=change-this-to-a-strong-secret-at-least-32-chars-long
+
+BUILD_BACKEND=tekton
+BUILD_TEMPLATE_VERSION=v1
+BUILD_REGISTRY_MIRROR=mirror.gcr.io
+BUILD_ENFORCE_ARTIFACT_DIGEST=false
+
+KUBERNETES_ENABLED=true
+KUBE_CONFIG_PATH=
+TEKTON_NAMESPACE=tekton-pipelines
+TEKTON_SERVICE_ACCOUNT=paas-build-bot
+TEKTON_NODE_PIPELINE_NAME=paas-node-build
+
+HARBOR_BASE_URL=https://harbor.example.com
+HARBOR_USERNAME=harbor-user
+HARBOR_PASSWORD=harbor-password
+
+ARGOCD_BASE_URL=https://argocd.example.com
+ARGOCD_AUTH_TOKEN=argocd-token
+
+GITOPS_REPO_URL=https://github.com/org/gitops-repo
+GITOPS_REPO_TOKEN=github-token
+```
+
+Switch back to Jenkins by setting:
+
+```bash
+BUILD_BACKEND=jenkins
+JENKINS_BASE_URL=https://jenkins.example.com
+JENKINS_USERNAME=jenkins-user
+JENKINS_API_TOKEN=jenkins-api-token
+```
+
+## Current Build/Deploy Behavior
+
+- Project creation detects a build profile and chooses either a platform template or a custom Dockerfile contract.
+- Build triggers return provider-neutral metadata and keep compatibility with current endpoints.
+- Deployment monitoring records run metadata and artifact details in the deployment log stream.
+- Promotion is artifact-driven: GitOps receives the produced image reference, and digest-aware promotion is supported.
+
+## Verification
+
+From `paas/frontend`:
+
+```bash
+npm run typecheck
+npm test
+```
+
+See `paas/TESTING.md` for platform validation and `paas/docs/DEVSOPS_PAAS_ARCHITECTURE.md` for the enterprise target architecture.

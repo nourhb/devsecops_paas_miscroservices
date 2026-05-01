@@ -8,7 +8,7 @@ pipeline {
     COSIGN_KEY     = credentials('cosign-key')
     GITOPS_REPO    = credentials('gitops-repo-url')
     PROJECT_NAME   = "${env.PROJECT_NAME}"
-    IMAGE_TAG      = "${env.GIT_COMMIT ?: 'latest'}"
+    IMAGE_TAG      = "${env.GIT_COMMIT ?: 'manual'}"
   }
 
   stages {
@@ -51,16 +51,26 @@ pipeline {
       }
     }
 
-    stage('Cosign Sign') {
-      steps {
-        sh 'cosign sign --key env://COSIGN_KEY $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG'
-      }
-    }
-
     stage('Push to Harbor') {
       steps {
         sh 'echo $REGISTRY_CREDS_PSW | docker login $REGISTRY_URL -u $REGISTRY_CREDS_USR --password-stdin'
         sh 'docker push $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG'
+        script {
+          env.IMAGE_DIGEST_REF = sh(returnStdout: true, script: "docker inspect --format='{{index .RepoDigests 0}}' $REGISTRY_URL/$PROJECT_NAME:$IMAGE_TAG").trim()
+          env.IMAGE_DIGEST = env.IMAGE_DIGEST_REF.tokenize("@")[-1]
+        }
+      }
+    }
+
+    stage('Cosign Sign') {
+      steps {
+        sh 'cosign sign --yes --key env://COSIGN_KEY $IMAGE_DIGEST_REF'
+      }
+    }
+
+    stage('Cosign Verify') {
+      steps {
+        sh 'cosign verify --key cosign.pub $IMAGE_DIGEST_REF'
       }
     }
 
@@ -69,9 +79,8 @@ pipeline {
         sh '''
         git clone $GITOPS_REPO gitops-repo
         cd gitops-repo
-        # TODO: update Helm values.yaml with new image tag
-        git config user.email "jenkins@local"
-        git config user.name "Jenkins"
+        sed -i "s|tag:.*|tag: \"\"|" apps/$PROJECT_NAME/values.yaml
+        sed -i "s|digest:.*|digest: $IMAGE_DIGEST|" apps/$PROJECT_NAME/values.yaml
         git commit -am "Update $PROJECT_NAME image to $IMAGE_TAG" || echo "No changes to commit"
         git push origin HEAD
         '''

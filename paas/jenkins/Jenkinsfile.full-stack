@@ -1,5 +1,5 @@
 // DevSecOps PaaS – Full-stack pipeline (Groovy)
-// Integrates: Jenkins, Harbor, SonarQube, Artifactory (JFrog CLI), Argo CD, Dependency Track,
+// Integrates: Jenkins, Harbor, SonarQube, Artifactory, Argo CD, Dependency Track,
 // Dependency Check, Trivy, Cosign, Docker, Helm, Nginx Ingress (via GitOps).
 // Supports: Spring Boot (Java), Angular (Node), or generic Node/npm.
 // Triggered by PaaS API; Kubernetes runtime uses containerd; monitoring: Prometheus + Grafana.
@@ -9,7 +9,7 @@ pipeline {
 
   environment {
     APP_NAME = "${env.JOB_NAME ?: 'my-app'}"
-    IMAGE_TAG = "${env.BUILD_NUMBER ?: 'latest'}"
+    IMAGE_TAG = "${env.BUILD_NUMBER ?: '0'}"
     HARBOR_PROJECT = "${env.HARBOR_PROJECT ?: 'paas'}"
     GITOPS_BRANCH = "${env.GITOPS_BRANCH ?: 'main'}"
     APP_TYPE = "${env.APP_TYPE ?: 'node'}"  // 'springboot' | 'angular' | 'node'
@@ -41,24 +41,36 @@ pipeline {
           if (env.APP_TYPE == 'springboot') {
             sh "./mvnw -B test"
           } else {
-            sh "npm test || true"
+            sh "npm test"
           }
         }
       }
     }
 
-    stage("Publish to Artifactory (JFrog CLI)") {
+    stage("Upload to Artifactory") {
       when { expression { return env.ARTIFACTORY_URL } }
       steps {
-        script {
-          def pattern = (env.APP_TYPE == 'springboot') ? "target/*.jar" : "dist/*.tgz"
-          def target = (env.APP_TYPE == 'springboot')
-            ? "generic-local/${APP_NAME}/${IMAGE_TAG}/"
-            : "generic-local/${APP_NAME}/${IMAGE_TAG}/"
-          sh """
-            jfrog rt config --url \${ARTIFACTORY_URL} --user \${ARTIFACTORY_USER} --password \${ARTIFACTORY_TOKEN} --interactive=false || true
-            jfrog rt u ${pattern} ${target} --build-name=${APP_NAME} --build-number=${IMAGE_TAG} || true
-          """
+        withCredentials([usernamePassword(credentialsId: 'artifactory-creds', usernameVariable: 'ARTIFACTORY_USER', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
+          script {
+            def artifactPattern = (env.APP_TYPE == 'springboot') ? "target/*.jar" : "dist/*.tgz"
+            def repository = env.ARTIFACTORY_REPOSITORY ?: "libs-release-local"
+            sh """
+              set -eu
+              uploaded=0
+              for file in ${artifactPattern}; do
+                if [ ! -f "\$file" ]; then
+                  continue
+                fi
+                artifact_name=\$(basename "\$file")
+                curl --fail --silent --show-error \
+                  -u "\$ARTIFACTORY_USER:\$ARTIFACTORY_PASSWORD" \
+                  -X PUT -T "\$file" \
+                  "${ARTIFACTORY_URL}/${repository}/${APP_NAME}/${IMAGE_TAG}/\${artifact_name}"
+                uploaded=1
+              done
+              test "\$uploaded" = "1"
+            """
+          }
         }
       }
     }
@@ -78,26 +90,18 @@ pipeline {
       }
     }
 
-    stage("Dependency Check (OWASP)") {
+    stage("Dependency Check") {
       steps {
         sh """
-          dependency-check.sh --out . --format JSON --format HTML --project ${APP_NAME} --scan . || true
+          dependency-check.sh --scan ./ --format XML --format HTML --out . --project ${APP_NAME}
         """
       }
     }
 
-    stage("Dependency Track (SBOM upload)") {
-      when { expression { return env.DEPENDENCY_TRACK_URL } }
+    stage("Publish to Dependency-Track") {
+      when { expression { return env.DEPENDENCY_TRACK_URL && env.DEPENDENCY_TRACK_API_KEY } }
       steps {
-        script {
-          if (env.APP_TYPE == 'springboot') {
-            sh "./mvnw -B org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -Dcyclonedx.skip=false || true"
-            sh "curl -s -X POST -H 'X-Api-Key: \${DEPENDENCY_TRACK_API_KEY}' -H 'Content-Type: application/json' -d @target/bom.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true"
-          } else {
-            sh "npx cyclonedx-npm --output bom.json || true"
-            sh "curl -s -X POST -H 'X-Api-Key: \${DEPENDENCY_TRACK_API_KEY}' -H 'Content-Type: application/json' -d @bom.json \${DEPENDENCY_TRACK_URL}/api/v1/bom || true"
-          }
-        }
+        dependencyTrackPublisher artifact: 'dependency-check-report.xml'
       }
     }
 
@@ -112,7 +116,7 @@ pipeline {
 
     stage("Trivy Scan") {
       steps {
-        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL} || true"
+        sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed ${env.IMAGE_FULL}"
       }
     }
 
@@ -122,15 +126,29 @@ pipeline {
           sh "echo \$HARBOR_PASS | docker login -u \$HARBOR_USER --password-stdin ${env.HARBOR_URL}"
         }
         sh "docker push ${env.IMAGE_FULL}"
+        script {
+          env.IMAGE_DIGEST_REF = sh(returnStdout: true, script: "docker inspect --format='{{index .RepoDigests 0}}' ${env.IMAGE_FULL}").trim()
+          if (!env.IMAGE_DIGEST_REF) {
+            error("Unable to resolve immutable image digest after docker push.")
+          }
+          env.IMAGE_DIGEST = env.IMAGE_DIGEST_REF.tokenize("@")[-1]
+        }
         sh "docker logout ${env.HARBOR_URL}"
       }
     }
 
     stage("Sign with Cosign") {
-      when { expression { return env.COSIGN_PRIVATE_KEY } }
       steps {
         withCredentials([file(credentialsId: 'cosign-key', variable: 'COSIGN_KEY')]) {
-          sh "cosign sign --key \$COSIGN_KEY ${env.IMAGE_FULL}"
+          sh "cosign sign --yes --key \$COSIGN_KEY ${env.IMAGE_DIGEST_REF}"
+        }
+      }
+    }
+
+    stage("Verify Image Signature") {
+      steps {
+        withCredentials([file(credentialsId: 'cosign-pub', variable: 'COSIGN_PUB')]) {
+          sh "cosign verify --key \$COSIGN_PUB ${env.IMAGE_DIGEST_REF}"
         }
       }
     }
@@ -146,21 +164,16 @@ pipeline {
       when { expression { return env.GITOPS_REPO_URL } }
       steps {
         sh """
+          set -eu
           git clone --branch ${GITOPS_BRANCH} ${env.GITOPS_REPO_URL} gitops-repo
           cd gitops-repo
-          sed -i 's|tag:.*|tag: ${IMAGE_TAG}|' apps/${APP_NAME}/values.yaml
+          sed -i 's|tag:.*|tag: ""|' apps/${APP_NAME}/values.yaml
+          sed -i 's|digest:.*|digest: ${env.IMAGE_DIGEST}|' apps/${APP_NAME}/values.yaml
           sed -i 's|repository:.*|repository: ${env.HARBOR_URL}/${env.HARBOR_PROJECT}/${APP_NAME}|' apps/${APP_NAME}/values.yaml
           git add apps/${APP_NAME}/values.yaml
           git commit -m "chore: deploy ${APP_NAME} ${IMAGE_TAG}" || true
           git push origin ${GITOPS_BRANCH}
         """
-      }
-    }
-
-    stage("Argo CD Sync") {
-      when { expression { return env.ARGOCD_SERVER } }
-      steps {
-        sh "argocd app sync ${APP_NAME} --server ${env.ARGOCD_SERVER} --auth-token \${ARGOCD_TOKEN} --insecure || true"
       }
     }
   }

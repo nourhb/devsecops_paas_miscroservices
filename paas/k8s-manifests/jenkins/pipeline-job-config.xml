@@ -1,0 +1,112 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@1571.vb_423c255d6d9">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@2.2277.v00573e73ddf1"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@2.2277.v00573e73ddf1">
+      <jobProperties/>
+      <triggers/>
+      <parameters/>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description>Uses pod template &quot;default&quot; (label jenkins-jenkins-agent) with docker-cli + dind sidecars. Docker steps run in container(&apos;docker&apos;).</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@4275.vb_0565eb_a_3d36">
+    <script>pipeline {
+    agent {
+        label &apos;jenkins-jenkins-agent&apos;
+    }
+
+    environment {
+        REGISTRY = &quot;192.168.56.129:30002&quot;
+        IMAGE = &quot;library/nginx&quot;
+        TAG = &quot;test&quot;
+    }
+
+    stages {
+
+        stage(&apos;Pull Base Image&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;docker pull nginx&apos;
+                }
+            }
+        }
+
+        stage(&apos;Tag Image&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;docker tag nginx $REGISTRY/$IMAGE:$TAG&apos;
+                }
+            }
+        }
+
+        stage(&apos;Push to Harbor&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;docker push $REGISTRY/$IMAGE:$TAG&apos;
+                }
+            }
+        }
+
+        stage(&apos;Scan with Trivy&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;&apos;&apos;
+                    trivy image --exit-code 1 --severity CRITICAL,HIGH $REGISTRY/$IMAGE:$TAG
+                    &apos;&apos;&apos;
+                }
+            }
+        }
+
+        stage(&apos;Get Digest&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    script {
+                        env.DIGEST = sh(
+                            script: &quot;docker inspect --format=&apos;{{index .RepoDigests 0}}&apos; $REGISTRY/$IMAGE:$TAG&quot;,
+                            returnStdout: true
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        stage(&apos;Sign Image&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;cosign sign --key cosign.key $DIGEST&apos;
+                }
+            }
+        }
+
+        stage(&apos;Verify Signature&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;cosign verify --key cosign.pub $DIGEST&apos;
+                }
+            }
+        }
+
+        stage(&apos;Deploy to Kubernetes&apos;) {
+            steps {
+                sh &apos;&apos;&apos;
+                kubectl set image deployment/demo-app demo-app=$DIGEST
+                &apos;&apos;&apos;
+            }
+        }
+        stage(&apos;Security Gate&apos;) {
+            steps {
+                container(&apos;docker&apos;) {
+                    sh &apos;cosign verify --key cosign.pub $DIGEST&apos;
+                }
+            }
+        }
+    }
+}</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
