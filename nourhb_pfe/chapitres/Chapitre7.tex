@@ -1,9 +1,0 @@
-
-\chapter{Retour sur le développement de \texttt{paas}}
-\label{ch:retex}
-
-Ce chapitre précise uniquement~\textbf{comment nous avons garanti que le mémoire reste synchrone avec la source}~(\texttt{paas/frontend}), les manifestes exemples~(\texttt{paas/k8s-manifests/}) et les fichiers environnement~\texttt{paas/frontend/.env.example}.
-
-La documentation interne~\texttt{paas/README.md} définit déjà les variables minimales~\texttt{DATABASE\_URL},~\texttt{JWT\_SECRET} et les chemins critiques Jenkins~/~Tekton~/~Harbor~/~GitOps~/~Argo~: le développement a consisté à maintenir l'alignement~(types Prisma, services dans~\texttt{src/server/}) avec ces valeurs lorsqu'elles étaient fournies dans l'environnement de démonstration.
-
-Les commandes de contrôle continu du frontal~(\texttt{npm run typecheck},~\texttt{npm test}) servent à valider~\textbf{l'outil construit}; la~\emph{section Conclusion générale}, qui clot le rapport, rattache encore ces artefacts au dépôt.

@@ -7,7 +7,7 @@ This document details the folder layout for the DevSecOps PaaS and where each ty
 ```
 paas/
 ├── docs/                    # Architecture and design
-├── backend-next/            # PaaS control plane (Next.js API + UI)
+├── frontend/                # PaaS control plane (Next.js App Router + Route Handlers API)
 ├── frontend/                # Optional standalone UI
 ├── gitops/                  # GitOps repo content (apps + base)
 ├── helm-charts/             # Reusable Helm charts
@@ -24,7 +24,7 @@ paas/
 | Path | Purpose |
 |------|--------|
 | `docs/` | Architecture docs, security integration, runbooks |
-| `backend-next/` | Next.js app: project API, pipeline triggers, deployments, metrics, health |
+| `frontend/` | Next.js app & API: onboarding, pipelines, deployments, metrics, integrations |
 | `gitops/` | GitOps repo: per-app Helm values and base manifests; ArgoCD points here |
 | `gitops/apps/<app>/` | One folder per app: `Chart.yaml`, `values.yaml`, `templates/` |
 | `helm-charts/` | Shared Helm chart templates (e.g. generic web app chart) |

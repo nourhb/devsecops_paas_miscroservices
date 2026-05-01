@@ -57,7 +57,7 @@ function stripFile(filePath) {
         console.log(filePath);
     }
 }
-const dirs = ["src", "tests", "scripts"].map((d) => path.join(rootDir, d));
+const dirs = ["src", "scripts"].map((d) => path.join(rootDir, d));
 for (const d of dirs) {
     for (const f of walk(d)) {
         if (/\.(ts|tsx|mjs|cjs|js)$/.test(f)) {
@@ -67,8 +67,6 @@ for (const d of dirs) {
 }
 for (const name of [
     "next.config.mjs",
-    "playwright.config.ts",
-    "vitest.config.ts",
     "postcss.config.js",
     "tailwind.config.ts"
 ]) {

@@ -338,7 +338,7 @@ export default function PipelinePage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Build + Security</CardTitle>
-            <CardDescription>The jury-facing DevSecOps summary.</CardDescription>
+            <CardDescription>Rough status for whoever is on-call.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
@@ -372,7 +372,7 @@ export default function PipelinePage() {
               </p>
             </div>
             {securityQuery.data?.findings?.[0] ? <div className="rounded-lg border border-border bg-background/50 p-3">
-                <p className="text-xs uppercase tracking-wide text-muted">AI explanation</p>
+                <p className="text-xs uppercase tracking-wide text-muted">What to fix</p>
                 <p className="mt-2 font-medium text-foreground">{securityQuery.data.findings[0].title}</p>
                 <p className="mt-1 text-muted">
                   {securityQuery.data.findings[0].recommendation || "Review the vulnerable component and upgrade to a patched version."}

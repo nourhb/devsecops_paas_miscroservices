@@ -103,7 +103,7 @@ export default function SecurityPage() {
                     </p>
                     {finding.component ? <p className="mt-1 text-xs text-muted">Component: {finding.component}</p> : null}
                     {finding.recommendation ? <p className="mt-2 text-sm text-muted">
-                        AI hint: {finding.recommendation}
+                        Tip: {finding.recommendation}
                       </p> : null}
                   </div>)}
               </div> : null}

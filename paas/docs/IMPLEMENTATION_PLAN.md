@@ -24,7 +24,7 @@
    - Create pipeline job(s) from `jenkins/Jenkinsfile.pipeline`; parameterize app name, repo, branch.
 
 5. **PaaS control plane**  
-   - Deploy `backend-next` (Next.js API + UI).  
+   - Deploy `frontend` (Next.js control plane — see `paas/docker/frontend.Dockerfile`).  
    - Implement: project CRUD, “Trigger build”, “Trigger deploy”, status from Jenkins/ArgoCD.  
    - Expose PaaS via Ingress (HTTPS).
 
