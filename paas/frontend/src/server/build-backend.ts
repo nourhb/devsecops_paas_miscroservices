@@ -33,12 +33,16 @@ export interface MonitorDeploymentArgs {
     startedRun: BuildTriggerResult;
     baseline: BuildDeploymentBaseline;
 }
+export interface BuildTriggerOptions {
+    branchOverride?: string;
+    gitCredentialsIdOverride?: string | null;
+}
 export interface BuildBackend {
     readonly provider: "jenkins" | "tekton";
     provisionProjectIntegration(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<void>;
-    triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult>;
+    triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult>;
     getDeploymentBaseline(project: BuildProjectRecord): Promise<BuildDeploymentBaseline>;
-    triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult>;
+    triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult>;
     monitorDeployment(args: MonitorDeploymentArgs): Promise<void>;
 }
 let backend: BuildBackend | null = null;

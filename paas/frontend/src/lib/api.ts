@@ -169,8 +169,15 @@ export const projectApi = {
     }
 };
 export const pipelineApi = {
-    triggerBuild: async (projectId: string) => {
-        const { data } = await apiClient.post<ActionResponse>(`/api/build/${projectId}`);
+    triggerBuild: async (projectId: string, body?: {
+        branch?: string;
+        gitCredentialsId?: string;
+        dismissPendingGitHubPush?: boolean;
+    }) => {
+        const hasBody = body && Object.keys(body).length > 0;
+        const { data } = hasBody
+            ? await apiClient.post<ActionResponse>(`/api/build/${projectId}`, body)
+            : await apiClient.post<ActionResponse>(`/api/build/${projectId}`);
         return data;
     },
     deploy: async (projectId: string) => {

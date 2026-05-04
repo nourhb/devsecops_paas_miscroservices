@@ -57,6 +57,49 @@ PARAMETER_DEFINITIONS = [
     ("SONAR_TOKEN", "", "SonarQube token for dockerless Sonar scanner"),
     ("DEPENDENCY_TRACK_BASE_URL", "", "Dependency-Track URL for SBOM upload"),
     ("DEPENDENCY_TRACK_API_KEY", "", "Dependency-Track API key for SBOM upload"),
+    ("NVD_API_KEY", "", "Optional NVD API key for OWASP Dependency-Check"),
+    (
+        "ARTIFACTORY_URL",
+        "",
+        "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload",
+    ),
+    (
+        "ARTIFACTORY_REPOSITORY",
+        "libs-release-local",
+        "Generic repository key in Artifactory for uploaded .tgz bundles",
+    ),
+    (
+        "ARTIFACTORY_USERNAME",
+        "",
+        "Artifactory user (optional if ACCESS_TOKEN or ARTIFACTORY_CREDENTIALS_ID)",
+    ),
+    ("ARTIFACTORY_PASSWORD", "", "Artifactory password (optional)"),
+    ("ARTIFACTORY_ACCESS_TOKEN", "", "Artifactory bearer token (optional)"),
+    (
+        "ARTIFACTORY_CREDENTIALS_ID",
+        "",
+        "Optional Jenkins username/password credential id for Artifactory (overrides ARTIFACTORY_* env on agent if set)",
+    ),
+    (
+        "COSIGN_CREDENTIALS_ID",
+        "",
+        "Optional Jenkins secret file credential id (Cosign private key) for signing IMAGE:BUILD_NUMBER",
+    ),
+    (
+        "HELM_OCI_PROJECT",
+        "paas",
+        "Harbor project name for OCI Helm charts (helm push oci://HARBOR_REGISTRY/PROJECT)",
+    ),
+    (
+        "HELM_OCI_INSECURE",
+        "false",
+        "helm registry login --insecure (self-signed TLS)",
+    ),
+    (
+        "HELM_OCI_PLAIN_HTTP",
+        "false",
+        "helm push --plain-http",
+    ),
 ]
 
 

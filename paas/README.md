@@ -20,6 +20,7 @@ The target production flow is:
 - `paas/k8s-manifests/tekton` - starter Tekton tasks, pipelines, and secret examples.
 - `paas/k8s-manifests` - platform Kubernetes manifests.
 - `paas/docs` - architecture, workflow, and integration documents.
+- **`paas/docs/DEPLOY_PAASS_MASTER_VM_FROM_SCRATCH.md`** — copy the repo onto a Linux master VM, configure `.env`, Prisma, and `docker compose` (no PaaS on the VM yet).
 
 ## Quickstart
 
@@ -28,7 +29,9 @@ The target production flow is:
 3. For local demo mode, enable `DEVSECOPS_ALLOW_SIMULATION=true`.
 4. For Jenkins mode, configure `JENKINS_*`.
 5. For Tekton mode, set `BUILD_BACKEND=tekton`, `KUBERNETES_ENABLED=true`, and the `TEKTON_*` values.
-6. Start the frontend from `paas/frontend`:
+6. Production `next start` validates Argo CD and GitOps by default; for Jenkins-only hosts set `PAAS_STRICT_INTEGRATIONS=false`.
+7. Optional: `JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true` runs the Python Jenkins job sync on each trigger (requires Python and the monorepo layout).
+8. Start the frontend from `paas/frontend`:
 
 ```bash
 npm install
@@ -62,6 +65,9 @@ ARGOCD_AUTH_TOKEN=argocd-token
 
 GITOPS_REPO_URL=https://github.com/org/gitops-repo
 GITOPS_REPO_TOKEN=github-token
+
+# Production: require Argo + GitOps (default). Jenkins-only: PAAS_STRICT_INTEGRATIONS=false
+# Auto-sync Jenkins job definition before trigger (needs Python): JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true
 ```
 
 Switch back to Jenkins by setting:

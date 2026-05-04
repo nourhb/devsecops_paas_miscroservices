@@ -1,5 +1,5 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
-import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build-backend";
+import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build-backend";
 import { prependBuildMetadata } from "@/server/build-metadata";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
@@ -8,7 +8,8 @@ import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { IntegrationError } from "@/server/http/errors";
 import { allowSimulation } from "@/server/integrations/integration-mode";
-import { jenkinsClient } from "@/server/integrations/devsecops-clients";
+import { jenkinsClient, resolveJenkinsJobNameForProject } from "@/server/integrations/devsecops-clients";
+import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
@@ -72,12 +73,17 @@ export class JenkinsBuildBackend implements BuildBackend {
     async provisionProjectIntegration(project: BuildProjectRecord): Promise<void> {
         await jenkinsClient.createPipeline(project.projectName);
     }
-    async triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult> {
-        const branch = project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK;
+    async triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult> {
+        const branch = (options?.branchOverride?.trim() || project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK);
+        const gitCredentialsId = options?.gitCredentialsIdOverride !== undefined
+            ? options.gitCredentialsIdOverride
+            : project.gitCredentialsId ?? null;
+        const jobName = resolveJenkinsJobNameForProject(project.projectName, project.id, "build");
+        const syncLog = await syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName);
         const build = await jenkinsClient.triggerBuild(project.projectName, project.id, {
             branch,
             gitUrl: project.gitRepositoryUrl,
-            gitCredentialsId: project.gitCredentialsId ?? null,
+            gitCredentialsId: gitCredentialsId ? String(gitCredentialsId).trim() || null : null,
             imageName: buildDeployImageRepository(project.projectName),
             projectUuid: project.id
         });
@@ -86,7 +92,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             provider: this.provider,
             runId: build.buildNumber === null ? null : String(build.buildNumber),
             runNumber: build.buildNumber,
-            logs: prependBuildMetadata(build.buildLog, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
+            logs: prependBuildMetadata(`${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
             externalUrl: build.jobUrl ?? null,
             artifactImage: build.buildNumber === null ? null : `${buildDeployImageRepository(project.projectName)}:${build.buildNumber}`,
             artifactDigest: null
@@ -96,12 +102,17 @@ export class JenkinsBuildBackend implements BuildBackend {
         const prior = await jenkinsClient.getLastBuildSummary(project.projectName, project.id, "deploy");
         return { runNumber: prior?.number ?? null };
     }
-    async triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult> {
-        const branch = project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK;
+    async triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult> {
+        const branch = (options?.branchOverride?.trim() || project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK);
+        const gitCredentialsId = options?.gitCredentialsIdOverride !== undefined
+            ? options.gitCredentialsIdOverride
+            : project.gitCredentialsId ?? null;
+        const jobName = resolveJenkinsJobNameForProject(project.projectName, project.id, "deploy");
+        const syncLog = await syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName);
         const build = await jenkinsClient.triggerDeployJob(project.projectName, project.id, {
             gitUrl: project.gitRepositoryUrl,
             branch,
-            gitCredentialsId: project.gitCredentialsId ?? null,
+            gitCredentialsId: gitCredentialsId ? String(gitCredentialsId).trim() || null : null,
             imageName: buildDeployImageRepository(project.projectName),
             projectUuid: project.id
         });
@@ -110,7 +121,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             provider: this.provider,
             runId: build.buildNumber === null ? null : String(build.buildNumber),
             runNumber: build.buildNumber,
-            logs: prependBuildMetadata(build.buildLog, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
+            logs: prependBuildMetadata(`${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
             externalUrl: build.jobUrl ?? null,
             artifactImage: build.buildNumber === null ? null : `${buildDeployImageRepository(project.projectName)}:${build.buildNumber}`,
             artifactDigest: null

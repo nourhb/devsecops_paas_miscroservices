@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
@@ -210,6 +211,8 @@ export default function PipelinePage() {
           <Badge variant="outline">Pod: {status?.podStatus ?? project.podStatus}</Badge>
         </div>
       </header>
+
+      <GitHubPushBuildPrompt projectId={projectId} pending={project.pendingGitHubPush} projectBranch={project.branch} gitCredentialsId={project.gitCredentialsId}/>
 
       
       <Card>

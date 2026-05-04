@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
@@ -290,6 +291,8 @@ export default function ProjectDetailsPage() {
           </Badge>
         </div>
       </header>
+
+      <GitHubPushBuildPrompt projectId={projectId} pending={project.pendingGitHubPush} projectBranch={project.branch} gitCredentialsId={project.gitCredentialsId}/>
 
       
       <Card>

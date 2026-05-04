@@ -1,5 +1,5 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
-import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build-backend";
+import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build-backend";
 import { prependBuildMetadata } from "@/server/build-metadata";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
@@ -88,18 +88,19 @@ export class TektonBuildBackend implements BuildBackend {
             throw new IntegrationError("Tekton is selected as the build backend but Kubernetes or the Tekton CRDs are not reachable from this server.");
         }
     }
-    async triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult> {
-        return this.createPipelineRun(project, plan, null);
+    async triggerBuild(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult> {
+        return this.createPipelineRun(project, plan, null, options);
     }
     async getDeploymentBaseline(_project: BuildProjectRecord): Promise<BuildDeploymentBaseline> {
         return { runNumber: null };
     }
-    async triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan): Promise<BuildTriggerResult> {
-        return this.createPipelineRun(project, plan, `deploy-${Date.now()}`);
+    async triggerDeployment(project: BuildProjectRecord, plan: ResolvedBuildPlan, options?: BuildTriggerOptions): Promise<BuildTriggerResult> {
+        return this.createPipelineRun(project, plan, `deploy-${Date.now()}`, options);
     }
-    private async createPipelineRun(project: BuildProjectRecord, plan: ResolvedBuildPlan, deploymentId: string | null): Promise<BuildTriggerResult> {
+    private async createPipelineRun(project: BuildProjectRecord, plan: ResolvedBuildPlan, deploymentId: string | null, options?: BuildTriggerOptions): Promise<BuildTriggerResult> {
         const syntheticRunId = `${safeName(project.projectName)}-${Date.now()}`;
         const artifactImage = buildArtifactImage(project.projectName, syntheticRunId);
+        const gitRevision = (options?.branchOverride?.trim() || project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK);
         if (!tektonConfigured()) {
             if (!allowSimulation()) {
                 throw new IntegrationError("Tekton build backend is not configured. Set KUBERNETES_ENABLED=true and point the server at a cluster with Tekton installed.");
@@ -143,7 +144,7 @@ export class TektonBuildBackend implements BuildBackend {
                 },
                 params: [
                     { name: "git-url", value: project.gitRepositoryUrl },
-                    { name: "git-revision", value: project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK },
+                    { name: "git-revision", value: gitRevision },
                     { name: "image", value: artifactImage },
                     { name: "project-id", value: project.id },
                     { name: "project-name", value: project.projectName },
