@@ -150,106 +150,7 @@ spec:
       }
     }
 
-    stage('SAST (SonarQube)') {
-      steps {
-        container('sonar') {
-          sh '''set -eu
-if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
-  echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
-  exit 0
-fi
-cd "$WORKSPACE"
-sonar-scanner \
-  -Dsonar.host.url="${SONAR_HOST_URL}" \
-  -Dsonar.token="${SONAR_TOKEN}" \
-  -Dsonar.projectKey="${PROJECT_ID}" \
-  -Dsonar.projectName="${PROJECT_ID}" \
-  -Dsonar.projectVersion="${BRANCH}-${BUILD_NUMBER}" \
-  -Dsonar.sources=. \
-  -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
-  -Dsonar.scm.provider=git
-'''
-        }
-
-        // Enforce SonarQube Quality Gate (without relying on Jenkins SonarQube plugin).
-        container('curl') {
-          sh '''set -eu
-if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
-  echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping Quality Gate enforcement."
-  exit 0
-fi
-
-REPORT_FILE="$WORKSPACE/.scannerwork/report-task.txt"
-if [ ! -f "$REPORT_FILE" ]; then
-  echo "[sonar] Missing $REPORT_FILE; cannot enforce Quality Gate."
-  exit 1
-fi
-
-ceTaskUrl="$(grep -E '^ceTaskUrl=' "$REPORT_FILE" | cut -d= -f2- || true)"
-if [ -z "$ceTaskUrl" ]; then
-  # Fallback for older formats
-  ceTaskId="$(grep -E '^ceTaskId=' "$REPORT_FILE" | cut -d= -f2- || true)"
-  serverUrl="$(grep -E '^serverUrl=' "$REPORT_FILE" | cut -d= -f2- || true)"
-  if [ -n "$ceTaskId" ] && [ -n "$serverUrl" ]; then
-    ceTaskUrl="${serverUrl%/}/api/ce/task?id=$ceTaskId"
-  fi
-fi
-
-if [ -z "$ceTaskUrl" ]; then
-  echo "[sonar] Unable to find ceTaskUrl/ceTaskId in report-task.txt"
-  sed -n '1,120p' "$REPORT_FILE" || true
-  exit 1
-fi
-
-AUTH="$(printf '%s:' "$SONAR_TOKEN" | base64 | tr -d '\\n')"
-
-echo "[sonar] Waiting for SonarQube background task to complete..."
-analysisId=""
-status=""
-i=0
-while [ "$i" -lt 90 ]; do
-  i=$((i+1))
-  json="$(curl -sS --connect-timeout 5 --max-time 20 -H "Authorization: Basic $AUTH" "$ceTaskUrl" || true)"
-  status="$(printf '%s' "$json" | tr -d '\\n' | sed -n 's/.*\"status\":\"\\([A-Z_]*\\)\".*/\\1/p' | head -n 1)"
-  analysisId="$(printf '%s' "$json" | tr -d '\\n' | sed -n 's/.*\"analysisId\":\"\\([^\"]*\\)\".*/\\1/p' | head -n 1)"
-
-  if [ "$status" = "SUCCESS" ] && [ -n "$analysisId" ]; then
-    break
-  fi
-  if [ "$status" = "FAILED" ] || [ "$status" = "CANCELED" ]; then
-    echo "[sonar] Background task status=$status"
-    echo "$json"
-    exit 1
-  fi
-  sleep 5
-done
-
-if [ "$status" != "SUCCESS" ] || [ -z "$analysisId" ]; then
-  echo "[sonar] Timed out waiting for background task. status=$status analysisId=$analysisId"
-  exit 1
-fi
-
-QG_URL="${SONAR_HOST_URL%/}/api/qualitygates/project_status?analysisId=$analysisId"
-qgJson="$(curl -sS --connect-timeout 5 --max-time 20 -H "Authorization: Basic $AUTH" "$QG_URL" || true)"
-qgStatus="$(printf '%s' "$qgJson" | tr -d '\\n' | sed -n 's/.*\"projectStatus\":{[^}]*\"status\":\"\\([A-Z]*\\)\".*/\\1/p' | head -n 1)"
-
-if [ -z "$qgStatus" ]; then
-  echo "[sonar] Could not parse Quality Gate status."
-  echo "$qgJson"
-  exit 1
-fi
-
-echo "[sonar] Quality Gate status: $qgStatus"
-if [ "$qgStatus" != "OK" ]; then
-  echo "[sonar] Quality Gate failed; failing build."
-  exit 1
-fi
-'''
-        }
-      }
-    }
-
-    stage('SCA (Dependency-Check + CycloneDX + Dependency-Track)') {
+    stage('3. Tests de sécurité et conformité (SCA → CycloneDX → Dependency-Track)') {
       steps {
         sh 'mkdir -p "$WORKSPACE/sca"'
 
@@ -350,7 +251,106 @@ curl -sS --fail-with-body --connect-timeout 10 --max-time 60 -X POST "$BASE/api/
       }
     }
 
-    stage('Build (Artifact)') {
+    stage('4. Tests de sécurité statique (SAST) — SonarQube') {
+      steps {
+        container('sonar') {
+          sh '''set -eu
+if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
+  echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+  exit 0
+fi
+cd "$WORKSPACE"
+sonar-scanner \
+  -Dsonar.host.url="${SONAR_HOST_URL}" \
+  -Dsonar.token="${SONAR_TOKEN}" \
+  -Dsonar.projectKey="${PROJECT_ID}" \
+  -Dsonar.projectName="${PROJECT_ID}" \
+  -Dsonar.projectVersion="${BRANCH}-${BUILD_NUMBER}" \
+  -Dsonar.sources=. \
+  -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
+  -Dsonar.scm.provider=git
+'''
+        }
+
+        // Enforce SonarQube Quality Gate (without relying on Jenkins SonarQube plugin).
+        container('curl') {
+          sh '''set -eu
+if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
+  echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping Quality Gate enforcement."
+  exit 0
+fi
+
+REPORT_FILE="$WORKSPACE/.scannerwork/report-task.txt"
+if [ ! -f "$REPORT_FILE" ]; then
+  echo "[sonar] Missing $REPORT_FILE; cannot enforce Quality Gate."
+  exit 1
+fi
+
+ceTaskUrl="$(grep -E '^ceTaskUrl=' "$REPORT_FILE" | cut -d= -f2- || true)"
+if [ -z "$ceTaskUrl" ]; then
+  # Fallback for older formats
+  ceTaskId="$(grep -E '^ceTaskId=' "$REPORT_FILE" | cut -d= -f2- || true)"
+  serverUrl="$(grep -E '^serverUrl=' "$REPORT_FILE" | cut -d= -f2- || true)"
+  if [ -n "$ceTaskId" ] && [ -n "$serverUrl" ]; then
+    ceTaskUrl="${serverUrl%/}/api/ce/task?id=$ceTaskId"
+  fi
+fi
+
+if [ -z "$ceTaskUrl" ]; then
+  echo "[sonar] Unable to find ceTaskUrl/ceTaskId in report-task.txt"
+  sed -n '1,120p' "$REPORT_FILE" || true
+  exit 1
+fi
+
+AUTH="$(printf '%s:' "$SONAR_TOKEN" | base64 | tr -d '\\n')"
+
+echo "[sonar] Waiting for SonarQube background task to complete..."
+analysisId=""
+status=""
+i=0
+while [ "$i" -lt 90 ]; do
+  i=$((i+1))
+  json="$(curl -sS --connect-timeout 5 --max-time 20 -H "Authorization: Basic $AUTH" "$ceTaskUrl" || true)"
+  status="$(printf '%s' "$json" | tr -d '\\n' | sed -n 's/.*\"status\":\"\\([A-Z_]*\\)\".*/\\1/p' | head -n 1)"
+  analysisId="$(printf '%s' "$json" | tr -d '\\n' | sed -n 's/.*\"analysisId\":\"\\([^\"]*\\)\".*/\\1/p' | head -n 1)"
+
+  if [ "$status" = "SUCCESS" ] && [ -n "$analysisId" ]; then
+    break
+  fi
+  if [ "$status" = "FAILED" ] || [ "$status" = "CANCELED" ]; then
+    echo "[sonar] Background task status=$status"
+    echo "$json"
+    exit 1
+  fi
+  sleep 5
+done
+
+if [ "$status" != "SUCCESS" ] || [ -z "$analysisId" ]; then
+  echo "[sonar] Timed out waiting for background task. status=$status analysisId=$analysisId"
+  exit 1
+fi
+
+QG_URL="${SONAR_HOST_URL%/}/api/qualitygates/project_status?analysisId=$analysisId"
+qgJson="$(curl -sS --connect-timeout 5 --max-time 20 -H "Authorization: Basic $AUTH" "$QG_URL" || true)"
+qgStatus="$(printf '%s' "$qgJson" | tr -d '\\n' | sed -n 's/.*\"projectStatus\":{[^}]*\"status\":\"\\([A-Z]*\\)\".*/\\1/p' | head -n 1)"
+
+if [ -z "$qgStatus" ]; then
+  echo "[sonar] Could not parse Quality Gate status."
+  echo "$qgJson"
+  exit 1
+fi
+
+echo "[sonar] Quality Gate status: $qgStatus"
+if [ "$qgStatus" != "OK" ]; then
+  echo "[sonar] Quality Gate failed; failing build."
+  exit 1
+fi
+'''
+        }
+      }
+    }
+
+    stage('5. Construction de l\'application') {
       steps {
         container('node') {
           sh '''set -eu
@@ -393,19 +393,32 @@ else
   echo "[build] Packaging build outputs:$OUTS"
   tar -czf "$WORKSPACE/artifacts/app-build.tgz" $OUTS
 fi
+
+mkdir -p "$WORKSPACE/paas-artifacts"
+{
+  echo "# 5. Construction — manifeste d'artefacts intermédiaires (Node)"
+  echo "STACK=node"
+  echo "BRANCH=${BRANCH:-unknown}"
+  echo "BUILD_NUMBER=${BUILD_NUMBER:-0}"
+} > "$WORKSPACE/paas-artifacts/build-artifact-manifest.txt"
+if ls "$WORKSPACE/artifacts"/*.tgz >/dev/null 2>&1; then
+  for f in "$WORKSPACE/artifacts"/*.tgz; do
+    echo "PACKAGED_ARCHIVE=$f" >> "$WORKSPACE/paas-artifacts/build-artifact-manifest.txt"
+  done
+fi
 '''
         }
 
-        archiveArtifacts artifacts: 'artifacts/*.tgz', allowEmptyArchive: true, fingerprint: true
+        archiveArtifacts artifacts: 'artifacts/*.tgz,paas-artifacts/build-artifact-manifest.txt', allowEmptyArchive: true, fingerprint: true
       }
     }
 
-    stage('Build and Push') {
+    stage('6. Création et publication de l\'image Docker (Harbor via Kaniko)') {
       steps {
         container('kaniko') {
           sh '''set -eu
-# Some Next.js Dockerfiles copy `/app/public` even when the repo doesn't have it.
-# Creating an empty `public/` avoids Kaniko failing with "lstat .../public: no such file or directory".
+# §6+§9 — Kaniko envoie l\'image au registre (Harbor) via --destination.
+# Next.js : certains Dockerfiles copient `/app/public` même si le dépôt n'en a pas — créer `public/` évite l'échec Kaniko.
 mkdir -p "$WORKSPACE/public"
 mkdir -p /kaniko/.docker
 DOCKERFILE_PATH="$WORKSPACE/Dockerfile"

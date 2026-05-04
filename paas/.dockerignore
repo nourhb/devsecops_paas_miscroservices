@@ -1,0 +1,18 @@
+# Build context root is paas/
+
+.git
+**/node_modules
+**/.git
+**/dist
+
+frontend/.next
+frontend/.turbo
+frontend/out
+frontend/test-results
+frontend/playwright-report
+frontend/blob-report
+
+# Never bake local secrets into the image
+**/frontend/.env
+**/frontend/.env.*
+**/frontend/*.local

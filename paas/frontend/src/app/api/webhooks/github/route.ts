@@ -99,27 +99,64 @@ export async function POST(request: NextRequest) {
         const results: Array<{
             projectId: string;
             projectName: string;
+            mode: "build" | "prompt";
         }> = [];
+        const promptPayload = {
+            branch,
+            after: payload.after || "",
+            cloneUrl: repoUrl,
+            fullName: payload.repository?.full_name || "",
+            receivedAt: new Date().toISOString()
+        };
         for (const project of toTrigger) {
-            await triggerBuild(project.id);
-            results.push({ projectId: project.id, projectName: project.projectName });
-            writeAuditLog({
-                action: "webhook.github.push.build.trigger",
-                outcome: "success",
-                actorEmail: payload.pusher?.email || payload.pusher?.name || "github",
-                targetType: "project",
-                targetId: project.id,
-                metadata: {
-                    repo: repoUrl,
-                    branch,
-                    after: payload.after || "",
-                    githubProject: payload.repository?.full_name || ""
-                }
-            });
+            if (env.GITHUB_WEBHOOK_BUILD_MODE === "auto") {
+                await triggerBuild(project.id);
+                results.push({ projectId: project.id, projectName: project.projectName, mode: "build" });
+                writeAuditLog({
+                    action: "webhook.github.push.build.trigger",
+                    outcome: "success",
+                    actorEmail: payload.pusher?.email || payload.pusher?.name || "github",
+                    targetType: "project",
+                    targetId: project.id,
+                    metadata: {
+                        repo: repoUrl,
+                        branch,
+                        after: payload.after || "",
+                        githubProject: payload.repository?.full_name || ""
+                    }
+                });
+            }
+            else {
+                await prisma.project.update({
+                    where: { id: project.id },
+                    data: { pendingGitHubPush: promptPayload }
+                });
+                results.push({ projectId: project.id, projectName: project.projectName, mode: "prompt" });
+                writeAuditLog({
+                    action: "webhook.github.push.build.prompt",
+                    outcome: "success",
+                    actorEmail: payload.pusher?.email || payload.pusher?.name || "github",
+                    targetType: "project",
+                    targetId: project.id,
+                    metadata: {
+                        repo: repoUrl,
+                        branch,
+                        after: payload.after || "",
+                        githubProject: payload.repository?.full_name || ""
+                    }
+                });
+            }
         }
+        const promptCount = results.filter((r) => r.mode === "prompt").length;
+        const autoCount = results.filter((r) => r.mode === "build").length;
+        const message = promptCount > 0 && autoCount === 0
+            ? `Recorded ${promptCount} build prompt(s). Open each project in the PaaS UI to confirm branch / credentials and trigger Jenkins.`
+            : autoCount > 0 && promptCount === 0
+                ? `Triggered build for ${autoCount} project(s)`
+                : `Triggered ${autoCount} build(s); ${promptCount} pending UI confirmation`;
         return ok({
             status: "SUCCESS",
-            message: `Triggered build for ${results.length} project(s)`,
+            message,
             results
         });
     }

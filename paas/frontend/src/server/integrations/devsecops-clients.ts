@@ -1,4 +1,5 @@
 import { env } from "@/server/config/env";
+import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
@@ -50,13 +51,22 @@ function appendRegistryParameters(q: URLSearchParams): void {
     const values: Record<string, string> = {
         DOCKERHUB_USERNAME: env.DOCKERHUB_USERNAME,
         DOCKERHUB_TOKEN: env.DOCKERHUB_TOKEN,
-        HARBOR_REGISTRY: env.HARBOR_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/$/, ""),
+        HARBOR_REGISTRY: env.HARBOR_REGISTRY,
         HARBOR_USERNAME: env.HARBOR_USERNAME,
         HARBOR_PASSWORD: env.HARBOR_PASSWORD,
         SONAR_HOST_URL: env.SONAR_BASE_URL,
         SONAR_TOKEN: env.SONAR_TOKEN,
         DEPENDENCY_TRACK_BASE_URL: env.DEPENDENCY_TRACK_BASE_URL,
-        DEPENDENCY_TRACK_API_KEY: env.DEPENDENCY_TRACK_API_KEY
+        DEPENDENCY_TRACK_API_KEY: env.DEPENDENCY_TRACK_API_KEY,
+        ARTIFACTORY_URL: env.ARTIFACTORY_URL,
+        ARTIFACTORY_REPOSITORY: env.ARTIFACTORY_REPOSITORY,
+        ARTIFACTORY_USERNAME: env.ARTIFACTORY_USERNAME,
+        ARTIFACTORY_PASSWORD: env.ARTIFACTORY_PASSWORD,
+        ARTIFACTORY_ACCESS_TOKEN: env.ARTIFACTORY_ACCESS_TOKEN,
+        ARTIFACTORY_CREDENTIALS_ID: env.ARTIFACTORY_CREDENTIALS_ID,
+        COSIGN_CREDENTIALS_ID: env.COSIGN_CREDENTIALS_ID,
+        HELM_OCI_PROJECT: env.HELM_OCI_PROJECT,
+        NVD_API_KEY: env.NVD_API_KEY
     };
     for (const [key, value] of Object.entries(values)) {
         const normalized = value.trim();
@@ -64,12 +74,18 @@ function appendRegistryParameters(q: URLSearchParams): void {
             q.set(key, normalized);
         }
     }
+    if (env.HELM_OCI_INSECURE === "true") {
+        q.set("HELM_OCI_INSECURE", "true");
+    }
+    if (env.HELM_OCI_PLAIN_HTTP === "true") {
+        q.set("HELM_OCI_PLAIN_HTTP", "true");
+    }
 }
 function redactJenkinsUrl(url: string): string {
     try {
         const u = new URL(url);
         for (const key of [...u.searchParams.keys()]) {
-            if (/TOKEN|PASSWORD|PASS|SECRET|API_KEY/i.test(key)) {
+            if (/TOKEN|PASSWORD|PASS|SECRET|API_KEY|NVD_API/i.test(key)) {
                 u.searchParams.set(key, "REDACTED");
             }
         }
@@ -89,7 +105,10 @@ function describeJenkinsFetchFailure(error: unknown): string {
     const cause = "cause" in error && error.cause instanceof Error ? error.cause.message : "";
     return cause ? `${error.message} (${cause})` : error.message;
 }
-type JenkinsJobKind = "build" | "deploy";
+export type JenkinsJobKind = "build" | "deploy";
+export function resolveJenkinsJobNameForProject(projectName: string, projectId: string, kind: JenkinsJobKind = "build"): string {
+    return jenkinsJobName(projectName, projectId, kind);
+}
 function projectScopedJenkinsJobName(projectName: string, projectId: string): string {
     if (env.JENKINS_JOB_NAME_SOURCE === "uuid") {
         return projectId;
@@ -664,6 +683,7 @@ export class JenkinsClient {
                 jobUrl: null
             };
         }
+        await syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName);
         const base = jenkinsBaseUrl();
         const jobPath = dashboardJenkinsJobPath(jobName);
         const headers: Record<string, string> = { Authorization: jenkinsAuthHeader() };

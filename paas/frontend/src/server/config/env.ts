@@ -22,6 +22,7 @@ const envSchema = z.object({
     SMTP_PASS: z.string().default(""),
     MAIL_FROM: z.string().default(""),
     GITHUB_WEBHOOK_SECRET: z.string().default(""),
+    GITHUB_WEBHOOK_BUILD_MODE: z.enum(["prompt", "auto"]).default("prompt"),
     JENKINS_BASE_URL: z.string().default(""),
     JENKINS_USERNAME: z.string().default(""),
     JENKINS_API_TOKEN: z.string().default(""),
@@ -41,10 +42,33 @@ const envSchema = z.object({
     JENKINS_DEPLOY_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
+    /** Run `python paas/scripts/jenkins_create_paas_deploy_job.py` before UI/API Jenkins build & deploy triggers (requires Python + monorepo layout). */
+    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
+    /** Absolute path to monorepo root (contains `paas/scripts/jenkins_create_paas_deploy_job.py`). Optional when `process.cwd()` is inside the repo. */
+    PAAS_MONOREPO_ROOT: z.string().default(""),
+    /** Python executable for Jenkins job sync (default: try py -3, python3, python). */
+    PYTHON_CMD: z.string().default(""),
+    /** Registry host:port for Jenkins/crane/docker (optional; else derived from HARBOR_BASE_URL / HARBOR_URL). */
+    HARBOR_REGISTRY: z.string().default(""),
     HARBOR_BASE_URL: z.string().default(""),
     HARBOR_USERNAME: z.string().default(""),
     HARBOR_PASSWORD: z.string().default(""),
     HARBOR_PROJECT: z.string().default("paas"),
+    /** Helm OCI project segment (e.g. Harbor project for `helm push oci://...`). */
+    HELM_OCI_PROJECT: z.string().default("paas"),
+    HELM_OCI_INSECURE: z.enum(["true", "false"]).default("false"),
+    HELM_OCI_PLAIN_HTTP: z.enum(["true", "false"]).default("false"),
+    ARTIFACTORY_URL: z.string().default(""),
+    ARTIFACTORY_REPOSITORY: z.string().default("libs-release-local"),
+    ARTIFACTORY_USERNAME: z.string().default(""),
+    ARTIFACTORY_PASSWORD: z.string().default(""),
+    ARTIFACTORY_ACCESS_TOKEN: z.string().default(""),
+    /** Jenkins credentialsId for Artifactory basic auth (optional). */
+    ARTIFACTORY_CREDENTIALS_ID: z.string().default(""),
+    /** Jenkins secret file credential id for Cosign private key (optional). */
+    COSIGN_CREDENTIALS_ID: z.string().default(""),
+    /** Optional NVD API key for OWASP Dependency-Check on the Jenkins agent. */
+    NVD_API_KEY: z.string().default(""),
     DEPLOY_IMAGE_NAME_TEMPLATE: z.string().default(""),
     DEPLOY_BRANCH_FALLBACK: z.string().default("main"),
     DEPLOYMENT_TRIGGER_USER_ID: z.string().default(""),
@@ -97,10 +121,35 @@ const envSchema = z.object({
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
-    AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false")
+    AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
+    /**
+     * When false, production boot skips mandatory Argo CD + GitOps env checks (Jenkins-only / lab installs).
+     * Keep true for full platform deployments.
+     */
+    PAAS_STRICT_INTEGRATIONS: z.enum(["true", "false"]).default("true")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
 const harborBaseEffective = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
+function harborRegistryHostFromBase(): string {
+    const base = harborBaseEffective.trim();
+    if (!base) {
+        return "";
+    }
+    return base
+        .replace(/^https?:\/\//i, "")
+        .replace(/\/$/, "")
+        .split("/")[0];
+}
+function resolvedHarborRegistryHost(): string {
+    const explicit = firstNonEmpty(process.env.HARBOR_REGISTRY);
+    if (explicit) {
+        return explicit
+            .replace(/^https?:\/\//i, "")
+            .replace(/\/$/, "")
+            .split("/")[0];
+    }
+    return harborRegistryHostFromBase();
+}
 function resolveCosignPublicKeyPem(): string {
     const pub = firstNonEmpty(process.env.COSIGN_PUBLIC_KEY);
     if (pub) {
@@ -145,14 +194,16 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
     if (!parsedEnv.JENKINS_BASE_URL || !parsedEnv.JENKINS_USERNAME || !parsedEnv.JENKINS_API_TOKEN) {
         errors.push("need Jenkins URL + user + token");
     }
-    if (!parsedEnv.ARGOCD_BASE_URL || !parsedEnv.ARGOCD_AUTH_TOKEN) {
-        errors.push("need Argo URL + token");
-    }
-    if (parsedEnv.ARGOCD_TLS_SKIP_VERIFY === "true") {
-        errors.push("ARGOCD_TLS_SKIP_VERIFY off for prod");
-    }
-    if (!parsedEnv.GITOPS_REPO_URL || !parsedEnv.GITOPS_REPO_TOKEN) {
-        errors.push("need gitops repo URL + token");
+    if (parsedEnv.PAAS_STRICT_INTEGRATIONS === "true") {
+        if (!parsedEnv.ARGOCD_BASE_URL || !parsedEnv.ARGOCD_AUTH_TOKEN) {
+            errors.push("need Argo URL + token (or set PAAS_STRICT_INTEGRATIONS=false for Jenkins-only prod)");
+        }
+        if (parsedEnv.ARGOCD_TLS_SKIP_VERIFY === "true") {
+            errors.push("ARGOCD_TLS_SKIP_VERIFY off for prod");
+        }
+        if (!parsedEnv.GITOPS_REPO_URL || !parsedEnv.GITOPS_REPO_TOKEN) {
+            errors.push("need gitops repo URL + token (or set PAAS_STRICT_INTEGRATIONS=false)");
+        }
     }
     return errors;
 }
@@ -170,6 +221,7 @@ const parsed = envSchema.safeParse({
     SMTP_PASS: process.env.SMTP_PASS,
     MAIL_FROM: process.env.MAIL_FROM,
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
+    GITHUB_WEBHOOK_BUILD_MODE: process.env.GITHUB_WEBHOOK_BUILD_MODE,
     JENKINS_BASE_URL: firstNonEmpty(process.env.JENKINS_BASE_URL, process.env.JENKINS_URL),
     JENKINS_USERNAME: firstNonEmpty(process.env.JENKINS_USERNAME, process.env.JENKINS_USER),
     JENKINS_API_TOKEN: firstNonEmpty(process.env.JENKINS_API_TOKEN, process.env.JENKINS_TOKEN),
@@ -189,10 +241,25 @@ const parsed = envSchema.safeParse({
     JENKINS_DEPLOY_POLL_INTERVAL_MS: process.env.JENKINS_DEPLOY_POLL_INTERVAL_MS,
     JENKINS_DEPLOY_POLL_MAX_MS: process.env.JENKINS_DEPLOY_POLL_MAX_MS,
     JENKINS_HTTP_TIMEOUT_MS: process.env.JENKINS_HTTP_TIMEOUT_MS,
+    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER,
+    PAAS_MONOREPO_ROOT: process.env.PAAS_MONOREPO_ROOT,
+    PYTHON_CMD: process.env.PYTHON_CMD,
+    HARBOR_REGISTRY: resolvedHarborRegistryHost(),
     HARBOR_BASE_URL: harborBaseEffective,
     HARBOR_USERNAME: process.env.HARBOR_USERNAME,
     HARBOR_PASSWORD: process.env.HARBOR_PASSWORD,
     HARBOR_PROJECT: process.env.HARBOR_PROJECT,
+    HELM_OCI_PROJECT: firstNonEmpty(process.env.HELM_OCI_PROJECT, process.env.HARBOR_PROJECT, "paas"),
+    HELM_OCI_INSECURE: process.env.HELM_OCI_INSECURE === "true" ? "true" : "false",
+    HELM_OCI_PLAIN_HTTP: process.env.HELM_OCI_PLAIN_HTTP === "true" ? "true" : "false",
+    ARTIFACTORY_URL: firstNonEmpty(process.env.ARTIFACTORY_URL, process.env.ARTIFACTORY_BASE_URL),
+    ARTIFACTORY_REPOSITORY: firstNonEmpty(process.env.ARTIFACTORY_REPOSITORY, "libs-release-local"),
+    ARTIFACTORY_USERNAME: process.env.ARTIFACTORY_USERNAME,
+    ARTIFACTORY_PASSWORD: process.env.ARTIFACTORY_PASSWORD,
+    ARTIFACTORY_ACCESS_TOKEN: firstNonEmpty(process.env.ARTIFACTORY_ACCESS_TOKEN, process.env.ARTIFACTORY_TOKEN),
+    ARTIFACTORY_CREDENTIALS_ID: process.env.ARTIFACTORY_CREDENTIALS_ID,
+    COSIGN_CREDENTIALS_ID: process.env.COSIGN_CREDENTIALS_ID,
+    NVD_API_KEY: process.env.NVD_API_KEY,
     DEPLOY_IMAGE_NAME_TEMPLATE: process.env.DEPLOY_IMAGE_NAME_TEMPLATE,
     DEPLOY_BRANCH_FALLBACK: process.env.DEPLOY_BRANCH_FALLBACK,
     DEPLOYMENT_TRIGGER_USER_ID: process.env.DEPLOYMENT_TRIGGER_USER_ID,
@@ -245,7 +312,8 @@ const parsed = envSchema.safeParse({
     APPS_PUBLIC_BASE_DOMAIN: process.env.APPS_PUBLIC_BASE_DOMAIN,
     APPS_PUBLIC_URL_TEMPLATE: process.env.APPS_PUBLIC_URL_TEMPLATE,
     APPS_REACHABILITY_TIMEOUT_MS: process.env.APPS_REACHABILITY_TIMEOUT_MS,
-    AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN
+    AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN,
+    PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS
 });
 if (!parsed.success) {
     throw new Error(`env: ${parsed.error.message}`);

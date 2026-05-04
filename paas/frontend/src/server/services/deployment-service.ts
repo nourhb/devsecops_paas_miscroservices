@@ -1,4 +1,4 @@
-import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
+import { DeploymentFailureReason, DeploymentJobStatus, Prisma } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { env } from "@/server/config/env";
@@ -159,7 +159,8 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
     await updateProject(project.id, {
         lastDeploymentStatus: "QUEUED",
         buildStatus: "QUEUED",
-        deploymentLogs: initialLog
+        deploymentLogs: initialLog,
+        pendingGitHubPush: Prisma.DbNull
     });
     monitorDeployment(deployment.id, build.runNumber);
     return {

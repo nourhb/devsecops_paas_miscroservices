@@ -67,6 +67,7 @@ model Project {
   url                    String?
   deletedAt              DateTime?
   gitCredentialsId       String?
+  pendingGitHubPush      Json?
   containerImages        ContainerImage[]
   deployments            Deployment[]
   createdBy              User             @relation(fields: [createdById], references: [id], onDelete: Cascade)

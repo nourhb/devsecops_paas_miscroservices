@@ -1,4 +1,6 @@
+import { Prisma } from "@prisma/client";
 import type { ActionResponse, DeploymentStatus } from "@/types";
+import type { BuildTriggerOptions } from "@/server/build-backend";
 import { getBuildBackend } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
@@ -21,11 +23,11 @@ function summarizeKubernetesError(message: string) {
     }
     return "Kubernetes unavailable";
 }
-export async function triggerBuild(projectId: string): Promise<ActionResponse> {
+export async function triggerBuild(projectId: string, options?: BuildTriggerOptions): Promise<ActionResponse> {
     const project = await getProjectById(projectId);
     const backend = getBuildBackend();
     const plan = resolveBuildPlan(project);
-    const build = await backend.triggerBuild(project, plan);
+    const build = await backend.triggerBuild(project, plan, options);
     if (!build.accepted) {
         await updateProject(project.id, {
             buildStatus: "FAILED",
@@ -39,7 +41,8 @@ export async function triggerBuild(projectId: string): Promise<ActionResponse> {
     await updateProject(project.id, {
         buildStatus: backend.provider === "tekton" ? "QUEUED" : "BUILDING",
         imageTag: build.artifactImage ?? project.imageTag,
-        buildLogs: build.logs
+        buildLogs: build.logs,
+        pendingGitHubPush: Prisma.DbNull
     });
     return {
         status: "SUCCESS",

@@ -33,7 +33,8 @@ pipeline {
   }
 
   stages {
-    stage("Checkout") {
+    /* 2. Checkout du code : clone du dépôt Git (GIT_URL / BRANCH) avant build ou image — voir README.md */
+    stage("2. Checkout du code (Git / GitHub)") {
       steps {
         script {
           if (!params.GIT_URL?.trim()) {
@@ -76,44 +77,8 @@ pipeline {
       }
     }
 
-    stage("SAST (SonarQube)") {
-      steps {
-        container("docker") {
-          catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
-            sh """
-          WS="\${WORKSPACE:-}"
-          if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
-          echo "[sonar] WORKSPACE=\${WORKSPACE}"
-          set -u
-          if [ -z "\${SONAR_HOST_URL:-}" ] || [ -z "\${SONAR_TOKEN:-}" ]; then
-            echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
-            exit 0
-          fi
-          SONAR_IMG="sonarsource/sonar-scanner-cli:latest"
-          set +e
-          docker pull "\$SONAR_IMG" >/dev/null
-          if [ "\$?" != "0" ]; then echo "[sonar] docker pull failed; skipping analysis"; exit 0; fi
-          docker run --rm \\
-            -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
-            -e SONAR_TOKEN="\${SONAR_TOKEN}" \\
-            -v "\${WORKSPACE}:/usr/src" \\
-            "\$SONAR_IMG" \\
-            -Dsonar.projectKey="${params.PROJECT_ID}" \\
-            -Dsonar.projectName="${params.PROJECT_ID}" \\
-            -Dsonar.projectVersion="${params.BRANCH}-${env.BUILD_NUMBER}" \\
-            -Dsonar.sources=. \\
-            -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \\
-            -Dsonar.scm.provider=git
-          SONAR_RC=\$?
-          if [ "\$SONAR_RC" != "0" ]; then echo "[sonar] scanner exited \$SONAR_RC (non-fatal for deploy pipeline)"; fi
-          exit 0
-        """
-          }
-        }
-      }
-    }
-
-    stage("SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
+    /* Étape 3 — SCA (voir README). Étape 4 — SAST SonarQube : analyse statique du code source. */
+    stage("3. Tests de sécurité et conformité (SCA → CycloneDX → Dependency-Track)") {
       steps {
         container("docker") {
           catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
@@ -184,7 +149,45 @@ pipeline {
       }
     }
 
-    stage("Image") {
+    stage("4. Tests de sécurité statique (SAST) — SonarQube") {
+      steps {
+        container("docker") {
+          catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
+            sh """
+          WS="\${WORKSPACE:-}"
+          if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
+          echo "[sonar] WORKSPACE=\${WORKSPACE}"
+          set -u
+          if [ -z "\${SONAR_HOST_URL:-}" ] || [ -z "\${SONAR_TOKEN:-}" ]; then
+            echo "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+            exit 0
+          fi
+          SONAR_IMG="sonarsource/sonar-scanner-cli:latest"
+          set +e
+          docker pull "\$SONAR_IMG" >/dev/null
+          if [ "\$?" != "0" ]; then echo "[sonar] docker pull failed; skipping analysis"; exit 0; fi
+          docker run --rm \\
+            -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
+            -e SONAR_TOKEN="\${SONAR_TOKEN}" \\
+            -v "\${WORKSPACE}:/usr/src" \\
+            "\$SONAR_IMG" \\
+            -Dsonar.projectKey="${params.PROJECT_ID}" \\
+            -Dsonar.projectName="${params.PROJECT_ID}" \\
+            -Dsonar.projectVersion="${params.BRANCH}-${env.BUILD_NUMBER}" \\
+            -Dsonar.sources=. \\
+            -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \\
+            -Dsonar.scm.provider=git
+          SONAR_RC=\$?
+          if [ "\$SONAR_RC" != "0" ]; then echo "[sonar] scanner exited \$SONAR_RC (non-fatal for deploy pipeline)"; fi
+          exit 0
+        """
+          }
+        }
+      }
+    }
+
+    /* §6 + §9 — Kaniko : build et publication vers Harbor en une étape (--destination). */
+    stage("6. Création et publication de l'image Docker (Harbor via Kaniko)") {
       steps {
         container("docker") {
         script {
