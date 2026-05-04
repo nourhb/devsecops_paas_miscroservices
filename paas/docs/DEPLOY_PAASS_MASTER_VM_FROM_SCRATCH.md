@@ -134,6 +134,18 @@ docker compose logs -f frontend
 
 **If you use Compose’s bundled Postgres**, keep the override in `docker-compose.yml` for `DATABASE_URL` inside the `frontend` service, or remove the `postgres` service and point everything at external Postgres only (then adjust `docker-compose.yml` accordingly).
 
+### Compose and `frontend/.env` (multi-line / special characters)
+
+Docker Compose’s `env_file` parser is **not** a full shell or dotenv implementation: each non-comment line must be `KEY=value`. **Multi-line PEM blocks** (e.g. `COSIGN_PUBLIC_KEY=-----BEGIN…` with following lines) break parsing; a bare base64 line with `/` or `=` can trigger errors like `unexpected character "/" in variable name`.
+
+**Fix (pick one):**
+
+1. **Simplest for the control plane container:** remove or comment out **`COSIGN_PUBLIC_KEY`**, **`COSIGN_PRIVATE_KEY`**, and any other multi-line secrets from `frontend/.env` used by Compose, unless the app truly needs them inside this container.
+2. **Single-line PEM:** put the whole PEM on one line with escaped newlines, e.g. `COSIGN_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMFkw...\n-----END PUBLIC KEY-----"` (quotes required).
+3. **Quote tokens** that contain `/`, `+`, or multiple `=` if Compose still complains: `TRIVY_AUTH_TOKEN="…"`.
+
+On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.kube/config`), not a Windows path.
+
 ## 7. Firewall / security
 
 - Allow inbound **3000** (or whatever you map) to the VM.
