@@ -150,14 +150,21 @@ function resolvedHarborRegistryHost(): string {
     }
     return harborRegistryHostFromBase();
 }
+/** Compose/dotenv often store PEM as one line with literal `\n` sequences. */
+function pemFromEnv(raw: string): string {
+    return String(raw)
+        .trim()
+        .replace(/\\n/g, "\n")
+        .trim();
+}
 function resolveCosignPublicKeyPem(): string {
     const pub = firstNonEmpty(process.env.COSIGN_PUBLIC_KEY);
     if (pub) {
-        return pub;
+        return pemFromEnv(pub);
     }
     const priv = firstNonEmpty(process.env.COSIGN_PRIVATE_KEY);
     if (priv.includes("BEGIN PUBLIC KEY")) {
-        return priv;
+        return pemFromEnv(priv);
     }
     return "";
 }
@@ -166,7 +173,7 @@ function resolveCosignPrivateKeyPem(): string {
     if (raw.includes("BEGIN PUBLIC KEY")) {
         return "";
     }
-    return raw;
+    return raw ? pemFromEnv(raw) : "";
 }
 function duringNextBuild(): boolean {
     return process.env["NEXT_PHASE"] === "phase-production-build";
