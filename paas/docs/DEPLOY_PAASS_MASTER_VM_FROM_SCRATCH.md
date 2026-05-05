@@ -67,7 +67,7 @@ cp frontend/docker-compose.env.example frontend/docker-compose.env
 nano frontend/docker-compose.env   # or vim
 ```
 
-Optional — Prisma from the **host** or one-off Node container: keep a normal `frontend/.env` (copy from `frontend/.env.example`) with a `DATABASE_URL` that reaches Postgres from the host (e.g. `postgresql://postgres:root@127.0.0.1:5432/paas?options=...` when Compose publishes `5432`). Inside the `frontend` service, `docker-compose.yml` still **overrides** `DATABASE_URL` to use the hostname `postgres`.
+Optional — Prisma from the **host** or one-off Node container: keep a normal `frontend/.env` (copy from `frontend/.env.example`) with a `DATABASE_URL` that reaches Postgres from the host (e.g. `postgresql://postgres:root@127.0.0.1:5433/paas?options=...` — Compose maps the DB to host port **5433** so it does not clash with a local Postgres on **5432**). Inside the `frontend` service, `docker-compose.yml` still **overrides** `DATABASE_URL` to use the hostname `postgres`.
 
 Set at minimum:
 
@@ -113,7 +113,7 @@ Apply the schema **once** before or right after the first app start, using a `DA
 
 ```bash
 cd ~/devsecops_paas_miscroservices/paas/frontend
-# Requires frontend/.env with host-reachable DATABASE_URL (e.g. 127.0.0.1:5432 when Compose publishes Postgres)
+# Requires frontend/.env with host-reachable DATABASE_URL (e.g. 127.0.0.1:5433 when using bundled Compose Postgres)
 export $(grep -v '^#' .env | xargs -d '\n' -I {} echo {} | sed 's/^/export /')  # or: export DATABASE_URL=... manually
 npm ci
 npx prisma generate
