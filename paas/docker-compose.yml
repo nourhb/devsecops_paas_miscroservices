@@ -1,4 +1,8 @@
 # Development-only compose stack. Production uses Kubernetes plus managed or operator-backed PostgreSQL.
+#
+# Run all `docker compose` commands from THIS directory (paas/), not from paas/frontend/.
+# Otherwise Compose may auto-load paas/frontend/.env for interpolation and fail on multi-line PEM blocks.
+#
 # Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
 # run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@127.0.0.1:5433/paas in .env (host port).
 services:
