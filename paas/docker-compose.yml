@@ -65,6 +65,8 @@ services:
       # Repo mount + Python in image so inline job sync can run before each trigger (creates/updates job XML).
       PAAS_MONOREPO_ROOT: /monorepo
       JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: "true"
+      # Ignore a Windows PYTHON_CMD copied from host .env; image uses python3 from PATH.
+      PYTHON_CMD: ""
     volumes:
       # Read-only monorepo root (parent of `paas/`). Required for Jenkins pre-trigger sync from the container.
       - ..:/monorepo:ro

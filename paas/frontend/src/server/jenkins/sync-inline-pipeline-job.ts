@@ -64,21 +64,11 @@ function writeTempEnvFromProcess(): string {
 }
 
 function stripEnvQuotes(s: string): string {
-    let t = s.trim();
-    for (let i = 0; i < 16; i++) {
-        if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
-            t = t.slice(1, -1).trim();
-            continue;
-        }
-        break;
+    const t = s.trim();
+    if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
+        return t.slice(1, -1).trim();
     }
     return t;
-}
-
-/** Windows absolute path (e.g. from .env copied from a dev PC); invalid on Linux/Docker. */
-function isWindowsFilesystemPythonPath(p: string): boolean {
-    const t = p.trim();
-    return /^[a-zA-Z]:[\\/]/.test(t) || t.startsWith("\\\\");
 }
 
 /** True when value should be resolved via PATH (e.g. `python`), not as a filesystem path. */
@@ -126,24 +116,19 @@ function resolveConfiguredPythonExecutable(configured: string): { executable: st
 }
 
 async function pickPython(): Promise<{ executable: string; prefixArgs: string[] }> {
-    let configured = stripEnvQuotes(env.PYTHON_CMD.trim());
-    if (configured && process.platform !== "win32" && isWindowsFilesystemPythonPath(configured)) {
-        configured = "";
-    }
+    const configured = env.PYTHON_CMD.trim();
     if (configured) {
-        const chosen = resolveConfiguredPythonExecutable(configured);
         try {
+            const chosen = resolveConfiguredPythonExecutable(configured);
             await execFileAsync(chosen.executable, [...chosen.prefixArgs, "--version"], {
                 timeout: 8000,
                 windowsHide: true,
                 encoding: "utf8"
             });
+            return chosen;
         } catch {
-            throw new IntegrationError(
-                `PYTHON_CMD "${configured}" does not run (python --version failed). Fix the path or remove PYTHON_CMD.`
-            );
+            /* Wrong path, Windows path on Linux, or python --version failed — use PATH (python3 / python / py). */
         }
-        return chosen;
     }
     /** On Windows, `py -3` under execFile sometimes yields vague "Command failed"; try `python` / `python3` first. */
     const candidates: { executable: string; prefixArgs: string[] }[] =
@@ -170,7 +155,7 @@ async function pickPython(): Promise<{ executable: string; prefixArgs: string[] 
         }
     }
     throw new IntegrationError(
-        "Python 3 is required to sync the Jenkins inline job. Install python3, add it to PATH, or set PYTHON_CMD in the environment."
+        "Python 3 is required to sync the Jenkins inline job. Install python3, add it to PATH, unset PYTHON_CMD, or set PYTHON_CMD to a valid interpreter."
     );
 }
 
