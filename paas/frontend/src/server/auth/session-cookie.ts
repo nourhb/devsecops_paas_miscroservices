@@ -5,7 +5,7 @@ const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 2;
  * Secure flag must be off for plain HTTP (e.g. http://VM:3000); browsers ignore Secure cookies over HTTP.
  * Use https APP_BASE_URL, or set SESSION_COOKIE_SECURE=true|false explicitly.
  */
-function useSecureCookie() {
+function resolveSecureSessionCookieFlag() {
     const explicit = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
     if (explicit === "true") {
         return true;
@@ -31,7 +31,7 @@ export function buildSessionCookie(token: string): ResponseCookie {
         value: token,
         httpOnly: true,
         sameSite: "lax",
-        secure: useSecureCookie(),
+        secure: resolveSecureSessionCookieFlag(),
         path: "/",
         maxAge: SESSION_COOKIE_MAX_AGE_SECONDS
     };
