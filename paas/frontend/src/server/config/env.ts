@@ -206,7 +206,7 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
             errors.push("need Argo URL + token (or set PAAS_STRICT_INTEGRATIONS=false for Jenkins-only prod)");
         }
         if (parsedEnv.ARGOCD_TLS_SKIP_VERIFY === "true") {
-            errors.push("ARGOCD_TLS_SKIP_VERIFY off for prod");
+            errors.push("ARGOCD_TLS_SKIP_VERIFY=true is disallowed when PAAS_STRICT_INTEGRATIONS=true in prod; use a verified TLS cert, or set PAAS_STRICT_INTEGRATIONS=false for lab/Jenkins-only");
         }
         if (!parsedEnv.GITOPS_REPO_URL || !parsedEnv.GITOPS_REPO_TOKEN) {
             errors.push("need gitops repo URL + token (or set PAAS_STRICT_INTEGRATIONS=false)");

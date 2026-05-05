@@ -40,6 +40,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
+      # Dev compose is often Jenkins-only with self-signed Argo; strict prod checks require real GitOps + TLS.
+      PAAS_STRICT_INTEGRATIONS: "false"
     ports:
       - "3000:3000"
 
