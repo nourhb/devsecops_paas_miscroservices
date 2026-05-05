@@ -17,7 +17,8 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",
     "auth:verify-email": "node scripts/verify-user-email.cjs",
-    "auth:reset-password": "node scripts/reset-user-password.cjs"
+    "auth:reset-password": "node scripts/reset-user-password.cjs",
+    "env:compose": "node scripts/flatten-env-for-compose.mjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^0.22.3",

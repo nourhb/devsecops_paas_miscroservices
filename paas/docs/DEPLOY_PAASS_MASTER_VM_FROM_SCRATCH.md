@@ -37,7 +37,7 @@ Create a database and user, for example:
 psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE paas;"
 ```
 
-Then set `DATABASE_URL` in `frontend/.env` to:
+Then set `DATABASE_URL` in `frontend/docker-compose.env` (and in `frontend/.env` if you run Prisma from the host—see step 5) to:
 
 `postgresql://USER:PASSWORD@MANAGER_IP_OR_HOSTNAME:5432/paas`
 
@@ -47,11 +47,27 @@ Append if you see Prisma/locale issues:
 
 ## 4. Environment file for the PaaS app
 
+`paas/docker-compose.yml` loads **`frontend/docker-compose.env`** (not `frontend/.env`). If you see errors like `failed to read .../frontend/.env`, your tree is **out of date**; run `git pull` so Compose uses `docker-compose.env` instead.
+
+Compose’s `env_file` parser accepts only **one line per variable**. Multi-line Cosign PEM blocks break it (`unexpected character "/" in variable name`).
+
+**Option A — generate from your single `frontend/.env` (copy/paste friendly):**
+
+```bash
+cd ~/devsecops_paas_miscroservices/paas/frontend
+node scripts/flatten-env-for-compose.mjs   # reads .env, writes docker-compose.env (no npm install required)
+cd .. && docker compose up -d
+```
+
+**Option B — edit by hand:**
+
 ```bash
 cd ~/devsecops_paas_miscroservices/paas
-cp frontend/.env.example frontend/.env
-nano frontend/.env   # or vim
+cp frontend/docker-compose.env.example frontend/docker-compose.env
+nano frontend/docker-compose.env   # or vim
 ```
+
+Optional — Prisma from the **host** or one-off Node container: keep a normal `frontend/.env` (copy from `frontend/.env.example`) with a `DATABASE_URL` that reaches Postgres from the host (e.g. `postgresql://postgres:root@127.0.0.1:5432/paas?options=...` when Compose publishes `5432`). Inside the `frontend` service, `docker-compose.yml` still **overrides** `DATABASE_URL` to use the hostname `postgres`.
 
 Set at minimum:
 
@@ -79,7 +95,7 @@ cd ~/devsecops_paas_miscroservices
 python3 paas/scripts/jenkins_create_paas_deploy_job.py
 ```
 
-(Use the same Jenkins credentials as in `frontend/.env`.)
+(Use the same Jenkins credentials as in `frontend/docker-compose.env`.)
 
 **If you do not use Argo CD + GitOps on this install yet:**
 
@@ -91,24 +107,26 @@ Otherwise set real `ARGOCD_*`, `GITOPS_*`, etc. The production Docker image runs
 
 ## 5. Database schema (Prisma)
 
-Apply the schema **once** before or right after the first app start, using the **same** `DATABASE_URL` as in `frontend/.env`.
+Apply the schema **once** before or right after the first app start, using a `DATABASE_URL` that works **from where you run Prisma** (host → `127.0.0.1` / manager IP; not the in-compose hostname `postgres` unless you run Prisma inside the Compose network).
 
 **Option A — On the VM with Node** (if installed):
 
 ```bash
 cd ~/devsecops_paas_miscroservices/paas/frontend
-export $(grep -v '^#' .env | xargs -d '\n' -I {} echo {} | sed 's/^/export /')  # or set DATABASE_URL manually
+# Requires frontend/.env with host-reachable DATABASE_URL (e.g. 127.0.0.1:5432 when Compose publishes Postgres)
+export $(grep -v '^#' .env | xargs -d '\n' -I {} echo {} | sed 's/^/export /')  # or: export DATABASE_URL=... manually
 npm ci
 npx prisma generate
 npx prisma db push
 ```
 
-**Option B — One-off Node container** (no local Node):
+**Option B — One-off Node container** (no local Node). Use a small `frontend/.env` (or `--env-file`) whose `DATABASE_URL` uses **`127.0.0.1`** (or `--network host` and the same URL), not the Compose hostname `postgres`:
 
 ```bash
 cd ~/devsecops_paas_miscroservices/paas/frontend
 docker run --rm -it \
   -v "$PWD:/app" -w /app \
+  --network host \
   --env-file .env \
   node:20-bookworm-slim \
   bash -lc "npm ci && npx prisma generate && npx prisma db push"
@@ -134,14 +152,14 @@ docker compose logs -f frontend
 
 **If you use Compose’s bundled Postgres**, keep the override in `docker-compose.yml` for `DATABASE_URL` inside the `frontend` service, or remove the `postgres` service and point everything at external Postgres only (then adjust `docker-compose.yml` accordingly).
 
-### Compose and `frontend/.env` (multi-line / special characters)
+### Compose-safe env (`frontend/docker-compose.env`)
 
-Docker Compose’s `env_file` parser is **not** a full shell or dotenv implementation: each non-comment line must be `KEY=value`. **Multi-line PEM blocks** (e.g. `COSIGN_PUBLIC_KEY=-----BEGIN…` with following lines) break parsing; a bare base64 line with `/` or `=` can trigger errors like `unexpected character "/" in variable name`.
+Docker Compose’s `env_file` parser is **not** a full shell or dotenv implementation: each non-comment line must be `KEY=value`. **Multi-line PEM blocks** break parsing; a bare base64 line with `/` or `=` can trigger errors like `unexpected character "/" in variable name`.
 
 **Fix (pick one):**
 
-1. **Simplest for the control plane container:** remove or comment out **`COSIGN_PUBLIC_KEY`**, **`COSIGN_PRIVATE_KEY`**, and any other multi-line secrets from `frontend/.env` used by Compose, unless the app truly needs them inside this container.
-2. **Single-line PEM:** put the whole PEM on one line with escaped newlines, e.g. `COSIGN_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMFkw...\n-----END PUBLIC KEY-----"` (quotes required).
+1. **Simplest:** leave **`COSIGN_PUBLIC_KEY`** / **`COSIGN_PRIVATE_KEY`** empty in `frontend/docker-compose.env` unless the app needs them in this container.
+2. **Single-line PEM:** one line with escaped newlines, e.g. `COSIGN_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMFkw...\n-----END PUBLIC KEY-----"` (quotes required). The app normalizes `\n` to real newlines at runtime (`pemFromEnv` in `env.ts`).
 3. **Quote tokens** that contain `/`, `+`, or multiple `=` if Compose still complains: `TRIVY_AUTH_TOKEN="…"`.
 
 On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.kube/config`), not a Windows path.
@@ -149,7 +167,7 @@ On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.ku
 ## 7. Firewall / security
 
 - Allow inbound **3000** (or whatever you map) to the VM.
-- Do not commit `frontend/.env` with real secrets; back it up securely.
+- Do not commit `frontend/.env` or `frontend/docker-compose.env` with real secrets; back them up securely.
 - For production, terminate TLS (reverse proxy, ingress, or Swarm ingress) in front of the app.
 
 ## 8. After it runs
@@ -168,4 +186,4 @@ On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.ku
 
 ## Relation to your home directory layout
 
-If you already maintain `~/install-stack.sh` and Swarm/Kubernetes YAML next to this repo, treat the PaaS as **another workload**: same Docker host, env pointing at the stack’s published ports. You can later add a **Swarm stack** or **Kubernetes Deployment** that uses an image built from `paas/docker/frontend.Dockerfile` (build context **`paas/`**) and the same environment as `frontend/.env`.
+If you already maintain `~/install-stack.sh` and Swarm/Kubernetes YAML next to this repo, treat the PaaS as **another workload**: same Docker host, env pointing at the stack’s published ports. You can later add a **Swarm stack** or **Kubernetes Deployment** that uses an image built from `paas/docker/frontend.Dockerfile` (build context **`paas/`**) and the same environment as `frontend/docker-compose.env` (or your orchestrator’s secret/config map).
