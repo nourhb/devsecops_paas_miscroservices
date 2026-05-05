@@ -156,7 +156,7 @@ pipeline {
     stage("DAST (OWASP ZAP)") {
       when { expression { return env.ZAP_TARGET_URL } }
       steps {
-        sh "docker run --rm -v \$(pwd):/zap/wrk owasp/zap2docker-stable zap-baseline.py -t \${ZAP_TARGET_URL} -r zap-report.html || true"
+        sh "docker run --rm -v \$(pwd):/zap/wrk:rw ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t \${ZAP_TARGET_URL} -r /zap/wrk/zap-report.html || true"
       }
     }
   }
