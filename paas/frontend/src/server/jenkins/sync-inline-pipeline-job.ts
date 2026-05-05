@@ -64,11 +64,21 @@ function writeTempEnvFromProcess(): string {
 }
 
 function stripEnvQuotes(s: string): string {
-    const t = s.trim();
-    if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
-        return t.slice(1, -1).trim();
+    let t = s.trim();
+    for (let i = 0; i < 16; i++) {
+        if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
+            t = t.slice(1, -1).trim();
+            continue;
+        }
+        break;
     }
     return t;
+}
+
+/** Windows absolute path (e.g. from .env copied from a dev PC); invalid on Linux/Docker. */
+function isWindowsFilesystemPythonPath(p: string): boolean {
+    const t = p.trim();
+    return /^[a-zA-Z]:[\\/]/.test(t) || t.startsWith("\\\\");
 }
 
 /** True when value should be resolved via PATH (e.g. `python`), not as a filesystem path. */
@@ -116,7 +126,10 @@ function resolveConfiguredPythonExecutable(configured: string): { executable: st
 }
 
 async function pickPython(): Promise<{ executable: string; prefixArgs: string[] }> {
-    const configured = env.PYTHON_CMD.trim();
+    let configured = stripEnvQuotes(env.PYTHON_CMD.trim());
+    if (configured && process.platform !== "win32" && isWindowsFilesystemPythonPath(configured)) {
+        configured = "";
+    }
     if (configured) {
         const chosen = resolveConfiguredPythonExecutable(configured);
         try {
@@ -249,8 +262,15 @@ async function runPythonScript(
  * Skipped when simulation mode, Jenkins folder layouts, or unsupported multi-segment job names.
  */
 export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: string): Promise<string> {
-    if (env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER !== "true") {
-        return "[jenkins-sync] Skipped: JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false.";
+    const rawFlag = process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER;
+    const flag = rawFlag === undefined || rawFlag === null ? "" : String(rawFlag).trim();
+    const mountHint = env.PAAS_MONOREPO_ROOT.trim();
+    const mounted = Boolean(mountHint && scriptRelativePathExists(path.resolve(mountHint)));
+    const root = findMonorepoRoot();
+    /** Sync when explicitly on, or Docker Compose mounted the repo (typical: PAAS_MONOREPO_ROOT=/monorepo), or walking finds the repo and sync was not explicitly turned off. */
+    const shouldSync = flag === "true" || mounted || (flag !== "false" && root !== null);
+    if (!shouldSync) {
+        return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=${flag || "unset"}; mounted script=${mounted}).`;
     }
     if (allowSimulation()) {
         return "[jenkins-sync] Skipped: DEVSECOPS_ALLOW_SIMULATION=true.";
@@ -266,7 +286,6 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         return "[jenkins-sync] Skipped: folder-qualified job name (use manual sync for nested jobs).";
     }
 
-    const root = findMonorepoRoot();
     if (!root) {
         throw new IntegrationError(
             "Cannot find monorepo root (expected paas/scripts/jenkins_create_paas_deploy_job.py). Set PAAS_MONOREPO_ROOT or run the app from inside the repository."
