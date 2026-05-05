@@ -150,6 +150,8 @@ Logs:
 docker compose logs -f frontend
 ```
 
+**Jenkins build triggers from the UI:** `docker-compose.yml` mounts the **monorepo** at `/monorepo`, sets **`PAAS_MONOREPO_ROOT`**, enables **`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`**, and forces **`JENKINS_BUILD_JOB_NAME=paas-deploy`** so the app POSTs to the same job the Python sync script creates. Rebuild the **`frontend`** image after pulling (it needs **`python3`** in the image). Ensure **`JENKINS_*`** in `docker-compose.env` point at Jenkins from the VM (e.g. `http://192.168.56.129:30090`).
+
 **If you use Compose’s bundled Postgres**, keep the override in `docker-compose.yml` for `DATABASE_URL` inside the `frontend` service, or remove the `postgres` service and point everything at external Postgres only (then adjust `docker-compose.yml` accordingly).
 
 ### Compose-safe env (`frontend/docker-compose.env`)
@@ -180,6 +182,7 @@ On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.ku
 
 | Symptom | Direction |
 |--------|-----------|
+| `build backend did not accept the build trigger` / Jenkins POST failed | Check **`docker-compose.env`** Jenkins URL and API token; rebuild **frontend** so sync can run (**python3** + **`..:/monorepo`** in compose). Compose sets **`JENKINS_BUILD_JOB_NAME=paas-deploy`** — that job must exist or sync must succeed. |
 | Container exits immediately | `docker compose logs frontend` — often `prod env: ...` from `env.ts`; set missing vars or `PAAS_STRICT_INTEGRATIONS=false` / real GitOps+Argo. |
 | Cannot reach Jenkins from container | Use IP/hostname reachable **from inside the container** (often host gateway or published manager IP, not only `localhost` if Jenkins is on another interface). |
 | Prisma `relation "User" does not exist` (42P01) | Run `docker compose build && docker compose up -d` so **`db-push`** applies the schema, or manually `npx prisma db push` against this database. |
