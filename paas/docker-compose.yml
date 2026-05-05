@@ -30,7 +30,8 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - frontend/.env
+      # Compose cannot parse multi-line PEM in `frontend/.env` — use compose-safe `docker-compose.env`.
+      - frontend/docker-compose.env
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
