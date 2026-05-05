@@ -32,7 +32,7 @@ ENV NODE_ENV=production \
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 --ingroup nodejs nextjs \
-    && apk add --no-cache wget
+    && apk add --no-cache wget openssl
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
