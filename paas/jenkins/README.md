@@ -11,7 +11,7 @@ Le PaaS **automatise** le déclenchement des builds : l’équipe peut lancer un
 ### Ordre des stages dans `Jenkinsfile.paas-deploy`
 
 - **§5 Construction** s’exécute **avant** **§3 SCA** et **§4 SAST** (dépendances et artefacts pour les analyses) — Blue Ocean peut afficher « 5 » avant « 3 » et « 4 ».
-- Après **§6 Image Docker**, la suite suit le **mémoire** : **§7** Helm → **§8** Artifactory → **§9** Harbor → **§10** Cosign → **§11** charts Helm OCI → **§12** / **§13** Argo (documentaires, délégués PaaS) → **archivage** Jenkins.
+- Après **§6 Image Docker**, la suite suit le **mémoire** : **§7** Helm → **§8** Artifactory → **§9** Harbor → **§10** Cosign → **§10b** ZAP baseline (optionnel) → **§11** charts Helm OCI → **§12** / **§13** Argo (documentaires, délégués PaaS) → **archivage** Jenkins.
 - **Sans Docker**, **crane** au §6 peut **déjà pousser** l’image : le **§9** est un **no-op** ; Cosign reste possible. **Kaniko** (autre `Jenkinsfile`) peut fusionner build + push.
 
 1. **Validation des paramètres** — `GIT_URL`, `BRANCH`, `IMAGE_NAME`, `PROJECT_ID` (§1 / PaaS).
@@ -24,10 +24,11 @@ Le PaaS **automatise** le déclenchement des builds : l’équipe peut lancer un
 8. **§8 — Publication dans Artifactory** — bundle `paas-artifacts` + `sca` (optionnel, non bloquant).
 9. **§9 — Publication de l’image Docker (Harbor)** — `docker push` ; **no-op** si image déjà poussée (**crane** §6).
 10. **§10 — Signature Cosign** — signature dans le registre (optionnel).
-11. **§11 — Publication des charts Helm (Harbor)** — `helm push` OCI (optionnel).
-12. **§12 — Déploiement avec Argo CD** — orchestration GitOps ; **délégué** au PaaS (stage documentaire).
-13. **§13 — Récupération et synchronisation du chart Helm** — pull OCI Harbor côté Argo ; **délégué** au cluster (stage documentaire).
-14. **Archivage Jenkins** — `sca/**`, `paas-artifacts/**`.
+11. **§10b — DAST (OWASP ZAP baseline)** — `docker run ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t $ZAP_TARGET_URL` ; **optionnel** si `ZAP_TARGET_URL` est vide (paramètre Jenkins ou env PaaS) ; non bloquant.
+12. **§11 — Publication des charts Helm (Harbor)** — `helm push` OCI (optionnel).
+13. **§12 — Déploiement avec Argo CD** — orchestration GitOps ; **délégué** au PaaS (stage documentaire).
+14. **§13 — Récupération et synchronisation du chart Helm** — pull OCI Harbor côté Argo ; **délégué** au cluster (stage documentaire).
+15. **Archivage Jenkins** — `sca/**`, `paas-artifacts/**`.
 
 ## Install / repair job (recommended — fixes `Error cloning remote repo 'origin'`)
 

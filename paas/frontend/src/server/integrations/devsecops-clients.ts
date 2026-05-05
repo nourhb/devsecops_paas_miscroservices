@@ -66,7 +66,8 @@ function appendRegistryParameters(q: URLSearchParams): void {
         ARTIFACTORY_CREDENTIALS_ID: env.ARTIFACTORY_CREDENTIALS_ID,
         COSIGN_CREDENTIALS_ID: env.COSIGN_CREDENTIALS_ID,
         HELM_OCI_PROJECT: env.HELM_OCI_PROJECT,
-        NVD_API_KEY: env.NVD_API_KEY
+        NVD_API_KEY: env.NVD_API_KEY,
+        ZAP_TARGET_URL: env.ZAP_TARGET_URL
     };
     for (const [key, value] of Object.entries(values)) {
         const normalized = value.trim();

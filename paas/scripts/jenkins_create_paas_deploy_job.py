@@ -59,6 +59,11 @@ PARAMETER_DEFINITIONS = [
     ("DEPENDENCY_TRACK_API_KEY", "", "Dependency-Track API key for SBOM upload"),
     ("NVD_API_KEY", "", "Optional NVD API key for OWASP Dependency-Check"),
     (
+        "ZAP_TARGET_URL",
+        "",
+        "Optional DAST target URL for OWASP ZAP baseline (e.g. http://your-app:8080); empty skips stage",
+    ),
+    (
         "ARTIFACTORY_URL",
         "",
         "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload",

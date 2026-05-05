@@ -97,6 +97,8 @@ const envSchema = z.object({
     PROMETHEUS_QUERY_MEMORY: z.string().default(""),
     TRIVY_BASE_URL: z.string().default(""),
     TRIVY_AUTH_TOKEN: z.string().default(""),
+    /** DAST: optional URL for Jenkins OWASP ZAP baseline (buildWithParameters). */
+    ZAP_TARGET_URL: z.string().default(""),
     COSIGN_ENFORCE_SIGNED: z.enum(["true", "false"]).default("true"),
     OPA_ENFORCE_SIGNED: z.enum(["true", "false"]).default("true"),
     POLICY_ENGINE: z.enum(["kyverno", "opa", "gatekeeper", "none"]).default("kyverno"),
@@ -295,6 +297,7 @@ const parsed = envSchema.safeParse({
     PROMETHEUS_QUERY_MEMORY: process.env.PROMETHEUS_QUERY_MEMORY,
     TRIVY_BASE_URL: process.env.TRIVY_BASE_URL,
     TRIVY_AUTH_TOKEN: process.env.TRIVY_AUTH_TOKEN,
+    ZAP_TARGET_URL: process.env.ZAP_TARGET_URL,
     COSIGN_ENFORCE_SIGNED: process.env.COSIGN_ENFORCE_SIGNED,
     OPA_ENFORCE_SIGNED: process.env.OPA_ENFORCE_SIGNED,
     POLICY_ENGINE: process.env.POLICY_ENGINE,

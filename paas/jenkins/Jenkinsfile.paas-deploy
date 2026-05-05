@@ -240,6 +240,7 @@ node(agentLabel) {
   env.HELM_OCI_PROJECT = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: "paas").trim()
   env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "").trim()
   env.HELM_OCI_PLAIN_HTTP = (params.HELM_OCI_PLAIN_HTTP?.trim() ?: env.HELM_OCI_PLAIN_HTTP ?: "").trim()
+  env.ZAP_TARGET_URL = (params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL ?: "").trim()
 
   /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
    * (ex. GitHub) dont l’URL est fournie par le paramètre GIT_URL (et BRANCH), transmis par le PaaS
@@ -709,6 +710,36 @@ EOF
             exit $RC
           '''
         }
+      }
+    }
+  }
+
+  /* OWASP ZAP baseline (DAST) — URL must be reachable from the Jenkins agent (deployed app or preview). */
+
+  stage("10b. DAST (OWASP ZAP baseline)") {
+    nonFatalStage("10b. ZAP baseline") {
+      def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
+      if (!zapTarget) {
+        println "[zap] ZAP_TARGET_URL absent — étape ignorée."
+        return
+      }
+      if (!commandExists("docker")) {
+        println "[zap] docker CLI absent — ZAP baseline ignoré."
+        return
+      }
+      println "[zap] Cible DAST: ${zapTarget}"
+      withEnv(["ZAP_TARGET=${zapTarget}"]) {
+        sh '''
+          set +e
+          mkdir -p paas-artifacts
+          docker run --rm \
+            -v "$PWD/paas-artifacts:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "$ZAP_TARGET" \
+              -r /zap/wrk/zap-baseline-report.html \
+              -J /zap/wrk/zap-baseline-report.json
+          echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
+        '''
       }
     }
   }
