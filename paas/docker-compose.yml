@@ -5,6 +5,8 @@
 #
 # Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
 # run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@127.0.0.1:5433/paas in .env (host port).
+#
+# `db-push` applies Prisma schema so tables like "User" exist before the app starts.
 services:
   postgres:
     image: postgres:16-alpine
@@ -26,6 +28,18 @@ services:
       timeout: 5s
       retries: 5
 
+  db-push:
+    build:
+      context: .
+      dockerfile: docker/prisma-db-push.Dockerfile
+    container_name: paas-db-push
+    environment:
+      DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   frontend:
     build:
       context: .
@@ -34,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-push:
+        condition: service_completed_successfully
     env_file:
       # Compose cannot parse multi-line PEM in `frontend/.env` — use compose-safe `docker-compose.env`.
       - frontend/docker-compose.env

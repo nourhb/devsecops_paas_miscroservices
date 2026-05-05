@@ -134,7 +134,7 @@ docker run --rm -it \
 
 ## 6. Build and run with Docker Compose
 
-Compose build context is **`paas/`** (not `frontend/`):
+Compose build context is **`paas/`** (not `frontend/`). A one-shot service **`db-push`** runs **`prisma db push`** after Postgres is healthy and before **`frontend`** starts, so tables such as **`User`** exist (you can skip manual step 5 when using bundled Postgres).
 
 ```bash
 cd ~/devsecops_paas_miscroservices/paas
@@ -182,7 +182,8 @@ On Linux VMs, set **`KUBE_CONFIG_PATH`** to a POSIX path (e.g. `/home/master/.ku
 |--------|-----------|
 | Container exits immediately | `docker compose logs frontend` — often `prod env: ...` from `env.ts`; set missing vars or `PAAS_STRICT_INTEGRATIONS=false` / real GitOps+Argo. |
 | Cannot reach Jenkins from container | Use IP/hostname reachable **from inside the container** (often host gateway or published manager IP, not only `localhost` if Jenkins is on another interface). |
-| Prisma errors / missing columns | Re-run `npx prisma db push` with correct `DATABASE_URL`. |
+| Prisma `relation "User" does not exist` (42P01) | Run `docker compose build && docker compose up -d` so **`db-push`** applies the schema, or manually `npx prisma db push` against this database. |
+| Prisma errors / missing columns | Re-run `npx prisma db push` with correct `DATABASE_URL` or recreate with `docker compose up -d` after schema changes. |
 
 ## Relation to your home directory layout
 
