@@ -1,6 +1,6 @@
 # Development-only compose stack. Production uses Kubernetes plus managed or operator-backed PostgreSQL.
 # Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
-# run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@localhost:5432/paas in .env.
+# run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@127.0.0.1:5433/paas in .env (host port).
 services:
   postgres:
     image: postgres:16-alpine
@@ -11,8 +11,9 @@ services:
       POSTGRES_DB: paas
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: root
+    # Host 5433 avoids clashing with a Postgres already bound on the VM (common on dev boxes).
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

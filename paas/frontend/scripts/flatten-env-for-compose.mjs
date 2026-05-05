@@ -40,7 +40,7 @@ function parseLooseEnv(text) {
     const m = t.match(KEY_RE);
     if (m) {
       flush();
-      current = { key: m[1], parts: [m[2] ?? ""] };
+      current = { key: m[1], parts: [m[2] == null ? "" : m[2]] };
       continue;
     }
     if (current) {
