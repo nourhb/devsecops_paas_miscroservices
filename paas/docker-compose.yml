@@ -58,6 +58,16 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ""
       # Dev compose is often Jenkins-only with self-signed Argo; strict prod checks require real GitOps + TLS.
       PAAS_STRICT_INTEGRATIONS: "false"
+      # Shared Jenkins pipeline job (matches jenkins_create_paas_deploy_job.py default). Without this, the UI
+      # triggers job/<projectSlug> but Jenkins often only has `paas-deploy` → build trigger fails.
+      JENKINS_BUILD_JOB_NAME: paas-deploy
+      JENKINS_DEPLOY_JOB_NAME: paas-deploy
+      # Repo mount + Python in image so inline job sync can run before each trigger (creates/updates job XML).
+      PAAS_MONOREPO_ROOT: /monorepo
+      JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: "true"
+    volumes:
+      # Read-only monorepo root (parent of `paas/`). Required for Jenkins pre-trigger sync from the container.
+      - ..:/monorepo:ro
     ports:
       - "3000:3000"
 
