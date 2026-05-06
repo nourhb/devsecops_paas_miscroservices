@@ -5,7 +5,7 @@ import { getDashboardOverview } from "@/server/services/dashboard-overview-servi
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const overview = await getDashboardOverview(auth.userId, auth.role);
         return ok(overview);
     }

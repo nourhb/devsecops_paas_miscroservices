@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { getAuthUserById } from "@/server/auth/auth-service";
 import { verifyToken } from "@/server/security/jwt";
 import { getSessionCookieName } from "@/server/auth/session-cookie";
 import { ForbiddenError, UnauthorizedError } from "@/server/http/errors";
@@ -15,24 +16,37 @@ function resolveToken(request: NextRequest) {
     }
     return request.cookies.get(getSessionCookieName())?.value?.trim() || "";
 }
-export function requireAuth(request: NextRequest, allowedRoles?: UserRole[]): AuthContext {
+/**
+ * Verifies JWT then ensures the user row still exists (avoids FK errors after DB reset while the browser keeps an old session).
+ */
+export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[]): Promise<AuthContext> {
     const token = resolveToken(request);
     if (!token) {
         throw new UnauthorizedError("Authentication is required");
     }
     try {
         const payload = verifyToken(token);
-        if (allowedRoles && !allowedRoles.includes(payload.role)) {
+        const user = await getAuthUserById(payload.userId);
+        if (!user) {
+            throw new UnauthorizedError(
+                "Your session is no longer valid (account missing—often after a database reset). Sign out and sign in again."
+            );
+        }
+        const role = user.role as UserRole;
+        if (allowedRoles && !allowedRoles.includes(role)) {
             throw new ForbiddenError("Insufficient role privileges");
         }
         return {
-            userId: payload.userId,
-            email: payload.email,
-            role: payload.role
+            userId: user.id,
+            email: user.email,
+            role
         };
     }
     catch (error) {
         if (error instanceof ForbiddenError) {
+            throw error;
+        }
+        if (error instanceof UnauthorizedError) {
             throw error;
         }
         throw new UnauthorizedError("Invalid or expired token");

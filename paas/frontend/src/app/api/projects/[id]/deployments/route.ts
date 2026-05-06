@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const items = await listDeploymentsForProject(params.id, auth.userId, auth.role);
         return ok(items);
     }

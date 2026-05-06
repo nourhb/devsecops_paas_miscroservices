@@ -6,7 +6,7 @@ import { readPodLog } from "@/server/integrations/kubernetes-client";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const { searchParams } = new URL(request.url);
         const namespace = (searchParams.get("namespace") || "").trim();
         const podName = (searchParams.get("podName") || "").trim();

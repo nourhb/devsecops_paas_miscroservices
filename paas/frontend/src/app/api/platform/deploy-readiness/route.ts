@@ -5,7 +5,7 @@ import { getDeployPipelineReadiness } from "@/server/services/deploy-pipeline-re
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         return ok(getDeployPipelineReadiness());
     }
     catch (error) {

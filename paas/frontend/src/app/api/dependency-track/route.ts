@@ -7,7 +7,7 @@ import { dependencyTrackClient } from "@/server/integrations/devsecops-clients";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const projectId = String(new URL(request.url).searchParams.get("projectId") || "").trim();
         if (!projectId) {
             throw new ValidationError("projectId is required.");

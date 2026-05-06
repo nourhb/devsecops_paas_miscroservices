@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, { params }: {
     };
 }) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const artifact = await getPlatformArtifactByName(params.name);
         if (!artifact) {
             throw new NotFoundError("Artifact not found.");

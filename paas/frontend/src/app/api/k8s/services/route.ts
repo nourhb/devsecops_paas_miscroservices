@@ -5,7 +5,7 @@ import { listClusterServices } from "@/server/integrations/kubernetes-client";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const result = await listClusterServices();
         return ok({
             configured: result.configured,

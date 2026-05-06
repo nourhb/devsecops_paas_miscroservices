@@ -5,7 +5,7 @@ import { listClusterPods } from "@/server/integrations/kubernetes-client";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const result = await listClusterPods();
         const running = result.items.filter((pod) => pod.status === "Running").length;
         const pending = result.items.filter((pod) => pod.status === "Pending").length;

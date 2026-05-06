@@ -6,7 +6,7 @@ import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
     try {
-        requireAuth(req, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(req, ["ADMIN", "DEVELOPER"]);
         const json = (await req.json()) as {
             jobName?: string;
             parameters?: Record<string, string>;

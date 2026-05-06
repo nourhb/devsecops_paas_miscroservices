@@ -5,7 +5,7 @@ import { listClusterDeployments, getClusterNodeCount } from "@/server/integratio
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const [deploymentsResult, nodeCount] = await Promise.all([
             listClusterDeployments(),
             getClusterNodeCount()
