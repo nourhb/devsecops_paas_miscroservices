@@ -255,6 +255,7 @@ node(agentLabel) {
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
+  env.PROJECT_ID = projectId
 
   /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
    * (ex. GitHub) dont l’URL est fournie par le paramètre GIT_URL (et BRANCH), transmis par le PaaS
@@ -303,6 +304,9 @@ node(agentLabel) {
       if (commandExists("npm")) {
         /* Stage 5 npm: persistent Node under JENKINS_PAAS_NODE_CACHE or JENKINS_HOME/.jenkins-paas-cache/node;
          * npm package cache under JENKINS_PAAS_NPM_CACHE or .../npm; JENKINS_NPM_CI_PREFER_OFFLINE=false to force full registry refresh.
+         * Next.js 16: sans script build:ci, le pipeline exécute npx next build --no-lint --webpack (désactiver ESLint intégré + Turbopack CI lent);
+         * JENKINS_NEXT_BUILD_WEBPACK=false pour garder Turbopack, JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true pour forcer npm run build,
+         * JENKINS_NEXT_PERSIST_CACHE=true pour réutiliser .next/cache par PROJECT_ID sous JENKINS_HOME.
          * Exit 143 = SIGTERM: often Jenkins/K8s step timeout or memory pressure during npm ci.
          * Longer timeout + capped Node heap; npm_config_maxsockets defaults to 8 (override on agent if OOM). */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
@@ -371,10 +375,24 @@ node(agentLabel) {
               echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
             else
               if node -e "const p=require('./package.json'); const s=p.scripts||{}; process.exit(s['build:ci']?0:1)"; then
-                echo "[build] npm run build:ci (next build --no-lint)"
+                echo "[build] npm run build:ci (script build:ci du dépôt)"
                 npm run build:ci
+              elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
+                NB_FLAGS="--no-lint"
+                if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
+                  NB_FLAGS="$NB_FLAGS --webpack"
+                fi
+                if [ "${JENKINS_NEXT_PERSIST_CACHE:-}" = "true" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
+                  NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
+                  mkdir -p "$NCROOT" .next
+                  rm -rf .next/cache
+                  ln -sfn "$NCROOT" .next/cache
+                  echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
+                fi
+                echo "[build] npx next build $NB_FLAGS — Next.js 16: Turbopack par défaut est souvent lent en CI; --webpack + --no-lint (JENKINS_NEXT_BUILD_WEBPACK=false pour forcer Turbopack)"
+                npx next build $NB_FLAGS
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
-                echo "[build] npm run build (lint inclus — préférez script build:ci dans package.json)"
+                echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
                 npm run build
               else
                 echo "[build] Pas de script build — skip."
