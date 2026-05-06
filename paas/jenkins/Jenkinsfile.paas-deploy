@@ -20,18 +20,28 @@ def ensureNodeTool() {
     return
   }
   def nodeVer = "20.19.5"
-  println "[tooling] npm is missing on Jenkins node; downloading portable Node.js into workspace."
+  def cacheRoot = (env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
+  if (!cacheRoot) {
+    def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
+    cacheRoot = base ? "${base}/.jenkins-paas-cache/node" : "${pwd()}/.paas-tools"
+  }
+  def nodeDir = "${cacheRoot}/node-v${nodeVer}-linux-x64"
+  println "[tooling] npm missing on Jenkins node; portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_CACHE to override root; persists across workspaces)"
   sh """
     set -eu
-    mkdir -p .paas-tools
     NODE_VERSION="${nodeVer}"
-    NODE_DIR="\$PWD/.paas-tools/node-v\${NODE_VERSION}-linux-x64"
-    if [ ! -x "\$NODE_DIR/bin/npm" ]; then
-      curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-x64.tar.gz" -o .paas-tools/node.tar.gz
-      tar -xzf .paas-tools/node.tar.gz -C .paas-tools
+    NODE_DIR="${nodeDir}"
+    mkdir -p "\$(dirname "\${NODE_DIR}")"
+    if [ ! -x "\${NODE_DIR}/bin/npm" ]; then
+      TDIR="\$(mktemp -d)"
+      trap 'rm -rf "\${TDIR}"' EXIT
+      curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-x64.tar.gz" -o "\${TDIR}/node.tar.gz"
+      tar -xzf "\${TDIR}/node.tar.gz" -C "\${TDIR}"
+      rm -rf "\${NODE_DIR}"
+      mv "\${TDIR}/node-v\${NODE_VERSION}-linux-x64" "\${NODE_DIR}"
     fi
   """
-  prependPath("${pwd()}/.paas-tools/node-v${nodeVer}-linux-x64/bin")
+  prependPath("${nodeDir}/bin")
 }
 
 def ensureCraneTool() {
@@ -243,6 +253,8 @@ node(agentLabel) {
   env.ZAP_TARGET_URL = (params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL ?: "").trim()
   env.BUILD_PACKAGE_PROXY_URL = (params.BUILD_PACKAGE_PROXY_URL?.trim() ?: env.BUILD_PACKAGE_PROXY_URL ?: "").trim()
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
+  env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
+  env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
 
   /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
    * (ex. GitHub) dont l’URL est fournie par le paramètre GIT_URL (et BRANCH), transmis par le PaaS
@@ -289,7 +301,9 @@ node(agentLabel) {
     } else if (fileExists("package.json")) {
       ensureNodeTool()
       if (commandExists("npm")) {
-        /* Exit 143 = SIGTERM: often Jenkins/K8s step timeout or memory pressure during npm ci.
+        /* Stage 5 npm: persistent Node under JENKINS_PAAS_NODE_CACHE or JENKINS_HOME/.jenkins-paas-cache/node;
+         * npm package cache under JENKINS_PAAS_NPM_CACHE or .../npm; JENKINS_NPM_CI_PREFER_OFFLINE=false to force full registry refresh.
+         * Exit 143 = SIGTERM: often Jenkins/K8s step timeout or memory pressure during npm ci.
          * Longer timeout + capped Node heap; npm_config_maxsockets defaults to 8 (override on agent if OOM). */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
@@ -309,6 +323,20 @@ node(agentLabel) {
             export NEXT_TELEMETRY_DISABLED=1
             export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
             export npm_config_maxsockets="${npm_config_maxsockets:-8}"
+            NPM_CACHE="${JENKINS_PAAS_NPM_CACHE:-}"
+            if [ -z "${NPM_CACHE}" ] && [ -n "${JENKINS_HOME:-}" ]; then
+              NPM_CACHE="${JENKINS_HOME}/.jenkins-paas-cache/npm"
+            fi
+            if [ -z "${NPM_CACHE}" ] && [ -n "${HOME:-}" ]; then
+              NPM_CACHE="${HOME}/.jenkins-paas-cache/npm"
+            fi
+            if [ -n "${NPM_CACHE}" ]; then
+              mkdir -p "${NPM_CACHE}"
+              export npm_config_cache="${NPM_CACHE}"
+              echo "[build] npm cache dir: ${NPM_CACHE}"
+            else
+              echo "[build] npm cache: default (set JENKINS_PAAS_NPM_CACHE if no JENKINS_HOME/HOME)"
+            fi
             if [ -n "${BUILD_PACKAGE_PROXY_URL:-}" ]; then
               npm config set proxy "$BUILD_PACKAGE_PROXY_URL"
               npm config set https-proxy "$BUILD_PACKAGE_PROXY_URL"
@@ -330,10 +358,14 @@ node(agentLabel) {
             if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
               LOG_ARG="--loglevel ${JENKINS_NPM_LOGLEVEL}"
             fi
+            OFFLINE_ARG=""
+            if [ "${JENKINS_NPM_CI_PREFER_OFFLINE:-true}" != "false" ]; then
+              OFFLINE_ARG="--prefer-offline"
+            fi
             if [ -f package-lock.json ]; then
-              npm ci --no-audit --no-fund $LOG_ARG || npm install --no-audit --no-fund $LOG_ARG
+              npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
             else
-              npm install --no-audit --no-fund $LOG_ARG
+              npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
             fi
             if [ "${JENKINS_SKIP_NEXT_BUILD:-}" = "true" ]; then
               echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
