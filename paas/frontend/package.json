@@ -21,6 +21,7 @@
     "env:compose": "node scripts/flatten-env-for-compose.mjs"
   },
   "dependencies": {
+    "@fontsource/space-grotesk": "^5.2.8",
     "@kubernetes/client-node": "^0.22.3",
     "@prisma/client": "^5.21.1",
     "@radix-ui/react-slot": "^1.1.0",

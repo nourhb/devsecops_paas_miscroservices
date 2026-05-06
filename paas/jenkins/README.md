@@ -34,13 +34,11 @@ Le PaaS **automatise** le déclenchement des builds : l’équipe peut lancer un
 
 If the Jenkins job uses **Pipeline script from SCM**, Jenkins clones that repo **before** any pipeline stage; clone failures surface as **origin** errors and PaaS parameters are never applied.
 
-Run this from the repo root (uses credentials in **`paas/frontend/.env`**: `JENKINS_BASE_URL`, `JENKINS_USERNAME`, `JENKINS_API_TOKEN`):
+Put the same values the app uses in **`paas/frontend/docker-compose.env`** (or app env): `JENKINS_BASE_URL`, `JENKINS_USERNAME`, `JENKINS_API_TOKEN`.
 
-```bash
-python paas/scripts/jenkins_create_paas_deploy_job.py
-```
+**With the PaaS app:** set `JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true` (and mount the monorepo, e.g. `PAAS_MONOREPO_ROOT=/monorepo`). The Next.js server syncs **`paas/jenkins/Jenkinsfile.paas-deploy`** into Jenkins over REST **before each build/deploy trigger** — no Python script.
 
-That creates or updates the **`paas-deploy`** job with an **inline** pipeline loaded from **`paas/jenkins/Jenkinsfile.paas-deploy`** (no Git clone for the job definition). Optional: `--dry-run` writes `paas/jenkins/paas-deploy-job.generated.xml` only; `--job-name OTHER` if your `.env` uses a different job name.
+**Manual one-off (Jenkins UI):** create or update job **`paas-deploy`** with **Pipeline script** (not from SCM) and paste the contents of **`paas/jenkins/Jenkinsfile.paas-deploy`**. Optional generated XML for debugging may live under `paas/jenkins/paas-deploy-job.generated.xml` if you export config from Jenkins.
 
 ## Docker on the agent (fix: `docker not found` in **Check**)
 
@@ -48,7 +46,7 @@ The pipeline runs **Sonar, OWASP Dependency-Check, cdxgen, and Kaniko** via `doc
 
 If your agent is a **single VM with Docker on PATH** (no Kubernetes `container()` support), remove those `container('docker')` wrappers or switch to a pod template that exposes Docker in the default container.
 
-Use label **`jenkins-jenkins-agent`** so builds don’t land on the built-in controller. After editing `Jenkinsfile.paas-deploy`, run `python paas/scripts/jenkins_create_paas_deploy_job.py`.
+Use label **`jenkins-jenkins-agent`** so builds don’t land on the built-in controller. After editing `Jenkinsfile.paas-deploy`, either rely on **PaaS inline sync** (`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true`) or update the job script manually in Jenkins.
 
 ## Agent type (fix: `Invalid agent type "kubernetes"`)
 
@@ -82,7 +80,7 @@ Set `JENKINS_DEPLOY_JOB_NAME=paas-deploy` (or your job name) and the same parame
 
 If Jenkins, Argo CD, SonarQube, Prometheus, Grafana, Nexus, Trivy, ZAP, etc. run as Swarm services with **published ports** on the manager, mirror those hostnames and ports in **`paas/frontend/.env`** (and root **`paas/.env`** if you use it). The Next server forwards integration settings to **`buildWithParameters`** (see **`appendRegistryParameters`** in `paas/frontend/src/server/integrations/devsecops-clients.ts`): e.g. **`SONAR_*`**, **`DEPENDENCY_TRACK_*`**, **`DOCKERHUB_*`**, **`HARBOR_*`**, **`ARTIFACTORY_*`**, **`HELM_OCI_*`**, **`NVD_API_KEY`**, credential IDs for Jenkins, etc.
 
-**`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`** defaults to **`false`** in the app so dev triggers do not require Python; set **`true`** in **`paas/frontend/.env`** to run **`jenkins_create_paas_deploy_job.py`** before each trigger.
+**`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`** defaults to **`false`** in the app; set **`true`** in **`paas/frontend/.env`** (or `docker-compose.env`) so the server syncs the inline pipeline from **`Jenkinsfile.paas-deploy`** over the Jenkins REST API before each trigger (TypeScript in `paas/frontend/src/server/jenkins/`, no Python).
 
 ## Image tag
 

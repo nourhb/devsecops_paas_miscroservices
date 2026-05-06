@@ -42,12 +42,10 @@ const envSchema = z.object({
     JENKINS_DEPLOY_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
-    /** Run `python paas/scripts/jenkins_create_paas_deploy_job.py` before UI/API Jenkins build & deploy triggers (requires Python + monorepo layout). */
+    /** Sync inline `paas/jenkins/Jenkinsfile.paas-deploy` into Jenkins before UI/API build & deploy triggers (requires monorepo layout when not disabled). */
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
-    /** Absolute path to monorepo root (contains `paas/scripts/jenkins_create_paas_deploy_job.py`). Optional when `process.cwd()` is inside the repo. */
+    /** Absolute path to monorepo root (contains `paas/jenkins/Jenkinsfile.paas-deploy`). Optional when `process.cwd()` is inside the repo. */
     PAAS_MONOREPO_ROOT: z.string().default(""),
-    /** Python executable for Jenkins job sync (default: try py -3, python3, python). */
-    PYTHON_CMD: z.string().default(""),
     /** Registry host:port for Jenkins/crane/docker (optional; else derived from HARBOR_BASE_URL / HARBOR_URL). */
     HARBOR_REGISTRY: z.string().default(""),
     HARBOR_BASE_URL: z.string().default(""),
@@ -252,7 +250,6 @@ const parsed = envSchema.safeParse({
     JENKINS_HTTP_TIMEOUT_MS: process.env.JENKINS_HTTP_TIMEOUT_MS,
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER,
     PAAS_MONOREPO_ROOT: process.env.PAAS_MONOREPO_ROOT,
-    PYTHON_CMD: process.env.PYTHON_CMD,
     HARBOR_REGISTRY: resolvedHarborRegistryHost(),
     HARBOR_BASE_URL: harborBaseEffective,
     HARBOR_USERNAME: process.env.HARBOR_USERNAME,
