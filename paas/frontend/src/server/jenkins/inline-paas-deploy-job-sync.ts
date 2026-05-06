@@ -31,6 +31,8 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["DEPENDENCY_TRACK_API_KEY", "", "Dependency-Track API key for SBOM upload"],
     ["NVD_API_KEY", "", "Optional NVD API key for OWASP Dependency-Check"],
     ["ZAP_TARGET_URL", "", "Optional DAST target URL for OWASP ZAP baseline (e.g. http://your-app:8080); empty skips stage"],
+    ["BUILD_PACKAGE_PROXY_URL", "", "HTTP(S) proxy for npm on the Jenkins agent (e.g. http://proxy.internal:8080); empty = direct"],
+    ["NPM_CONFIG_REGISTRY", "", "npm registry for Jenkins npm ci (e.g. https://registry.npmjs.org/ or Verdaccio mirror); empty = npm default"],
     ["ARTIFACTORY_URL", "", "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload"],
     ["ARTIFACTORY_REPOSITORY", "libs-release-local", "Generic repository key in Artifactory for uploaded .tgz bundles"],
     ["ARTIFACTORY_USERNAME", "", "Artifactory user (optional if ACCESS_TOKEN or ARTIFACTORY_CREDENTIALS_ID)"],

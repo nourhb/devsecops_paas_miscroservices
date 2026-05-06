@@ -74,6 +74,8 @@ const envSchema = z.object({
     BUILD_TEMPLATE_VERSION: z.string().default("v1"),
     BUILD_REGISTRY_MIRROR: z.string().default(""),
     BUILD_PACKAGE_PROXY_URL: z.string().default(""),
+    /** Passed to Jenkins as NPM_CONFIG_REGISTRY (Verdaccio / mirror); empty uses npm default. */
+    BUILD_NPM_REGISTRY: z.string().default(""),
     BUILD_ENFORCE_ARTIFACT_DIGEST: z.enum(["true", "false"]).default("false"),
     TEKTON_API_VERSION: z.string().default("v1beta1"),
     TEKTON_NAMESPACE: z.string().default("tekton-pipelines"),
@@ -273,6 +275,7 @@ const parsed = envSchema.safeParse({
     BUILD_TEMPLATE_VERSION: process.env.BUILD_TEMPLATE_VERSION,
     BUILD_REGISTRY_MIRROR: process.env.BUILD_REGISTRY_MIRROR,
     BUILD_PACKAGE_PROXY_URL: process.env.BUILD_PACKAGE_PROXY_URL,
+    BUILD_NPM_REGISTRY: process.env.BUILD_NPM_REGISTRY,
     BUILD_ENFORCE_ARTIFACT_DIGEST: process.env.BUILD_ENFORCE_ARTIFACT_DIGEST,
     TEKTON_API_VERSION: process.env.TEKTON_API_VERSION,
     TEKTON_NAMESPACE: process.env.TEKTON_NAMESPACE,
