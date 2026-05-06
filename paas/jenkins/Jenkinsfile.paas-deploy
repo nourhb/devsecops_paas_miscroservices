@@ -241,6 +241,8 @@ node(agentLabel) {
   env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "").trim()
   env.HELM_OCI_PLAIN_HTTP = (params.HELM_OCI_PLAIN_HTTP?.trim() ?: env.HELM_OCI_PLAIN_HTTP ?: "").trim()
   env.ZAP_TARGET_URL = (params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL ?: "").trim()
+  env.BUILD_PACKAGE_PROXY_URL = (params.BUILD_PACKAGE_PROXY_URL?.trim() ?: env.BUILD_PACKAGE_PROXY_URL ?: "").trim()
+  env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
 
   /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
    * (ex. GitHub) dont l’URL est fournie par le paramètre GIT_URL (et BRANCH), transmis par le PaaS
@@ -288,7 +290,7 @@ node(agentLabel) {
       ensureNodeTool()
       if (commandExists("npm")) {
         /* Exit 143 = SIGTERM: often Jenkins/K8s step timeout or memory pressure during npm ci.
-         * Longer timeout + capped Node heap + limited concurrent fetches reduce OOM / watchdog kills. */
+         * Longer timeout + capped Node heap; npm_config_maxsockets defaults to 8 (override on agent if OOM). */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
@@ -306,7 +308,16 @@ node(agentLabel) {
             export CI=true
             export NEXT_TELEMETRY_DISABLED=1
             export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
-            export npm_config_maxsockets="${npm_config_maxsockets:-2}"
+            export npm_config_maxsockets="${npm_config_maxsockets:-8}"
+            if [ -n "${BUILD_PACKAGE_PROXY_URL:-}" ]; then
+              npm config set proxy "$BUILD_PACKAGE_PROXY_URL"
+              npm config set https-proxy "$BUILD_PACKAGE_PROXY_URL"
+              export HTTP_PROXY="$BUILD_PACKAGE_PROXY_URL"
+              export HTTPS_PROXY="$BUILD_PACKAGE_PROXY_URL"
+              echo "[build] package proxy: configured (BUILD_PACKAGE_PROXY_URL)"
+            else
+              echo "[build] package proxy: none (direct egress to registry)"
+            fi
             npm config set audit false
             npm config set fund false
             npm config set fetch-retries 5
@@ -314,10 +325,15 @@ node(agentLabel) {
             npm config set fetch-retry-mintimeout 20000
             npm config set fetch-retry-maxtimeout 120000
             npm config set fetch-timeout 1800000
+            echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
+            LOG_ARG=""
+            if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
+              LOG_ARG="--loglevel ${JENKINS_NPM_LOGLEVEL}"
+            fi
             if [ -f package-lock.json ]; then
-              npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+              npm ci --no-audit --no-fund $LOG_ARG || npm install --no-audit --no-fund $LOG_ARG
             else
-              npm install --no-audit --no-fund
+              npm install --no-audit --no-fund $LOG_ARG
             fi
             if [ "${JENKINS_SKIP_NEXT_BUILD:-}" = "true" ]; then
               echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
