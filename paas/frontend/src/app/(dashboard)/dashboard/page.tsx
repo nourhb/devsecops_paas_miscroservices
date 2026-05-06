@@ -202,7 +202,7 @@ export default function DashboardPage() {
                 <span className="flex items-center gap-2"><span className={cn("h-2.5 w-2.5 rounded-full", item.dotClassName)}/>{item.name}</span>
                 <span className="font-semibold">{item.value}</span>
               </div>))}
-            </div>
+      </div>
           </CardContent>
         </Card>
 
@@ -411,7 +411,7 @@ export default function DashboardPage() {
             <div className="space-y-1">
               <CardTitle className="text-base font-semibold">Recent deployments</CardTitle>
               <CardDescription>Latest activity across your projects</CardDescription>
-            </div>
+    </div>
             {overviewQuery.isFetching && overviewQuery.data ? (<Loader2 className="h-4 w-4 animate-spin text-muted" aria-label="Refreshing"/>) : null}
           </CardHeader>
           <CardContent className="px-0 pb-0">

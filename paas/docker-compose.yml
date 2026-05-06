@@ -51,22 +51,23 @@ services:
       db-push:
         condition: service_completed_successfully
     env_file:
-      # Compose cannot parse multi-line PEM in `frontend/.env` — use compose-safe `docker-compose.env`.
+      # Secrets and Jenkins URL/token: edit `frontend/docker-compose.env` (copy from docker-compose.env.example).
+      # Jenkins URL/token/user: edit `frontend/docker-compose.env`. Inline job sync uses these env vars only (not bind-mounted `.env`).
       - frontend/docker-compose.env
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
       # Dev compose is often Jenkins-only with self-signed Argo; strict prod checks require real GitOps + TLS.
       PAAS_STRICT_INTEGRATIONS: "false"
-      # Shared Jenkins pipeline job (matches jenkins_create_paas_deploy_job.py default). Without this, the UI
-      # triggers job/<projectSlug> but Jenkins often only has `paas-deploy` → build trigger fails.
+      # Shared Jenkins pipeline job name. Without this, the UI targets job/<projectSlug> while Jenkins may only define `paas-deploy`.
       JENKINS_BUILD_JOB_NAME: paas-deploy
       JENKINS_DEPLOY_JOB_NAME: paas-deploy
-      # Repo mount + Python in image so inline job sync can run before each trigger (creates/updates job XML).
+      # Repo mount so inline job sync (TypeScript) can read Jenkinsfile before each trigger.
       PAAS_MONOREPO_ROOT: /monorepo
       JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: "true"
-      # Ignore a Windows PYTHON_CMD copied from host .env; image uses python3 from PATH.
-      PYTHON_CMD: ""
+    # Reach Jenkins (or other host/Swarm ingress ports) from the container; use JENKINS_BASE_URL=http://host.docker.internal:30090 if VM LAN IP fails from inside the app.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Read-only monorepo root (parent of `paas/`). Required for Jenkins pre-trigger sync from the container.
       - ..:/monorepo:ro

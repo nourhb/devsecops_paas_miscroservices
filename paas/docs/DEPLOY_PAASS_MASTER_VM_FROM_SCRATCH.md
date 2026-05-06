@@ -82,18 +82,15 @@ Set at minimum:
 
 Align other URLs with **published ports** on your stack (Sonar, Prometheus, Harbor, Argo CD, Nexus, …). A port map template is in `paas/jenkins/swarm-stack.env.example`.
 
-**Recommended on the VM (no Python in the app container):**
+**Recommended on the VM:** keep inline sync on (same as Compose default) so the Next.js server pushes `Jenkinsfile.paas-deploy` over the Jenkins REST API before each trigger (no Python, no separate script):
 
 ```env
-JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false
+JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true
 ```
 
-Run the sync script **once** from the repo when you change the Jenkinsfile/job definition:
+Ensure `PAAS_MONOREPO_ROOT=/monorepo` (or your mount) and the repo is mounted read-only so the app can read `paas/jenkins/Jenkinsfile.paas-deploy`. Rebuild the frontend image after pulling code so this logic is included.
 
-```bash
-cd ~/devsecops_paas_miscroservices
-python3 paas/scripts/jenkins_create_paas_deploy_job.py
-```
+**If you turn sync off** (`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false`), update the Jenkins job manually after changing the shared Jenkinsfile (Jenkins UI → Pipeline script from `Jenkinsfile.paas-deploy`, or paste the file).
 
 (Use the same Jenkins credentials as in `frontend/docker-compose.env`.)
 
