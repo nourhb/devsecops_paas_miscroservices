@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const project = await getProjectForUser(params.projectId, auth.userId, auth.role);
         return ok(project);
     }
@@ -23,7 +23,7 @@ export async function PATCH(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const body = await request.json();
         const project = await updateProjectForUser(params.projectId, body, auth.userId, auth.role);
         return ok(project);
@@ -38,7 +38,7 @@ export async function DELETE(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         await deleteProjectForUser(params.projectId, auth.userId, auth.role);
         return ok({ deleted: true });
     }

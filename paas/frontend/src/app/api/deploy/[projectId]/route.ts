@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         enforceRateLimit(request, {
             keyPrefix: `project-deploy:${auth.userId}`,
             windowMs: 60000,

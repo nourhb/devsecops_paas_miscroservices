@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, context: {
     };
 }) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const { searchParams } = new URL(request.url);
         const jobName = (searchParams.get("jobName") || env.JENKINS_BUILD_JOB_NAME || "").trim();
         const buildId = (context.params.id || "").trim();

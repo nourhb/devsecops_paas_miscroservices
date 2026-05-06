@@ -7,7 +7,7 @@ import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const { searchParams } = new URL(request.url);
         const jobName = (searchParams.get("jobName") || env.JENKINS_BUILD_JOB_NAME || "").trim();
         const limit = Number.parseInt(searchParams.get("limit") || "20", 10);

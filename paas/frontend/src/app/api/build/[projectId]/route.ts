@@ -8,7 +8,7 @@ import { triggerBuild } from "@/server/pipeline/pipeline-service";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest, { params }: { params: { projectId: string } }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         enforceRateLimit(request, {
             keyPrefix: `project-build:${auth.userId}`,
             windowMs: 60000,

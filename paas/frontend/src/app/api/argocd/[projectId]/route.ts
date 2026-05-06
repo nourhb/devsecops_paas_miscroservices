@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, { params }: {
     };
 }) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         await assertProjectAccess(params.projectId, auth.userId, auth.role);
         const status = await getArgoStatusForProject(params.projectId);
         return ok(status);

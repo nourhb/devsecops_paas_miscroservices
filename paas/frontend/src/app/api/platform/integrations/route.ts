@@ -6,7 +6,7 @@ import { buildPlatformIntegrations } from "@/server/platform/platform-integratio
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     try {
-        requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         const payload = buildPlatformIntegrations();
         await attachIntegrationHealth(payload);
         return ok(payload);

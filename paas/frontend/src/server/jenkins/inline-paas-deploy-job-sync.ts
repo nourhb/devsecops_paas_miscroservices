@@ -162,30 +162,72 @@ function extractCookieHeader(response: Response): string | null {
                 .join("; ");
         }
     }
+    /** Node undici: get("set-cookie") is often null — prefer getSetCookie above. */
     const setCookie = response.headers.get("set-cookie");
     if (!setCookie) {
         return null;
     }
-    const firstCookie = setCookie.split(";")[0]?.trim();
-    return firstCookie || null;
+    /** Legacy single-header join: take each cookie's first segment only. */
+    return setCookie
+        .split(/,(?=[^;]+=[^;])/i)
+        .map((line) => line.split(";")[0]?.trim())
+        .filter(Boolean)
+        .join("; ");
 }
+
+/** Merge Cookie request header values (name=value; ...) — latest wins per name. */
+function mergeCookieHeader(existing: string | null, incoming: string | null): string | null {
+    const map = new Map<string, string>();
+    const ingest = (chunk: string | null) => {
+        if (!chunk?.trim()) {
+            return;
+        }
+        for (const part of chunk.split(";")) {
+            const t = part.trim();
+            const eq = t.indexOf("=");
+            if (eq <= 0) {
+                continue;
+            }
+            const name = t.slice(0, eq).trim();
+            const value = t.slice(eq + 1).trim();
+            if (name) {
+                map.set(name, value);
+            }
+        }
+    };
+    ingest(existing);
+    ingest(incoming);
+    if (!map.size) {
+        return existing?.trim() || null;
+    }
+    return Array.from(map.entries())
+        .map(([k, v]) => `${k}=${v}`)
+        .join("; ");
+}
+
+type CookieJar = { cookie: string | null };
 
 async function fetchJenkinsCrumb(
     base: string,
-    authHeader: string
-): Promise<{ field: string; value: string; cookie: string | null } | null> {
-    const res = await integrationFetch(
-        `${base}/crumbIssuer/api/json`,
-        { headers: { Authorization: authHeader } },
-        env.JENKINS_HTTP_TIMEOUT_MS
-    );
+    authHeader: string,
+    jar: CookieJar
+): Promise<{ field: string; value: string } | null> {
+    const headers = new Headers({ Authorization: authHeader });
+    if (jar.cookie) {
+        headers.set("Cookie", jar.cookie);
+    }
+    const res = await integrationFetch(`${base}/crumbIssuer/api/json`, { headers }, env.JENKINS_HTTP_TIMEOUT_MS);
+    const newCookies = extractCookieHeader(res);
+    if (newCookies) {
+        jar.cookie = mergeCookieHeader(jar.cookie, newCookies);
+    }
     if (!res.ok) {
         return null;
     }
     try {
         const data = (await res.json()) as { crumb?: string; crumbRequestField?: string };
         if (data.crumb && data.crumbRequestField) {
-            return { field: data.crumbRequestField, value: data.crumb, cookie: extractCookieHeader(res) };
+            return { field: data.crumbRequestField, value: data.crumb };
         }
     } catch {
         /* ignore */
@@ -216,7 +258,9 @@ function extractHtmlErrorHint(body: string, maxLen = 1200): string {
 }
 
 function jenkinsAuthHeader(): string {
-    return `Basic ${Buffer.from(`${env.JENKINS_USERNAME}:${env.JENKINS_API_TOKEN}`).toString("base64")}`;
+    const user = env.JENKINS_USERNAME.trim();
+    const token = env.JENKINS_API_TOKEN.trim();
+    return `Basic ${Buffer.from(`${user}:${token}`, "utf-8").toString("base64")}`;
 }
 
 async function jenkinsReq(
@@ -224,17 +268,22 @@ async function jenkinsReq(
     pathname: string,
     init: RequestInit,
     authHeader: string,
-    postExtras?: { crumb: { field: string; value: string }; cookie: string | null }
+    jar: CookieJar,
+    postCrumb?: { field: string; value: string }
 ): Promise<{ status: number; body: string }> {
     const headers = new Headers(init.headers as HeadersInit | undefined);
     headers.set("Authorization", authHeader);
-    if (postExtras?.cookie) {
-        headers.set("Cookie", postExtras.cookie);
+    if (jar.cookie) {
+        headers.set("Cookie", jar.cookie);
     }
-    if (postExtras?.crumb) {
-        headers.set(postExtras.crumb.field, postExtras.crumb.value);
+    if (postCrumb) {
+        headers.set(postCrumb.field, postCrumb.value);
     }
     const res = await integrationFetch(`${base}${pathname}`, { ...init, headers }, env.JENKINS_HTTP_TIMEOUT_MS);
+    const newCookies = extractCookieHeader(res);
+    if (newCookies) {
+        jar.cookie = mergeCookieHeader(jar.cookie, newCookies);
+    }
     const body = await res.text();
     return { status: res.status, body };
 }
@@ -262,16 +311,44 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
     }
 
     const authHeader = jenkinsAuthHeader();
+    const jar: CookieJar = { cookie: null };
 
-    const crumbInfo = await fetchJenkinsCrumb(base, authHeader);
-    const postCrumb = crumbInfo ? { field: crumbInfo.field, value: crumbInfo.value } : undefined;
-    const postCookie = crumbInfo?.cookie ?? null;
-    const postExtra = postCrumb ? { crumb: postCrumb, cookie: postCookie } : undefined;
+    const whoami = await jenkinsReq(base, "/api/json", { method: "GET" }, authHeader, jar);
+    if (whoami.status === 401) {
+        throw new IntegrationError(
+            `Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
+                `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
+                `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
+                `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`
+        );
+    }
+    if (whoami.status === 403) {
+        throw new IntegrationError(
+            `Jenkins returned HTTP 403 for GET ${base}/api/json. This usually means the URL host does not match Jenkins' configured root URL ` +
+                `(Manage Jenkins → System → Jenkins URL). Use that exact URL in JENKINS_BASE_URL — not http://172.18.0.1:PORT when Jenkins is published as http://YOUR_VM_IP:PORT. ` +
+                `Verify from the container with the same URL: docker compose exec frontend wget -S -O- --user='…' --password='…' '${base}/api/json'`
+        );
+    }
+    if (whoami.status !== 200) {
+        throw new IntegrationError(
+            `Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${whoami.status}. Body: ${whoami.body.slice(0, 500)}`
+        );
+    }
+
+    const crumbInfo = await fetchJenkinsCrumb(base, authHeader, jar);
 
     const jobName = opts.jobName.trim();
     const lines: string[] = [];
 
-    const { status: existsCode } = await jenkinsReq(base, `/job/${encodeURIComponent(jobName)}/api/json`, { method: "GET" }, authHeader);
+    const postCrumb = crumbInfo ?? undefined;
+
+    const { status: existsCode } = await jenkinsReq(
+        base,
+        `/job/${encodeURIComponent(jobName)}/api/json`,
+        { method: "GET" },
+        authHeader,
+        jar
+    );
 
     if (existsCode === 200) {
         let payload = buildPaasDeployJobConfigXml(opts.groovyScript);
@@ -281,7 +358,8 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
                 base,
                 `/job/${encodeURIComponent(jobName)}/config.xml`,
                 { method: "GET" },
-                authHeader
+                authHeader,
+                jar
             );
             if (gc === 200 && existingBody.trim()) {
                 const prep = prepareUpdatedJobConfigXml(existingBody, opts.groovyScript);
@@ -305,7 +383,8 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
                 headers: { "Content-Type": "application/xml; charset=UTF-8" }
             },
             authHeader,
-            postExtra
+            jar,
+            postCrumb
         );
 
         if (code2 === 200 || code2 === 201) {
@@ -347,7 +426,8 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
             headers: { "Content-Type": "application/xml; charset=UTF-8" }
         },
         authHeader,
-        postExtra
+        jar,
+        postCrumb
     );
 
     if (createCode === 200 || createCode === 201 || createCode === 302) {
@@ -363,10 +443,11 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
 
     if (createCode === 401) {
         throw new IntegrationError(
-            "HTTP 401: Wrong password or API token. Compare with cluster secret:\n" +
-                "  kubectl get secret jenkins -n jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d\n" +
-                "Under Docker Compose, set JENKINS_BASE_URL / JENKINS_USERNAME / JENKINS_API_TOKEN in paas/frontend/docker-compose.env.\n" +
-                "Verify: docker compose exec frontend env | grep JENKINS\n" +
+            "HTTP 401 on /createItem. If GET /api/json succeeded, Jenkins often needs the same browser session cookie with the CSRF crumb for POSTs. " +
+                "This build sends Cookie + crumb accumulated from /api/json and /crumbIssuer; rebuild the frontend image with the latest sync. " +
+                "Otherwise verify Overall/Create permission for the Jenkins user. " +
+                "Also compare password/API token with: kubectl get secret jenkins -n jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d\n" +
+                "JENKINS_* live in frontend/docker-compose.env. Verify: docker compose exec frontend env | grep JENKINS\n" +
                 `Failed HTTP ${createCode}:\n${createBody.slice(0, 6000)}`
         );
     }

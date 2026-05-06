@@ -11,7 +11,7 @@ const requestSchema = z.object({
 });
 export async function POST(request: NextRequest) {
     try {
-        const auth = requireAuth(request, ["ADMIN", "DEVELOPER"]);
+        const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         enforceRateLimit(request, {
             keyPrefix: `project-detect-language:${auth.userId}`,
             windowMs: 60000,

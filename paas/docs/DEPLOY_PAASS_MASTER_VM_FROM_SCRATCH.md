@@ -147,7 +147,9 @@ Logs:
 docker compose logs -f frontend
 ```
 
-**Jenkins build triggers from the UI:** `docker-compose.yml` mounts the **monorepo** at `/monorepo`, sets **`PAAS_MONOREPO_ROOT`**, enables **`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`**, and forces **`JENKINS_BUILD_JOB_NAME=paas-deploy`** so the app POSTs to the same job the Python sync script creates. Rebuild the **`frontend`** image after pulling (it needs **`python3`** in the image). Ensure **`JENKINS_*`** in `docker-compose.env` point at Jenkins from the VM (e.g. `http://192.168.56.129:30090`).
+**Jenkins build triggers from the UI:** `docker-compose.yml` mounts the **monorepo** at `/monorepo`, sets **`PAAS_MONOREPO_ROOT`**, enables **`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`**, and forces **`JENKINS_BUILD_JOB_NAME=paas-deploy`** so the app syncs the inline job over REST before triggers. Rebuild the **`frontend`** image after pulling so that logic is included. Set **`JENKINS_BASE_URL` / `JENKINS_URL`** to the **same** URL as **Manage Jenkins → System → Jenkins URL** (e.g. `http://VM_IP:30090`). Using the Docker bridge gateway (e.g. `172.18.0.1`) when Jenkins thinks its URL is the VM IP often yields **HTTP 403** from inside the container because the **`Host`** header does not match.
+
+**If `docker compose build` fails on Alpine** with `DNS: transient error` or `no such package` for `libc6-compat` / `openssl`, the CDN was not reached (VM DNS/firewall). Compose uses **`build.network: host`** on Linux so `apk` uses the host resolver; alternately set Docker daemon DNS (e.g. `"dns": ["8.8.8.8","1.1.1.1"]` in `/etc/docker/daemon.json`) and `sudo systemctl restart docker`, then rebuild.
 
 **If you use Compose’s bundled Postgres**, keep the override in `docker-compose.yml` for `DATABASE_URL` inside the `frontend` service, or remove the `postgres` service and point everything at external Postgres only (then adjust `docker-compose.yml` accordingly).
 
