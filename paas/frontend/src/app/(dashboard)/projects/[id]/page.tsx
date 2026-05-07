@@ -552,7 +552,7 @@ export default function ProjectDetailsPage() {
           </CardHeader>
           <CardContent>
             <pre className={cn("max-h-72 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono text-foreground/90")}>
-              {status?.buildLogs?.trim() || "No build logs yet. Trigger a build from Operations."}
+              {status?.buildLogs?.trim() || "No build log text is stored yet.\n\nOpen Operations → Trigger Build. Logs appear once Jenkins runs and reconciles; use Cluster → Logs to browse recent deployment records across the workspace."}
             </pre>
           </CardContent>
         </Card>
@@ -565,7 +565,7 @@ export default function ProjectDetailsPage() {
           <CardContent>
             <pre className={cn("max-h-72 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono text-foreground/90")}>
               {status?.deploymentLogs?.trim() ||
-            "No deployment logs yet. Run a full deploy after a successful build path."}
+            "No deployment log text yet.\n\nRun a full deploy from Operations after a good build. Stored output includes registry/GitOps/policy stages when available."}
             </pre>
           </CardContent>
         </Card>

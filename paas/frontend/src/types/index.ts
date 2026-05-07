@@ -120,6 +120,18 @@ export interface DeploymentSummary {
     failureReason: string | null;
     failureMessage: string | null;
 }
+export interface RecentDeploymentListItem {
+    id: string;
+    projectId: string;
+    projectName: string;
+    status: string;
+    createdAt: string;
+    buildNumber: number | null;
+}
+export interface RecentDeploymentsListResponse {
+    jenkinsJobName: string;
+    deployments: RecentDeploymentListItem[];
+}
 export interface DeployPipelineReadinessResponse {
     simulationEnabled: boolean;
     buildBackend: {

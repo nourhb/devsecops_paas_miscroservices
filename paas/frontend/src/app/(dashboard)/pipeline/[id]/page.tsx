@@ -420,7 +420,7 @@ export default function PipelinePage() {
           </CardHeader>
           <CardContent>
             {statusQuery.isLoading ? (<Skeleton className="h-80 w-full"/>) : (<pre className={cn("max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono")}>
-                {status?.buildLogs?.trim() || "No build output yet. Trigger a build to stream logs here."}
+              {status?.buildLogs?.trim() || "No build log text is stored on this project yet.\n\nRun Build from Operations. After Jenkins starts, this app syncs the job and the buffer fills here; you can also open the Cluster page → Platform logs for recent deployments across projects."}
               </pre>)}
           </CardContent>
         </Card>
@@ -433,7 +433,7 @@ export default function PipelinePage() {
           <CardContent>
             {statusQuery.isLoading ? (<Skeleton className="h-80 w-full"/>) : (<pre className={cn("max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono")}>
                 {status?.deploymentLogs?.trim() ||
-                "No deployment logs yet. Run a full deploy after a successful build path."}
+                "No deployment log text yet.\n\nRun Deploy after a successful build. GitOps/registry/policy steps append here when the controller updates the project; check /cluster for the latest stored buffer or Jenkins console fetch."}
               </pre>)}
           </CardContent>
         </Card>

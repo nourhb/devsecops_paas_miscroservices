@@ -12,7 +12,7 @@ import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
 import { jenkinsClient } from "@/server/integrations/devsecops-clients";
-import type { ActionResponse, UserRole } from "@/types";
+import type { ActionResponse, RecentDeploymentListItem, UserRole } from "@/types";
 function effectiveTriggerUserId(jwtUserId: string): string | null {
     const override = env.DEPLOYMENT_TRIGGER_USER_ID.trim();
     if (override) {
@@ -80,6 +80,32 @@ export async function listDeploymentsForProject(projectId: string, userId: strin
             failureMessage: r.failureMessage
         };
     });
+}
+export async function listRecentDeploymentsForUser(userId: string, role: UserRole, limit: number): Promise<RecentDeploymentListItem[]> {
+    const projectFilter: Prisma.ProjectWhereInput = role === "ADMIN"
+        ? { deletedAt: null }
+        : { createdById: userId, deletedAt: null };
+    const rows = await prisma.deployment.findMany({
+        where: { project: projectFilter },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        select: {
+            id: true,
+            projectId: true,
+            status: true,
+            createdAt: true,
+            jenkinsBuildNumber: true,
+            project: { select: { projectName: true } }
+        }
+    });
+    return rows.map((r) => ({
+        id: r.id,
+        projectId: r.projectId,
+        projectName: r.project.projectName,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+        buildNumber: r.jenkinsBuildNumber
+    }));
 }
 export async function runProjectDeployment(projectId: string, jwtUserId: string): Promise<ActionResponse> {
     const project = await getProjectById(projectId);

@@ -68,8 +68,14 @@ function StatsSkeleton() {
         </Card>))}
     </div>);
 }
-function ChartEmptyState() {
-    return <div className="flex h-[220px] items-center justify-center rounded-lg border border-dashed border-border/70 text-sm text-muted">No data yet</div>;
+function ChartEmptyState({ title, children }: {
+    title: string;
+    children: React.ReactNode;
+}) {
+    return (<div className="flex h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 px-6 text-center">
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <div className="max-w-md text-sm leading-relaxed text-muted">{children}</div>
+    </div>);
 }
 export default function DashboardPage() {
     const overviewQuery = useQuery({
@@ -170,7 +176,13 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {workloadChartData.every((item) => item.value === 0) ? <ChartEmptyState /> : (<div className="h-[240px]">
+            {workloadChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="Nothing to plot yet">
+                {clusterDataSource === "kubernetes"
+                    ? "Kubernetes returned zero pods, services, and deployments for your filters, or the cluster is empty."
+                    : clusterDataSource === "project_rollups"
+                        ? "Project rollups are all zero — add projects and run deploys so workload counts update, or connect Kubernetes for live cluster metrics."
+                        : "Add projects or connect Kubernetes; there is no data to chart for workload right now."}
+              </ChartEmptyState>) : (<div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={workloadChartData} margin={{ left: -20, right: 12, top: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
@@ -192,7 +204,11 @@ export default function DashboardPage() {
             <CardDescription>Success, active, and failed deployment history.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
-            {deliveryChartData.length === 0 ? <ChartEmptyState /> : (<div className="h-[220px]">
+            {deliveryChartData.length === 0 ? (<ChartEmptyState title="No segments for this pie">
+                {(stats?.totalDeployments ?? 0) === 0
+                    ? "There are no deployment rows yet. Trigger a build/deploy from a project; finished jobs will appear here as successful, active, or failed."
+                    : "All current jobs are still in categories with zero count (for example only pending). Open the project board below or Deployments for live status."}
+              </ChartEmptyState>) : (<div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={deliveryChartData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={90} paddingAngle={3}>
@@ -217,7 +233,9 @@ export default function DashboardPage() {
             <CardDescription>Open findings and policy signals summarized by severity.</CardDescription>
           </CardHeader>
           <CardContent>
-            {securityChartData.every((item) => item.value === 0) ? <ChartEmptyState /> : (<div className="h-[240px]">
+            {securityChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="No security findings in the sample">
+                The overview scans a subset of projects with Trivy, Dependency-Track, and cosign signals. Zero can mean tools are not configured, images are clean, or sampled projects have no artifacts yet. Open Integrations to verify tool URLs.
+              </ChartEmptyState>) : (<div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={securityChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
@@ -239,7 +257,9 @@ export default function DashboardPage() {
             <CardDescription>Live and degraded platform tools from configured integrations.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
-            {toolHealthChartData.length === 0 ? <ChartEmptyState /> : (<div className="h-[220px]">
+            {toolHealthChartData.length === 0 ? (<ChartEmptyState title="No tool health segments">
+                Platform tooling has not returned live vs degraded counts yet. Open the Platform hub to run reachability checks, or wait for the background poll to finish.
+              </ChartEmptyState>) : (<div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={toolHealthChartData} dataKey="value" nameKey="name" innerRadius={54} outerRadius={88} paddingAngle={3}>
