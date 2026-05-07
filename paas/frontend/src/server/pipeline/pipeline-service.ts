@@ -66,22 +66,40 @@ export async function rollbackProject(projectId: string): Promise<ActionResponse
 export async function getProjectStatus(projectId: string): Promise<DeploymentStatus> {
     const project = await getProjectById(projectId);
     const base = mapProjectToResponse(project);
-    if (env.KUBERNETES_ENABLED !== "true") {
-        return base;
+    if (env.KUBERNETES_ENABLED === "true") {
+        const live = await getNamespacePodSummary(project.namespace);
+        if (live.error && live.total === 0) {
+            return {
+                ...base,
+                podStatus: summarizeKubernetesError(live.error),
+                deploymentLogs: [base.deploymentLogs, `[k8s] ${live.error}`].filter(Boolean).join("\n")
+            };
+        }
+        if (live.total > 0) {
+            return {
+                ...base,
+                podStatus: `${live.running} running · ${live.failed} failed · ${live.pending} pending (${live.total} pods)`
+            };
+        }
     }
-    const live = await getNamespacePodSummary(project.namespace);
-    if (live.error && live.total === 0) {
-        return {
-            ...base,
-            podStatus: summarizeKubernetesError(live.error),
-            deploymentLogs: [base.deploymentLogs, `[k8s] ${live.error}`].filter(Boolean).join("\n")
-        };
+    const ds = (base.lastDeploymentStatus || "").toUpperCase();
+    let podStatus = base.podStatus;
+    if (!podStatus || podStatus === "UNKNOWN") {
+        if (ds === "DEPLOYED") {
+            podStatus = env.KUBERNETES_ENABLED === "true" ? "DEPLOYED (0 pods in namespace)" : "DEPLOYED (enable KUBERNETES_ENABLED for live pod status)";
+        }
+        else if (ds === "FAILED") {
+            podStatus = "FAILED";
+        }
+        else if (ds === "DEPLOYING" || ds === "PROMOTING") {
+            podStatus = ds === "DEPLOYING" ? "Deploying" : "Promoting (GitOps / registry)";
+        }
+        else if (ds === "SUCCESS") {
+            podStatus = "Success (post-build promotion)";
+        }
+        else {
+            podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "Kubernetes disabled — pod health from cluster unavailable";
+        }
     }
-    if (live.total > 0) {
-        return {
-            ...base,
-            podStatus: `${live.running} running · ${live.failed} failed · ${live.pending} pending (${live.total} pods)`
-        };
-    }
-    return base;
+    return { ...base, podStatus };
 }
