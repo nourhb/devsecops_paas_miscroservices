@@ -1,20 +1,10 @@
 import { env } from "@/server/config/env";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
 import { IntegrationError } from "@/server/http/errors";
+import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 export function argoApplicationName(projectName: string): string {
     return `${env.ARGOCD_APP_PREFIX}-${projectName}`;
-}
-function formatFetchError(e: unknown): string {
-    if (!(e instanceof Error)) {
-        return String(e);
-    }
-    const parts = [e.message];
-    const c = "cause" in e && e.cause instanceof Error ? e.cause : null;
-    if (c?.message) {
-        parts.push(c.message);
-    }
-    return parts.join(" — ");
 }
 export async function syncArgoApplication(projectName: string): Promise<{
     logs: string;
@@ -41,7 +31,7 @@ export async function syncArgoApplication(projectName: string): Promise<{
         });
     }
     catch (e) {
-        const msg = formatFetchError(e);
+        const msg = formatFetchErrorChain(e);
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated sync for ${appName} (request failed: ${msg})` };
         }
