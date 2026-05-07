@@ -199,6 +199,7 @@ export interface DashboardOverviewResponse {
         status: string;
         createdAt: string;
     }[];
+    clusterDataSource: "kubernetes" | "project_rollups" | "none";
 }
 export interface AppReachabilityResponse {
     url: string | null;

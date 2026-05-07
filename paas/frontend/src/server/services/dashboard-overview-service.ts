@@ -8,6 +8,42 @@ import type { ArtifactRecord, PlatformToolGroup, UserRole } from "@/types";
 function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.ProjectWhereInput {
     return role === "ADMIN" ? { deletedAt: null } : { createdById: userId, deletedAt: null };
 }
+export type DashboardClusterDataSource = "kubernetes" | "project_rollups" | "none";
+function rollUpClusterFromProjects(
+    projects: Array<{ lastDeploymentStatus: string; podStatus: string; url: string | null }>,
+    totalDeployments: number,
+    succeededDeployments: number
+): {
+    pods: number;
+    runningPods: number;
+    unhealthyPods: number;
+    services: number;
+    deployments: number;
+    healthyDeployments: number;
+} {
+    const runningPods = projects.filter((p) => {
+        const d = (p.lastDeploymentStatus || "").toUpperCase();
+        if (d === "DEPLOYED" || d === "SUCCESS") {
+            return true;
+        }
+        return /\d+\s*running/i.test(p.podStatus || "") || /\brunning\b/i.test(p.podStatus || "");
+    }).length;
+    const unhealthyPods = projects.filter((p) => {
+        if ((p.lastDeploymentStatus || "").toUpperCase() === "FAILED") {
+            return true;
+        }
+        const ps = (p.podStatus || "").toUpperCase();
+        return ps.includes("FAIL") || ps.includes("ERROR") || ps.includes("CRASH") || ps === "UNKNOWN";
+    }).length;
+    return {
+        pods: projects.length,
+        runningPods,
+        unhealthyPods,
+        services: projects.filter((p) => Boolean(p.url?.trim())).length,
+        deployments: totalDeployments,
+        healthyDeployments: succeededDeployments
+    };
+}
 export interface DashboardOverview {
     stats: {
         totalProjects: number;
@@ -62,6 +98,8 @@ export interface DashboardOverview {
         status: DeploymentJobStatus;
         createdAt: string;
     }[];
+    /** Kubernetes list metrics when connected; otherwise project/deployment rollups from the DB. */
+    clusterDataSource: DashboardClusterDataSource;
 }
 const emptySeverity = {
     critical: 0,
@@ -139,7 +177,8 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
             platformTools: [],
             projects: [],
             failedDeployments: [],
-            recentDeployments: []
+            recentDeployments: [],
+            clusterDataSource: "none"
         };
     }
     const totalProjects = projectIds.length;
@@ -194,9 +233,37 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
     const successRatePercent = terminal === 0 ? null : Math.round((succeededCount / terminal) * 100);
     const liveTools = tooling.groups.flatMap((g) => g.items).filter((item) => item.tone === "success").length;
     const degradedTools = tooling.groups.flatMap((g) => g.items).filter((item) => item.tone === "warning" || item.tone === "danger").length;
-    const runningPods = pods.items.filter((pod) => pod.status === "Running").length;
-    const unhealthyPods = pods.items.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
-    const healthyDeployments = k8sDeployments.items.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
+    const useKubernetesCluster = pods.configured && !pods.error;
+    let runningPods: number;
+    let unhealthyPods: number;
+    let cluster: DashboardOverview["cluster"];
+    let clusterDataSource: DashboardClusterDataSource;
+    if (useKubernetesCluster) {
+        runningPods = pods.items.filter((pod) => pod.status === "Running").length;
+        unhealthyPods = pods.items.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
+        const healthyDeployments = k8sDeployments.items.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
+        cluster = {
+            pods: pods.items.length,
+            runningPods,
+            services: services.items.length,
+            deployments: k8sDeployments.items.length,
+            healthyDeployments
+        };
+        clusterDataSource = "kubernetes";
+    }
+    else {
+        const rollup = rollUpClusterFromProjects(projects, totalDeployments, succeededCount);
+        runningPods = rollup.runningPods;
+        unhealthyPods = rollup.unhealthyPods;
+        cluster = {
+            pods: rollup.pods,
+            runningPods: rollup.runningPods,
+            services: rollup.services,
+            deployments: rollup.deployments,
+            healthyDeployments: rollup.healthyDeployments
+        };
+        clusterDataSource = "project_rollups";
+    }
     const securitySamples = await Promise.all(projects.slice(0, 10).map((project) => safeProjectSecurity(project)));
     const critical = securitySamples.reduce((total, row) => total + row.critical, 0);
     const high = securitySamples.reduce((total, row) => total + row.high, 0);
@@ -216,13 +283,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
             liveTools,
             degradedTools
         },
-        cluster: {
-            pods: pods.items.length,
-            runningPods,
-            services: services.items.length,
-            deployments: k8sDeployments.items.length,
-            healthyDeployments
-        },
+        cluster,
         security: {
             score: securityScore,
             critical,
@@ -257,6 +318,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
             projectName: r.project.projectName,
             status: r.status,
             createdAt: r.createdAt.toISOString()
-        }))
+        })),
+        clusterDataSource
     };
 }

@@ -85,6 +85,7 @@ export default function DashboardPage() {
     const projects = overviewQuery.data?.projects ?? [];
     const failures = overviewQuery.data?.failedDeployments ?? [];
     const artifacts = overviewQuery.data?.artifacts ?? [];
+    const clusterDataSource = overviewQuery.data?.clusterDataSource ?? "none";
     const successDisplay = stats?.successRatePercent === null || stats?.successRatePercent === undefined
         ? "—"
         : `${stats.successRatePercent}%`;
@@ -153,7 +154,7 @@ export default function DashboardPage() {
 
       {overviewQuery.isLoading && !overviewQuery.data ? (<StatsSkeleton />) : (<section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <OverviewStatCard title="Total projects" value={stats?.totalProjects ?? 0} icon={FolderKanban}/>
-          <OverviewStatCard title="Running pods" value={`${stats?.runningPods ?? 0}/${cluster?.pods ?? 0}`} icon={ServerCog}/>
+          <OverviewStatCard title={clusterDataSource === "project_rollups" ? "Healthy workloads" : "Running pods"} value={`${stats?.runningPods ?? 0}/${cluster?.pods ?? 0}`} icon={ServerCog}/>
           <OverviewStatCard title="Security score" value={`${security?.score ?? 0}/100`} icon={Shield}/>
           <OverviewStatCard title="Live tools" value={`${stats?.liveTools ?? 0}`} icon={Activity}/>
         </section>)}
@@ -162,7 +163,11 @@ export default function DashboardPage() {
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Cluster workload</CardTitle>
-            <CardDescription>Pods, services, and deployments from Kubernetes.</CardDescription>
+            <CardDescription>
+              {clusterDataSource === "kubernetes" && "Pods, services, and deployments from Kubernetes."}
+              {clusterDataSource === "project_rollups" && "Rollups from your projects and deployment history (Kubernetes API not in use)."}
+              {clusterDataSource === "none" && "Connect Kubernetes or add projects to see workload signals."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {workloadChartData.every((item) => item.value === 0) ? <ChartEmptyState /> : (<div className="h-[240px]">
@@ -264,7 +269,9 @@ export default function DashboardPage() {
             <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Cluster</p>
               <p className="mt-2 text-2xl font-semibold">{cluster?.healthyDeployments ?? 0}/{cluster?.deployments ?? 0}</p>
-              <p className="text-xs text-muted">healthy deployments · {cluster?.services ?? 0} services</p>
+              <p className="text-xs text-muted">
+                {clusterDataSource === "project_rollups" ? `${cluster?.services ?? 0} projects with a public URL` : `${cluster?.services ?? 0} services`}
+              </p>
             </div>
             <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Security</p>

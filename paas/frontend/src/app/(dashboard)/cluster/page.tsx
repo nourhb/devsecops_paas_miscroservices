@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Activity, Boxes, FileText, RefreshCcw, ServerCog, ShipWheel } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { kubernetesApi } from "@/lib/api";
+import { kubernetesApi, projectApi } from "@/lib/api";
+import type { Project } from "@/types";
 function formatTimestamp(value: string) {
     if (!value) {
         return "-";
@@ -59,6 +61,52 @@ function PodHealthPill({ health }: {
                 : "neutral";
     return <StatusPill label={health || "Unknown"} tone={tone}/>;
 }
+function rollUpClusterFromProjects(projects: Project[]): {
+    runningPods: number;
+    unhealthyPods: number;
+    services: number;
+    deployments: number;
+    healthyDeployments: number;
+} {
+    const runningPods = projects.filter((p) => {
+        const d = (p.lastDeploymentStatus || "").toUpperCase();
+        if (d === "DEPLOYED" || d === "SUCCESS") {
+            return true;
+        }
+        return /\d+\s*running/i.test(p.podStatus || "") || /\brunning\b/i.test(p.podStatus || "");
+    }).length;
+    const unhealthyPods = projects.filter((p) => {
+        if ((p.lastDeploymentStatus || "").toUpperCase() === "FAILED") {
+            return true;
+        }
+        const ps = (p.podStatus || "").toUpperCase();
+        return ps.includes("FAIL") || ps.includes("ERROR") || ps.includes("CRASH") || ps === "UNKNOWN";
+    }).length;
+    const healthyDeployments = projects.filter((p) => {
+        const d = (p.lastDeploymentStatus || "").toUpperCase();
+        return d === "DEPLOYED" || d === "SUCCESS";
+    }).length;
+    return {
+        runningPods,
+        unhealthyPods,
+        services: projects.filter((p) => Boolean(p.url?.trim())).length,
+        deployments: projects.length,
+        healthyDeployments
+    };
+}
+function RecordStatusPill({ status }: {
+    status: string;
+}) {
+    const s = status.toUpperCase();
+    const tone = s === "DEPLOYED" || s === "SUCCESS" || s === "RUNNING" || s === "PASSED"
+        ? "success"
+        : s === "FAILED" || s.includes("ERROR")
+            ? "danger"
+            : s === "PENDING" || s === "DEPLOYING"
+                ? "warning"
+                : "neutral";
+    return <StatusPill label={status || "—"} tone={tone}/>;
+}
 function EmptyMessage({ children }: {
     children: React.ReactNode;
 }) {
@@ -88,39 +136,69 @@ export default function ClusterPage() {
         queryFn: () => kubernetesApi.getDeployments(),
         refetchInterval: 10000
     });
+    const projectsQuery = useQuery({
+        queryKey: ["projects", "cluster-fallback"],
+        queryFn: () => projectApi.getProjects(),
+        refetchInterval: 15000
+    });
     const podLogsQuery = useQuery({
         queryKey: ["k8s", "pod-logs", selectedPod?.namespace, selectedPod?.name, selectedPod?.container],
         queryFn: () => kubernetesApi.getPodLogs(selectedPod?.namespace || "", selectedPod?.name || "", selectedPod?.container),
         enabled: Boolean(selectedPod?.namespace && selectedPod?.name)
     });
-    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching;
+    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching || projectsQuery.isFetching;
     const clusterConfigured = useMemo(() => Boolean(podsQuery.data?.configured || servicesQuery.data?.configured || deploymentsQuery.data?.configured), [deploymentsQuery.data?.configured, podsQuery.data?.configured, servicesQuery.data?.configured]);
     const clusterError = podsQuery.data?.error || servicesQuery.data?.error || deploymentsQuery.data?.error || "";
     const clusterConnected = clusterConfigured && !clusterError;
+    /** No usable Kubernetes API — we show platform projects instead of live cluster lists. */
+    const useControlPlaneFallback = !clusterConnected;
+    const projectList = projectsQuery.data ?? [];
+    const useRollupStats = useControlPlaneFallback && projectList.length > 0;
     const allNamespaces = useMemo(() => {
         const names = new Set<string>();
-        for (const pod of podsQuery.data?.pods ?? []) {
-            names.add(pod.namespace);
+        if (clusterConnected) {
+            for (const pod of podsQuery.data?.pods ?? []) {
+                names.add(pod.namespace);
+            }
+            for (const service of servicesQuery.data?.services ?? []) {
+                names.add(service.namespace);
+            }
+            for (const deployment of deploymentsQuery.data?.deployments ?? []) {
+                names.add(deployment.namespace);
+            }
         }
-        for (const service of servicesQuery.data?.services ?? []) {
-            names.add(service.namespace);
-        }
-        for (const deployment of deploymentsQuery.data?.deployments ?? []) {
-            names.add(deployment.namespace);
+        else {
+            for (const project of projectsQuery.data ?? []) {
+                const ns = project.namespace?.trim();
+                if (ns) {
+                    names.add(ns);
+                }
+            }
         }
         return Array.from(names).sort();
-    }, [deploymentsQuery.data?.deployments, podsQuery.data?.pods, servicesQuery.data?.services]);
+    }, [
+        clusterConnected,
+        deploymentsQuery.data?.deployments,
+        podsQuery.data?.pods,
+        projectsQuery.data,
+        servicesQuery.data?.services
+    ]);
+    const filteredProjects = useMemo(() => (projectsQuery.data ?? []).filter((project) => selectedNamespace === "all" || project.namespace === selectedNamespace), [projectsQuery.data, selectedNamespace]);
+    const projectRollup = useMemo(() => rollUpClusterFromProjects(filteredProjects), [filteredProjects]);
     const filteredPods = useMemo(() => (podsQuery.data?.pods ?? []).filter((pod) => selectedNamespace === "all" || pod.namespace === selectedNamespace), [podsQuery.data?.pods, selectedNamespace]);
     const filteredServices = useMemo(() => (servicesQuery.data?.services ?? []).filter((service) => selectedNamespace === "all" || service.namespace === selectedNamespace), [selectedNamespace, servicesQuery.data?.services]);
     const filteredDeployments = useMemo(() => (deploymentsQuery.data?.deployments ?? []).filter((deployment) => selectedNamespace === "all" || deployment.namespace === selectedNamespace), [deploymentsQuery.data?.deployments, selectedNamespace]);
-    const runningPods = filteredPods.filter((pod) => pod.status === "Running").length;
-    const unhealthyPods = filteredPods.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
-    const healthyDeployments = filteredDeployments.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
+    const runningPods = useRollupStats ? projectRollup.runningPods : filteredPods.filter((pod) => pod.status === "Running").length;
+    const unhealthyPods = useRollupStats ? projectRollup.unhealthyPods : filteredPods.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
+    const servicesTotal = useRollupStats ? projectRollup.services : filteredServices.length;
+    const deploymentsTotal = useRollupStats ? projectRollup.deployments : filteredDeployments.length;
+    const healthyDeployments = useRollupStats ? projectRollup.healthyDeployments : filteredDeployments.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
     const refreshAll = async () => {
         await Promise.all([
             podsQuery.refetch(),
             servicesQuery.refetch(),
             deploymentsQuery.refetch(),
+            projectsQuery.refetch(),
             selectedPod ? podLogsQuery.refetch() : Promise.resolve()
         ]);
     };
@@ -135,7 +213,9 @@ export default function ClusterPage() {
           <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted">Cluster status</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes Control View</h2>
           <p className="mt-2 max-w-3xl text-sm text-muted">
-            Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs.
+            {useControlPlaneFallback
+                ? "Kubernetes is not connected. This page does not discover Docker Compose or Swarm services on a server by itself. You will see workload counts and rows only for projects registered here (with deploy status from your pipelines) unless you enable the Kubernetes API and kubeconfig."
+                : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -157,10 +237,22 @@ export default function ClusterPage() {
           {clusterError}
         </div> : null}
 
+      {useControlPlaneFallback ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
+          <strong className="font-medium text-foreground">Why counts may stay at zero:</strong> Docker Engine and Docker Swarm are not wired into this screen. Either create projects under{" "}
+          <Link href="/projects" className="font-medium text-primary hover:underline">
+            Projects
+          </Link>{" "}
+          and deploy through this platform (status is stored in the database), or set <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> with a valid kubeconfig to list pods and services from a cluster.
+        </div> : null}
+
+      {projectsQuery.isError ? <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+          Could not load projects for this view. Refresh or check your session.
+        </div> : null}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Pods running</CardTitle>
+            <CardTitle className="text-sm">{useControlPlaneFallback ? "Healthy workloads" : "Pods running"}</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Activity className="h-6 w-6 text-success"/>
@@ -169,7 +261,7 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Unhealthy pods</CardTitle>
+            <CardTitle className="text-sm">{useControlPlaneFallback ? "Needs attention" : "Unhealthy pods"}</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Activity className="h-6 w-6 text-danger"/>
@@ -178,25 +270,25 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Services</CardTitle>
+            <CardTitle className="text-sm">{useControlPlaneFallback ? "Public URLs" : "Services"}</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <ServerCog className="h-6 w-6 text-primary"/>
-            {filteredServices.length}
+            {servicesTotal}
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Deployments</CardTitle>
+            <CardTitle className="text-sm">{useControlPlaneFallback ? "Applications" : "Deployments"}</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <ShipWheel className="h-6 w-6 text-primary"/>
-            {filteredDeployments.length}
+            {deploymentsTotal}
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Healthy deployments</CardTitle>
+            <CardTitle className="text-sm">{useControlPlaneFallback ? "Last deploy OK" : "Healthy deployments"}</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Boxes className="h-6 w-6 text-foreground"/>
@@ -210,6 +302,7 @@ export default function ClusterPage() {
           <CardTitle>Pod Logs</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {useControlPlaneFallback ? (<Textarea readOnly value="Kubernetes is not connected. Configure KUBERNETES_ENABLED and a valid kubeconfig to select pods and stream logs here. Docker-only stacks do not expose pod logs in this view." className="min-h-[200px] font-mono text-xs"/>) : (<>
           <div className="flex flex-wrap items-center gap-3">
             <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
             <StatusPill label={selectedPod ? selectedPod.namespace : "Namespace"} tone="neutral"/>
@@ -227,9 +320,60 @@ export default function ClusterPage() {
               </Button>) : null}
           </div>
           <Textarea readOnly value={selectedPod ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs..." : "No logs loaded yet.") : "Choose a pod row and click View logs to inspect container output."} className="min-h-[360px] font-mono text-xs"/>
+        </>)}
         </CardContent>
       </Card>
 
+      {useControlPlaneFallback ? (<Card>
+          <CardHeader>
+            <CardTitle>Applications (control plane)</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            {projectsQuery.isLoading ? <p className="text-sm text-muted">Loading projects…</p> : null}
+            {!projectsQuery.isLoading && !projectList.length ? <EmptyMessage>
+                No projects in this workspace yet, so there is nothing to roll up. Docker services running outside this app are not listed here — add a project and deploy through the platform, or connect Kubernetes.
+                {" "}
+                <Link href="/projects/create" className="font-medium text-primary hover:underline">
+                  Create a project
+                </Link>
+              </EmptyMessage> : null}
+            {!projectsQuery.isLoading && projectList.length > 0 ? (<>
+              <table className="w-full min-w-[920px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th className="py-3 pr-4 font-medium">Project</th>
+                    <th className="py-3 pr-4 font-medium">Namespace</th>
+                    <th className="py-3 pr-4 font-medium">Deploy</th>
+                    <th className="py-3 pr-4 font-medium">Pod</th>
+                    <th className="py-3 pr-4 font-medium">Build</th>
+                    <th className="py-3 font-medium">URL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProjects.map((project) => <tr key={project.id} className="border-b border-border/60">
+                      <td className="py-3 pr-4 font-medium">
+                        <Link href={`/projects/${project.id}`} className="text-primary hover:underline">
+                          {project.projectName}
+                        </Link>
+                      </td>
+                      <td className="py-3 pr-4">{project.namespace || "—"}</td>
+                      <td className="py-3 pr-4"><RecordStatusPill status={project.lastDeploymentStatus}/></td>
+                      <td className="py-3 pr-4"><RecordStatusPill status={project.podStatus}/></td>
+                      <td className="py-3 pr-4"><RecordStatusPill status={project.buildStatus}/></td>
+                      <td className="py-3">
+                        {project.url?.trim()
+                          ? (<a href={project.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
+                              Open
+                            </a>)
+                          : "—"}
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+              {!filteredProjects.length ? <EmptyMessage>No projects match the selected namespace.</EmptyMessage> : null}
+            </>) : null}
+          </CardContent>
+        </Card>) : (<>
       <Card>
         <CardHeader>
           <CardTitle>Pods</CardTitle>
@@ -347,5 +491,6 @@ export default function ClusterPage() {
           </CardContent>
         </Card>
       </div>
+        </>)}
     </div>);
 }
