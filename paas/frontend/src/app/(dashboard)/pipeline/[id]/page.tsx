@@ -12,6 +12,7 @@ import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prom
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
+import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
 import { cn } from "@/lib/utils";
 const STAGES = [
     { key: "build", label: "Build", description: "Jenkins compile & image" },
@@ -20,23 +21,26 @@ const STAGES = [
     { key: "gitops", label: "GitOps", description: "Helm values commit" },
     { key: "argo", label: "Argo CD", description: "Cluster sync" }
 ] as const;
-function stageState(index: number, buildOk: boolean, deployOk: boolean, deployFailed: boolean): "done" | "active" | "pending" | "error" {
-    if (deployFailed && index >= 1) {
-        return index === 1 ? "error" : "pending";
+function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
+    const bs = (projectStatus || "").toUpperCase();
+    const ds = (lastDeploymentStatus || "").toUpperCase();
+    if (ds === "FAILED" && (bs === "BUILDING" || bs === "QUEUED")) {
+        return "FAILED";
     }
-    if (deployOk) {
-        return "done";
+    return projectStatus || "—";
+}
+function buildHeaderBadgeVariant(buildLabel: string): "success" | "warning" | "danger" | "outline" {
+    const u = (buildLabel || "").toUpperCase();
+    if (u === "FAILED" || u === "FAILURE" || u === "ABORTED" || u === "UNSTABLE") {
+        return "danger";
     }
-    if (buildOk && index === 0) {
-        return "done";
+    if (u === "SUCCESS" || u === "READY") {
+        return "success";
     }
-    if (buildOk && index === 1) {
-        return "active";
+    if (u === "BUILDING" || u === "QUEUED" || u === "PUSHING") {
+        return "warning";
     }
-    if (!buildOk && index === 0) {
-        return "active";
-    }
-    return "pending";
+    return "outline";
 }
 function ArgoHealthBadge({ health }: {
     health: string | undefined;
@@ -165,10 +169,21 @@ export default function PipelinePage() {
     const project = projectQuery.data;
     const status = statusQuery.data;
     const refreshing = statusQuery.isFetching && !statusQuery.isLoading;
-    const buildOk = (project.buildStatus || "").toUpperCase() === "SUCCESS";
-    const deployOk = (status?.lastDeploymentStatus || project.lastDeploymentStatus || "").toUpperCase() === "SUCCESS";
-    const deployFailed = (status?.lastDeploymentStatus || "").toUpperCase() === "FAILED";
+    const lastDs = status?.lastDeploymentStatus ?? project.lastDeploymentStatus;
+    const displayBuild = displayBuildStatus(project.buildStatus, lastDs);
+    const buildOk = ["SUCCESS", "READY"].includes((displayBuild || "").toUpperCase());
+    const deployU = (lastDs || "").toUpperCase();
+    const deployOk = deployU === "DEPLOYED" || deployU === "SUCCESS";
+    const deployFailed = deployU === "FAILED";
     const securityMetrics = securityQuery.data?.metrics;
+    const deliveryStates = computeDeliveryPathStates({
+        buildStatus: project.buildStatus,
+        lastDeploymentStatus: lastDs,
+        buildLogs: status?.buildLogs,
+        deploymentLogs: status?.deploymentLogs,
+        argoHealth: argoQuery.data?.health,
+        argoSyncStatus: argoQuery.data?.syncStatus
+    });
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -204,9 +219,9 @@ export default function PipelinePage() {
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Badge variant={buildOk ? "success" : "warning"}>Build: {project.buildStatus}</Badge>
+          <Badge variant={buildHeaderBadgeVariant(displayBuild)}>Build: {displayBuild}</Badge>
           <Badge variant={deployOk ? "success" : deployFailed ? "danger" : "outline"}>
-            Deploy: {status?.lastDeploymentStatus ?? project.lastDeploymentStatus}
+            Deploy: {lastDs}
           </Badge>
           <Badge variant="outline">Pod: {status?.podStatus ?? project.podStatus}</Badge>
         </div>
@@ -218,12 +233,12 @@ export default function PipelinePage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Delivery path</CardTitle>
-          <CardDescription>Typical flow for a full deploy (build → policy → registry → GitOps → Argo).</CardDescription>
+          <CardDescription>Progress is inferred from Jenkins console markers (checkouts, SCA/SAST, image, Harbor) plus GitOps/Argo and deployment status.</CardDescription>
         </CardHeader>
         <CardContent>
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
-            {STAGES.map((stage, index) => {
-            const state = stageState(index, buildOk, deployOk, deployFailed);
+            {STAGES.map((stage) => {
+            const state = deliveryStates[stage.key];
             return (<li key={stage.key} className="flex flex-col items-center text-center">
                   <div className={cn("mb-3 flex h-12 w-12 items-center justify-center rounded-full border-2 transition-colors", state === "done" && "border-success bg-success/15 text-success", state === "active" && "border-primary bg-primary/10 text-primary", state === "error" && "border-danger bg-danger/15 text-danger", state === "pending" && "border-border bg-muted/30 text-muted")}>
                     {state === "done" ? (<CheckCircle2 className="h-6 w-6"/>) : state === "error" ? (<Circle className="h-6 w-6"/>) : state === "active" ? (<Loader2 className="h-6 w-6 animate-spin"/>) : (<Circle className="h-5 w-5"/>)}
@@ -346,7 +361,7 @@ export default function PipelinePage() {
           <CardContent className="space-y-3 text-sm">
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
               <span className="text-muted">Build</span>
-              <Badge variant={buildOk ? "success" : "warning"}>{project.buildStatus}</Badge>
+              <Badge variant={buildHeaderBadgeVariant(displayBuild)}>{displayBuild}</Badge>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
               <span className="text-muted">Security</span>
@@ -367,7 +382,7 @@ export default function PipelinePage() {
             <div className="rounded-lg border border-border bg-background/50 p-3">
               <p className="text-xs uppercase tracking-wide text-muted">Enforcement</p>
               <p className="mt-2 text-muted">
-                {project.buildStatus === "SUCCESS"
+                {buildOk
             ? ((securityMetrics?.critical ?? 0) > 0
                 ? `Build passed, but ${securityMetrics?.critical ?? 0} critical vulnerabilities still require action before production rollout.`
                 : "Build passed and the security gate is clear for trusted deployment.")
