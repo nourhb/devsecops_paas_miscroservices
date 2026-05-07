@@ -1,5 +1,5 @@
 import apiClient from "@/lib/api-client";
-import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse } from "@/types";
+import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse } from "@/types";
 export interface DashboardMetrics {
     cluster: {
         nodeCount: number;
@@ -194,6 +194,10 @@ export const pipelineApi = {
     },
     getDeployment: async (deploymentId: string) => {
         const { data } = await apiClient.get<DeploymentPollResponse>(`/api/deployments/${deploymentId}`);
+        return data;
+    },
+    listRecentDeployments: async (limit = 20) => {
+        const { data } = await apiClient.get<RecentDeploymentsListResponse>(`/api/deployments/recent?limit=${encodeURIComponent(String(limit))}`);
         return data;
     },
     cancelDeployment: async (deploymentId: string) => {

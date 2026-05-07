@@ -4,9 +4,9 @@ import Link from "next/link";
 import { Activity, Boxes, FileText, RefreshCcw, ServerCog, ShipWheel } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { kubernetesApi, projectApi } from "@/lib/api";
+import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
 import type { Project } from "@/types";
 function formatTimestamp(value: string) {
     if (!value) {
@@ -120,6 +120,9 @@ export default function ClusterPage() {
         containers: string[];
         container: string;
     } | null>(null);
+    const [platformLogDeploymentId, setPlatformLogDeploymentId] = useState<string | null>(null);
+    const [jenkinsConsoleExtra, setJenkinsConsoleExtra] = useState<string | null>(null);
+    const [jenkinsConsoleLoading, setJenkinsConsoleLoading] = useState(false);
     const logsRef = useRef<HTMLDivElement | null>(null);
     const podsQuery = useQuery({
         queryKey: ["k8s", "pods"],
@@ -146,7 +149,20 @@ export default function ClusterPage() {
         queryFn: () => kubernetesApi.getPodLogs(selectedPod?.namespace || "", selectedPod?.name || "", selectedPod?.container),
         enabled: Boolean(selectedPod?.namespace && selectedPod?.name)
     });
-    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching || projectsQuery.isFetching;
+    const recentDeploymentsQuery = useQuery({
+        queryKey: ["deployments-recent", "cluster-page"],
+        queryFn: () => pipelineApi.listRecentDeployments(25),
+        refetchInterval: 20000
+    });
+    const effectivePlatformLogId = platformLogDeploymentId ?? recentDeploymentsQuery.data?.deployments[0]?.id ?? null;
+    const platformDeploymentQuery = useQuery({
+        queryKey: ["deployment", "cluster-logs", effectivePlatformLogId],
+        queryFn: () => pipelineApi.getDeployment(effectivePlatformLogId!),
+        enabled: Boolean(effectivePlatformLogId),
+        refetchInterval: 12000
+    });
+    const selectedRecentMeta = recentDeploymentsQuery.data?.deployments.find((d) => d.id === effectivePlatformLogId);
+    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching || projectsQuery.isFetching || recentDeploymentsQuery.isFetching || platformDeploymentQuery.isFetching;
     const clusterConfigured = useMemo(() => Boolean(podsQuery.data?.configured || servicesQuery.data?.configured || deploymentsQuery.data?.configured), [deploymentsQuery.data?.configured, podsQuery.data?.configured, servicesQuery.data?.configured]);
     const clusterError = podsQuery.data?.error || servicesQuery.data?.error || deploymentsQuery.data?.error || "";
     const clusterConnected = clusterConfigured && !clusterError;
@@ -193,15 +209,110 @@ export default function ClusterPage() {
     const servicesTotal = useRollupStats ? projectRollup.services : filteredServices.length;
     const deploymentsTotal = useRollupStats ? projectRollup.deployments : filteredDeployments.length;
     const healthyDeployments = useRollupStats ? projectRollup.healthyDeployments : filteredDeployments.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
+    useEffect(() => {
+        setJenkinsConsoleExtra(null);
+    }, [effectivePlatformLogId]);
     const refreshAll = async () => {
         await Promise.all([
             podsQuery.refetch(),
             servicesQuery.refetch(),
             deploymentsQuery.refetch(),
             projectsQuery.refetch(),
+            recentDeploymentsQuery.refetch(),
+            effectivePlatformLogId ? platformDeploymentQuery.refetch() : Promise.resolve(),
             selectedPod ? podLogsQuery.refetch() : Promise.resolve()
         ]);
     };
+    const pullJenkinsConsole = async () => {
+        const jobName = recentDeploymentsQuery.data?.jenkinsJobName?.trim();
+        const bn = selectedRecentMeta?.buildNumber;
+        if (!jobName || bn == null) {
+            setJenkinsConsoleExtra("No Jenkins job name or build number is stored on this deployment yet.");
+            return;
+        }
+        setJenkinsConsoleLoading(true);
+        try {
+            const payload = (await jenkinsUi.logs(jobName, bn)) as {
+                logs?: string;
+            };
+            setJenkinsConsoleExtra(payload.logs ?? "(empty console response)");
+        }
+        catch (e) {
+            setJenkinsConsoleExtra(`[Jenkins] ${e instanceof Error ? e.message : String(e)}`);
+        }
+        finally {
+            setJenkinsConsoleLoading(false);
+        }
+    };
+    const recentList = recentDeploymentsQuery.data?.deployments ?? [];
+    const platformLogText = useMemo(() => {
+        if (recentDeploymentsQuery.isLoading) {
+            return "Loading recent deployments from the platform database…";
+        }
+        if (!recentList.length) {
+            return [
+                "No deployment records yet for your workspace.",
+                "",
+                "This is normal before the first build/deploy. Records appear when you:",
+                "  • Open Projects → choose an application → trigger Build or Deploy from Operations;",
+                "  • Wait for the Jenkins job to start — this app polls Jenkins and stores console output on the Deployment row.",
+                "",
+                "Useful links:",
+                "  • /projects — register or open apps",
+                "  • /projects/create — new repository wiring",
+                "",
+                "Docker Swarm / plain Docker do not push pod logs into this UI; CI/CD logs from Jenkins are what you will see here until Kubernetes is configured."
+            ].join("\n");
+        }
+        if (!effectivePlatformLogId) {
+            return "Pick a deployment from the list above.";
+        }
+        if (platformDeploymentQuery.isLoading) {
+            return "Loading deployment details…";
+        }
+        const p = platformDeploymentQuery.data;
+        if (!p) {
+            return "Could not load deployment details. Try Refresh or pick another run.";
+        }
+        const lines: string[] = [
+            `=== Deployment ${p.id} ===`,
+            `Status: ${p.status}`,
+            `Project: ${selectedRecentMeta?.projectName ?? "(unknown)"} (${p.projectId})`,
+            p.buildNumber != null ? `Jenkins build number (stored on row): ${p.buildNumber}` : "Jenkins build number (stored on row): not linked yet",
+            p.buildProvider ? `Build backend: ${p.buildProvider}` : "",
+            p.buildRunId ? `Run id: ${p.buildRunId}` : "",
+            p.artifactImage ? `Image: ${p.artifactImage}` : "",
+            p.url ? `App URL: ${p.url}` : ""
+        ].filter(Boolean);
+        if (p.failureReason) {
+            lines.push(`Failure reason: ${p.failureReason}`);
+        }
+        if (p.failureMessage) {
+            lines.push(`Failure message: ${p.failureMessage}`);
+        }
+        lines.push("", "--- Log buffer stored in database (Jenkins / pipeline reconciliation) ---");
+        const buf = p.logs?.trim();
+        lines.push(buf && buf.length > 0
+            ? buf
+            : "(No log text stored on this row yet. If the job is still running, wait for the next poll; or click “Fetch Jenkins console” when a build number is attached.)");
+        if (jenkinsConsoleExtra) {
+            lines.push("", "--- Live Jenkins consoleText (fetched on demand via API) ---", jenkinsConsoleExtra);
+        }
+        return lines.join("\n");
+    }, [
+        recentDeploymentsQuery.isLoading,
+        recentDeploymentsQuery.data,
+        recentList.length,
+        effectivePlatformLogId,
+        platformDeploymentQuery.isLoading,
+        platformDeploymentQuery.data,
+        selectedRecentMeta?.projectName,
+        jenkinsConsoleExtra
+    ]);
+    const podLogHint = "Select a pod in the table below and choose “View logs”, or use the platform CI/CD section for Jenkins output stored in this application.";
+    const podLogBody = selectedPod
+        ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes…" : "No log lines returned for this pod/container yet.")
+        : podLogHint;
     useEffect(() => {
         if (selectedPod) {
             logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -299,28 +410,62 @@ export default function ClusterPage() {
 
       <Card ref={logsRef}>
         <CardHeader>
-          <CardTitle>Pod Logs</CardTitle>
+          <CardTitle>Logs</CardTitle>
+          <CardDescription>
+            Kubernetes pod stream when the API is connected; platform deployment output (database + optional live Jenkins) is always available below.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {useControlPlaneFallback ? (<Textarea readOnly value="Kubernetes is not connected. Configure KUBERNETES_ENABLED and a valid kubeconfig to select pods and stream logs here. Docker-only stacks do not expose pod logs in this view." className="min-h-[200px] font-mono text-xs"/>) : (<>
-          <div className="flex flex-wrap items-center gap-3">
-            <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
-            <StatusPill label={selectedPod ? selectedPod.namespace : "Namespace"} tone="neutral"/>
-            {selectedPod?.containers.length ? (<select aria-label="Select pod container" value={selectedPod.container} onChange={(event) => setSelectedPod({
+        <CardContent className="space-y-6">
+          {clusterConnected ? (<div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Kubernetes — pod stream</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
+                <StatusPill label={selectedPod ? selectedPod.namespace : "Namespace"} tone="neutral"/>
+                {selectedPod?.containers.length ? (<select aria-label="Select pod container" value={selectedPod.container} onChange={(event) => setSelectedPod({
                 ...selectedPod,
                 container: event.target.value
             })} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
-                {selectedPod.containers.map((container) => <option key={container} value={container}>
-                    {container}
-                  </option>)}
-              </select>) : null}
-            {selectedPod ? (<Button type="button" variant="outline" size="sm" onClick={() => void podLogsQuery.refetch()} disabled={podLogsQuery.isFetching}>
-                <RefreshCcw className={`mr-2 h-4 w-4 ${podLogsQuery.isFetching ? "animate-spin" : ""}`}/>
-                Refresh logs
-              </Button>) : null}
+                    {selectedPod.containers.map((container) => <option key={container} value={container}>
+                        {container}
+                      </option>)}
+                  </select>) : null}
+                {selectedPod ? (<Button type="button" variant="outline" size="sm" onClick={() => void podLogsQuery.refetch()} disabled={podLogsQuery.isFetching}>
+                    <RefreshCcw className={`mr-2 h-4 w-4 ${podLogsQuery.isFetching ? "animate-spin" : ""}`}/>
+                    Refresh pod logs
+                  </Button>) : null}
+              </div>
+              <Textarea readOnly value={podLogBody} className="min-h-[220px] font-mono text-xs"/>
+            </div>) : (<div className="rounded-lg border border-border/80 bg-muted/10 p-4 text-sm text-muted">
+              <p className="font-medium text-foreground">Kubernetes pod streaming is unavailable</p>
+              <p className="mt-2">
+                Enable <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED</code> and mount a kubeconfig the server can read. Until then, pod log lines cannot be fetched — use the{" "}
+                <strong className="text-foreground">platform CI/CD</strong> section for Jenkins output.
+              </p>
+            </div>)}
+
+          <div className="space-y-3 border-t border-border/60 pt-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Platform — CI/CD (stored in this application)</p>
+            {recentList.length > 0 ? (<div className="flex flex-wrap items-center gap-3">
+                <select aria-label="Select deployment run" className="h-10 min-w-[280px] rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40" value={effectivePlatformLogId ?? ""} onChange={(event) => setPlatformLogDeploymentId(event.target.value || null)}>
+                  {recentList.map((row) => <option key={row.id} value={row.id}>
+                      {formatTimestamp(row.createdAt)} — {row.projectName} — {row.status}
+                      {row.buildNumber != null ? ` #${row.buildNumber}` : ""}
+                    </option>)}
+                </select>
+                <Button type="button" variant="outline" size="sm" onClick={() => void platformDeploymentQuery.refetch()} disabled={platformDeploymentQuery.isFetching}>
+                  <RefreshCcw className={`mr-2 h-4 w-4 ${platformDeploymentQuery.isFetching ? "animate-spin" : ""}`}/>
+                  Refresh record
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void pullJenkinsConsole()} disabled={jenkinsConsoleLoading || !effectivePlatformLogId}>
+                  {jenkinsConsoleLoading ? (<RefreshCcw className="mr-2 h-4 w-4 animate-spin"/>) : null}
+                  Fetch Jenkins console
+                </Button>
+                {effectivePlatformLogId ? <Button type="button" variant="ghost" size="sm" asChild>
+                    <Link href={`/deployments/${effectivePlatformLogId}`}>Open deployment page</Link>
+                  </Button> : null}
+              </div>) : null}
+            <Textarea readOnly value={platformLogText} className="min-h-[360px] font-mono text-xs"/>
           </div>
-          <Textarea readOnly value={selectedPod ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs..." : "No logs loaded yet.") : "Choose a pod row and click View logs to inspect container output."} className="min-h-[360px] font-mono text-xs"/>
-        </>)}
         </CardContent>
       </Card>
 
