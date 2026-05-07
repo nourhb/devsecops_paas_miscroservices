@@ -36,9 +36,15 @@ export async function recordDeploymentFailure(deploymentId: string, projectId: s
             failureMessage
         }
     });
+    const failedDuringJenkinsRun =
+        options.reason === DeploymentFailureReason.JENKINS ||
+        options.reason === DeploymentFailureReason.TIMEOUT ||
+        options.reason === DeploymentFailureReason.TRIGGER ||
+        options.reason === DeploymentFailureReason.UNKNOWN;
     await updateProject(projectId, {
         lastDeploymentStatus: "FAILED",
-        deploymentLogs: logs
+        deploymentLogs: logs,
+        ...(failedDuringJenkinsRun ? { buildStatus: "FAILED" } : {})
     });
 }
 export function clearDeploymentFailureFields(): {
