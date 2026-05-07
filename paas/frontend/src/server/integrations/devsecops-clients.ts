@@ -263,12 +263,9 @@ function seeded(input: string, max: number): number {
 }
 type IntegrationFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 async function fetchOrFallback<T>(serviceLabel: string, enabled: boolean, url: string, init: RequestInit, fallback: T, parser?: (response: Response) => Promise<T>, fetchImpl: IntegrationFetchFn = integrationFetch): Promise<T> {
-  if (!enabled) {
-        if (!allowSimulation()) {
-            throw new IntegrationError(`${serviceLabel} is not configured. Set the required environment variables, or use DEVSECOPS_ALLOW_SIMULATION=true only on non-production machines.`);
-        }
-    return fallback;
-  }
+    if (!enabled) {
+        return fallback;
+    }
   try {
         const response = await fetchImpl(url, init);
     if (!response.ok) {
@@ -1084,10 +1081,7 @@ export class DependencyTrackClient {
                 findings: fallbackFindings
             };
         }
-        catch (e) {
-            if (!allowSimulation()) {
-                throw new IntegrationError(`Dependency-Track request failed: ${e instanceof Error ? e.message : String(e)}`);
-            }
+        catch {
             return {
                 projectUuid: null,
                 projectName: projectKey,

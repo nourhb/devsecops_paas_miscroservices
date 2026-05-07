@@ -3,6 +3,7 @@ import { env } from "@/server/config/env";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, dependencyTrackClient, opaClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
+import type { Project } from "@prisma/client";
 function score(base: number, penalty: number): number {
     const scored = base - penalty;
     return Math.max(0, Math.min(100, scored));
@@ -19,8 +20,38 @@ function policyEngineLabel(): "Kyverno" | "OPA" | "Gatekeeper" | "None" {
             return "None";
     }
 }
-export async function getSecurityMetrics(projectId: string): Promise<SecurityMetrics> {
-    const project = await getProjectById(projectId);
+function emptySeverity() {
+    return { critical: 0, high: 0, medium: 0, low: 0 };
+}
+function degradedMetrics(project: Project, message: string): SecurityMetrics {
+    const imageTag = project.imageTag || project.projectName;
+    const policyEngine = policyEngineLabel();
+    return {
+        qualityGateStatus: "UNKNOWN",
+        dependencyTrack: emptySeverity(),
+        dependencyTrackProjectUuid: null,
+        dependencyTrackProjectName: project.projectName,
+        dependencyTrackFindings: [],
+        securitySummary: message.slice(0, 400),
+        imageSecurity: {
+            imageRef: imageTag,
+            signed: false,
+            verified: false,
+            verifier: "Cosign"
+        },
+        securityEnforcement: {
+            policyEngine,
+            policyValidated: policyEngine === "None",
+            deploymentAllowed: policyEngine === "None",
+            summary: "Security integrations returned an error — values below are incomplete."
+        },
+        trivy: emptySeverity(),
+        cosignSigned: false,
+        opaViolations: 0,
+        securityScore: 0
+    };
+}
+async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> {
     const imageTag = project.imageTag || project.projectName;
     const qualityGate = await sonarQubeClient.qualityGate(project.projectName);
     const dependencyTrackProject = await dependencyTrackClient.projectMetrics(project.projectName);
@@ -36,7 +67,8 @@ export async function getSecurityMetrics(projectId: string): Promise<SecurityMet
         dependencyTrack.medium * 3 +
         trivy.critical * 20 +
         trivy.high * 10 +
-        trivy.medium * 4;
+        trivy.medium * 4 +
+        trivy.low * 1;
     const gatePenalty = (qualityGate.status === "FAILED" ? 20 : 0) +
         (!cosignSigned ? 20 : 0) +
         (!opaAllowed ? 20 : 0);
@@ -85,4 +117,14 @@ export async function getSecurityMetrics(projectId: string): Promise<SecurityMet
         opaViolations: opaAllowed ? 0 : 1,
         securityScore
     };
+}
+export async function getSecurityMetrics(projectId: string): Promise<SecurityMetrics> {
+    const project = await getProjectById(projectId);
+    try {
+        return await buildSecurityMetrics(project);
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return degradedMetrics(project, `Could not reach one or more security backends: ${msg}`);
+    }
 }
