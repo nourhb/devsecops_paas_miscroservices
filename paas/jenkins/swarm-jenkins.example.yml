@@ -5,7 +5,7 @@
 # - Exit **137** = SIGKILL → usually **OOM** (raise limits.memory and/or lower -Xmx).
 # - **JENKINS-48300** ("wrapper script does not seem to be touching the log file" / exit -1 on long `npm ci`):
 #   `JAVA_OPTS` below raises the durable-task heartbeat, or set the same flag on the Jenkins controller.
-#   Pipeline also emits keepalive lines every 120s unless `JENKINS_SH_KEEPALIVE=false`.
+#   Pipeline also emits keepalive lines (default every 60s; override JENKINS_SH_KEEPALIVE_SEC) unless JENKINS_SH_KEEPALIVE=false.
 #
 # Redeploy: docker stack deploy -c your-compose.yml my-stack
 # -----------------------------------------------------------------------------
