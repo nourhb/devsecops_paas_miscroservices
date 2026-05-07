@@ -1,0 +1,41 @@
+# -----------------------------------------------------------------------------
+# Jenkins on Docker Swarm — memory + JVM tuning (reference compose file)
+# -----------------------------------------------------------------------------
+# Merge into your real stack or copy values into `services.jenkins`:
+# - Exit **137** = SIGKILL → usually **OOM** (raise limits.memory and/or lower -Xmx).
+# - Keep **heap (-Xmx) ~512MiB–1GiB below** `deploy.resources.limits.memory`.
+#
+# Redeploy: docker stack deploy -c your-compose.yml my-stack
+# -----------------------------------------------------------------------------
+
+version: "3.8"
+
+services:
+  jenkins:
+    image: jenkins/jenkins:lts
+    ports:
+      - "30090:8080"
+      - "50000:50000"
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx2048m -XX:+UseG1GC -Djenkins.install.runSetupWizard=false"
+      TZ: UTC
+    volumes:
+      - jenkins_data:/var/jenkins_home
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 5
+        window: 120s
+
+volumes:
+  jenkins_data:
