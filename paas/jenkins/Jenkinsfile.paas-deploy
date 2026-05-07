@@ -302,13 +302,12 @@ node(agentLabel) {
     } else if (fileExists("package.json")) {
       ensureNodeTool()
       if (commandExists("npm")) {
-        /* Stage 5 npm: persistent Node under JENKINS_PAAS_NODE_CACHE or JENKINS_HOME/.jenkins-paas-cache/node;
-         * npm package cache under JENKINS_PAAS_NPM_CACHE or .../npm; JENKINS_NPM_CI_PREFER_OFFLINE=false to force full registry refresh.
-         * Next.js 16: sans script build:ci, le pipeline exécute npx next build --no-lint --webpack (désactiver ESLint intégré + Turbopack CI lent);
-         * JENKINS_NEXT_BUILD_WEBPACK=false pour garder Turbopack, JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true pour forcer npm run build,
-         * JENKINS_NEXT_PERSIST_CACHE=true pour réutiliser .next/cache par PROJECT_ID sous JENKINS_HOME.
-         * Exit 143 = SIGTERM: often Jenkins/K8s step timeout or memory pressure during npm ci.
-         * Longer timeout + capped Node heap; npm_config_maxsockets defaults to 8 (override on agent if OOM). */
+        /* Stage 5 npm: persistent Node under JENKINS_PAAS_NODE_CACHE; npm tarball cache under .../npm;
+         * optional node_modules snapshot under .../nm-snap/${PROJECT_ID}/${sha256(package-lock)} (default on;
+         * set JENKINS_NPM_SNAPSHOT_NODE_MODULES=false to disable — saves disk, slower installs).
+         * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
+         * Next.js: npx next build --no-lint --webpack unless JENKINS_NEXT_BUILD_WEBPACK=false / USE_NPM_SCRIPT.
+         * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed. */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
@@ -326,7 +325,7 @@ node(agentLabel) {
             export CI=true
             export NEXT_TELEMETRY_DISABLED=1
             export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
-            export npm_config_maxsockets="${npm_config_maxsockets:-8}"
+            export npm_config_maxsockets="${npm_config_maxsockets:-16}"
             NPM_CACHE="${JENKINS_PAAS_NPM_CACHE:-}"
             if [ -z "${NPM_CACHE}" ] && [ -n "${JENKINS_HOME:-}" ]; then
               NPM_CACHE="${JENKINS_HOME}/.jenkins-paas-cache/npm"
@@ -352,6 +351,7 @@ node(agentLabel) {
             fi
             npm config set audit false
             npm config set fund false
+            npm config set progress true
             npm config set fetch-retries 5
             npm config set fetch-retry-factor 2
             npm config set fetch-retry-mintimeout 20000
@@ -366,10 +366,46 @@ node(agentLabel) {
             if [ "${JENKINS_NPM_CI_PREFER_OFFLINE:-true}" != "false" ]; then
               OFFLINE_ARG="--prefer-offline"
             fi
+            LOCK_HASH=""
             if [ -f package-lock.json ]; then
-              npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
-            else
-              npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              if command -v sha256sum >/dev/null 2>&1; then
+                LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
+              else
+                LOCK_HASH=$(openssl dgst -sha256 package-lock.json 2>/dev/null | awk '{print $NF}')
+              fi
+            fi
+            NM_SNAP=""
+            if [ "${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${LOCK_HASH}" ] && [ -n "${PROJECT_ID:-}" ]; then
+              NM_SNAP="${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/${PROJECT_ID}/${LOCK_HASH}"
+            fi
+            DEPS_OK=0
+            if [ -n "${NM_SNAP}" ] && [ -d "${NM_SNAP}" ] && [ -n "$(ls -A "${NM_SNAP}" 2>/dev/null)" ]; then
+              echo "[build] node_modules snapshot hit → ${NM_SNAP}"
+              rm -rf node_modules
+              mkdir -p node_modules
+              cp -a "${NM_SNAP}/." node_modules/
+              if npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG; then
+                DEPS_OK=1
+                echo "[build] npm install from snapshot OK (skipped full npm ci)"
+              else
+                echo "[build] snapshot stale or incompatible; removing node_modules and running npm ci"
+                rm -rf node_modules
+              fi
+            fi
+            if [ "${DEPS_OK}" != "1" ]; then
+              if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              else
+                npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              fi
+            fi
+            if [ -n "${NM_SNAP}" ] && [ -f package-lock.json ] && [ -d node_modules ] && [ "${DEPS_OK}" != "1" ]; then
+              mkdir -p "$(dirname "${NM_SNAP}")"
+              rm -rf "${NM_SNAP}.new" "${NM_SNAP}"
+              mkdir -p "${NM_SNAP}.new"
+              cp -a node_modules/. "${NM_SNAP}.new/"
+              mv "${NM_SNAP}.new" "${NM_SNAP}"
+              echo "[build] node_modules snapshot saved → ${NM_SNAP}"
             fi
             if [ "${JENKINS_SKIP_NEXT_BUILD:-}" = "true" ]; then
               echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
