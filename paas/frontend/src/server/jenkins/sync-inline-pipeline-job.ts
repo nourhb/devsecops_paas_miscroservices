@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { env } from "@/server/config/env";
 import { IntegrationError } from "@/server/http/errors";
+import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-deploy-job-sync";
 
@@ -82,7 +83,12 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         });
         return `[jenkins-sync] OK (${trimmedJob})\n${out}`.trim();
     } catch (err: unknown) {
-        const detail = err instanceof Error ? err.message : String(err);
-        throw new IntegrationError(`Jenkins job sync failed:\n${detail}`);
+        const detail = formatFetchErrorChain(err);
+        const netLike =
+            /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|timed out|network|connect/i.test(detail);
+        const hint = netLike
+            ? " If you run the UI in Docker, JENKINS_BASE_URL must be reachable from inside the container (try http://host.docker.internal:<jenkins-port> on Docker Desktop or Linux with host-gateway, or the swarm ingress hostname), not only from your laptop."
+            : "";
+        throw new IntegrationError(`Jenkins job sync failed:\n${detail}${hint}`);
     }
 }
