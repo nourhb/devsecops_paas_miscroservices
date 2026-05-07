@@ -322,6 +322,7 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
         throw new IntegrationError(
             `Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
                 `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
+                `JENKINS_API_TOKEN must be a Jenkins **user API token** (Your name → Configure → API Token), not your login password. Regenerate the token if it was rotated. ` +
                 `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
                 `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`
         );
