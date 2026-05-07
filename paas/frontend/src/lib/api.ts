@@ -195,6 +195,10 @@ export const pipelineApi = {
     getDeployment: async (deploymentId: string) => {
         const { data } = await apiClient.get<DeploymentPollResponse>(`/api/deployments/${deploymentId}`);
         return data;
+    },
+    cancelDeployment: async (deploymentId: string) => {
+        const { data } = await apiClient.post<ActionResponse>(`/api/deployments/${deploymentId}/cancel`);
+        return data;
     }
 };
 export const metricsApi = {

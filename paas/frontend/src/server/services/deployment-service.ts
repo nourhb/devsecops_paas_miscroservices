@@ -10,6 +10,8 @@ import { ApiError, IntegrationError, NotFoundError } from "@/server/http/errors"
 import { assertProjectAccess, getProjectById, updateProject } from "@/server/projects/project-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
+import { reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
+import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 import type { ActionResponse, UserRole } from "@/types";
 function effectiveTriggerUserId(jwtUserId: string): string | null {
     const override = env.DEPLOYMENT_TRIGGER_USER_ID.trim();
@@ -170,6 +172,72 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
         deploymentId: deployment.id
     };
 }
+export async function cancelRunningDeploymentForUser(deploymentId: string, userId: string, role: UserRole): Promise<ActionResponse> {
+    const row = await prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        include: { project: true }
+    });
+    if (!row) {
+        throw new NotFoundError("Deployment not found");
+    }
+    await assertProjectAccess(row.projectId, userId, role, { includeDeleted: true });
+    if (row.status !== DeploymentJobStatus.PENDING && row.status !== DeploymentJobStatus.DEPLOYING) {
+        throw new ApiError(409, "This deployment is no longer active.", {
+            details: `Current status: ${row.status}`
+        });
+    }
+    if (getBuildBackend().provider !== "jenkins") {
+        throw new ApiError(501, "Stopping deployments from the portal requires Jenkins as the build backend.");
+    }
+    if (!env.JENKINS_BASE_URL?.trim()) {
+        throw new IntegrationError("Jenkins is not configured on this server.");
+    }
+    const { projectName, id: projectId } = row.project;
+    const baseline = row.priorJenkinsBuildNumber ?? null;
+    let buildNum = row.jenkinsBuildNumber;
+    const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
+    if (buildNum === null && summary && summary.building && (baseline === null || summary.number > baseline)) {
+        buildNum = summary.number;
+        await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: { jenkinsBuildNumber: buildNum }
+        });
+    }
+    const parts: string[] = [];
+    if (buildNum !== null) {
+        const meta = await jenkinsClient.getBuildApiJson(projectName, projectId, buildNum, "deploy");
+        if (meta?.building) {
+            const stopped = await jenkinsClient.stopBuild(projectName, projectId, buildNum, "deploy");
+            if (!stopped.ok) {
+                throw new IntegrationError("Jenkins did not accept the stop request.", {
+                    details: stopped.detail
+                });
+            }
+            parts.push(`Stopped Jenkins run #${buildNum}.`);
+        }
+        else {
+            parts.push(`Jenkins run #${buildNum} is not marked building (may have finished).`);
+        }
+    }
+    const queued = await jenkinsClient.cancelQueuedPipelineItems(projectName, projectId, "deploy");
+    if (queued.cancelled > 0) {
+        parts.push(queued.detail);
+    }
+    const append = `\n[paas] Cancel requested from portal. ${parts.join(" ")}`.trimEnd();
+    await prisma.deployment.update({
+        where: { id: deploymentId },
+        data: {
+            logs: `${(row.logs ?? "").trimEnd()}${append}`.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS)
+        }
+    });
+    await new Promise((r) => setTimeout(r, 1200));
+    await reconcileJenkinsDeploymentRecord(deploymentId);
+    return {
+        status: "SUCCESS",
+        message: parts.join(" ") || "Cancellation sent. Refreshing status from Jenkins.",
+        deploymentId
+    };
+}
 export async function getDeploymentForUser(deploymentId: string, userId: string, role: UserRole): Promise<DeploymentStatusPayload> {
     const row = await prisma.deployment.findUnique({
         where: { id: deploymentId },
@@ -179,19 +247,29 @@ export async function getDeploymentForUser(deploymentId: string, userId: string,
         throw new NotFoundError("Deployment not found");
     }
     await assertProjectAccess(row.projectId, userId, role, { includeDeleted: true });
-    const metadata = parseBuildMetadata(row.logs);
+    if (row.status === DeploymentJobStatus.PENDING || row.status === DeploymentJobStatus.DEPLOYING) {
+        await reconcileJenkinsDeploymentRecord(deploymentId);
+    }
+    const fresh = await prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        include: { project: true }
+    });
+    if (!fresh) {
+        throw new NotFoundError("Deployment not found");
+    }
+    const metadata = parseBuildMetadata(fresh.logs);
     return {
-        id: row.id,
-        projectId: row.projectId,
-        status: row.status,
-        logs: row.logs ?? "",
-        buildNumber: row.jenkinsBuildNumber,
+        id: fresh.id,
+        projectId: fresh.projectId,
+        status: fresh.status,
+        logs: fresh.logs ?? "",
+        buildNumber: fresh.jenkinsBuildNumber,
         buildProvider: metadata.provider ?? null,
-        buildRunId: metadata.runId ?? (row.jenkinsBuildNumber === null ? null : String(row.jenkinsBuildNumber)),
+        buildRunId: metadata.runId ?? (fresh.jenkinsBuildNumber === null ? null : String(fresh.jenkinsBuildNumber)),
         artifactImage: metadata.artifactImage ?? null,
         artifactDigest: metadata.artifactDigest ?? null,
-        url: resolveAppUrlForClient(row.project.projectName, row.url),
-        failureReason: row.failureReason,
-        failureMessage: row.failureMessage
+        url: resolveAppUrlForClient(fresh.project.projectName, fresh.url),
+        failureReason: fresh.failureReason,
+        failureMessage: fresh.failureMessage
     };
 }

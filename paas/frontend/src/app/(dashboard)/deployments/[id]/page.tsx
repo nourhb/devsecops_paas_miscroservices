@@ -1,14 +1,16 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, ClipboardList, ExternalLink, Hash, Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ArrowLeft, ChevronRight, ClipboardList, ExternalLink, Hash, Loader2, StopCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentLogsView, deploymentFailureStageLabel, jenkinsScmCloneFailureHint } from "@/components/deployments/deployment-logs-view";
 import { pipelineApi, projectApi } from "@/lib/api";
+import { queryHttpMessage } from "@/lib/query-http-message";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
     const s = status.toUpperCase();
     if (s === "SUCCESS" || s === "DEPLOYED") {
@@ -27,10 +29,26 @@ export default function DeploymentDetailPage() {
         id: string;
     }>();
     const deploymentId = params.id;
+    const queryClient = useQueryClient();
     const query = useQuery({
         queryKey: ["deployment", deploymentId],
         queryFn: () => pipelineApi.getDeployment(deploymentId),
-        refetchInterval: 5000
+        refetchInterval: (q) => {
+            const s = q.state.data?.status?.toUpperCase();
+            return s === "PENDING" || s === "DEPLOYING" ? 4000 : false;
+        }
+    });
+    const cancelMutation = useMutation({
+        mutationFn: () => pipelineApi.cancelDeployment(deploymentId),
+        onSuccess: (data) => {
+            void queryClient.invalidateQueries({ queryKey: ["deployment", deploymentId] });
+            void queryClient.invalidateQueries({ queryKey: ["project", query.data?.projectId] });
+            void queryClient.invalidateQueries({ queryKey: ["status", query.data?.projectId] });
+            toast.success(data.message || "Cancellation sent to Jenkins.");
+        },
+        onError: (e: unknown) => {
+            toast.error(queryHttpMessage(e, "Could not cancel deployment."));
+        }
     });
     const reachQuery = useQuery({
         queryKey: ["app-reachability", query.data?.projectId],
@@ -63,6 +81,7 @@ export default function DeploymentDetailPage() {
     }
     const d = query.data;
     const live = query.isFetching && !query.isLoading;
+    const canCancelJenkins = ["PENDING", "DEPLOYING"].includes(d.status.toUpperCase()) && (!d.buildProvider || d.buildProvider === "jenkins");
     const isFailed = d.status.toUpperCase() === "FAILED";
     const jenkinsHint = isFailed ? jenkinsScmCloneFailureHint(d.logs ?? "") : null;
     return (<div className="space-y-8">
@@ -86,7 +105,7 @@ export default function DeploymentDetailPage() {
           </div>
           <h1 className="font-mono text-xl font-semibold tracking-tight sm:text-2xl">{d.id}</h1>
           <p className="text-xs text-muted">
-            Auto-refresh every 5s
+            Auto-refresh while running (~4s); otherwise on focus
             {live ? (<span className="ml-2 inline-flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin"/>
                 Updating…
@@ -103,6 +122,10 @@ export default function DeploymentDetailPage() {
             Run {d.buildRunId ?? d.buildNumber ?? "—"}
           </Badge>
           {d.buildProvider ? <Badge variant="outline" className="h-9 px-3 py-1.5">{d.buildProvider}</Badge> : null}
+          {canCancelJenkins ? (<Button type="button" variant="outline" className="h-9 border-warning/40 text-warning hover:bg-warning/10" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
+              {cancelMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<StopCircle className="mr-2 h-4 w-4"/>)}
+              Cancel Jenkins run
+            </Button>) : null}
         </div>
       </header>
 
