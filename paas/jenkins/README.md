@@ -80,6 +80,8 @@ Set `JENKINS_DEPLOY_JOB_NAME=paas-deploy` (or your job name) and the same parame
 
 If Jenkins, Argo CD, SonarQube, Prometheus, Grafana, Nexus, Trivy, ZAP, etc. run as Swarm services with **published ports** on the manager, mirror those hostnames and ports in **`paas/frontend/.env`** (and root **`paas/.env`** if you use it). The Next server forwards integration settings to **`buildWithParameters`** (see **`appendRegistryParameters`** in `paas/frontend/src/server/integrations/devsecops-clients.ts`): e.g. **`SONAR_*`**, **`DEPENDENCY_TRACK_*`**, **`DOCKERHUB_*`**, **`HARBOR_*`**, **`ARTIFACTORY_*`**, **`HELM_OCI_*`**, **`NVD_API_KEY`**, credential IDs for Jenkins, etc.
 
+**OOM / task exit 137:** see **`swarm-jenkins.example.yml`** — set `deploy.resources.limits.memory` and matching **`JAVA_OPTS`** (`-Xmx` must stay well below the limit). Confirm with `dmesg | grep -i kill` on the node after a failure.
+
 **`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`** defaults to **`false`** in the app; set **`true`** in **`paas/frontend/.env`** (or `docker-compose.env`) so the server syncs the inline pipeline from **`Jenkinsfile.paas-deploy`** over the Jenkins REST API before each trigger (TypeScript in `paas/frontend/src/server/jenkins/`, no Python).
 
 ## Image tag
