@@ -307,7 +307,9 @@ node(agentLabel) {
          * set JENKINS_NPM_SNAPSHOT_NODE_MODULES=false to disable — saves disk, slower installs).
          * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
          * Next.js: npx next build --no-lint --webpack unless JENKINS_NEXT_BUILD_WEBPACK=false / USE_NPM_SCRIPT.
-         * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed. */
+         * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed.
+         * JENKINS-48300: long steps with little stdout ("wrapper script does not seem to be touching the log file",
+         * exit -1) — set JENKINS_SH_KEEPALIVE=true (default) or increase BourneShellScript.HEARTBEAT on the controller JVM. */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
@@ -358,6 +360,17 @@ node(agentLabel) {
             npm config set fetch-retry-maxtimeout 120000
             npm config set fetch-timeout 1800000
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
+            if [ "${JENKINS_SH_KEEPALIVE:-true}" != "false" ]; then
+              JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-120}"
+              (
+                while true; do
+                  sleep "${JENKINS_SH_KEEPALIVE_SEC}"
+                  echo "[build] (keepalive) long step still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                done
+              ) &
+              JENKINS_KEEPALIVE_PID=$!
+              trap 'kill "${JENKINS_KEEPALIVE_PID}" 2>/dev/null || true' EXIT
+            fi
             LOG_ARG=""
             if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
               LOG_ARG="--loglevel ${JENKINS_NPM_LOGLEVEL}"

@@ -3,6 +3,10 @@
 # Run all `docker compose` commands from THIS directory (paas/), not from paas/frontend/.
 # Otherwise Compose may auto-load paas/frontend/.env for interpolation and fail on multi-line PEM blocks.
 #
+# Typical hybrid lab: Swarm stack `my-stack` on the same host provides Jenkins :30090, Prometheus/Grafana,
+# Nexus, Sonar, Trivy :4954, etc. (`docker service ls`). This compose file adds `paas-frontend` :3000 and an
+# optional dedicated Postgres :5433 (`paas-postgres`) so the PaaS DB does not fight with `my-stack_postgres` on :5432.
+#
 # Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
 # run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@127.0.0.1:5433/paas in .env (host port).
 #
