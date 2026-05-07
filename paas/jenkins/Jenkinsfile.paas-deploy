@@ -308,9 +308,10 @@ node(agentLabel) {
          * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
          * Next.js: npx next build --no-lint --webpack unless JENKINS_NEXT_BUILD_WEBPACK=false / USE_NPM_SCRIPT.
          * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed.
-         * JENKINS-48300: long steps with little stdout ("wrapper script does not seem to be touching the log file",
-         * exit -1) — keepalive lines every JENKINS_SH_KEEPALIVE_SEC (default 60s; was 120) or set JENKINS_SH_KEEPALIVE=false,
-         * or increase BourneShellScript.HEARTBEAT on the controller JVM. Stage time is usually npm ci / next build + snapshot copy, not the sleep itself. */
+         * JENKINS-48300: long steps with little stdout → durable-task abort (exit -1). Background subshells
+         * may NOT refresh the wrapper log; run long commands via run_with_keepalive (foreground loop in THIS shell).
+         * Default interval JENKINS_SH_KEEPALIVE_SEC=60; JENKINS_SH_KEEPALIVE=false disables; JVM option
+         * BourneShellScript.HEARTBEAT_CHECK_INTERVAL still helps on slow FS / after controller restarts. */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
@@ -361,18 +362,25 @@ node(agentLabel) {
             npm config set fetch-retry-maxtimeout 120000
             npm config set fetch-timeout 1800000
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
-            if [ "${JENKINS_SH_KEEPALIVE:-true}" != "false" ]; then
-              JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
-              (
-                echo "[build] (keepalive) long step started $(date -u +%Y-%m-%dT%H:%M:%SZ) — then every ${JENKINS_SH_KEEPALIVE_SEC}s (JENKINS-48300; set JENKINS_SH_KEEPALIVE=false to disable)"
-                while true; do
-                  sleep "${JENKINS_SH_KEEPALIVE_SEC}"
-                  echo "[build] (keepalive) long step still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                done
-              ) &
-              JENKINS_KEEPALIVE_PID=$!
-              trap 'kill "${JENKINS_KEEPALIVE_PID}" 2>/dev/null || true' EXIT
-            fi
+            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
+            # Run long command in background; heartbeat from THIS shell (JENKINS-48300 — background echo is not enough).
+            run_with_keepalive() {
+              if [ "${JENKINS_SH_KEEPALIVE:-true}" = "false" ]; then
+                "$@"
+                return $?
+              fi
+              _rwk_sec="${JENKINS_SH_KEEPALIVE_SEC}"
+              "$@" &
+              _rwk_cmdpid=$!
+              echo "[build] (keepalive) subprocess pid=${_rwk_cmdpid} started $(date -u +%Y-%m-%dT%H:%M:%SZ) — main-shell heartbeat every ${_rwk_sec}s"
+              _rwk_n=0
+              while kill -0 "${_rwk_cmdpid}" 2>/dev/null; do
+                sleep "${_rwk_sec}"
+                _rwk_n=$((_rwk_n+1))
+                echo "[build] (keepalive #${_rwk_n}) pid=${_rwk_cmdpid} still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              done
+              wait "${_rwk_cmdpid}"
+            }
             LOG_ARG=""
             if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
               LOG_ARG="--loglevel ${JENKINS_NPM_LOGLEVEL}"
@@ -398,8 +406,8 @@ node(agentLabel) {
               echo "[build] node_modules snapshot hit → ${NM_SNAP}"
               rm -rf node_modules
               mkdir -p node_modules
-              cp -a "${NM_SNAP}/." node_modules/
-              if npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG; then
+              run_with_keepalive cp -a "${NM_SNAP}/." node_modules/
+              if run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG; then
                 DEPS_OK=1
                 echo "[build] npm install from snapshot OK (skipped full npm ci)"
               else
@@ -409,16 +417,16 @@ node(agentLabel) {
             fi
             if [ "${DEPS_OK}" != "1" ]; then
               if [ -f package-lock.json ]; then
-                npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+                run_with_keepalive npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
               else
-                npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+                run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
               fi
             fi
             if [ -n "${NM_SNAP}" ] && [ -f package-lock.json ] && [ -d node_modules ] && [ "${DEPS_OK}" != "1" ]; then
               mkdir -p "$(dirname "${NM_SNAP}")"
               rm -rf "${NM_SNAP}.new" "${NM_SNAP}"
               mkdir -p "${NM_SNAP}.new"
-              cp -a node_modules/. "${NM_SNAP}.new/"
+              run_with_keepalive cp -a node_modules/. "${NM_SNAP}.new/"
               mv "${NM_SNAP}.new" "${NM_SNAP}"
               echo "[build] node_modules snapshot saved → ${NM_SNAP}"
             fi
@@ -427,7 +435,7 @@ node(agentLabel) {
             else
               if node -e "const p=require('./package.json'); const s=p.scripts||{}; process.exit(s['build:ci']?0:1)"; then
                 echo "[build] npm run build:ci (script build:ci du dépôt)"
-                npm run build:ci
+                run_with_keepalive npm run build:ci
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS="--no-lint"
                 if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
@@ -441,10 +449,10 @@ node(agentLabel) {
                   echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
                 fi
                 echo "[build] npx next build $NB_FLAGS — Next.js 16: Turbopack par défaut est souvent lent en CI; --webpack + --no-lint (JENKINS_NEXT_BUILD_WEBPACK=false pour forcer Turbopack)"
-                npx next build $NB_FLAGS
+                run_with_keepalive npx next build $NB_FLAGS
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
-                npm run build
+                run_with_keepalive npm run build
               else
                 echo "[build] Pas de script build — skip."
               fi
