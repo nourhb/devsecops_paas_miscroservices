@@ -52,10 +52,10 @@ export default function DockerPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
-            {buildMutation.isPending ? "Building…" : "Build image"}
+            {buildMutation.isPending ? "Building\u2026" : "Build image"}
           </Button>
           <Button onClick={() => pushMutation.mutate()} disabled={pushMutation.isPending} variant="outline">
-            {pushMutation.isPending ? "Pushing…" : "Push to Docker Hub"}
+            {pushMutation.isPending ? "Pushing\u2026" : "Push to Docker Hub"}
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link href={`/pipeline/${projectId}`}>Pipeline</Link>
@@ -86,7 +86,7 @@ export default function DockerPage() {
                     <TableCell>{row.action}</TableCell>
                     <TableCell>{row.registry}</TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">{row.imageRef}</TableCell>
-                    <TableCell className="max-w-[140px] truncate font-mono text-xs">{row.digest ?? "—"}</TableCell>
+                    <TableCell className="max-w-[140px] truncate font-mono text-xs">{row.digest ?? "\u2014"}</TableCell>
                   </TableRow>))}
               </TableBody>
             </Table>)}

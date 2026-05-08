@@ -3,9 +3,7 @@ import { requireAuth } from "@/server/auth/auth-guard";
 import { summarizeBuildOutcome } from "@/server/integrations/build-hint-service";
 import { fail } from "@/server/http/response";
 import { enforceRateLimit } from "@/server/http/rate-limit";
-
 export const runtime = "nodejs";
-
 export async function POST(request: NextRequest) {
     try {
         await requireAuth(request, ["ADMIN", "DEVELOPER"]);
@@ -13,7 +11,7 @@ export async function POST(request: NextRequest) {
             keyPrefix: "build-hint-analyze",
             windowMs: 60000,
             maxRequests: 12,
-            message: "Too many log summaries—slow down for a minute.",
+            message: "Too many log summaries\u2014slow down for a minute.",
         });
         const payload = await request.json().catch(() => ({}));
         const result = await summarizeBuildOutcome(payload || {});

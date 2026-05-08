@@ -6,7 +6,11 @@ import { fail, ok } from "@/server/http/response";
 import { enforceRateLimit } from "@/server/http/rate-limit";
 import { triggerBuild } from "@/server/pipeline/pipeline-service";
 export const runtime = "nodejs";
-export async function POST(request: NextRequest, { params }: { params: { projectId: string } }) {
+export async function POST(request: NextRequest, { params }: {
+    params: {
+        projectId: string;
+    };
+}) {
     try {
         const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
         enforceRateLimit(request, {

@@ -1,1 +1,0 @@
-# devsecops_paas_miscroservices

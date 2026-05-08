@@ -105,7 +105,7 @@ function RecordStatusPill({ status }: {
             : s === "PENDING" || s === "DEPLOYING"
                 ? "warning"
                 : "neutral";
-    return <StatusPill label={status || "—"} tone={tone}/>;
+    return <StatusPill label={status || "\u2014"} tone={tone}/>;
 }
 function EmptyMessage({ children }: {
     children: React.ReactNode;
@@ -166,7 +166,6 @@ export default function ClusterPage() {
     const clusterConfigured = useMemo(() => Boolean(podsQuery.data?.configured || servicesQuery.data?.configured || deploymentsQuery.data?.configured), [deploymentsQuery.data?.configured, podsQuery.data?.configured, servicesQuery.data?.configured]);
     const clusterError = podsQuery.data?.error || servicesQuery.data?.error || deploymentsQuery.data?.error || "";
     const clusterConnected = clusterConfigured && !clusterError;
-    /** No usable Kubernetes API — we show platform projects instead of live cluster lists. */
     const useControlPlaneFallback = !clusterConnected;
     const projectList = projectsQuery.data ?? [];
     const useRollupStats = useControlPlaneFallback && projectList.length > 0;
@@ -247,19 +246,19 @@ export default function ClusterPage() {
     const recentList = recentDeploymentsQuery.data?.deployments ?? [];
     const platformLogText = useMemo(() => {
         if (recentDeploymentsQuery.isLoading) {
-            return "Loading recent deployments from the platform database…";
+            return "Loading recent deployments from the platform database\u2026";
         }
         if (!recentList.length) {
             return [
                 "No deployment records yet for your workspace.",
                 "",
                 "This is normal before the first build/deploy. Records appear when you:",
-                "  • Open Projects → choose an application → trigger Build or Deploy from Operations;",
-                "  • Wait for the Jenkins job to start — this app polls Jenkins and stores console output on the Deployment row.",
+                "  \u2022 Open Projects \u2192 choose an application \u2192 trigger Build or Deploy from Operations;",
+                "  \u2022 Wait for the Jenkins job to start \u2014 this app polls Jenkins and stores console output on the Deployment row.",
                 "",
                 "Useful links:",
-                "  • /projects — register or open apps",
-                "  • /projects/create — new repository wiring",
+                "  \u2022 /projects \u2014 register or open apps",
+                "  \u2022 /projects/create \u2014 new repository wiring",
                 "",
                 "Docker Swarm / plain Docker do not push pod logs into this UI; CI/CD logs from Jenkins are what you will see here until Kubernetes is configured."
             ].join("\n");
@@ -268,7 +267,7 @@ export default function ClusterPage() {
             return "Pick a deployment from the list above.";
         }
         if (platformDeploymentQuery.isLoading) {
-            return "Loading deployment details…";
+            return "Loading deployment details\u2026";
         }
         const p = platformDeploymentQuery.data;
         if (!p) {
@@ -294,14 +293,13 @@ export default function ClusterPage() {
         const buf = p.logs?.trim();
         lines.push(buf && buf.length > 0
             ? buf
-            : "(No log text stored on this row yet. If the job is still running, wait for the next poll; or click “Fetch Jenkins console” when a build number is attached.)");
+            : "(No log text stored on this row yet. If the job is still running, wait for the next poll; or click \u201CFetch Jenkins console\u201D when a build number is attached.)");
         if (jenkinsConsoleExtra) {
             lines.push("", "--- Live Jenkins consoleText (fetched on demand via API) ---", jenkinsConsoleExtra);
         }
         return lines.join("\n");
     }, [
         recentDeploymentsQuery.isLoading,
-        recentDeploymentsQuery.data,
         recentList.length,
         effectivePlatformLogId,
         platformDeploymentQuery.isLoading,
@@ -309,9 +307,9 @@ export default function ClusterPage() {
         selectedRecentMeta?.projectName,
         jenkinsConsoleExtra
     ]);
-    const podLogHint = "Select a pod in the table below and choose “View logs”, or use the platform CI/CD section for Jenkins output stored in this application.";
+    const podLogHint = "Select a pod in the table below and choose \u201CView logs\u201D, or use the platform CI/CD section for Jenkins output stored in this application.";
     const podLogBody = selectedPod
-        ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes…" : "No log lines returned for this pod/container yet.")
+        ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned for this pod/container yet.")
         : podLogHint;
     useEffect(() => {
         if (selectedPod) {
@@ -325,8 +323,8 @@ export default function ClusterPage() {
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes Control View</h2>
           <p className="mt-2 max-w-3xl text-sm text-muted">
             {useControlPlaneFallback
-                ? "Kubernetes is not connected. This page does not discover Docker Compose or Swarm services on a server by itself. You will see workload counts and rows only for projects registered here (with deploy status from your pipelines) unless you enable the Kubernetes API and kubeconfig."
-                : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
+            ? "Kubernetes is not connected. This page does not discover Docker Compose or Swarm services on a server by itself. You will see workload counts and rows only for projects registered here (with deploy status from your pipelines) unless you enable the Kubernetes API and kubeconfig."
+            : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -422,9 +420,9 @@ export default function ClusterPage() {
                 <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
                 <StatusPill label={selectedPod ? selectedPod.namespace : "Namespace"} tone="neutral"/>
                 {selectedPod?.containers.length ? (<select aria-label="Select pod container" value={selectedPod.container} onChange={(event) => setSelectedPod({
-                ...selectedPod,
-                container: event.target.value
-            })} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
+                    ...selectedPod,
+                    container: event.target.value
+                })} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
                     {selectedPod.containers.map((container) => <option key={container} value={container}>
                         {container}
                       </option>)}
@@ -501,16 +499,16 @@ export default function ClusterPage() {
                           {project.projectName}
                         </Link>
                       </td>
-                      <td className="py-3 pr-4">{project.namespace || "—"}</td>
+                      <td className="py-3 pr-4">{project.namespace || "\u2014"}</td>
                       <td className="py-3 pr-4"><RecordStatusPill status={project.lastDeploymentStatus}/></td>
                       <td className="py-3 pr-4"><RecordStatusPill status={project.podStatus}/></td>
                       <td className="py-3 pr-4"><RecordStatusPill status={project.buildStatus}/></td>
                       <td className="py-3">
                         {project.url?.trim()
-                          ? (<a href={project.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
+                        ? (<a href={project.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
                               Open
                             </a>)
-                          : "—"}
+                        : "\u2014"}
                       </td>
                     </tr>)}
                 </tbody>
@@ -557,11 +555,11 @@ export default function ClusterPage() {
                   <td className="py-3 pr-4">{formatTimestamp(pod.createdAt)}</td>
                   <td className="py-3">
                     <Button type="button" variant="outline" size="sm" onClick={() => setSelectedPod({
-                namespace: pod.namespace,
-                name: pod.name,
-                containers: pod.containers,
-                container: pod.containers[0] || ""
-            })}>
+                    namespace: pod.namespace,
+                    name: pod.name,
+                    containers: pod.containers,
+                    container: pod.containers[0] || ""
+                })}>
                       <FileText className="mr-2 h-4 w-4"/>
                       View logs
                     </Button>

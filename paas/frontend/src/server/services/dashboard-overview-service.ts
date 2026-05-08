@@ -9,11 +9,11 @@ function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.Project
     return role === "ADMIN" ? { deletedAt: null } : { createdById: userId, deletedAt: null };
 }
 export type DashboardClusterDataSource = "kubernetes" | "project_rollups" | "none";
-function rollUpClusterFromProjects(
-    projects: Array<{ lastDeploymentStatus: string; podStatus: string; url: string | null }>,
-    totalDeployments: number,
-    succeededDeployments: number
-): {
+function rollUpClusterFromProjects(projects: Array<{
+    lastDeploymentStatus: string;
+    podStatus: string;
+    url: string | null;
+}>, totalDeployments: number, succeededDeployments: number): {
     pods: number;
     runningPods: number;
     unhealthyPods: number;
@@ -98,7 +98,6 @@ export interface DashboardOverview {
         status: DeploymentJobStatus;
         createdAt: string;
     }[];
-    /** Kubernetes list metrics when connected; otherwise project/deployment rollups from the DB. */
     clusterDataSource: DashboardClusterDataSource;
 }
 const emptySeverity = {

@@ -7,15 +7,15 @@ import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 import { promoteDeploymentAfterJenkinsSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { updateProject } from "@/server/projects/project-service";
-
 function jenkinsConfigured(): boolean {
     return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
 }
-
-function terminalBuild(meta: { result: string | null; building: boolean }): boolean {
+function terminalBuild(meta: {
+    result: string | null;
+    building: boolean;
+}): boolean {
     return !meta.building && meta.result !== null;
 }
-
 function normalizeBuildNumber(reported: number | null, baseline: number | null): number | null {
     if (reported === null) {
         return null;
@@ -25,11 +25,6 @@ function normalizeBuildNumber(reported: number | null, baseline: number | null):
     }
     return reported;
 }
-
-/**
- * One-shot sync of a running deployment row against Jenkins (deploy job).
- * GET /api/deployments/:id calls this so the UI stays aligned with Jenkins even if the background poller lags.
- */
 export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Promise<void> {
     if (!jenkinsConfigured() || getBuildBackend().provider !== "jenkins") {
         return;
@@ -86,10 +81,9 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
         await promoteDeploymentAfterJenkinsSuccess(deploymentId, projectId, projectName, buildNum, logTail);
         return;
     }
-    const msg =
-        meta.result === "ABORTED"
-            ? "Jenkins pipeline was cancelled or aborted."
-            : `Build backend finished with result: ${meta.result ?? "UNKNOWN"}`;
+    const msg = meta.result === "ABORTED"
+        ? "Jenkins pipeline was cancelled or aborted."
+        : `Build backend finished with result: ${meta.result ?? "UNKNOWN"}`;
     await recordDeploymentFailure(deploymentId, projectId, {
         reason: DeploymentFailureReason.JENKINS,
         message: msg,

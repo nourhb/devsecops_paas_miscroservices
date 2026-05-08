@@ -1,6 +1,3 @@
-/**
- * Format `fetch` / undici errors so UI logs are actionable (root cause is often on `error.cause`).
- */
 export function formatFetchErrorChain(error: unknown): string {
     if (!(error instanceof Error)) {
         return String(error);
@@ -17,12 +14,14 @@ export function formatFetchErrorChain(error: unknown): string {
             cur = "cause" in cur ? cur.cause : undefined;
         }
         else if (typeof cur === "object" && cur !== null && "message" in cur) {
-            parts.push(String((cur as { message: unknown }).message));
+            parts.push(String((cur as {
+                message: unknown;
+            }).message));
             break;
         }
         else {
             break;
         }
     }
-    return parts.join(" — ");
+    return parts.join(" \u2014 ");
 }

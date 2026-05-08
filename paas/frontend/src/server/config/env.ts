@@ -42,17 +42,13 @@ const envSchema = z.object({
     JENKINS_DEPLOY_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
-    /** Sync inline `paas/jenkins/Jenkinsfile.paas-deploy` into Jenkins before UI/API build & deploy triggers (requires monorepo layout when not disabled). */
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
-    /** Absolute path to monorepo root (contains `paas/jenkins/Jenkinsfile.paas-deploy`). Optional when `process.cwd()` is inside the repo. */
     PAAS_MONOREPO_ROOT: z.string().default(""),
-    /** Registry host:port for Jenkins/crane/docker (optional; else derived from HARBOR_BASE_URL / HARBOR_URL). */
     HARBOR_REGISTRY: z.string().default(""),
     HARBOR_BASE_URL: z.string().default(""),
     HARBOR_USERNAME: z.string().default(""),
     HARBOR_PASSWORD: z.string().default(""),
     HARBOR_PROJECT: z.string().default("paas"),
-    /** Helm OCI project segment (e.g. Harbor project for `helm push oci://...`). */
     HELM_OCI_PROJECT: z.string().default("paas"),
     HELM_OCI_INSECURE: z.enum(["true", "false"]).default("false"),
     HELM_OCI_PLAIN_HTTP: z.enum(["true", "false"]).default("false"),
@@ -61,11 +57,8 @@ const envSchema = z.object({
     ARTIFACTORY_USERNAME: z.string().default(""),
     ARTIFACTORY_PASSWORD: z.string().default(""),
     ARTIFACTORY_ACCESS_TOKEN: z.string().default(""),
-    /** Jenkins credentialsId for Artifactory basic auth (optional). */
     ARTIFACTORY_CREDENTIALS_ID: z.string().default(""),
-    /** Jenkins secret file credential id for Cosign private key (optional). */
     COSIGN_CREDENTIALS_ID: z.string().default(""),
-    /** Optional NVD API key for OWASP Dependency-Check on the Jenkins agent. */
     NVD_API_KEY: z.string().default(""),
     DEPLOY_IMAGE_NAME_TEMPLATE: z.string().default(""),
     DEPLOY_BRANCH_FALLBACK: z.string().default("main"),
@@ -74,7 +67,6 @@ const envSchema = z.object({
     BUILD_TEMPLATE_VERSION: z.string().default("v1"),
     BUILD_REGISTRY_MIRROR: z.string().default(""),
     BUILD_PACKAGE_PROXY_URL: z.string().default(""),
-    /** Passed to Jenkins as NPM_CONFIG_REGISTRY (Verdaccio / mirror); empty uses npm default. */
     BUILD_NPM_REGISTRY: z.string().default(""),
     BUILD_ENFORCE_ARTIFACT_DIGEST: z.enum(["true", "false"]).default("false"),
     TEKTON_API_VERSION: z.string().default("v1beta1"),
@@ -97,7 +89,6 @@ const envSchema = z.object({
     PROMETHEUS_QUERY_MEMORY: z.string().default(""),
     TRIVY_BASE_URL: z.string().default(""),
     TRIVY_AUTH_TOKEN: z.string().default(""),
-    /** DAST: optional URL for Jenkins OWASP ZAP baseline (buildWithParameters). */
     ZAP_TARGET_URL: z.string().default(""),
     COSIGN_ENFORCE_SIGNED: z.enum(["true", "false"]).default("true"),
     OPA_ENFORCE_SIGNED: z.enum(["true", "false"]).default("true"),
@@ -124,10 +115,6 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
-    /**
-     * When false, production boot skips mandatory Argo CD + GitOps env checks (Jenkins-only / lab installs).
-     * Keep true for full platform deployments.
-     */
     PAAS_STRICT_INTEGRATIONS: z.enum(["true", "false"]).default("true")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
@@ -152,7 +139,6 @@ function resolvedHarborRegistryHost(): string {
     }
     return harborRegistryHostFromBase();
 }
-/** Compose/dotenv often store PEM as one line with literal `\n` sequences. */
 function pemFromEnv(raw: string): string {
     return String(raw)
         .trim()
@@ -330,6 +316,6 @@ if (!parsed.success) {
 }
 const productionErrors = collectProductionEnvErrors(parsed.data);
 if (productionErrors.length > 0) {
-    throw new Error(`prod env: ${productionErrors.join(" · ")}`);
+    throw new Error(`prod env: ${productionErrors.join(" \u00B7 ")}`);
 }
 export const env = parsed.data;

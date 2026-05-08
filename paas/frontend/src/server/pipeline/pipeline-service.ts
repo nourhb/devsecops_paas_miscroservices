@@ -98,7 +98,7 @@ export async function getProjectStatus(projectId: string): Promise<DeploymentSta
             podStatus = "Success (post-build promotion)";
         }
         else {
-            podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "Kubernetes disabled — pod health from cluster unavailable";
+            podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "Kubernetes disabled \u2014 pod health from cluster unavailable";
         }
     }
     return { ...base, podStatus };

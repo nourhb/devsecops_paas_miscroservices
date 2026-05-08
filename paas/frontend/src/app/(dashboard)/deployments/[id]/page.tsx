@@ -119,7 +119,7 @@ export default function DeploymentDetailPage() {
           </Badge>
           <Badge variant="outline" className="h-9 gap-1.5 px-3 py-1.5 font-mono text-xs">
             <Hash className="h-3.5 w-3.5"/>
-            Run {d.buildRunId ?? d.buildNumber ?? "—"}
+            Run {d.buildRunId ?? d.buildNumber ?? "\u2014"}
           </Badge>
           {d.buildProvider ? <Badge variant="outline" className="h-9 px-3 py-1.5">{d.buildProvider}</Badge> : null}
           {canCancelJenkins ? (<Button type="button" variant="outline" className="h-9 border-warning/40 text-warning hover:bg-warning/10" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
@@ -138,7 +138,7 @@ export default function DeploymentDetailPage() {
                     {deploymentFailureStageLabel(d.failureReason)}
                   </span>
                   {d.failureMessage ? (<>
-                      {" — "}
+                      {" \u2014 "}
                       <span className="text-foreground/90">{d.failureMessage}</span>
                     </>) : null}
                 </>) : d.failureMessage ? (<span className="text-foreground/90">{d.failureMessage}</span>) : ("See console output below for details.")}
@@ -171,7 +171,7 @@ export default function DeploymentDetailPage() {
                     : reachQuery.data.error === "no_url"
                         ? "No URL on project"
                         : reachQuery.data.error === "synthetic_local"
-                            ? ".local URL — not probed in simulation (use real cluster DNS in prod)"
+                            ? ".local URL \u2014 not probed in simulation (use real cluster DNS in prod)"
                             : "Probe failed / timeout"}
               </Badge>) : reachQuery.isFetching ? (<Badge variant="outline">Probing…</Badge>) : null}
           </CardContent>

@@ -1,30 +1,12 @@
-# Development-only compose stack. Production uses Kubernetes plus managed or operator-backed PostgreSQL.
-#
-# Run all `docker compose` commands from THIS directory (paas/), not from paas/frontend/.
-# Otherwise Compose may auto-load paas/frontend/.env for interpolation and fail on multi-line PEM blocks.
-#
-# Jenkins / API secrets for `paas-frontend`: put them in `frontend/docker-compose.env` and/or `paas/.env`.
-# The service loads both (later file wins for duplicate keys). `paas/.env` is optional and is not committed.
-#
-# Typical hybrid lab: Swarm stack `my-stack` on the same host provides Jenkins :30090, Prometheus/Grafana,
-# Nexus, Sonar, Trivy :4954, etc. (`docker service ls`). This compose file adds `paas-frontend` :3000 and an
-# optional dedicated Postgres :5433 (`paas-postgres`) so the PaaS DB does not fight with `my-stack_postgres` on :5432.
-#
-# Postgres: DB paas, user postgres, password root. If an old volume was created with user `paas`,
-# run `docker compose down -v` (wipes data) or keep using postgresql://paas:paas@127.0.0.1:5433/paas in .env (host port).
-#
-# `db-push` applies Prisma schema so tables like "User" exist before the app starts.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: paas-postgres
-    # English errors so Prisma parses "column does not exist" correctly (French "colonne" breaks Prisma P2022).
     command: ["postgres", "-c", "lc_messages=C"]
     environment:
       POSTGRES_DB: paas
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: root
-    # Host 5433 avoids clashing with a Postgres already bound on the VM (common on dev boxes).
     ports:
       - "5433:5432"
     volumes:
@@ -39,7 +21,6 @@ services:
     build:
       context: .
       dockerfile: docker/prisma-db-push.Dockerfile
-      # Linux VM: use host DNS for `apk`/`npm` during build when bridge DNS fails (e.g. transient APKINDEX errors).
       network: host
     container_name: paas-db-push
     environment:
@@ -61,28 +42,21 @@ services:
       db-push:
         condition: service_completed_successfully
     env_file:
-      # Primary: tracked example → copy to this path. Jenkins sync reads these inside the container (not paas/../frontend/.env).
       - path: frontend/docker-compose.env
         required: true
-      # Optional: same directory as this compose file — put secrets here on the VM (`paas/.env`) so they override docker-compose.env.
       - path: .env
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
-      # Dev compose is often Jenkins-only with self-signed Argo; strict prod checks require real GitOps + TLS.
       PAAS_STRICT_INTEGRATIONS: "false"
-      # Shared Jenkins pipeline job name. Without this, the UI targets job/<projectSlug> while Jenkins may only define `paas-deploy`.
       JENKINS_BUILD_JOB_NAME: paas-deploy
       JENKINS_DEPLOY_JOB_NAME: paas-deploy
-      # Repo mount so inline job sync (TypeScript) can read Jenkinsfile before each trigger.
       PAAS_MONOREPO_ROOT: /monorepo
       JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: "true"
-    # Set JENKINS_BASE_URL to the same host as Jenkins "Jenkins URL" (not 172.18.0.1 if that mismatches — HTTP 403).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Read-only monorepo root (parent of `paas/`). Required for Jenkins pre-trigger sync from the container.
       - ..:/monorepo:ro
     ports:
       - "3000:3000"

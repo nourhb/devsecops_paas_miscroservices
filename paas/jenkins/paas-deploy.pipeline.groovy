@@ -272,7 +272,6 @@ sonar-scanner \
 '''
         }
 
-        // Enforce SonarQube Quality Gate (without relying on Jenkins SonarQube plugin).
         container('curl') {
           sh '''set -eu
 if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then

@@ -33,7 +33,7 @@ function zodErrorMessage(error: z.ZodError): string {
     const fieldParts = Object.entries(flat.fieldErrors)
         .flatMap(([key, msgs]) => (msgs?.length ? msgs.map((m) => `${key}: ${m}`) : []))
         .join("; ");
-    return [root, fieldParts].filter(Boolean).join(" — ") || "Invalid request";
+    return [root, fieldParts].filter(Boolean).join(" \u2014 ") || "Invalid request";
 }
 const registerSchema = z.object({
     fullName: z.string().trim().min(2).max(120),

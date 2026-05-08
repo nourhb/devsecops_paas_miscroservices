@@ -36,8 +36,7 @@ export async function recordDeploymentFailure(deploymentId: string, projectId: s
             failureMessage
         }
     });
-    const failedDuringJenkinsRun =
-        options.reason === DeploymentFailureReason.JENKINS ||
+    const failedDuringJenkinsRun = options.reason === DeploymentFailureReason.JENKINS ||
         options.reason === DeploymentFailureReason.TIMEOUT ||
         options.reason === DeploymentFailureReason.TRIGGER ||
         options.reason === DeploymentFailureReason.UNKNOWN;

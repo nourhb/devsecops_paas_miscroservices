@@ -16,9 +16,6 @@ function resolveToken(request: NextRequest) {
     }
     return request.cookies.get(getSessionCookieName())?.value?.trim() || "";
 }
-/**
- * Verifies JWT then ensures the user row still exists (avoids FK errors after DB reset while the browser keeps an old session).
- */
 export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[]): Promise<AuthContext> {
     const token = resolveToken(request);
     if (!token) {
@@ -28,9 +25,7 @@ export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[
         const payload = verifyToken(token);
         const user = await getAuthUserById(payload.userId);
         if (!user) {
-            throw new UnauthorizedError(
-                "Your session is no longer valid (account missing—often after a database reset). Sign out and sign in again."
-            );
+            throw new UnauthorizedError("Your session is no longer valid (account missing\u2014often after a database reset). Sign out and sign in again.");
         }
         const role = user.role as UserRole;
         if (allowedRoles && !allowedRoles.includes(role)) {

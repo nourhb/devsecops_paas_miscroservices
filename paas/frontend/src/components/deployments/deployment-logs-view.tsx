@@ -10,7 +10,7 @@ export function jenkinsScmCloneFailureHint(logs: string): string | null {
     if (L.includes("[checkout]")) {
         return null;
     }
-    return "Jenkins failed while cloning the repository configured for Pipeline from SCM (the script that defines the job). That runs before PaaS sends GIT_URL or project Git credentials. Fix: use an inline pipeline script in Jenkins, or fix that SCM repo URL and credentials. If you ever see a [checkout] line above the error, the problem is cloning the app repo instead—set Git credentials (Jenkins) on the PaaS project.";
+    return "Jenkins failed while cloning the repository configured for Pipeline from SCM (the script that defines the job). That runs before PaaS sends GIT_URL or project Git credentials. Fix: use an inline pipeline script in Jenkins, or fix that SCM repo URL and credentials. If you ever see a [checkout] line above the error, the problem is cloning the app repo instead\u2014set Git credentials (Jenkins) on the PaaS project.";
 }
 export function DeploymentLogsView({ logs, failed }: {
     logs: string;
