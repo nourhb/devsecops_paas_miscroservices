@@ -3,8 +3,8 @@ import { prisma } from "@/server/db/prisma";
 import { listClusterDeployments, listClusterPods, listClusterServices } from "@/server/integrations/kubernetes-client";
 import { listPlatformArtifacts } from "@/server/artifacts/artifact-service";
 import { getPlatformTooling } from "@/server/platform/platform-tooling";
-import { cosignClient, dependencyTrackClient, trivyClient } from "@/server/integrations/devsecops-clients";
-import type { ArtifactRecord, PlatformToolGroup, UserRole } from "@/types";
+import { getSecurityMetrics } from "@/server/security/security-service";
+import type { ArtifactRecord, PlatformToolGroup, SeverityBreakdown, UserRole } from "@/types";
 function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.ProjectWhereInput {
     return role === "ADMIN" ? { deletedAt: null } : { createdById: userId, deletedAt: null };
 }
@@ -67,8 +67,26 @@ export interface DashboardOverview {
         score: number;
         critical: number;
         high: number;
+        medium: number;
+        low: number;
         unsignedImages: number;
         policyBlocked: number;
+        dependencyTrack: SeverityBreakdown;
+        trivy: SeverityBreakdown;
+        sonar: {
+            passed: number;
+            failed: number;
+            unknown: number;
+        };
+        opa: {
+            violationCount: number;
+            projectsWithViolations: number;
+            projectsWithPolicyGap: number;
+        };
+        kyverno: {
+            projectsWithPolicyGap: number;
+        };
+        sampledProjects: number;
     };
     artifacts: ArtifactRecord[];
     platformTools: PlatformToolGroup[];
@@ -100,33 +118,101 @@ export interface DashboardOverview {
     }[];
     clusterDataSource: DashboardClusterDataSource;
 }
-const emptySeverity = {
+const emptySeverity: SeverityBreakdown = {
     critical: 0,
     high: 0,
     medium: 0,
     low: 0
 };
-async function safeProjectSecurity(project: {
-    projectName: string;
-    imageTag: string | null;
-}): Promise<{
-    critical: number;
-    high: number;
-    unsigned: boolean;
-}> {
-    const imageRef = project.imageTag || project.projectName;
-    const [trivyResult, dependencyTrackResult, cosignResult] = await Promise.allSettled([
-        trivyClient.scan(imageRef),
-        dependencyTrackClient.projectMetrics(project.projectName),
-        project.imageTag ? cosignClient.isSigned(project.imageTag) : Promise.resolve(true)
-    ]);
-    const trivy = trivyResult.status === "fulfilled" ? trivyResult.value : emptySeverity;
-    const dependencyTrack = dependencyTrackResult.status === "fulfilled" ? dependencyTrackResult.value.metrics : emptySeverity;
-    const signed = cosignResult.status === "fulfilled" ? cosignResult.value : true;
+const SECURITY_SAMPLE_LIMIT = 12;
+function sumSeverity(a: SeverityBreakdown, b: SeverityBreakdown): SeverityBreakdown {
     return {
-        critical: trivy.critical + dependencyTrack.critical,
-        high: trivy.high + dependencyTrack.high,
-        unsigned: !signed
+        critical: a.critical + b.critical,
+        high: a.high + b.high,
+        medium: a.medium + b.medium,
+        low: a.low + b.low
+    };
+}
+async function rollupSecurityForDashboard(projectIds: string[]): Promise<DashboardOverview["security"]> {
+    if (projectIds.length === 0) {
+        return {
+            score: 100,
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            unsignedImages: 0,
+            policyBlocked: 0,
+            dependencyTrack: { ...emptySeverity },
+            trivy: { ...emptySeverity },
+            sonar: { passed: 0, failed: 0, unknown: 0 },
+            opa: { violationCount: 0, projectsWithViolations: 0, projectsWithPolicyGap: 0 },
+            kyverno: { projectsWithPolicyGap: 0 },
+            sampledProjects: 0
+        };
+    }
+    const metricsList = await Promise.all(projectIds.map((id) => getSecurityMetrics(id)));
+    let dtSum = { ...emptySeverity };
+    let trivySum = { ...emptySeverity };
+    let scoreSum = 0;
+    let unsignedImages = 0;
+    let policyBlocked = 0;
+    const sonar = { passed: 0, failed: 0, unknown: 0 };
+    let opaViolationCount = 0;
+    let opaProjectsWithViolations = 0;
+    let opaPolicyGap = 0;
+    let kyvernoGap = 0;
+    for (const m of metricsList) {
+        dtSum = sumSeverity(dtSum, m.dependencyTrack);
+        trivySum = sumSeverity(trivySum, m.trivy);
+        scoreSum += m.securityScore;
+        if (!m.cosignSigned) {
+            unsignedImages += 1;
+        }
+        if (!m.securityEnforcement?.deploymentAllowed) {
+            policyBlocked += 1;
+        }
+        const q = String(m.qualityGateStatus || "").toUpperCase();
+        if (q === "PASSED") {
+            sonar.passed += 1;
+        }
+        else if (q === "FAILED") {
+            sonar.failed += 1;
+        }
+        else {
+            sonar.unknown += 1;
+        }
+        if (m.opaViolations > 0) {
+            opaProjectsWithViolations += 1;
+            opaViolationCount += m.opaViolations;
+        }
+        const engine = m.securityEnforcement?.policyEngine;
+        if (engine === "Kyverno" && m.securityEnforcement && !m.securityEnforcement.policyValidated) {
+            kyvernoGap += 1;
+        }
+        if (engine === "OPA" && m.securityEnforcement && !m.securityEnforcement.policyValidated) {
+            opaPolicyGap += 1;
+        }
+    }
+    const n = metricsList.length;
+    return {
+        score: n === 0 ? 100 : Math.max(0, Math.min(100, Math.round(scoreSum / n))),
+        critical: dtSum.critical + trivySum.critical,
+        high: dtSum.high + trivySum.high,
+        medium: dtSum.medium + trivySum.medium,
+        low: dtSum.low + trivySum.low,
+        unsignedImages,
+        policyBlocked,
+        dependencyTrack: dtSum,
+        trivy: trivySum,
+        sonar,
+        opa: {
+            violationCount: opaViolationCount,
+            projectsWithViolations: opaProjectsWithViolations,
+            projectsWithPolicyGap: opaPolicyGap
+        },
+        kyverno: { projectsWithPolicyGap: kyvernoGap },
+        sampledProjects: n
     };
 }
 export async function getDashboardOverview(userId: string, role: UserRole): Promise<DashboardOverview> {
@@ -169,8 +255,16 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
                 score: 100,
                 critical: 0,
                 high: 0,
+                medium: 0,
+                low: 0,
                 unsignedImages: 0,
-                policyBlocked: 0
+                policyBlocked: 0,
+                dependencyTrack: { ...emptySeverity },
+                trivy: { ...emptySeverity },
+                sonar: { passed: 0, failed: 0, unknown: 0 },
+                opa: { violationCount: 0, projectsWithViolations: 0, projectsWithPolicyGap: 0 },
+                kyverno: { projectsWithPolicyGap: 0 },
+                sampledProjects: 0
             },
             artifacts: [],
             platformTools: [],
@@ -263,13 +357,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
         };
         clusterDataSource = "project_rollups";
     }
-    const securitySamples = await Promise.all(projects.slice(0, 10).map((project) => safeProjectSecurity(project)));
-    const critical = securitySamples.reduce((total, row) => total + row.critical, 0);
-    const high = securitySamples.reduce((total, row) => total + row.high, 0);
-    const unsignedImages = securitySamples.filter((row) => row.unsigned).length;
-    const policyBlocked = projects.filter((project) => project.lastDeploymentStatus === "FAILED" || project.podStatus === "FAILED").length;
-    const securityPenalty = critical * 15 + high * 5 + unsignedImages * 8 + policyBlocked * 5;
-    const securityScore = Math.max(0, Math.min(100, 100 - securityPenalty));
+    const securityRollup = await rollupSecurityForDashboard(projectIds.slice(0, SECURITY_SAMPLE_LIMIT));
     return {
         stats: {
             totalProjects,
@@ -283,13 +371,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
             degradedTools
         },
         cluster,
-        security: {
-            score: securityScore,
-            critical,
-            high,
-            unsignedImages,
-            policyBlocked
-        },
+        security: securityRollup,
         artifacts: artifactsPayload.artifacts.slice(0, 8),
         platformTools: tooling.groups,
         projects: projects.slice(0, 10).map((project) => ({

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, LayoutGrid, Loader2, Package, Percent, Plus, Rocket, Shield, ServerCog } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,8 +110,32 @@ export default function DashboardPage() {
     const securityChartData = [
         { name: "Critical", value: security?.critical ?? 0, fill: chartColors.danger },
         { name: "High", value: security?.high ?? 0, fill: chartColors.warning },
+        { name: "Medium", value: security?.medium ?? 0, fill: "#eab308" },
+        { name: "Low", value: security?.low ?? 0, fill: chartColors.success },
         { name: "Unsigned", value: security?.unsignedImages ?? 0, fill: chartColors.info },
-        { name: "Blocked", value: security?.policyBlocked ?? 0, fill: chartColors.muted }
+        { name: "Not allowed", value: security?.policyBlocked ?? 0, fill: chartColors.muted }
+    ];
+    const scanCompareData = [
+        { severity: "Critical", dt: security?.dependencyTrack.critical ?? 0, trivy: security?.trivy.critical ?? 0 },
+        { severity: "High", dt: security?.dependencyTrack.high ?? 0, trivy: security?.trivy.high ?? 0 },
+        { severity: "Medium", dt: security?.dependencyTrack.medium ?? 0, trivy: security?.trivy.medium ?? 0 },
+        { severity: "Low", dt: security?.dependencyTrack.low ?? 0, trivy: security?.trivy.low ?? 0 }
+    ];
+    const sonarPassed = security?.sonar.passed ?? 0;
+    const sonarFailed = security?.sonar.failed ?? 0;
+    const sonarUnknown = security?.sonar.unknown ?? 0;
+    const sonarGateData = [
+        { name: "Passed", value: sonarPassed, fill: chartColors.success },
+        { name: "Failed", value: sonarFailed, fill: chartColors.danger },
+        { name: "Unknown", value: sonarUnknown, fill: chartColors.muted }
+    ];
+    const sonarGateHasSignal = sonarPassed + sonarFailed + sonarUnknown > 0;
+    const policySignalData = [
+        { name: "Cosign unsigned", value: security?.unsignedImages ?? 0, fill: chartColors.info },
+        { name: "Deploy blocked", value: security?.policyBlocked ?? 0, fill: chartColors.danger },
+        { name: "Kyverno gap", value: security?.kyverno.projectsWithPolicyGap ?? 0, fill: "#a855f7" },
+        { name: "OPA policy gap", value: security?.opa.projectsWithPolicyGap ?? 0, fill: "#6366f1" },
+        { name: "OPA violations", value: security?.opa.violationCount ?? 0, fill: chartColors.warning }
     ];
     const toolHealthChartData = [
         { name: "Live", value: stats?.liveTools ?? 0, fill: chartColors.success, dotClassName: "bg-success" },
@@ -227,27 +251,80 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-xl border-border/70 shadow-sm">
+        <Card className="rounded-xl border-border/70 shadow-sm xl:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Security risk</CardTitle>
-            <CardDescription>Open findings and policy signals summarized by severity.</CardDescription>
+            <CardTitle className="text-base">Security posture (live tool data)</CardTitle>
+            <CardDescription>
+              Rolled up from the same SonarQube, Dependency-Track, Trivy, Cosign, OPA, and Kyverno calls as the project Security page, across up to {security?.sampledProjects ?? 0} recent projects.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            {securityChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="No security findings in the sample">
-                The overview scans a subset of projects with Trivy, Dependency-Track, and cosign signals. Zero can mean tools are not configured, images are clean, or sampled projects have no artifacts yet. Open Integrations to verify tool URLs.
-              </ChartEmptyState>) : (<div className="h-[240px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={securityChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
-                  <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
-                  <YAxis type="category" dataKey="name" width={72} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
-                  <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.25)" }} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
-                  <Bar dataKey="value" radius={[0, 8, 8, 0]}>
-                    {securityChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>)}
+          <CardContent className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">All findings (SCA + image scan)</p>
+              {securityChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="No counted findings yet">
+                  Zeros usually mean scanners are not configured, returned no vulnerabilities for the sampled image refs, or projects lack image tags. Configure tool URLs under Integrations / env and open a project Security tab to verify per-project responses.
+                </ChartEmptyState>) : (<div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={securityChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
+                    <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
+                    <YAxis type="category" dataKey="name" width={88} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
+                    <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.25)" }} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                    <Bar dataKey="value" radius={[0, 8, 8, 0]}>
+                      {securityChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>)}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Dependency-Track vs Trivy by severity</p>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={scanCompareData} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
+                    <XAxis dataKey="severity" tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
+                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                    <Legend wrapperStyle={{ fontSize: 12 }}/>
+                    <Bar dataKey="dt" name="Dependency-Track" fill="#0ea5e9" radius={[6, 6, 0, 0]}/>
+                    <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">SonarQube quality gate (projects sampled)</p>
+              {(!sonarGateHasSignal || (security?.sampledProjects ?? 0) === 0) ? (<ChartEmptyState title="No Sonar gate results">
+                  With tools configured, each sampled project reports PASSED, FAILED, or UNKNOWN. UNKNOWN usually means Sonar is not configured or the project key did not match.
+                </ChartEmptyState>) : (<div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={sonarGateData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={80} paddingAngle={2}>
+                      {sonarGateData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                    </Pie>
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                    <Legend wrapperStyle={{ fontSize: 12 }}/>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>)}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Signing & policy (Cosign / OPA / Kyverno)</p>
+              <div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={policySignalData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
+                    <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
+                    <YAxis type="category" dataKey="name" width={120} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                    <Bar dataKey="value" radius={[0, 8, 8, 0]}>
+                      {policySignalData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -296,7 +373,9 @@ export default function DashboardPage() {
             <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Security</p>
               <p className="mt-2 text-2xl font-semibold">{security?.critical ?? 0} critical</p>
-              <p className="text-xs text-muted">{security?.high ?? 0} high · {security?.unsignedImages ?? 0} unsigned images</p>
+              <p className="text-xs text-muted">
+                {security?.high ?? 0} high · Sonar fail {security?.sonar.failed ?? 0} · {security?.unsignedImages ?? 0} unsigned · Kyverno gaps {security?.kyverno.projectsWithPolicyGap ?? 0}
+              </p>
             </div>
             <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Delivery</p>
