@@ -274,7 +274,7 @@ Base URL is the same origin as the UI (e.g. `http://host:3000`). Below, **`[id]`
 |------|------|
 | `GET|POST /api/projects` | List / create |
 | `GET|PATCH|DELETE /api/project/[projectId]` | Single project CRUD-style |
-| `GET /api/projects/detect-language` | Repo heuristic |
+| `POST /api/projects/detect-language` | Repo heuristic (JSON: `gitRepositoryUrl`, optional `branch`) |
 | `GET /api/status/[projectId]` | Aggregate status (`getProjectStatus` → K8s overlay + project row) |
 | `GET /api/projects/[id]/deployments`, `GET /api/projects/[id]/app-reachability` | History / HTTP probe to app URL |
 
@@ -443,6 +443,118 @@ sequenceDiagram
 | Main Jenkins pipeline | `paas/jenkins/Jenkinsfile.paas-deploy` |
 | Prisma schema | `paas/frontend/prisma/schema.prisma` |
 | Client API wrapper | `paas/frontend/src/lib/api.ts` |
+
+---
+
+## 26. How to find things in the code (navigation)
+
+- **UI page for a project** → `paas/frontend/src/app/(dashboard)/projects/[id]/page.tsx` — this is the richest example of **React Query** keys, **mutations** (build / deploy / rollback), and **invalidation** after success.
+- **“What happens when I hit this API?”** → `paas/frontend/src/app/api/<segment>/.../route.ts` — export `GET` / `POST` / `PATCH` / `DELETE` matching the HTTP verb.
+- **Business logic not tied to HTTP** → `paas/frontend/src/server/**` — prefer reading **services** (`deployment-service`, `cluster-deploy-service`) and **pipeline** (`pipeline-service`) before diving into `devsecops-clients`.
+- **Env names and defaults** → single source: `src/server/config/env.ts` (Zod parse).
+- **DTOs the UI and API share** → `paas/frontend/src/types/**` (imported as `@/types`).
+
+Quick greps that pay off in review prep:
+
+- `requireAuth(` — see every protected route’s role list.
+- `assertProjectAccess(` — project-scoped endpoints.
+- `getBuildBackend(` / `resolveBuildPlan(` — any path that touches CI.
+- `queryKey:` — client cache boundaries.
+
+---
+
+## 27. API route handler pattern (repeated recipe)
+
+Most write routes follow the same shape (example: **`POST /api/deploy/[projectId]`** in `route.ts`):
+
+1. `export const runtime = "nodejs"` — Prisma and long integrations expect Node, not Edge.
+2. `requireAuth(request, ["ADMIN","DEVELOPER"])` — JWT from **`Authorization: Bearer`** **or** session cookie (see `auth-guard.ts` `resolveToken`).
+3. **`enforceRateLimit`** (where used) — in-memory keyed limiter (`src/server/http/rate-limit.ts`); tune `keyPrefix`, window, `maxRequests`.
+4. **`assertProjectAccess(projectId, userId, role)`** — developers only see their projects; admins see all (implementation in `project-service.ts`).
+5. Call a **server service** (e.g. `runProjectDeployment`) — keep orchestration out of the route file.
+6. **`ok(payload)`** or **`fail(error)`** — `fail` unwraps **`ApiError`** → JSON `{ message, details?, ...data }` with the right status (`src/server/http/response.ts`).
+7. **`writeAuditLog`** on success/failure for sensitive actions (build/deploy).
+
+Missing auth → **401**; wrong role → **403**; validation → **400** via `ValidationError` / Zod in route; integration outages often surface as **`IntegrationError` (502)** with `details` for upstream body or message.
+
+---
+
+## 28. Browser client: Axios, cookies, and React Query
+
+**`api-client.ts`** — Axios instance with `withCredentials: true` so **HTTP-only session cookies** ride on same-origin requests. Optional **`NEXT_PUBLIC_API_BASE_URL`**: if set, it becomes the origin prefix (trailing `/api` is stripped so paths stay `/api/...`).
+
+**Dual JWT path**: Interceptor adds **`Authorization: Bearer`** from `authStorage.getToken()` when present. Server **`requireAuth`** accepts **either** header or cookie — useful if some flows store a token client-side while login still sets the cookie.
+
+**`lib/api.ts`** — Typed facades: `authApi`, `projectApi`, `pipelineApi`, `metricsApi`, `securityApi`, `platformApi`, `kubernetesApi`, `dockerApi`, `jenkinsUi`, etc. Prefer calling these from components instead of raw `fetch` so URLs and types stay consistent.
+
+**React Query** — Wrapped in **`QueryProvider`** (`lib/query-provider.tsx`); root layout nests **`AuthProvider`** → **`QueryProvider`** (`app/layout.tsx`).
+
+**Example query keys** (from the project detail page): `["project", projectId]`, `["status", projectId]`, `["deployments", projectId]`, `["argocd", projectId]`, `["app-reachability", projectId]`, `["security", projectId]`. After **build**: invalidate `status` + `project`. After **deploy**: also invalidate `argocd`, `deployments`, `app-reachability`.
+
+**401 handling**: Response interceptor clears `authStorage` and redirects to `/login` unless path is public or the request was session check.
+
+---
+
+## 29. `BuildBackend` interface (the CI abstraction)
+
+Defined in **`src/server/build-backend.ts`**. Implementations: **`JenkinsBuildBackend`**, **`TektonBuildBackend`**. Factory: **`getBuildBackend()`** — memoized singleton chosen by **`resolveBuildProvider()`** from env (`jenkins` vs `tekton`).
+
+| Method | Purpose |
+|--------|---------|
+| `provisionProjectIntegration` | Optional setup hook for the provider. |
+| `triggerBuild` | Build-only; used by **`pipeline-service.triggerBuild`**. |
+| `getDeploymentBaseline` | e.g. “last known Jenkins build number” stored as **`Deployment.priorJenkinsBuildNumber`**. |
+| `triggerDeployment` | Full deploy pipeline trigger; used by **`runProjectDeployment`**. |
+| `monitorDeployment` | Long-running poll until terminal state; updates DB logs/status and invokes promotion on success. |
+
+**`BuildTriggerResult`**: `accepted`, `provider`, `runId`, `runNumber`, `logs`, optional `externalUrl`, `artifactImage`, `artifactDigest`. Downstream code always checks **`accepted`** before assuming the run exists.
+
+---
+
+## 30. Deployment flow in code (details people ask about)
+
+**`runProjectDeployment`** (`deployment-service.ts`):
+
+- Loads project; **rejects with 409** if another row is **`PENDING`** or **`DEPLOYING`** for that project (concurrency guard).
+- **`effectiveTriggerUserId`**: optional env **`DEPLOYMENT_TRIGGER_USER_ID`** overrides who is stored as **`triggeredById`** (automation demos).
+- Creates **`Deployment`** with **`priorJenkinsBuildNumber`** = baseline from backend.
+- **`triggerDeployment`**: on failure, **`recordDeploymentFailure`** with **`TRIGGER`** and rethrows **`IntegrationError`** often including **`deploymentId`** in `data`.
+- On success: trims initial logs to **`DEPLOYMENT_LOG_TAIL_MAX_CHARS`** (5000 in `constants/deploy.ts`), updates **`jenkinsBuildNumber`**, sets project **`lastDeploymentStatus` / `buildStatus`** to **`QUEUED`**, clears **`pendingGitHubPush`**.
+- **`monitorDeployment(id, runNumber)`** — **fire-and-forget** (`void` + `.catch` in `jenkins-monitor.ts`); errors in the monitor loop become **`UNKNOWN`** failure if unhandled.
+
+**`monitorDeployment` wrapper** builds a synthetic **`startedRun`** from DB + `initialBuildNumber` so **`BuildBackend.monitorDeployment`** always sees a consistent shape.
+
+**Polling the deployment row** — **`GET /api/deployments/[id]`** → **`getDeploymentForUser`**: if status is **`PENDING`** or **`DEPLOYING`**, it calls **`reconcileJenkinsDeploymentRecord`** first so refreshes pull fresh Jenkins state without waiting for the async monitor tick.
+
+**Cancel** — **`cancelRunningDeploymentForUser`**: Jenkins-only; **`stopBuild`** + cancel queue; then **`reconcileJenkinsDeploymentRecord`** after a short delay.
+
+---
+
+## 31. Log lines: `[build-meta]` (structured breadcrumbs in plain text)
+
+**`build-metadata.ts`** prepends lines like `[build-meta] key=value` into log buffers. **`parseBuildMetadata(logs)`** scans the deployment’s **`logs`** text and extracts **`provider`**, **`runId`**, **`runNumber`**, **`artifactImage`**, **`artifactDigest`**, plus plan fields (**`profile`**, **`mode`**, templates).
+
+API list responses use that parser so the UI can show **artifact image/digest** without extra columns. If someone asks “where does the UI get `artifactImage` for a deployment?” — **from the log prefix lines**, not only from Prisma fields.
+
+---
+
+## 32. Errors and status codes (server)
+
+**`ApiError` subclasses** (`http/errors.ts`): **`UnauthorizedError` 401**, **`ForbiddenError` 403**, **`NotFoundError` 404**, **`ValidationError` 400**, **`SecurityGateError` 422**, **`IntegrationError` 502** (external tool failure; often carries **`details`**).
+
+**`fail()`** in `response.ts` serializes **`ApiError`** to JSON and passes through optional **`data`** (e.g. **`deploymentId`**, **`jobUrl`**). Non-`Error` failures become **500** with a generic message.
+
+---
+
+## 33. Likely technical questions (short answers)
+
+- **Why both cookie and Bearer in auth?** Cookie is the primary session for the browser; Bearer allows the same routes to be called with an explicit token and matches common API client patterns.
+- **Where is deploy “after Jenkins succeeds”?** **`cluster-deploy-service`** (promote: **`ContainerImage`**, GitOps commit, Argo sync) — called from the Jenkins backend’s monitor path when **`result`** is success.
+- **Why `priorJenkinsBuildNumber`?** So polling and reconcile can ignore an **older** Jenkins build still showing in **`/lastBuild`** APIs when job names are shared.
+- **Why is monitor fire-and-forget?** HTTP response returns immediately with **`deploymentId`**; work continues in-process. **Restarting the Next server** can interrupt an in-flight monitor (document honestly for ops).
+- **Where is Tekton different?** Same **`BuildBackend`** methods; **`build-backend-tekton.ts`** implements polling of **`PipelineRun`** instead of Jenkins queue/build APIs; cancel from UI may be limited (deploy cancel checks **`provider !== "jenkins"`** → 501).
+- **Single job name for build and deploy?** Supported via **`JENKINS_BUILD_JOB_NAME` / `JENKINS_DEPLOY_JOB_NAME`**; pipeline parameters distinguish intent; folder jobs use **`JENKINS_JOB_FOLDER`** path segments.
+- **How does project status mix DB and K8s?** **`getProjectStatus`** starts from **`mapProjectToResponse`**; if **`KUBERNETES_ENABLED`**, merges **`getNamespacePodSummary`** for live counts/errors (`pipeline-service.ts`).
 
 ---
 
