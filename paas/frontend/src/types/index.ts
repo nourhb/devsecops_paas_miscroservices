@@ -180,8 +180,26 @@ export interface DashboardOverviewResponse {
         score: number;
         critical: number;
         high: number;
+        medium: number;
+        low: number;
         unsignedImages: number;
         policyBlocked: number;
+        dependencyTrack: SeverityBreakdown;
+        trivy: SeverityBreakdown;
+        sonar: {
+            passed: number;
+            failed: number;
+            unknown: number;
+        };
+        opa: {
+            violationCount: number;
+            projectsWithViolations: number;
+            projectsWithPolicyGap: number;
+        };
+        kyverno: {
+            projectsWithPolicyGap: number;
+        };
+        sampledProjects: number;
     };
     artifacts: ArtifactRecord[];
     platformTools: PlatformToolGroup[];
