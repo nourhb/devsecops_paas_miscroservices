@@ -229,4 +229,221 @@ Authoritative defaults and parsing: `paas/frontend/src/server/config/env.ts`.
 
 ---
 
+## 16. Technical stack (control plane)
+
+| Layer | Technology |
+|-------|------------|
+| Framework | **Next.js 14** (App Router): `paas/frontend/src/app/` |
+| UI | **React 18**, **Tailwind CSS**, **Radix-style** primitives under `src/components/ui/` |
+| Client data | **TanStack React Query** (`@tanstack/react-query`), toasts via **Sonner** |
+| Server API | **Route Handlers** `route.ts` under `src/app/api/**` (Node runtime where set) |
+| Persistence | **PostgreSQL** + **Prisma** 5 (`prisma/schema.prisma`, client in `src/server/db/prisma.ts`) |
+| Validation | **Zod** (e.g. `src/server/config/env.ts`, auth/project payloads) |
+| Outbound HTTP | **`fetch`** and **undici** via `src/server/http/integration-fetch.ts` (optional TLS skip via `INTEGRATIONS_TLS_SKIP_VERIFY`); Jenkins/Argo may use dedicated wrappers |
+| K8s | **`@kubernetes/client-node`** when `KUBERNETES_ENABLED=true` (`src/server/integrations/kubernetes-client.ts`) |
+
+Pages under `(dashboard)/` and `(auth)/` are mostly **`"use client"`** where hooks/query are used. Layout and metadata live in `layout.tsx` files.
+
+---
+
+## 17. Authentication and authorization
+
+- **Login** posts to `/api/auth/login`; server verifies password (**bcrypt**), issues **JWT** (secret `JWT_SECRET`, expiry `JWT_EXPIRES_IN`), sets **HTTP-only cookie** (see `src/server/auth/session-cookie.ts`, `auth-tokens.ts`).
+- **Session** read via `/api/auth/session`; **logout** clears cookie (`/api/auth/logout`).
+- **Email verification** and **password reset** token tables: `EmailVerificationToken`, `PasswordResetToken`; mail via **nodemailer** when SMTP env is set.
+- **Route protection**: `requireAuth(request, ["ADMIN","DEVELOPER"])` in `src/server/auth/auth-guard.ts` used by API handlers.
+- **Project scope**: `assertProjectAccess` / `getProjectForUser` in `src/server/projects/project-service.ts` — developers restricted to `createdById === userId`.
+
+---
+
+## 18. HTTP API surface (Route Handlers)
+
+Base URL is the same origin as the UI (e.g. `http://host:3000`). Below, **`[id]`** / **`[projectId]`** are path parameters. Methods are the typical REST usage unless noted.
+
+**Auth**
+
+| Path | Role |
+|------|------|
+| `POST /api/auth/login`, `register`, `logout` | Session lifecycle |
+| `GET /api/auth/session` | Current user |
+| `POST /api/auth/forgot-password`, `reset-password`, `verify-email`, `resend-verification` | Account recovery / verification |
+
+**Projects & status**
+
+| Path | Role |
+|------|------|
+| `GET|POST /api/projects` | List / create |
+| `GET|PATCH|DELETE /api/project/[projectId]` | Single project CRUD-style |
+| `GET /api/projects/detect-language` | Repo heuristic |
+| `GET /api/status/[projectId]` | Aggregate status (`getProjectStatus` → K8s overlay + project row) |
+| `GET /api/projects/[id]/deployments`, `GET /api/projects/[id]/app-reachability` | History / HTTP probe to app URL |
+
+**Build & deploy**
+
+| Path | Role |
+|------|------|
+| `POST /api/build/[projectId]` | `triggerBuild` (Jenkins/Tekton) |
+| `POST /api/deploy/[projectId]` | Create `Deployment`, trigger backend, start async monitor |
+| `POST /api/rollback/[projectId]` | Rollback project metadata / logs |
+| `GET /api/deployments/[id]` | Poll single deployment (optionally drives reconcile) |
+| `POST /api/deployments/[id]/cancel` | Cancel path |
+| `GET /api/deployments/recent` | Cross-project recent rows for dashboards |
+
+**Cluster & metrics**
+
+| Path | Role |
+|------|------|
+| `GET /api/k8s/pods`, `services`, `deployments` | Proxied K8s list |
+| `GET /api/k8s/pod-logs` | Namespaced pod log fetch |
+| `GET /api/metrics`, `GET /api/metrics/[projectId]` | Dashboard vs per-project Prometheus-derived CPU/RAM |
+| `GET /api/dashboard/overview` | Rolled-up overview (K8s vs DB fallbacks) |
+
+**Integrations & platform**
+
+| Path | Role |
+|------|------|
+| `GET /api/platform/integrations`, `tooling`, `deploy-readiness` | Integration matrix and readiness |
+| `GET /api/argocd/[projectId]` | Argo application health/sync JSON |
+| `GET /api/security/[projectId]` | `getSecurityMetrics` |
+| `GET /api/dependency-track` | Dependency-Track slice for pipeline UI |
+| `GET /api/jenkins/builds`, `GET /api/jenkins/logs/[id]` | Jenkins dashboard helpers |
+
+**Docker / artifacts / helpers**
+
+| Path | Role |
+|------|------|
+| `POST /api/docker/[projectId]/build`, `push`, `GET .../history` | Docker flows as implemented |
+| `GET /api/artifacts`, `GET /api/artifacts/[name]` | Artifact API |
+| `POST /api/helpers/suggest-build`, `analyze-build-log` | Optional OpenAI-backed hints when `OPENAI_API_KEY` set |
+| `POST /api/webhooks/github` | Push events → optional build prompt (`GITHUB_WEBHOOK_*`) |
+
+**Health**
+
+| Path | Role |
+|------|------|
+| `GET /api/health` | Liveness |
+
+Exact file paths mirror URL segments: e.g. `src/app/api/deploy/[projectId]/route.ts`.
+
+---
+
+## 19. Server module map (where logic lives)
+
+| Area | Primary modules |
+|------|-----------------|
+| Build abstraction | `src/server/build-backend.ts` — `BuildBackend` interface; `build-backend-jenkins.ts`, `build-backend-tekton.ts` |
+| Build planning | `src/server/build-planner.ts`, `build-metadata.ts`, `deploy/deploy-image.ts` |
+| Pipeline orchestration | `src/server/pipeline/pipeline-service.ts` — trigger, rollback, `getProjectStatus` |
+| Deploy promotion | `src/server/services/cluster-deploy-service.ts` — post-Jenkins success → image row, GitOps commit, Argo sync |
+| Deployment persistence | `src/server/services/deployment-service.ts`, `deployment-failure.ts`, `jenkins-deployment-reconcile.ts`, `jenkins-monitor.ts` |
+| Jenkins REST | `src/server/integrations/devsecops-clients.ts` (`JenkinsClient`), inline XML sync `src/server/jenkins/inline-paas-deploy-job-sync.ts`, `sync-inline-pipeline-job.ts` |
+| GitOps | `src/server/gitops/gitops-github-service.ts` |
+| Argo | `src/server/services/argocd-service.ts` (+ `src/server/http/argocd-fetch.ts`) |
+| Security metrics | `src/server/security/security-service.ts`, `cosign-verify.ts`, `opa-eval.ts` |
+| K8s | `src/server/integrations/kubernetes-client.ts` |
+| Auth | `src/server/auth/auth-service.ts`, `auth-guard.ts`, `auth-mailer.ts` |
+| Projects | `src/server/projects/project-service.ts` |
+| Dashboard | `src/server/services/dashboard-overview-service.ts`, `metrics/metrics-service.ts` |
+| HTTP helpers | `src/server/http/response.ts` (`ok`/`fail`), `integration-fetch.ts`, `format-fetch-error.ts`, `errors.ts` (`IntegrationError`) |
+
+---
+
+## 20. Build and deploy execution path (server-side)
+
+**Build-only (`POST /api/build/[projectId]`)**
+
+1. `pipeline-service.triggerBuild` loads project, resolves `ResolvedBuildPlan`, calls `getBuildBackend().triggerBuild`.
+2. Jenkins path: HTTP **POST** job build (with parameters), optional **CSRF crumb**; optional **config.xml** push for inline Pipeline job before trigger.
+3. Project row updated: `buildStatus` e.g. `BUILDING` / `QUEUED`, `buildLogs` tail.
+
+**Full deploy (`POST /api/deploy/[projectId]`)**
+
+1. `deployment-service` creates `Deployment` row (`PENDING`), calls `triggerDeployment` on backend.
+2. Backend returns `runId` / `runNumber`, queue URL, etc.; logs merged into deployment row.
+3. **`monitorDeployment`** (async): polls Jenkins `api/json` and progressive **consoleText** until terminal `result` or timeout.
+4. On **`SUCCESS`**: `promoteDeploymentAfterJenkinsSuccess` / `promoteDeploymentAfterBuildSuccess` — updates project `buildStatus` to `PUSHING`, writes **ContainerImage**, runs **Helm values commit**, **Argo sync**, then marks deployment **DEPLOYED** and project `lastDeploymentStatus` / `url` / `imageTag`.
+5. On failure: `recordDeploymentFailure` sets `deployment.status` **FAILED**, `failureReason` enum, `failureMessage`, updates project `lastDeploymentStatus`; Jenkins-like failures also set `buildStatus` **FAILED** when appropriate.
+
+**Baseline / duplicate-build guard**
+
+- `priorJenkinsBuildNumber` on `Deployment` avoids treating an old Jenkins build as the new run (`jenkins-deployment-reconcile.ts`, Jenkins backend polling).
+
+Log tail length caps (e.g. `DEPLOYMENT_LOG_TAIL_MAX_CHARS` in `src/server/constants/deploy.ts`) prevent unbounded DB growth.
+
+---
+
+## 21. Database schema (Prisma) — technical detail
+
+**`User`** — `role`: `ADMIN` | `DEVELOPER` (enum `Role`). Relations: `projects[]`, `deployments[]` (as triggerer), token tables.
+
+**`Project`** — Soft delete: `deletedAt` (queries filter active). **Operational fields**: `buildStatus`, `lastDeploymentStatus`, `podStatus` (string mirrors, not K8s-native enums), `buildLogs` / `deploymentLogs` (long text buffers for UI), `imageTag`, `url` (public app URL), `gitCredentialsId` (Jenkins credential id), `pendingGitHubPush` (JSON for post-push build UX).
+
+**`Deployment`** — `status`: `DeploymentJobStatus` (`PENDING`, `SUCCESS`, `FAILED`, `DEPLOYING`, `DEPLOYED`). After Jenkins succeeds, the row can transition **`SUCCESS`** (build artifact persisted) → **`DEPLOYING`** (GitOps / Argo handoff) → **`DEPLOYED`**. **Jenkins**: `jenkinsBuildNumber`, `priorJenkinsBuildNumber`. **Failure**: `failureReason` ∈ `JENKINS` \| `GITOPS` \| `ARGOCD` \| `IMAGE_REF` \| `TRIGGER` \| `TIMEOUT` \| `UNKNOWN`, plus `failureMessage`. **`url`**: optional deployed app URL on success path.
+
+**`ContainerImage`** — Audit trail of promoted images (`imageRef`, `registry`, `action`, `digest`, `logs`).
+
+Prisma **generator** targets `native` and `linux-musl-openssl-3.0.x` for Alpine-compatible CI images.
+
+---
+
+## 22. Jenkins integration (technical)
+
+- **Base URL**: `JENKINS_BASE_URL` must match Jenkins **System** “Jenkins URL” host; host header mismatches often yield **403**.
+- **Auth**: Basic auth with **user + API token** (not password) in `Authorization` header.
+- **Job naming**: `JENKINS_JOB_NAME_SOURCE` **`projectName`** (sanitized slug) vs **`uuid`** (project id). Shared job names via `JENKINS_BUILD_JOB_NAME` / `JENKINS_DEPLOY_JOB_NAME` (e.g. both `paas-deploy`). **Folder** jobs: `JENKINS_JOB_FOLDER` → path segments `job/.../job/name`.
+- **Parameters**: Build/deploy append registry, Sonar, Dependency-Track, Harbor, Helm OCI, Artifactory, proxy/npm registry, etc. from env (see `appendRegistryParameters` in `devsecops-clients.ts`).
+- **Inline sync**: Reads `paas/jenkins/Jenkinsfile.paas-deploy` from `PAAS_MONOREPO_ROOT` or upward walk from `cwd`, POSTs **Pipeline XML** to `/job/{name}/config.xml` when enabled.
+- **Long-running shell**: Pipeline uses `run_with_keepalive` so the **parent** shell prints periodically (mitigates **JENKINS-48300** durable-task timeout). JVM flag `BourneShellScript.HEARTBEAT_CHECK_INTERVAL` (see `swarm-jenkins.example.yml`) is an additional mitigation.
+
+---
+
+## 23. Security API behavior (technical)
+
+`getSecurityMetrics` composes parallel calls: Sonar **quality gate** API, Dependency-Track **project** + **findings**, **Trivy** scan POST, **Cosign verify** (subprocess), **Kyverno** policy list (if K8s + engine), **OPA** POST (if URL set). **Scoring** is heuristic (severity weights + gate penalties). **Unconfigured** external services return fallbacks (no hard failure on `fetchOrFallback` when integration URL absent). **Hard failures** are caught and returned as a **degraded** `SecurityMetrics` payload with `qualityGateStatus: UNKNOWN` and explanatory `securitySummary`.
+
+---
+
+## 24. Sequence (deploy) — condensed
+
+```mermaid
+sequenceDiagram
+  participant UI as Browser
+  participant API as Next API
+  participant DB as PostgreSQL
+  participant JK as Jenkins
+  participant GH as Git Helm repo
+  participant AR as Argo CD
+  UI->>API: POST /api/deploy/{projectId}
+  API->>DB: INSERT Deployment PENDING
+  API->>JK: POST buildWithParameters
+  API->>DB: update logs / DEPLOYING
+  loop Poll until terminal
+    API->>JK: GET api/json + consoleText
+    API->>DB: merge logs
+  end
+  alt SUCCESS
+    API->>DB: ContainerImage, PUSHING
+    API->>GH: commit values (optional)
+    API->>AR: sync app (optional)
+    API->>DB: DEPLOYED, project url/imageTag
+  else FAILURE
+    API->>DB: FAILED + failureReason
+  end
+```
+
+---
+
+## 25. File index (quick)
+
+| Artifact | Path |
+|----------|------|
+| Env schema | `paas/frontend/src/server/config/env.ts` |
+| Compose stack | `paas/docker-compose.yml` |
+| Compose env template | `paas/frontend/docker-compose.env.example` |
+| Main Jenkins pipeline | `paas/jenkins/Jenkinsfile.paas-deploy` |
+| Prisma schema | `paas/frontend/prisma/schema.prisma` |
+| Client API wrapper | `paas/frontend/src/lib/api.ts` |
+
+---
+
 *Last updated to match repository layout and behavior at documentation time; verify against `env.ts` and live Jenkinsfile for your deployment as the system evolves.*
