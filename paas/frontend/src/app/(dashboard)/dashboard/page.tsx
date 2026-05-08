@@ -93,7 +93,7 @@ export default function DashboardPage() {
     const artifacts = overviewQuery.data?.artifacts ?? [];
     const clusterDataSource = overviewQuery.data?.clusterDataSource ?? "none";
     const successDisplay = stats?.successRatePercent === null || stats?.successRatePercent === undefined
-        ? "—"
+        ? "\u2014"
         : `${stats.successRatePercent}%`;
     const successfulDeployments = Math.max(0, (stats?.totalDeployments ?? 0) - (stats?.activeDeployments ?? 0) - (stats?.failedDeployments ?? 0));
     const workloadChartData = [
@@ -178,10 +178,10 @@ export default function DashboardPage() {
           <CardContent>
             {workloadChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="Nothing to plot yet">
                 {clusterDataSource === "kubernetes"
-                    ? "Kubernetes returned zero pods, services, and deployments for your filters, or the cluster is empty."
-                    : clusterDataSource === "project_rollups"
-                        ? "Project rollups are all zero — add projects and run deploys so workload counts update, or connect Kubernetes for live cluster metrics."
-                        : "Add projects or connect Kubernetes; there is no data to chart for workload right now."}
+                ? "Kubernetes returned zero pods, services, and deployments for your filters, or the cluster is empty."
+                : clusterDataSource === "project_rollups"
+                    ? "Project rollups are all zero \u2014 add projects and run deploys so workload counts update, or connect Kubernetes for live cluster metrics."
+                    : "Add projects or connect Kubernetes; there is no data to chart for workload right now."}
               </ChartEmptyState>) : (<div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={workloadChartData} margin={{ left: -20, right: 12, top: 8 }}>
@@ -206,8 +206,8 @@ export default function DashboardPage() {
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
             {deliveryChartData.length === 0 ? (<ChartEmptyState title="No segments for this pie">
                 {(stats?.totalDeployments ?? 0) === 0
-                    ? "There are no deployment rows yet. Trigger a build/deploy from a project; finished jobs will appear here as successful, active, or failed."
-                    : "All current jobs are still in categories with zero count (for example only pending). Open the project board below or Deployments for live status."}
+                ? "There are no deployment rows yet. Trigger a build/deploy from a project; finished jobs will appear here as successful, active, or failed."
+                : "All current jobs are still in categories with zero count (for example only pending). Open the project board below or Deployments for live status."}
               </ChartEmptyState>) : (<div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -353,7 +353,7 @@ export default function DashboardPage() {
                   <TableCell><Badge variant={statusVariant(project.buildStatus)}>{project.buildStatus}</Badge></TableCell>
                   <TableCell><Badge variant={statusVariant(project.lastDeploymentStatus)}>{project.lastDeploymentStatus}</Badge></TableCell>
                   <TableCell><Badge variant={statusVariant(project.podStatus)}>{project.podStatus}</Badge></TableCell>
-                  <TableCell className="max-w-[220px] truncate font-mono text-xs">{project.imageTag || "—"}</TableCell>
+                  <TableCell className="max-w-[220px] truncate font-mono text-xs">{project.imageTag || "\u2014"}</TableCell>
                   <TableCell className="pr-6 text-right">
                     <Button asChild variant="outline" size="sm">
                       <Link href={`/projects/${project.id}`}>Manage</Link>

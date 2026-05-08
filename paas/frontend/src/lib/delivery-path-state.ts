@@ -1,22 +1,12 @@
-/**
- * Derive Delivery path UI states from Jenkinsfile markers in logs + project/deployment fields.
- * Aligns the UI with the real pipeline instead of treating any non-SUCCESS buildStatus as "build active".
- */
-
 export type DeliveryPathStageKey = "build" | "gates" | "registry" | "gitops" | "argo";
 export type DeliveryPathVisualState = "done" | "active" | "pending" | "error";
-
 const ORDER: DeliveryPathStageKey[] = ["build", "gates", "registry", "gitops", "argo"];
-
 function up(s: string | null | undefined): string {
     return (s || "").trim().toUpperCase();
 }
-
 function combinedLogs(buildLogs?: string | null, deploymentLogs?: string | null): string {
     return [buildLogs || "", deploymentLogs || ""].join("\n");
 }
-
-/** 0–4 = stage index that failed; used when deployment failed */
 function inferFailedStageIndex(logs: string, buildStatus: string): number {
     const bs = up(buildStatus);
     if (/\[argocd\]\s*FAILED/i.test(logs)) {
@@ -41,8 +31,6 @@ function inferFailedStageIndex(logs: string, buildStatus: string): number {
     }
     return 0;
 }
-
-/** Active stage index 0–4 while job is running; -1 if unknown (treat as 0) */
 function inferActiveStageIndex(logs: string): number {
     if (/\*\*\* BEGIN :\s*13\./i.test(logs) || /\*\*\* BEGIN :\s*12\./i.test(logs)) {
         return 4;
@@ -73,11 +61,9 @@ function inferActiveStageIndex(logs: string): number {
     }
     return 0;
 }
-
 function allDone(): Record<DeliveryPathStageKey, DeliveryPathVisualState> {
     return { build: "done", gates: "done", registry: "done", gitops: "done", argo: "done" };
 }
-
 export function computeDeliveryPathStates(input: {
     buildStatus: string;
     lastDeploymentStatus: string;
@@ -89,20 +75,16 @@ export function computeDeliveryPathStates(input: {
     const bs = up(input.buildStatus);
     const ds = up(input.lastDeploymentStatus);
     const logs = combinedLogs(input.buildLogs, input.deploymentLogs);
-
     const deployFailed = ds === "FAILED";
     const deployDone = ds === "DEPLOYED";
     const jenkinsRunning = bs === "BUILDING" || bs === "QUEUED";
     const deployRunning = ds === "DEPLOYING" || ds === "PROMOTING";
-
     if (deployDone) {
         return allDone();
     }
-
     if (ds === "PROMOTING") {
         return { build: "done", gates: "done", registry: "done", gitops: "active", argo: "pending" };
     }
-
     if (deployFailed) {
         const failIx = inferFailedStageIndex(logs, input.buildStatus);
         const out: Partial<Record<DeliveryPathStageKey, DeliveryPathVisualState>> = {};
@@ -120,7 +102,6 @@ export function computeDeliveryPathStates(input: {
         }
         return out as Record<DeliveryPathStageKey, DeliveryPathVisualState>;
     }
-
     const buildTerminalFail = bs === "FAILED" || bs === "FAILURE" || bs === "ABORTED" || bs === "UNSTABLE";
     if (buildTerminalFail) {
         return {
@@ -131,9 +112,7 @@ export function computeDeliveryPathStates(input: {
             argo: "pending"
         };
     }
-
     const buildPastCompile = bs === "SUCCESS" || bs === "PUSHING" || bs === "READY";
-
     if (buildPastCompile && !jenkinsRunning && !deployRunning) {
         if (bs === "READY") {
             return allDone();
@@ -143,7 +122,6 @@ export function computeDeliveryPathStates(input: {
         }
         return { build: "done", gates: "done", registry: "pending", gitops: "pending", argo: "pending" };
     }
-
     if (jenkinsRunning || deployRunning) {
         const activeIx = inferActiveStageIndex(logs);
         const out: Partial<Record<DeliveryPathStageKey, DeliveryPathVisualState>> = {};
@@ -167,7 +145,6 @@ export function computeDeliveryPathStates(input: {
         }
         return out as Record<DeliveryPathStageKey, DeliveryPathVisualState>;
     }
-
     return {
         build: "pending",
         gates: "pending",

@@ -27,7 +27,7 @@ function displayBuildStatus(projectStatus: string | undefined, lastDeploymentSta
     if (ds === "FAILED" && (bs === "BUILDING" || bs === "QUEUED")) {
         return "FAILED";
     }
-    return projectStatus || "—";
+    return projectStatus || "\u2014";
 }
 function buildHeaderBadgeVariant(buildLabel: string): "success" | "warning" | "danger" | "outline" {
     const u = (buildLabel || "").toUpperCase();
@@ -47,15 +47,15 @@ function ArgoHealthBadge({ health }: {
 }) {
     const h = (health || "").toLowerCase();
     if (h === "healthy" || h === "progressing") {
-        return <Badge variant="success">Health: {health ?? "—"}</Badge>;
+        return <Badge variant="success">Health: {health ?? "\u2014"}</Badge>;
     }
     if (h === "degraded" || h === "missing" || h === "unknown" || h === "suspended") {
-        return <Badge variant="warning">Health: {health ?? "—"}</Badge>;
+        return <Badge variant="warning">Health: {health ?? "\u2014"}</Badge>;
     }
     if (h.includes("fail") || h === "unhealthy") {
-        return <Badge variant="danger">Health: {health ?? "—"}</Badge>;
+        return <Badge variant="danger">Health: {health ?? "\u2014"}</Badge>;
     }
-    return <Badge variant="outline">Health: {health ?? "—"}</Badge>;
+    return <Badge variant="outline">Health: {health ?? "\u2014"}</Badge>;
 }
 export default function PipelinePage() {
     const params = useParams<{
@@ -296,19 +296,19 @@ export default function PipelinePage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm text-muted">Application</span>
                   <code className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">
-                    {argoQuery.data?.appName ?? "—"}
+                    {argoQuery.data?.appName ?? "\u2014"}
                   </code>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <ArgoHealthBadge health={argoQuery.data?.health}/>
-                  <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "—"}</Badge>
+                  <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
                 </div>
               </>)}
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted">
               <p>
                 Image in use:{" "}
                 <span className="font-mono text-foreground/90">
-                  {status?.imageTag || project.imageTag || "—"}
+                  {status?.imageTag || project.imageTag || "\u2014"}
                 </span>
               </p>
             </div>
@@ -435,7 +435,7 @@ export default function PipelinePage() {
           </CardHeader>
           <CardContent>
             {statusQuery.isLoading ? (<Skeleton className="h-80 w-full"/>) : (<pre className={cn("max-h-80 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono")}>
-              {status?.buildLogs?.trim() || "No build log text is stored on this project yet.\n\nRun Build from Operations. After Jenkins starts, this app syncs the job and the buffer fills here; you can also open the Cluster page → Platform logs for recent deployments across projects."}
+              {status?.buildLogs?.trim() || "No build log text is stored on this project yet.\n\nRun Build from Operations. After Jenkins starts, this app syncs the job and the buffer fills here; you can also open the Cluster page \u2192 Platform logs for recent deployments across projects."}
               </pre>)}
           </CardContent>
         </Card>

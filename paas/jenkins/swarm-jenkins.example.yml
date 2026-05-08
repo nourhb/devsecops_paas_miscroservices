@@ -1,16 +1,3 @@
-# -----------------------------------------------------------------------------
-# Jenkins on Docker Swarm — memory + JVM tuning (reference compose file)
-# -----------------------------------------------------------------------------
-# Merge into your real stack or copy values into `services.jenkins`:
-# - Exit **137** = SIGKILL → usually **OOM** (raise limits.memory and/or lower -Xmx).
-# - **JENKINS-48300** ("wrapper script does not seem to be touching the log file" / exit -1 on long `npm ci`):
-#   `JAVA_OPTS` below raises the durable-task heartbeat, or set the same flag on the Jenkins controller.
-#   Pipeline uses run_with_keepalive: the main shell prints every JENKINS_SH_KEEPALIVE_SEC (default 60s) while npm/copy runs;
-#   background-only echo does not fix JENKINS-48300. Set JENKINS_SH_KEEPALIVE=false to disable.
-#
-# Redeploy: docker stack deploy -c your-compose.yml my-stack
-# -----------------------------------------------------------------------------
-
 version: "3.8"
 
 services:
@@ -20,7 +7,6 @@ services:
       - "30090:8080"
       - "50000:50000"
     environment:
-      # HEARTBEAT_CHECK_INTERVAL: avoid JENKINS-48300 abort on long npm ci / slow workspace FS (NFS, some Docker volumes).
       JAVA_OPTS: "-Xms512m -Xmx2048m -XX:+UseG1GC -Djenkins.install.runSetupWizard=false -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
       TZ: UTC
     volumes:

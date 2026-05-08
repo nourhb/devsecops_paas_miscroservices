@@ -14,7 +14,7 @@ export async function verifyImageWithCosign(imageRef: string): Promise<boolean> 
         return false;
     }
     const keyPath = join(tmpdir(), `cosign-pub-${process.pid}-${Date.now()}.pem`);
-    await writeFile(keyPath, `${pem}\n`, { mode: 0o600 });
+    await writeFile(keyPath, `${pem}\n`, { mode: 384 });
     try {
         const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
         await execFileAsync(bin, ["verify", "--key", keyPath, imageRef], {

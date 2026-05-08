@@ -1,13 +1,11 @@
-/**
- * Create or update the shared Jenkins deploy job (inline Pipeline XML) via REST — TypeScript port of
- * the former paas/scripts/jenkins_create_paas_deploy_job.py (no Python / subprocess).
- */
 import { env } from "@/server/config/env";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
-
-type ParamDef = readonly [name: string, defaultValue: string, description: string];
-
+type ParamDef = readonly [
+    name: string,
+    defaultValue: string,
+    description: string
+];
 const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_AGENT_LABEL", "built-in", "Agent label for Kubernetes Pod Template."],
     ["GIT_URL", "", "Repository clone URL"],
@@ -46,33 +44,25 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["HELM_OCI_INSECURE", "false", "helm registry login --insecure (self-signed TLS)"],
     ["HELM_OCI_PLAIN_HTTP", "false", "helm push --plain-http"]
 ];
-
-/** Match Python html.escape default (ampersand, lt, gt). */
 function escapeXmlText(s: string): string {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-
 function parameterPropertyXml(indent: string): string {
     const paramIndent = `${indent}      `;
     const params = PARAMETER_DEFINITIONS.map(([name, defaultValue, description]) => {
-        return (
-            `${paramIndent}<hudson.model.StringParameterDefinition>\n` +
+        return (`${paramIndent}<hudson.model.StringParameterDefinition>\n` +
             `${paramIndent}  <name>${escapeXmlText(name)}</name>\n` +
             `${paramIndent}  <description>${escapeXmlText(description)}</description>\n` +
             `${paramIndent}  <defaultValue>${escapeXmlText(defaultValue)}</defaultValue>\n` +
             `${paramIndent}  <trim>true</trim>\n` +
-            `${paramIndent}</hudson.model.StringParameterDefinition>`
-        );
+            `${paramIndent}</hudson.model.StringParameterDefinition>`);
     });
-    return (
-        `${indent}<hudson.model.ParametersDefinitionProperty>\n` +
+    return (`${indent}<hudson.model.ParametersDefinitionProperty>\n` +
         `${indent}  <parameterDefinitions>\n` +
         `${params.join("\n")}\n` +
         `${indent}  </parameterDefinitions>\n` +
-        `${indent}</hudson.model.ParametersDefinitionProperty>`
-    );
+        `${indent}</hudson.model.ParametersDefinitionProperty>`);
 }
-
 function ensureParameterizedJobXml(xml: string): string {
     if (xml.includes("hudson.model.ParametersDefinitionProperty")) {
         return xml;
@@ -84,37 +74,24 @@ function ensureParameterizedJobXml(xml: string): string {
     if (xml.includes("</properties>")) {
         return xml.replace("</properties>", `${prop}\n  </properties>`);
     }
-    return xml.replace(
-        "<keepDependencies>false</keepDependencies>",
-        `<keepDependencies>false</keepDependencies>\n  <properties>\n${prop}\n  </properties>`
-    );
+    return xml.replace("<keepDependencies>false</keepDependencies>", `<keepDependencies>false</keepDependencies>\n  <properties>\n${prop}\n  </properties>`);
 }
-
 function escapeCdata(s: string): string {
     return s.replace(/]]>/g, "]]]]><![CDATA[>");
 }
-
 const CPS_FLOW_DEFINITION = "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition";
-const CDATA_SCRIPT_BLOCK = new RegExp(
-    `(<definition\\b[^>]*class="${CPS_FLOW_DEFINITION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>\\s*<script>\\s*<!\\[CDATA\\[)([\\s\\S]*?)(\\]\\]>\\s*</script>)`,
-    "i"
-);
+const CDATA_SCRIPT_BLOCK = new RegExp(`(<definition\\b[^>]*class="${CPS_FLOW_DEFINITION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>\\s*<script>\\s*<!\\[CDATA\\[)([\\s\\S]*?)(\\]\\]>\\s*</script>)`, "i");
 const DEFINITION_BLOCK = /<definition\b[^>]*>[\s\S]*?<\/definition>/i;
-
 function definitionXmlFragment(groovyScript: string): string {
     const inner = escapeCdata(groovyScript);
-    return (
-        `<definition class="${CPS_FLOW_DEFINITION}" plugin="workflow-cps">\n` +
+    return (`<definition class="${CPS_FLOW_DEFINITION}" plugin="workflow-cps">\n` +
         `    <script><![CDATA[${inner}]]></script>\n` +
         `    <sandbox>true</sandbox>\n` +
-        `  </definition>`
-    );
+        `  </definition>`);
 }
-
 function buildPaasDeployJobConfigXml(groovyScript: string): Buffer {
     const inner = escapeCdata(groovyScript);
-    const xml =
-        `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
         `<flow-definition plugin="workflow-job">\n` +
         `  <description>Inline pipeline from Jenkinsfile.paas-deploy (no SCM). Updated by PaaS (inline-paas-deploy-job-sync.ts)</description>\n` +
         `  <keepDependencies>false</keepDependencies>\n` +
@@ -130,11 +107,10 @@ function buildPaasDeployJobConfigXml(groovyScript: string): Buffer {
         `</flow-definition>\n`;
     return Buffer.from(ensureParameterizedJobXml(xml), "utf-8");
 }
-
-function prepareUpdatedJobConfigXml(
-    existingXml: string | null | undefined,
-    groovyScript: string
-): { payload: Buffer; mode: "merged-cdata" | "replaced-definition" | "full-document" } {
+function prepareUpdatedJobConfigXml(existingXml: string | null | undefined, groovyScript: string): {
+    payload: Buffer;
+    mode: "merged-cdata" | "replaced-definition" | "full-document";
+} {
     if (!existingXml?.trim()) {
         return { payload: buildPaasDeployJobConfigXml(groovyScript), mode: "full-document" };
     }
@@ -154,9 +130,10 @@ function prepareUpdatedJobConfigXml(
     }
     return { payload: buildPaasDeployJobConfigXml(groovyScript), mode: "full-document" };
 }
-
 function extractCookieHeader(response: Response): string | null {
-    const h = response.headers as Headers & { getSetCookie?: () => string[] };
+    const h = response.headers as Headers & {
+        getSetCookie?: () => string[];
+    };
     if (typeof h.getSetCookie === "function") {
         const parts = h.getSetCookie();
         if (parts?.length) {
@@ -166,20 +143,16 @@ function extractCookieHeader(response: Response): string | null {
                 .join("; ");
         }
     }
-    /** Node undici: get("set-cookie") is often null — prefer getSetCookie above. */
     const setCookie = response.headers.get("set-cookie");
     if (!setCookie) {
         return null;
     }
-    /** Legacy single-header join: take each cookie's first segment only. */
     return setCookie
         .split(/,(?=[^;]+=[^;])/i)
         .map((line) => line.split(";")[0]?.trim())
         .filter(Boolean)
         .join("; ");
 }
-
-/** Merge Cookie request header values (name=value; ...) — latest wins per name. */
 function mergeCookieHeader(existing: string | null, incoming: string | null): string | null {
     const map = new Map<string, string>();
     const ingest = (chunk: string | null) => {
@@ -208,14 +181,13 @@ function mergeCookieHeader(existing: string | null, incoming: string | null): st
         .map(([k, v]) => `${k}=${v}`)
         .join("; ");
 }
-
-type CookieJar = { cookie: string | null };
-
-async function fetchJenkinsCrumb(
-    base: string,
-    authHeader: string,
-    jar: CookieJar
-): Promise<{ field: string; value: string } | null> {
+type CookieJar = {
+    cookie: string | null;
+};
+async function fetchJenkinsCrumb(base: string, authHeader: string, jar: CookieJar): Promise<{
+    field: string;
+    value: string;
+} | null> {
     const headers = new Headers({ Authorization: authHeader });
     if (jar.cookie) {
         headers.set("Cookie", jar.cookie);
@@ -229,16 +201,18 @@ async function fetchJenkinsCrumb(
         return null;
     }
     try {
-        const data = (await res.json()) as { crumb?: string; crumbRequestField?: string };
+        const data = (await res.json()) as {
+            crumb?: string;
+            crumbRequestField?: string;
+        };
         if (data.crumb && data.crumbRequestField) {
             return { field: data.crumbRequestField, value: data.crumb };
         }
-    } catch {
-        /* ignore */
+    }
+    catch {
     }
     return null;
 }
-
 function extractHtmlErrorHint(body: string, maxLen = 1200): string {
     const patterns = [
         /<h1[^>]*>\s*([^<]+)/i,
@@ -260,21 +234,18 @@ function extractHtmlErrorHint(body: string, maxLen = 1200): string {
     }
     return "";
 }
-
 function jenkinsAuthHeader(): string {
     const user = env.JENKINS_USERNAME.trim();
     const token = env.JENKINS_API_TOKEN.trim();
     return `Basic ${Buffer.from(`${user}:${token}`, "utf-8").toString("base64")}`;
 }
-
-async function jenkinsReq(
-    base: string,
-    pathname: string,
-    init: RequestInit,
-    authHeader: string,
-    jar: CookieJar,
-    postCrumb?: { field: string; value: string }
-): Promise<{ status: number; body: string }> {
+async function jenkinsReq(base: string, pathname: string, init: RequestInit, authHeader: string, jar: CookieJar, postCrumb?: {
+    field: string;
+    value: string;
+}): Promise<{
+    status: number;
+    body: string;
+}> {
     const headers = new Headers(init.headers as HeadersInit | undefined);
     headers.set("Authorization", authHeader);
     if (jar.cookie) {
@@ -291,81 +262,48 @@ async function jenkinsReq(
     const body = await res.text();
     return { status: res.status, body };
 }
-
 export type SyncInlinePaasDeployJobOptions = {
     jobName: string;
     groovyScript: string;
     jenkinsfileLabel: string;
-    /** Minimal generated XML only (no merge into existing job XML). */
     forceFullConfig?: boolean;
     verbose?: boolean;
 };
-
-/**
- * POST inline pipeline job XML to Jenkins (create or update). Uses `env` Jenkins URL, user, and API token.
- */
 export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeployJobOptions): Promise<string> {
     const base = env.JENKINS_BASE_URL.replace(/\/+$/, "");
     const user = env.JENKINS_USERNAME.trim();
     const token = env.JENKINS_API_TOKEN.trim();
     if (!base || !user || !token) {
-        throw new IntegrationError(
-            "Jenkins inline job sync needs JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN (e.g. paas/frontend/docker-compose.env)."
-        );
+        throw new IntegrationError("Jenkins inline job sync needs JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN (e.g. paas/frontend/docker-compose.env).");
     }
-
     const authHeader = jenkinsAuthHeader();
     const jar: CookieJar = { cookie: null };
-
     const whoami = await jenkinsReq(base, "/api/json", { method: "GET" }, authHeader, jar);
     if (whoami.status === 401) {
-        throw new IntegrationError(
-            `Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
-                `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
-                `JENKINS_API_TOKEN must be a Jenkins **user API token** (Your name → Configure → API Token), not your login password. Regenerate the token if it was rotated. ` +
-                `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
-                `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`
-        );
+        throw new IntegrationError(`Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
+            `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
+            `JENKINS_API_TOKEN must be a Jenkins **user API token** (Your name → Configure → API Token), not your login password. Regenerate the token if it was rotated. ` +
+            `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
+            `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`);
     }
     if (whoami.status === 403) {
-        throw new IntegrationError(
-            `Jenkins returned HTTP 403 for GET ${base}/api/json. This usually means the URL host does not match Jenkins' configured root URL ` +
-                `(Manage Jenkins → System → Jenkins URL). Use that exact URL in JENKINS_BASE_URL — not http://172.18.0.1:PORT when Jenkins is published as http://YOUR_VM_IP:PORT. ` +
-                `Verify from the container with the same URL: docker compose exec frontend wget -S -O- --user='…' --password='…' '${base}/api/json'`
-        );
+        throw new IntegrationError(`Jenkins returned HTTP 403 for GET ${base}/api/json. This usually means the URL host does not match Jenkins' configured root URL ` +
+            `(Manage Jenkins → System → Jenkins URL). Use that exact URL in JENKINS_BASE_URL — not http://172.18.0.1:PORT when Jenkins is published as http://YOUR_VM_IP:PORT. ` +
+            `Verify from the container with the same URL: docker compose exec frontend wget -S -O- --user='…' --password='…' '${base}/api/json'`);
     }
     if (whoami.status !== 200) {
-        throw new IntegrationError(
-            `Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${whoami.status}. Body: ${whoami.body.slice(0, 500)}`
-        );
+        throw new IntegrationError(`Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${whoami.status}. Body: ${whoami.body.slice(0, 500)}`);
     }
-
     const crumbInfo = await fetchJenkinsCrumb(base, authHeader, jar);
-
     const jobName = opts.jobName.trim();
     const lines: string[] = [];
-
     const postCrumb = crumbInfo ?? undefined;
-
-    const { status: existsCode } = await jenkinsReq(
-        base,
-        `/job/${encodeURIComponent(jobName)}/api/json`,
-        { method: "GET" },
-        authHeader,
-        jar
-    );
-
+    const { status: existsCode } = await jenkinsReq(base, `/job/${encodeURIComponent(jobName)}/api/json`, { method: "GET" }, authHeader, jar);
     if (existsCode === 200) {
         let payload = buildPaasDeployJobConfigXml(opts.groovyScript);
         let updateMode: "merged-cdata" | "replaced-definition" | "full-document" = "full-document";
         if (!opts.forceFullConfig) {
-            const { status: gc, body: existingBody } = await jenkinsReq(
-                base,
-                `/job/${encodeURIComponent(jobName)}/config.xml`,
-                { method: "GET" },
-                authHeader,
-                jar
-            );
+            const { status: gc, body: existingBody } = await jenkinsReq(base, `/job/${encodeURIComponent(jobName)}/config.xml`, { method: "GET" }, authHeader, jar);
             if (gc === 200 && existingBody.trim()) {
                 const prep = prepareUpdatedJobConfigXml(existingBody, opts.groovyScript);
                 payload = prep.payload;
@@ -373,41 +311,30 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
                 if (opts.verbose) {
                     lines.push(`Config source: ${updateMode} (from GET config.xml)`);
                 }
-            } else if (opts.verbose) {
+            }
+            else if (opts.verbose) {
                 lines.push(`GET config.xml HTTP ${gc}: using full generated XML`);
             }
         }
-
-        const { status: code2, body: body2 } = await jenkinsReq(
-            base,
-            `/job/${encodeURIComponent(jobName)}/config.xml`,
-            {
-                method: "POST",
-                body: payload.toString("utf-8"),
-                redirect: "manual",
-                headers: { "Content-Type": "application/xml; charset=UTF-8" }
-            },
-            authHeader,
-            jar,
-            postCrumb
-        );
-
+        const { status: code2, body: body2 } = await jenkinsReq(base, `/job/${encodeURIComponent(jobName)}/config.xml`, {
+            method: "POST",
+            body: payload.toString("utf-8"),
+            redirect: "manual",
+            headers: { "Content-Type": "application/xml; charset=UTF-8" }
+        }, authHeader, jar, postCrumb);
         if (code2 === 200 || code2 === 201) {
             const how: Record<string, string> = {
                 "merged-cdata": "merged script into existing job XML",
                 "replaced-definition": "replaced <definition> with inline pipeline (was SCM or non-CDATA)",
                 "full-document": "replaced job config with generated flow-definition"
             };
-            lines.push(
-                `Updated Jenkins job '${jobName}' at ${base}/job/${jobName}/ (HTTP ${code2}) — ${how[updateMode] ?? updateMode}; pipeline from ${opts.jenkinsfileLabel}`
-            );
+            lines.push(`Updated Jenkins job '${jobName}' at ${base}/job/${jobName}/ (HTTP ${code2}) — ${how[updateMode] ?? updateMode}; pipeline from ${opts.jenkinsfileLabel}`);
             lines.push("");
             lines.push("--- OK: Jenkins is aligned with Jenkinsfile.paas-deploy ---");
             lines.push("You can deploy from the PaaS app (same JENKINS_* as this sync).");
             lines.push(`Job URL: ${base}/job/${jobName}/`);
             return lines.join("\n");
         }
-
         const hint = extractHtmlErrorHint(body2);
         let msg = `Job exists but config update failed HTTP ${code2}`;
         if (hint) {
@@ -415,47 +342,32 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
         }
         msg += `\n${body2.slice(0, 4000)}`;
         msg +=
-            "\n\nIf this was HTTP 500: open Jenkins → Manage Jenkins → System Log, or controller pod logs, " +
-            "for the Java stack trace.";
+            "\n\nIf this was HTTP 500: open Jenkins \u2192 Manage Jenkins \u2192 System Log, or controller pod logs, " +
+                "for the Java stack trace.";
         throw new IntegrationError(msg);
     }
-
     const createUrl = `/createItem?name=${encodeURIComponent(jobName)}`;
-    const { status: createCode, body: createBody } = await jenkinsReq(
-        base,
-        createUrl,
-        {
-            method: "POST",
-            body: buildPaasDeployJobConfigXml(opts.groovyScript).toString("utf-8"),
-            redirect: "manual",
-            headers: { "Content-Type": "application/xml; charset=UTF-8" }
-        },
-        authHeader,
-        jar,
-        postCrumb
-    );
-
+    const { status: createCode, body: createBody } = await jenkinsReq(base, createUrl, {
+        method: "POST",
+        body: buildPaasDeployJobConfigXml(opts.groovyScript).toString("utf-8"),
+        redirect: "manual",
+        headers: { "Content-Type": "application/xml; charset=UTF-8" }
+    }, authHeader, jar, postCrumb);
     if (createCode === 200 || createCode === 201 || createCode === 302) {
-        lines.push(
-            `Created Jenkins job '${jobName}' at ${base}/job/${jobName}/ (HTTP ${createCode}) — inline pipeline from ${opts.jenkinsfileLabel}`
-        );
+        lines.push(`Created Jenkins job '${jobName}' at ${base}/job/${jobName}/ (HTTP ${createCode}) — inline pipeline from ${opts.jenkinsfileLabel}`);
         lines.push("");
         lines.push("--- OK: Jenkins is aligned with Jenkinsfile.paas-deploy ---");
         lines.push("You can deploy from the PaaS app (same JENKINS_* as this sync).");
         lines.push(`Job URL: ${base}/job/${jobName}/`);
         return lines.join("\n");
     }
-
     if (createCode === 401) {
-        throw new IntegrationError(
-            "HTTP 401 on /createItem. If GET /api/json succeeded, Jenkins often needs the same browser session cookie with the CSRF crumb for POSTs. " +
-                "This build sends Cookie + crumb accumulated from /api/json and /crumbIssuer; rebuild the frontend image with the latest sync. " +
-                "Otherwise verify Overall/Create permission for the Jenkins user. " +
-                "Also compare password/API token with: kubectl get secret jenkins -n jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d\n" +
-                "JENKINS_* live in frontend/docker-compose.env. Verify: docker compose exec frontend env | grep JENKINS\n" +
-                `Failed HTTP ${createCode}:\n${createBody.slice(0, 6000)}`
-        );
+        throw new IntegrationError("HTTP 401 on /createItem. If GET /api/json succeeded, Jenkins often needs the same browser session cookie with the CSRF crumb for POSTs. " +
+            "This build sends Cookie + crumb accumulated from /api/json and /crumbIssuer; rebuild the frontend image with the latest sync. " +
+            "Otherwise verify Overall/Create permission for the Jenkins user. " +
+            "Also compare password/API token with: kubectl get secret jenkins -n jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d\n" +
+            "JENKINS_* live in frontend/docker-compose.env. Verify: docker compose exec frontend env | grep JENKINS\n" +
+            `Failed HTTP ${createCode}:\n${createBody.slice(0, 6000)}`);
     }
-
     throw new IntegrationError(`Failed HTTP ${createCode}:\n${createBody.slice(0, 6000)}`);
 }

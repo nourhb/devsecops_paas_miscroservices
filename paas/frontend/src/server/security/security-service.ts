@@ -43,7 +43,7 @@ function degradedMetrics(project: Project, message: string): SecurityMetrics {
             policyEngine,
             policyValidated: policyEngine === "None",
             deploymentAllowed: policyEngine === "None",
-            summary: "Security integrations returned an error — values below are incomplete."
+            summary: "Security integrations returned an error \u2014 values below are incomplete."
         },
         trivy: emptySeverity(),
         cosignSigned: false,

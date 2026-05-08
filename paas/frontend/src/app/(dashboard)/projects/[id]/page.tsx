@@ -126,7 +126,7 @@ export default function ProjectDetailsPage() {
             }
         },
         onError: (err) => {
-            const msg = queryHttpMessage(err, "Deploy failed — check the build backend and deploy parameters");
+            const msg = queryHttpMessage(err, "Deploy failed \u2014 check the build backend and deploy parameters");
             const details = queryHttpDetails(err);
             const data = queryHttpData(err);
             const deploymentId = typeof data?.deploymentId === "string" ? data.deploymentId : null;
@@ -323,7 +323,7 @@ export default function ProjectDetailsPage() {
                     : appReachQuery.data.error === "no_url"
                         ? "App URL not set"
                         : appReachQuery.data.error === "synthetic_local"
-                            ? ".local URL — probe skipped (simulation)"
+                            ? ".local URL \u2014 probe skipped (simulation)"
                             : "Not reachable (probe)"}
                 </Badge>) : appReachQuery.isLoading ? (<Badge variant="outline" className="h-9">
                   Checking reachability…
@@ -331,18 +331,18 @@ export default function ProjectDetailsPage() {
             </>) : null}
           <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
             <Wrench className="mr-2 h-4 w-4"/>
-            {buildMutation.isPending ? "Building…" : "Trigger build"}
+            {buildMutation.isPending ? "Building\u2026" : "Trigger build"}
           </Button>
           <Button onClick={() => deployMutation.mutate()} disabled={deployMutation.isPending || Boolean(activeDeployment)}>
             <Rocket className="mr-2 h-4 w-4"/>
-            {deployMutation.isPending ? "Deploying…" : activeDeployment ? "Deploy running" : "Deploy"}
+            {deployMutation.isPending ? "Deploying\u2026" : activeDeployment ? "Deploy running" : "Deploy"}
           </Button>
           {activeDeployment ? (<Button variant="outline" asChild>
             <Link href={`/deployments/${activeDeployment.id}`}>Open running deploy</Link>
           </Button>) : null}
           <Button variant="destructive" onClick={() => rollbackMutation.mutate()} disabled={rollbackMutation.isPending}>
             <RotateCcw className="mr-2 h-4 w-4"/>
-            {rollbackMutation.isPending ? "Rolling back…" : "Rollback"}
+            {rollbackMutation.isPending ? "Rolling back\u2026" : "Rollback"}
           </Button>
           <Button variant="outline" asChild>
             <Link href={`/projects/${projectId}/edit`}>Edit project</Link>
@@ -402,16 +402,16 @@ export default function ProjectDetailsPage() {
                       {new Date(row.createdAt).toLocaleString()}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
-                      {row.buildRunId ?? row.buildNumber ?? "—"}
+                      {row.buildRunId ?? row.buildNumber ?? "\u2014"}
                       {row.buildProvider ? <div className="text-muted-foreground">{row.buildProvider}</div> : null}
                     </TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">
-                      {row.artifactImage ? row.artifactImage : "—"}
+                      {row.artifactImage ? row.artifactImage : "\u2014"}
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate text-xs">
                       {row.url ? (<a href={row.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                           {row.url}
-                        </a>) : ("—")}
+                        </a>) : ("\u2014")}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="outline" size="sm" asChild>
@@ -433,12 +433,12 @@ export default function ProjectDetailsPage() {
         <CardContent>
           {argoQuery.isLoading ? (<Skeleton className="h-10 w-full max-w-md"/>) : (<div className="flex flex-wrap gap-2">
               <Badge variant="outline" className="font-mono text-xs">
-                {argoQuery.data?.appName ?? "—"}
+                {argoQuery.data?.appName ?? "\u2014"}
               </Badge>
               <Badge variant={argoQuery.data?.health === "Healthy" ? "success" : "warning"}>
                 {argoQuery.data?.health ?? "Unknown"}
               </Badge>
-              <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "—"}</Badge>
+              <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
             </div>)}
         </CardContent>
       </Card>
@@ -482,7 +482,7 @@ export default function ProjectDetailsPage() {
           <CardContent className="space-y-3 text-sm">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Image tag</p>
-              <p className="mt-0.5 break-all font-mono text-xs">{status?.imageTag || project.imageTag || "—"}</p>
+              <p className="mt-0.5 break-all font-mono text-xs">{status?.imageTag || project.imageTag || "\u2014"}</p>
             </div>
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Pod status</p>
@@ -552,7 +552,7 @@ export default function ProjectDetailsPage() {
           </CardHeader>
           <CardContent>
             <pre className={cn("max-h-72 overflow-auto rounded-lg border border-border p-4 text-xs leading-relaxed", "bg-background/80 font-mono text-foreground/90")}>
-              {status?.buildLogs?.trim() || "No build log text is stored yet.\n\nOpen Operations → Trigger Build. Logs appear once Jenkins runs and reconciles; use Cluster → Logs to browse recent deployment records across the workspace."}
+              {status?.buildLogs?.trim() || "No build log text is stored yet.\n\nOpen Operations \u2192 Trigger Build. Logs appear once Jenkins runs and reconciles; use Cluster \u2192 Logs to browse recent deployment records across the workspace."}
             </pre>
           </CardContent>
         </Card>

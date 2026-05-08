@@ -107,7 +107,7 @@ export default function EditProjectPage() {
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             <div className="flex gap-3">
               <Button disabled={mutation.isPending} type="submit">
-                {mutation.isPending ? "Saving…" : "Save changes"}
+                {mutation.isPending ? "Saving\u2026" : "Save changes"}
               </Button>
               <Button type="button" variant="outline" onClick={() => router.back()}>
                 Cancel

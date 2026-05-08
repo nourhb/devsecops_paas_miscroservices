@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 function formatDate(value: string): string {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+    return Number.isNaN(date.getTime()) ? "\u2014" : date.toLocaleString();
 }
 export default function ArtifactsPage() {
     const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -65,15 +65,15 @@ export default function ArtifactsPage() {
                     <CardContent className="space-y-3 text-sm">
                         <div>
                             <p className="text-xs uppercase tracking-wide text-muted">Name</p>
-                            <p className="mt-1 font-medium">{latestArtifact?.name || "—"}</p>
+                            <p className="mt-1 font-medium">{latestArtifact?.name || "\u2014"}</p>
                         </div>
                         <div>
                             <p className="text-xs uppercase tracking-wide text-muted">Version</p>
-                            <p className="mt-1">{latestArtifact?.version || "—"}</p>
+                            <p className="mt-1">{latestArtifact?.version || "\u2014"}</p>
                         </div>
                         <div>
                             <p className="text-xs uppercase tracking-wide text-muted">Stored at</p>
-                            <p className="mt-1">{latestArtifact ? formatDate(latestArtifact.createdAt) : "—"}</p>
+                            <p className="mt-1">{latestArtifact ? formatDate(latestArtifact.createdAt) : "\u2014"}</p>
                         </div>
                     </CardContent>
                 </Card>
@@ -89,11 +89,11 @@ export default function ArtifactsPage() {
                         </div>
                         <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                             <span className="text-muted">Latest version</span>
-                            <span className="font-semibold">{latestArtifact?.version || "—"}</span>
+                            <span className="font-semibold">{latestArtifact?.version || "\u2014"}</span>
                         </div>
                         <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                             <span className="text-muted">Repository</span>
-                            <span className="font-semibold">{latestArtifact?.repository || "—"}</span>
+                            <span className="font-semibold">{latestArtifact?.repository || "\u2014"}</span>
                         </div>
                     </CardContent>
                 </Card>

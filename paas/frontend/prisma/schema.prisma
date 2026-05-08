@@ -1,6 +1,5 @@
 generator client {
   provider      = "prisma-client-js"
-  // `linux-musl` links OpenSSL 1.1 (missing on current Alpine). Use openssl-3 target + openssl in Docker runner.
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
