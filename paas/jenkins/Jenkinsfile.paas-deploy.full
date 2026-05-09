@@ -1,4 +1,4 @@
-def nonEmptyNoSpace(String value, String label) {
+﻿def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
     error("${label} is required")
   }
@@ -525,41 +525,49 @@ node(agentLabel) {
         return
       }
       def nvdArg = env.NVD_API_KEY?.trim() ? "--nvdApiKey ${env.NVD_API_KEY}" : "--noupdate"
-      sh """
-        set +u
-        WS="\${WORKSPACE:-}"
-        if [ -z "\$WS" ]; then export WORKSPACE="\$(pwd)"; else export WORKSPACE="\$WS"; fi
-        set +e
-        mkdir -p "\$WORKSPACE/sca"
-        echo "[sca] OWASP Dependency-Check: scan des dépendances vs NVD → JSON..."
-        docker pull owasp/dependency-check:latest >/dev/null
-        docker run --rm -v "\$WORKSPACE:/src" owasp/dependency-check:latest \\
-          --scan /src --format JSON --out /src/sca ${nvdArg} || true
-        if [ -f "\$WORKSPACE/sca/dependency-check-report.json" ]; then
-          mv -f "\$WORKSPACE/sca/dependency-check-report.json" "\$WORKSPACE/sca/dependency-check.json"
-        fi
-        echo "[sca] Génération SBOM CycloneDX (bom.json) pour Dependency-Track..."
-        CDXGEN_IMG="ghcr.io/cyclonedx/cdxgen:latest"
-        docker pull "\$CDXGEN_IMG" >/dev/null || echo "[sca] cdxgen image pull failed"
-        if [ -f "\$WORKSPACE/package.json" ] || [ -f "\$WORKSPACE/package-lock.json" ] || [ -f "\$WORKSPACE/yarn.lock" ] || [ -f "\$WORKSPACE/pnpm-lock.yaml" ]; then
-          docker run --rm -v "\$WORKSPACE:/repo" -w /repo "\$CDXGEN_IMG" \\
-            -r /repo -o /repo/sca/bom.json || true
-        elif [ -f "\$WORKSPACE/pom.xml" ] || [ -f "\$WORKSPACE/build.gradle" ] || [ -f "\$WORKSPACE/build.gradle.kts" ]; then
-          docker run --rm -v "\$WORKSPACE:/repo" -w /repo "\$CDXGEN_IMG" \\
-            -t java -r /repo -o /repo/sca/bom.json || true
-        elif [ -f "\$WORKSPACE/requirements.txt" ] || [ -f "\$WORKSPACE/pyproject.toml" ] || [ -f "\$WORKSPACE/Pipfile.lock" ]; then
-          docker run --rm -v "\$WORKSPACE:/repo" -w /repo "\$CDXGEN_IMG" \\
-            -t python -r /repo -o /repo/sca/bom.json || true
-        else
-          echo "[sca] Manifeste non reconnu par cdxgen; bom.json peut être absent."
-        fi
-        if [ -f "\$WORKSPACE/sca/bom.json" ]; then
-          echo "[sca] SBOM: \$WORKSPACE/sca/bom.json"
-        else
-          echo "[sca] Pas de bom.json généré."
-        fi
-        exit 0
-      """
+      withEnv([
+        "PAAS_SCA_WORKSPACE=${env.WORKSPACE ?: ''}",
+        "PAAS_SCA_NVD_ARG=${nvdArg}"
+      ]) {
+        sh '''#!/bin/bash
+set +u
+if [ -z "${PAAS_SCA_WORKSPACE}" ]; then
+  export WORKSPACE="$(pwd)"
+else
+  export WORKSPACE="${PAAS_SCA_WORKSPACE}"
+fi
+set +e
+mkdir -p "${WORKSPACE}/sca"
+echo "[sca] OWASP Dependency-Check: scan des dépendances vs NVD → JSON..."
+docker pull owasp/dependency-check:latest >/dev/null
+docker run --rm -v "${WORKSPACE}:/src" owasp/dependency-check:latest \
+  --scan /src --format JSON --out /src/sca ${PAAS_SCA_NVD_ARG} || true
+if [ -f "${WORKSPACE}/sca/dependency-check-report.json" ]; then
+  mv -f "${WORKSPACE}/sca/dependency-check-report.json" "${WORKSPACE}/sca/dependency-check.json"
+fi
+echo "[sca] Génération SBOM CycloneDX (bom.json) pour Dependency-Track..."
+CDXGEN_IMG="ghcr.io/cyclonedx/cdxgen:latest"
+docker pull "${CDXGEN_IMG}" >/dev/null || echo "[sca] cdxgen image pull failed"
+if [ -f "${WORKSPACE}/package.json" ] || [ -f "${WORKSPACE}/package-lock.json" ] || [ -f "${WORKSPACE}/yarn.lock" ] || [ -f "${WORKSPACE}/pnpm-lock.yaml" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -r /repo -o /repo/sca/bom.json || true
+elif [ -f "${WORKSPACE}/pom.xml" ] || [ -f "${WORKSPACE}/build.gradle" ] || [ -f "${WORKSPACE}/build.gradle.kts" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -t java -r /repo -o /repo/sca/bom.json || true
+elif [ -f "${WORKSPACE}/requirements.txt" ] || [ -f "${WORKSPACE}/pyproject.toml" ] || [ -f "${WORKSPACE}/Pipfile.lock" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -t python -r /repo -o /repo/sca/bom.json || true
+else
+  echo "[sca] Manifeste non reconnu par cdxgen; bom.json peut être absent."
+fi
+if [ -f "${WORKSPACE}/sca/bom.json" ]; then
+  echo "[sca] SBOM: ${WORKSPACE}/sca/bom.json"
+else
+  echo "[sca] Pas de bom.json généré."
+fi
+exit 0
+'''
+      }
       uploadBomToDependencyTrack(projectId, branchName)
     }
   }
@@ -600,22 +608,32 @@ node(agentLabel) {
         println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
         return
       }
-      sh """
-        set +e
-        docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
-        docker run --rm \\
-          -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
-          -e SONAR_TOKEN="\${SONAR_TOKEN}" \\
-          -v "\${WORKSPACE}:/usr/src" \\
-          sonarsource/sonar-scanner-cli:latest \\
-          -Dsonar.projectKey="${projectId}" \\
-          -Dsonar.projectName="${projectId}" \\
-          -Dsonar.projectVersion="${branchName}-${env.BUILD_NUMBER}" \\
-          -Dsonar.sources=. \\
-          -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \\
-          -Dsonar.scm.provider=git
-        exit 0
-      """
+      withEnv([
+        "SONAR_SCAN_HOST_URL=${env.SONAR_HOST_URL}",
+        "SONAR_SCAN_TOKEN=${env.SONAR_TOKEN}",
+        "SONAR_SCAN_WORKSPACE=${env.WORKSPACE ?: ''}",
+        "SONAR_SCAN_PROJECT_KEY=${projectId}",
+        "SONAR_SCAN_PROJECT_VERSION=${branchName}-${env.BUILD_NUMBER}"
+      ]) {
+        sh '''#!/bin/bash
+set +e
+SONAR_WS="${SONAR_SCAN_WORKSPACE}"
+if [ -z "${SONAR_WS}" ]; then SONAR_WS="$(pwd)"; fi
+docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
+docker run --rm \
+  -e SONAR_HOST_URL="$SONAR_SCAN_HOST_URL" \
+  -e SONAR_TOKEN="$SONAR_SCAN_TOKEN" \
+  -v "${SONAR_WS}:/usr/src" \
+  sonarsource/sonar-scanner-cli:latest \
+  -Dsonar.projectKey="$SONAR_SCAN_PROJECT_KEY" \
+  -Dsonar.projectName="$SONAR_SCAN_PROJECT_KEY" \
+  -Dsonar.projectVersion="$SONAR_SCAN_PROJECT_VERSION" \
+  -Dsonar.sources=. \
+  -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
+  -Dsonar.scm.provider=git
+exit 0
+'''
+      }
     }
   }
 
