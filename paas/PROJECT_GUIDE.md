@@ -786,4 +786,128 @@ Treat the **Next process** as holding **integration secrets** (API tokens, kubec
 
 ---
 
+## 35. Choix technologiques (stack catégorisée)
+
+Vue d’ensemble des **technologies réellement utilisées** dans ce dépôt (control plane + intégrations + pipeline), classées par rôle. Les versions précises sont dans `paas/frontend/package.json`, `docker-compose.yml` et les Dockerfiles.
+
+### 35.1 Interface utilisateur (frontend)
+
+| Technologie | Rôle dans la solution |
+|-------------|------------------------|
+| **Next.js 14** (App Router) | Framework full-stack : pages React + API Routes (`src/app/api`). |
+| **React 18** | Composants UI, état local, hooks. |
+| **TypeScript** | Typage du frontend et du code serveur partagé. |
+| **Tailwind CSS** + **PostCSS** + **Autoprefixer** | Styles utilitaires, design system léger. |
+| **Radix UI** (`@radix-ui/react-slot`) | Primitives accessibles (composition des boutons / patterns UI). |
+| **class-variance-authority**, **clsx**, **tailwind-merge** | Variants de composants et fusion de classes. |
+| **TanStack React Query v5** | Cache, requêtes, polling, invalidation après mutations. |
+| **Axios** | Client HTTP navigateur vers `/api/*` (`withCredentials`, intercepteurs 401). |
+| **jwt-decode** | Décodage côté client si besoin (session complémentaire au cookie). |
+| **Recharts** | Graphiques (dashboard, sécurité). |
+| **Sonner** | Toasts / notifications. |
+| **Lucide React** | Icônes. |
+| **next-themes** | Thème clair/sombre. |
+| **Fontsource Space Grotesk** | Police locale embarquée. |
+
+### 35.2 Backend applicatif (même codebase Next.js)
+
+| Technologie | Rôle |
+|-------------|------|
+| **Node.js** (runtime **20** en image Docker, voir `docker/frontend.Dockerfile`) | Exécution du serveur Next production et des route handlers. |
+| **Next.js Route Handlers** | Endpoints REST sous `src/app/api/**/route.ts` (souvent `runtime = "nodejs"` pour Prisma / intégrations). |
+| **Zod** | Validation des variables d’environnement (`env.ts`) et de certains corps de requête. |
+| **Prisma 5** | ORM + client généré, migrations / `db push`, schéma PostgreSQL. |
+| **bcryptjs** | Hachage des mots de passe. |
+| **jsonwebtoken** | Émission / vérification JWT (session). |
+| **nodemailer** | Envoi mail (vérification compte, reset mot de passe) si SMTP configuré. |
+| **undici** | Client HTTP côté serveur (chemins « integrations », timeouts TLS). |
+| **yaml** | Parsing / manipulation YAML si besoin côté serveur. |
+
+### 35.3 Données et persistance
+
+| Technologie | Rôle |
+|-------------|------|
+| **PostgreSQL 16** (image **Alpine** dans Docker Compose) | Base transactionnelle : utilisateurs, projets, déploiements, tokens, images. |
+| **Prisma Migrate / db push** | Évolution du schéma ; conteneur one-shot `db-push` en compose. |
+| **Cibles binaires Prisma** | `native` + `linux-musl-openssl-3.0.x` pour images Alpine CI/prod. |
+
+### 35.4 Intégration Kubernetes (optionnelle)
+
+| Technologie | Rôle |
+|-------------|------|
+| **@kubernetes/client-node** | Client API Kubernetes depuis le process Next (pods, services, deployments, logs, CRD selon code). |
+| **Kubeconfig fichier** ou **compte de service in-cluster** | Auth auprès du cluster (`KUBE_CONFIG_PATH`, `KUBERNETES_ENABLED`). |
+
+### 35.5 CI/CD exécuté hors control plane
+
+| Technologie | Rôle |
+|-------------|------|
+| **Jenkins** (Pipeline **Groovy** scripté) | Moteur de build/déploiement : `Jenkinsfile.paas-deploy` (+ variante sauvegardée `.full`). |
+| **Git** (plugin Jenkins `git`) | Checkout des dépôts applicatifs (paramètres `GIT_URL`, `BRANCH`, credentials). |
+| **Tekton** (optionnel) | Backend `BUILD_BACKEND=tekton` : API Kubernetes + `PipelineRun` (`build-backend-tekton.ts`). |
+| **Docker CLI** (sur agent Jenkins) | Build / push d’images lorsque disponible. |
+| **crane** (téléchargé portable dans le pipeline si besoin) | Construction / push « dockerless » OCI quand Docker absent. |
+| **Helm CLI** (sur agent, optionnel) | `helm package`, `helm push` OCI vers registre (ex. Harbor). |
+| **Cosign** (binaire pipeline ou agent) | Signature d’images dans les stages prévus. |
+| **curl**, **shell bash** | Orchestration, uploads, keepalive Jenkins. |
+
+Stages pipeline fréquents (non npm du PaaS) : **OWASP Dependency-Check**, **CycloneDX / cdxgen**, **Sonar Scanner** (Docker ou `npx sonarqube-scanner`), **OWASP ZAP** (image Docker), builds **Maven** / **npm** / **Python** selon le dépôt cloné.
+
+### 35.6 Registre, artefacts et GitOps
+
+| Technologie | Rôle |
+|-------------|------|
+| **Harbor** (ou registre compatible) | Push d’images Helm OCI / conteneurs ; paramètres `HARBOR_*`. |
+| **Docker Hub** (optionnel) | Chemin crane / credentials `DOCKERHUB_*`. |
+| **Git** (HTTPS + token) | Commits GitOps (values Helm) depuis le serveur (`gitops-github-service` / env `GITOPS_*`). |
+| **Argo CD** (API REST) | Statut sync/health, déclenchement de sync (`ARGOCD_*`). |
+| **Artifactory** (optionnel) | Bundle d’artefacts pipeline (paramètres `ARTIFACTORY_*`). |
+
+### 35.7 Sécurité et analyse (intégrations consommées par le PaaS)
+
+| Technologie | Rôle |
+|-------------|------|
+| **SonarQube** | Quality gate / métriques (`SONAR_*`). |
+| **OWASP Dependency-Track** | SCA centralisé, findings (`DEPENDENCY_TRACK_*`). |
+| **Trivy** | Scan image / vuln (`TRIVY_*`). |
+| **Cosign** | Vérification de signature d’image (contrôle plan + pipeline). |
+| **OPA** | Évaluation de politique HTTP (`OPA_EVAL_URL` / env associées). |
+| **Kyverno** | Liste / statut de politiques via API K8s quand moteur = Kyverno. |
+
+### 35.8 Observabilité
+
+| Technologie | Rôle |
+|-------------|------|
+| **Prometheus** (source métriques) | Agrégation CPU/RAM / charge côté API métriques (selon `metrics-service` et config). |
+| **Grafana** | Lien dashboard externe (`NEXT_PUBLIC_GRAFANA_URL`) ; pas embarqué dans le repo. |
+
+### 35.9 Conteneurs et environnement local
+
+| Technologie | Rôle |
+|-------------|------|
+| **Docker** | Build images control plane et exécution **Docker Compose**. |
+| **Docker Compose v2** | Stack local : Postgres, job `db-push`, service `paas-frontend`. |
+| **Alpine Linux** (bases `node:20-alpine`, `postgres:16-alpine`) | Images légères runtime / DB. |
+
+### 35.10 Qualité, lint et outillage dev
+
+| Technologie | Rôle |
+|-------------|------|
+| **ESLint** + **eslint-config-next** | Lint JS/TS / conventions Next. |
+| **Prisma Studio** (script npm) | Exploration locale du schéma. |
+| **Nodemon** (script optionnel) | Reload dev. |
+
+### 35.11 Scripts et infra annexe (dépôt)
+
+| Élément | Rôle |
+|---------|------|
+| **`paas/scripts/*.py`** | Helpers opérationnels (Harbor, Argo, etc.) — hors chemin critique du serveur Next. |
+| **Terraform / manifests d’exemple** (`paas/terraform/`, `paas/k8s-manifests/`, `paas/gitops/`) | Modèles d’infra à adapter ; pas le runtime du control plane. |
+
+### 35.12 Synthèse en une phrase
+
+**Le produit repose sur un monolithe Next.js/Node + PostgreSQL/Prisma dans le navigateur et sur le serveur, orchestre Jenkins (ou Tekton) pour la chaîne de build, et se branche par HTTP/API ou client K8s à Argo, aux registres, à Git et à la toolchain DevSecOps (Sonar, Dependency-Track, Trivy, Cosign, OPA, Kyverno) selon la configuration.**
+
+---
+
 *Last updated to match repository layout and behavior at documentation time; verify against `env.ts` and live Jenkinsfile for your deployment as the system evolves.*
