@@ -2,6 +2,9 @@
 // Full pipeline (build, SCA, SAST, image, Helm, Harbor, Cosign, etc.):
 //   see `Jenkinsfile.paas-deploy.full` in this folder. To restore: copy the .full file over this one.
 // Sync to Jenkins still uses this filename — inline job sync reads `Jenkinsfile.paas-deploy`.
+//
+// If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
+// is still an old/broken script: re-run inline job sync from the PaaS or reload pipeline from this repo.
 
 def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
