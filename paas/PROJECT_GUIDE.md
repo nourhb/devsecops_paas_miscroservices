@@ -558,4 +558,232 @@ API list responses use that parser so the UI can show **artifact image/digest** 
 
 ---
 
+## 34. Full architecture description (end-to-end)
+
+This section ties together **what runs where**, **who talks to whom**, and **how a user action becomes a cluster state**, at a depth suitable for architecture reviews and onboarding.
+
+### 34.1 Problem the solution solves
+
+Teams need a **single place** to:
+
+- Own application **metadata** (repo, branch, namespace, credentials IDs) without hand-editing Jenkins or YAML for every action.
+- **Trigger** CI/CD (Jenkins by default, Tekton optionally) with parameters that stay consistent with the control plane config.
+- **Observe** build/deploy progress, logs, and outcomes in the UI rather than only in Jenkins.
+- **Gate and visualize** security and policy signals (SCA/SAST/image scan/signing/policy) when those backends exist.
+- **Optional:** reconcile **Kubernetes** live state (pods, services, deployments, logs) and **GitOps/Argo** health into the same UX.
+
+The implementation choice is a **control plane monolith** (Next.js) that is both UI and API, plus **PostgreSQL** for authoritative platform state, and **best-effort integrations** to external tools over HTTP/API and optional in-cluster clients.
+
+### 34.2 Logical architecture (layers)
+
+| Layer | Responsibility | Primary location |
+|--------|----------------|------------------|
+| **Presentation** | Dashboard pages, forms, charts; TanStack Query for server state; Axios client with credentials | `src/app/(dashboard)/**`, `src/lib/api.ts`, `src/lib/api-client.ts` |
+| **Edge API** | AuthN/AuthZ, rate limits, validation, audit hooks, HTTP mapping | `src/app/api/**/route.ts` |
+| **Application services** | Orchestration: deployments, pipeline triggers, dashboard rollups, security composition | `src/server/services/**`, `src/server/pipeline/**`, `src/server/security/**` |
+| **Domain / persistence** | Prisma access, project scoping, deployment records | `src/server/projects/**`, `src/server/db/**`, `prisma/schema.prisma` |
+| **Integration adapters** | Jenkins REST, Tekton/K8s, Harbor/Helm patterns, Argo REST, GitOps Git, Sonar/DT/Trivy/etc. | `src/server/integrations/**`, `src/server/gitops/**`, `src/server/jenkins/**` |
+| **External systems** | Jenkins, registry, optional K8s API, optional Prometheus, tool URLs | Your infrastructure |
+
+**Important boundary:** business rules that must stay consistent (who can deploy, concurrent deployment guard, deployment status transitions) live in **server services**, not in the React layer. The UI only reflects API results and triggers mutations.
+
+### 34.3 Runtime / physical view
+
+Typical production-style layout (exact hosts vary):
+
+```mermaid
+flowchart TB
+  subgraph browser [User browser]
+    UI[React app]
+  end
+  subgraph control [Control plane host / cluster]
+    NEXT[Next.js Node process]
+    PG[(PostgreSQL)]
+  end
+  subgraph ci [CI farm]
+    JK[Jenkins controller + agent]
+  end
+  subgraph reg [Artifact plane]
+    HR[Harbor or Docker Hub]
+  end
+  subgraph gitplane [Git]
+    REPO[GitOps values repo]
+  end
+  subgraph cd[Continuous delivery]
+    ARGO[Argo CD]
+  end
+  subgraph run[Runtime cluster]
+    K8S[Kubernetes workloads]
+    PROM[Prometheus optional]
+  end
+  UI -->|HTTPS same-origin /api| NEXT
+  NEXT --> PG
+  NEXT -->|HTTPS + crumb| JK
+  NEXT -->|optional K8s client| K8S
+  NEXT -->|optional HTTP| ARGO
+  NEXT -->|Git HTTPS| REPO
+  JK -->|docker push / crane| HR
+  ARGO --> HR
+  ARGO --> K8S
+  JK -. optional metrics .- PROM
+  NEXT -. metrics API .- PROM
+```
+
+The **frontend container** often mounts the monorepo read-only so it can read `paas/jenkins/Jenkinsfile.paas-deploy` for **inline Pipeline job sync** into Jenkins before trigger (`JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER`).
+
+### 34.4 Identity, authorization, and multi-tenancy
+
+- **Authentication:** JWT stored in an **HTTP-only cookie** for browsers; **`Authorization: Bearer`** also accepted for API-style clients. Verification in `auth-guard.ts` loads the user from DB (so resets survive token issue).
+- **Roles:** **`ADMIN`** vs **`DEVELOPER`** (`Role` enum). Developers are **scoped to projects where `createdById` matches** (`assertProjectAccess`); admins bypass that filter for project operations as implemented.
+- **Audit:** Sensitive actions (e.g. build/deploy triggers) write **`writeAuditLog`** entries where wired.
+
+Multi-tenancy is **logical** (per-user project ownership), not hard Kubernetes isolation: all projects share the same platform instance and integration credentials unless you split deployments by environment.
+
+### 34.5 Core domain state (what the platform “is responsible for”)
+
+- **Project** — Desired state: Git URL, branch, namespace, feature flags (auto Dockerfile/Helm), operational mirrors (`buildStatus`, `lastDeploymentStatus`, `podStatus`), long text logs for UX, optional `url` / `imageTag`, soft delete.
+- **Deployment** — One **attempt** to run a pipeline for a project: Jenkins/Tekton run identity, **status machine** (`PENDING` → `DEPLOYING` → `SUCCESS` / GitOps handoff → `DEPLOYED`, or `FAILED`), **failure reason** enum, **log buffer** (tailed), **`priorJenkinsBuildNumber`** anti-confusion baseline.
+- **ContainerImage** — Audit of **promoted** images (registry ref, digest, action) after successful CI path.
+- **User + tokens** — Accounts, email verification / reset tokens when SMTP enabled.
+
+The control plane is **not** the source of truth for Kubernetes object YAML; it reflects outcomes (URLs, tags, optional live pod counts) and drives **GitOps commits** / **Argo sync** when configured.
+
+### 34.6 Build-backend abstraction (Jenkins vs Tekton)
+
+All CI entry points go through **`BuildBackend`** (`build-backend.ts`):
+
+- **`triggerBuild`** — Build-only; updates **project** row (no `Deployment` row required for a simple build in the current design).
+- **`triggerDeployment`** + **`getDeploymentBaseline`** + **`monitorDeployment`** — Full path: create/update **Deployment**, poll until terminal Jenkins (or Tekton) state, then **promote** or **record failure**.
+
+Switching backends is **`BUILD_BACKEND`** (`jenkins` default, `tekton` alternative). Tekton path requires **`KUBERNETES_ENABLED`** and working cluster access from the Next process.
+
+### 34.7 End-to-end flow: user login → session
+
+1. Browser **`POST /api/auth/login`** with email/password.
+2. Server validates password (bcrypt), mints JWT, sets cookie (`session-cookie.ts`).
+3. **`GET /api/auth/session`** returns user profile; **React Query** / **`AuthProvider`** keep client state in sync.
+4. Subsequent **`/api/*`** calls send cookie (and may add Bearer from local storage via Axios interceptor).
+
+### 34.8 End-to-end flow: register project
+
+1. User submits project form → **`POST /api/projects`** (or create flow).
+2. Route validates payload (Zod where used), **`requireAuth`**, persists **Project** with **`createdById`**.
+3. List views **`GET /api/projects`** filter on role.
+
+### 34.9 End-to-end flow: build-only
+
+1. UI calls **`POST /api/build/[projectId]`** (`pipeline-service.triggerBuild`).
+2. Server **`assertProjectAccess`**, optional rate limit, **`resolveBuildPlan`**, **`getBuildBackend().triggerBuild`**.
+3. **Jenkins:** parameterized job trigger (crumb), optional inline `config.xml` sync from monorepo `Jenkinsfile.paas-deploy`; response updates **`buildStatus`**, **`buildLogs`** on **Project**.
+4. **Tekton:** creates/observes `PipelineRun` per `build-backend-tekton.ts`.
+5. UI invalidates **`["status", projectId]`** and **`["project", projectId]`** queries.
+
+No **`Deployment`** row is required for this path; monitoring is project-centric.
+
+### 34.10 End-to-end flow: full deploy (detailed)
+
+This is the longest path and the heart of the product.
+
+**Synchronous part (HTTP request)**
+
+1. **`POST /api/deploy/[projectId]`** → **`runProjectDeployment`**.
+2. **Concurrency:** if another row is `PENDING` or `DEPLOYING` for that project → **409** with existing `deploymentId`.
+3. **Plan + baseline:** `resolveBuildPlan`, `getBuildBackend().getDeploymentBaseline()` → e.g. last Jenkins number → stored as **`priorJenkinsBuildNumber`**.
+4. **Row created:** **`Deployment`** in `PENDING` with empty logs.
+5. **Trigger:** `backend.triggerDeployment(project, plan)` — on hard failure → **`recordDeploymentFailure`** (`TRIGGER`) and **502**-style error to client with `deploymentId` when possible.
+6. **Accepted:** trim logs, set **`jenkinsBuildNumber`/metadata**, set project **`QUEUED`**, **`monitorDeployment(deploymentId, runNumber)`** fired without awaiting completion.
+7. **Response:** JSON with **`deploymentId`** and message to poll **`GET /api/deployments/:id`**.
+
+**Asynchronous part (monitor loop)**
+
+8. **`BuildBackend.monitorDeployment`** (Jenkins: poll `api/json` + `consoleText`, respect baseline).
+9. **While running:** merge console output into **`Deployment.logs`** (capped by `DEPLOYMENT_LOG_TAIL_MAX_CHARS`), status often **`DEPLOYING`**.
+10. **Failure:** **`recordDeploymentFailure`** with enum reason (`JENKINS`, `TIMEOUT`, etc.) and message; project **`lastDeploymentStatus`** updated.
+11. **Success:** **`promoteDeploymentAfterJenkinsSuccess`** (cluster-deploy-service): persist artifact metadata (`ContainerImage`), optional **GitOps commit** (image tag in values repo), optional **Argo CD sync** HTTP call, set **`DEPLOYED`** / project `url` / `imageTag` as applicable.
+
+**Client observation**
+
+12. **`GET /api/deployments/[id]`** for active rows calls **`reconcileJenkinsDeploymentRecord`** first to reduce staleness.
+
+```mermaid
+sequenceDiagram
+  participant U as User browser
+  participant API as Next API routes
+  participant S as Server services
+  participant DB as PostgreSQL
+  participant J as Jenkins
+  participant R as Registry
+  participant G as GitOps repo
+  participant A as Argo CD
+  participant K as Kubernetes
+  U->>API: POST /api/deploy/projectId
+  API->>S: runProjectDeployment
+  S->>DB: INSERT Deployment PENDING
+  S->>J: buildWithParameters
+  S->>DB: update queued logs run number
+  S-->>U: 200 + deploymentId
+  loop Async monitor
+    S->>J: poll build + console
+    S->>DB: merge logs status
+  end
+  alt Jenkins success
+    S->>DB: SUCCESS then DEPLOYING promote path
+    S->>R: image already pushed by Jenkins or crane path
+    S->>G: commit values optional
+    S->>A: sync optional
+    S->>DB: DEPLOYED project url imageTag
+  else Jenkins fail
+    S->>DB: FAILED failureReason
+  end
+  A->>K: reconcile workload
+```
+
+### 34.11 Rollback and cancel
+
+- **Rollback** (`POST /api/rollback/[projectId]`) updates **project** operational strings (simplified rollback narrative in `pipeline-service.rollbackProject`); it is not a Kubernetes `kubectl rollout undo` by itself unless extended.
+- **Cancel** (`POST /api/deployments/:id/cancel`) is **implemented for Jenkins**: stop build, cancel queue items, **`reconcileJenkinsDeploymentRecord`**. Tekton cancel returns **501** from the service when backend is not Jenkins.
+
+### 34.12 Security and observability surfaces (architecture)
+
+- **Per-project security page:** **`getSecurityMetrics`** composes parallel calls (Sonar gate, Dependency-Track metrics/findings, Trivy scan, Cosign verify subprocess, optional Kyverno policy list via K8s client, OPA HTTP if configured). Scoring is **heuristic**; missing tools **degrade** with partial payloads.
+- **Dashboard overview:** aggregates **cluster** (K8s or project rollups), **deployments**, **artifacts**, **platform tooling reachability**, and **security rollups** from multiple `getSecurityMetrics` samples for charting.
+
+### 34.13 Kubernetes optional path
+
+When **`KUBERNETES_ENABLED=true`** and kubeconfig (or in-cluster config) loads:
+
+- **Cluster** pages and **`/api/k8s/*`** proxy **list/get** operations through **`@kubernetes/client-node`** with RBAC as granted.
+- **`getProjectStatus`** enriches pod summaries for a **project namespace**.
+- **Security** may include Kyverno-related policy signals when `POLICY_ENGINE` aligns.
+
+When disabled, the UI uses **DB-backed rollups** and strings so pages remain usable.
+
+### 34.14 Jenkins pipeline vs control plane split
+
+- **Jenkins** runs **`Jenkinsfile.paas-deploy`** (or a minimal variant during incremental testing): checkout, build, SCA/SAST (often non-fatal stages), image build/push (Docker or crane path), optional Cosign/ZAP/Helm push, archives. It prints **`PAAS_ARTIFACT_IMAGE=...`** for log consumers.
+- **Control plane** does **not** execute Maven/npm inside Next.js**; it **orchestrates** Jenkins and then **promotes** and **records** outcomes in Postgres.
+
+A **full** Groovy backup may live in **`Jenkinsfile.paas-deploy.full`** while **`Jenkinsfile.paas-deploy`** is trimmed for step-by-step bring-up; inline sync pulls the filename the PaaS expects.
+
+### 34.15 Configuration and secrets (architecture level)
+
+- **Single schema:** `src/server/config/env.ts` (Zod) defines what the app reads.
+- **Categories:** database JWT, Jenkins, registries, GitOps, Argo, security tool URLs, Kubernetes, build backend, optional OpenAI for helpers, webhooks.
+- **Compose:** `paas/docker-compose.yml` wires Postgres + frontend; `frontend/docker-compose.env` is the usual operator-facing env file.
+
+Treat the **Next process** as holding **integration secrets** (API tokens, kubeconfig path); protect host/network access accordingly.
+
+### 34.16 Failure modes (what to expect)
+
+- **Integration down:** routes return **`IntegrationError`** (often 502) with a message; security APIs **soft-fail** per integration.
+- **Jenkins URL/crumb mismatch:** 403 or failed trigger; documented in troubleshooting notes.
+- **Long builds:** pipeline uses **keepalive** patterns; DB **log tails** capped to avoid unbounded growth.
+- **Process restart** during `monitorDeployment`: in-flight poll may stop until next reconcile/poll — document for SREs.
+
+### 34.17 Summary sentence
+
+**The solution is a Postgres-backed control plane (Next.js) that authenticates users, owns project and deployment records, drives Jenkins (or Tekton) as the execution engine for builds and image production, optionally commits GitOps changes and triggers Argo CD, optionally reads Kubernetes and metrics APIs, and presents a unified dashboard for delivery and security posture.**
+
+---
+
 *Last updated to match repository layout and behavior at documentation time; verify against `env.ts` and live Jenkinsfile for your deployment as the system evolves.*
