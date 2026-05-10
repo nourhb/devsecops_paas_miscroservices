@@ -58,6 +58,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ..:/monorepo:ro
+      # Optional: expose cluster API to the app (KUBERNETES_ENABLED=true, KUBE_CONFIG_PATH=/home/nextjs/.kube/config).
+      # Windows: use the path Docker can read, e.g. C:\Users\you\.kube\config:/home/nextjs/.kube/config:ro
+      # - "${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/home/nextjs/.kube/config:ro"
     ports:
       - "3000:3000"
 
