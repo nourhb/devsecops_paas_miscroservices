@@ -153,16 +153,23 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
 
   sh """
     set -eu
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ]; then
+      echo "[image] npm prune --omit=dev — shrink node_modules before crane layer (skip: JENKINS_NPM_PRUNE_BEFORE_CRANE=false)"
+      npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
+    fi
     CR_HEART_PID=""
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
       echo "[image] crane/registry stdout heartbeat every \${_hb}s — mitigates durable-task exit -2 during long quiet layer pushes"
-      ( while true; do sleep "\${_hb}"; echo "[image] (crane heartbeat) still pushing layers… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+      ( while true; do sleep "\${_hb}"; echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
       CR_HEART_PID=\$!
       trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
     fi
     mkdir -p paas-artifacts
     tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
+      --exclude='./.next/cache' \\
+      --exclude='./node_modules/.cache' \\
+      --exclude='./coverage' --exclude='./.eslintcache' \\
       --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
     '${craneBin}' append \\
       -b mirror.gcr.io/library/node:20-bookworm-slim \\
@@ -221,6 +228,7 @@ node(agentLabel) {
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
+  env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.PROJECT_ID = projectId
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -493,6 +501,9 @@ node(agentLabel) {
         """
         println "*** END : 6. Création de l'image Docker ***"
         return
+      }
+      if (fileExists("package.json")) {
+        ensureNodeTool()
       }
       def craneBin = ensureCraneTool()
       dockerlessImagePush(craneBin, dest, resolvedDockerfile)
