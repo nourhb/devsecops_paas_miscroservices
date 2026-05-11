@@ -1,6 +1,5 @@
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
-import { allowSimulation } from "@/server/integrations/integration-mode";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import type { UserRole } from "@/types";
 function isLikelySyntheticLocalHostname(url: string): boolean {
@@ -28,7 +27,9 @@ export async function probeProjectAppReachability(projectId: string, userId: str
     if (!url) {
         return { url: null, reachable: false, statusCode: null, error: "no_url" };
     }
-    if (allowSimulation() && isLikelySyntheticLocalHostname(url)) {
+    // Lab hostnames: probing from the PaaS server (often Docker) almost always fails
+    // (no cluster DNS / hosts), even when the app is fine in the browser.
+    if (isLikelySyntheticLocalHostname(url)) {
         return {
             url,
             reachable: false,
