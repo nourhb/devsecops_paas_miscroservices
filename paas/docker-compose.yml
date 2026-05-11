@@ -50,7 +50,6 @@ services:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
       NEXT_PUBLIC_API_BASE_URL: ""
       PAAS_STRICT_INTEGRATIONS: "false"
-      ARGOCD_SYNC_OPTIONAL: "true"
       JENKINS_BUILD_JOB_NAME: paas-deploy
       JENKINS_DEPLOY_JOB_NAME: paas-deploy
       PAAS_MONOREPO_ROOT: /monorepo

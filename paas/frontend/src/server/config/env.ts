@@ -80,7 +80,6 @@ const envSchema = z.object({
     ARGOCD_AUTH_TOKEN: z.string().default(""),
     ARGOCD_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     ARGOCD_APP_PREFIX: z.string().default("paas"),
-    ARGOCD_SYNC_OPTIONAL: z.enum(["true", "false"]).default("false"),
     SONAR_BASE_URL: z.string().default(""),
     SONAR_TOKEN: z.string().default(""),
     DEPENDENCY_TRACK_BASE_URL: z.string().default(""),
@@ -201,9 +200,6 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
             errors.push("need gitops repo URL + token (or set PAAS_STRICT_INTEGRATIONS=false)");
         }
     }
-    if (parsedEnv.PAAS_STRICT_INTEGRATIONS === "true" && parsedEnv.ARGOCD_SYNC_OPTIONAL === "true") {
-        errors.push("ARGOCD_SYNC_OPTIONAL=true is incompatible with PAAS_STRICT_INTEGRATIONS=true");
-    }
     return errors;
 }
 const parsed = envSchema.safeParse({
@@ -278,7 +274,6 @@ const parsed = envSchema.safeParse({
     ARGOCD_AUTH_TOKEN: firstNonEmpty(process.env.ARGOCD_AUTH_TOKEN, process.env.ARGOCD_TOKEN),
     ARGOCD_TLS_SKIP_VERIFY: process.env.ARGOCD_TLS_SKIP_VERIFY,
     ARGOCD_APP_PREFIX: process.env.ARGOCD_APP_PREFIX,
-    ARGOCD_SYNC_OPTIONAL: process.env.ARGOCD_SYNC_OPTIONAL,
     SONAR_BASE_URL: firstNonEmpty(process.env.SONAR_BASE_URL, process.env.SONAR_URL),
     SONAR_TOKEN: process.env.SONAR_TOKEN,
     DEPENDENCY_TRACK_BASE_URL: process.env.DEPENDENCY_TRACK_BASE_URL,
