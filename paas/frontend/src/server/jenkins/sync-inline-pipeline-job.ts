@@ -6,6 +6,8 @@ import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-deploy-job-sync";
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
+/** Baked into paas/docker/frontend.Dockerfile when the UI runs as a container without a monorepo volume. */
+const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
 }
@@ -27,6 +29,10 @@ function findMonorepoRoot(): string | null {
             break;
         }
         dir = parent;
+    }
+    const bundled = path.resolve(BUNDLED_MONOREPO_ROOT);
+    if (jenkinsfileRelativePathExists(bundled)) {
+        return bundled;
     }
     return null;
 }
@@ -54,7 +60,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         return "[jenkins-sync] Skipped: folder-qualified job name (use manual sync for nested jobs).";
     }
     if (!root) {
-        throw new IntegrationError("Cannot find monorepo root (expected paas/jenkins/Jenkinsfile.paas-deploy). Set PAAS_MONOREPO_ROOT or run the app from inside the repository.");
+        throw new IntegrationError("Cannot find Jenkinsfile.paas-deploy (tried PAAS_MONOREPO_ROOT, cwd parents, and /app/paas-bundled from the frontend image). Rebuild the frontend image or set PAAS_MONOREPO_ROOT to the repo root that contains paas/jenkins/.");
     }
     const jenkinsfilePath = path.join(root, ...JENKINSFILE_SEGMENTS);
     if (!fs.existsSync(jenkinsfilePath)) {
