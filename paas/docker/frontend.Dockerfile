@@ -1,7 +1,4 @@
-﻿# syntax=docker/dockerfile:1
-
-# Build context: paas/ (see docker-compose.yml). App source: frontend/
-ARG NODE_VERSION=20-alpine
+﻿# Build context: paas/ (see docker-compose.yml). App source: frontend/ARG NODE_VERSION=20-alpine
 
 # --- dependencies (lockfile-reproducible)
 FROM node:${NODE_VERSION} AS deps
