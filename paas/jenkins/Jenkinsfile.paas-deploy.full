@@ -255,6 +255,7 @@ node(agentLabel) {
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
+  env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "false").trim()
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.PROJECT_ID = projectId
@@ -286,7 +287,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Ordre volontaire : après ce checkout, le stage « 5. Construction » s’exécute **avant** les stages « 3. SCA » et « 4. SAST » (dépendances et artefacts nécessaires aux analyses — numéros = chapitres mémoire, pas l’ordre 1,2,3…)."
+  println "[pipeline] Ordre volontaire : après ce checkout, le stage « 5. Construction » s’exécute **avant** les stages « 3. SCA » et « 4. SAST » (dépendances et artefacts nécessaires aux analyses — numéros = chapitres mémoire, pas l’ordre 1,2,3…). Le fichier `Jenkinsfile.paas-deploy` (job inline PaaS) enchaîne la même « 6. Image Docker » juste après la construction (Step 4) sans SCA/SAST."
 
   /* §5 — Construction de l'application : compilation selon le type de projet (Maven, npm, Python…).
    * Cette étape utilise les outils adaptés au manifeste détecté ; les sorties (node_modules, target/, dist/, etc.)
