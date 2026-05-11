@@ -10,6 +10,7 @@ const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as c
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
 /** Known markers printed by `paas/jenkins/Jenkinsfile.paas-deploy` (accept several so a newer UI syncs an older mounted repo until `git pull`). */
 const ACCEPTED_PAAS_JENKINSFILE_MARKERS = [
+    "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602",
     "[paas-jenkinsfile] marker=steps-1-2-3-4-202602",
     "[paas-jenkinsfile] marker=steps-1-2-3-202602"
 ] as const;
