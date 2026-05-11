@@ -81,6 +81,7 @@ node(agentLabel) {
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
+  env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "false").trim()
   env.PROJECT_ID = projectId
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -178,7 +179,10 @@ node(agentLabel) {
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
             JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
             run_with_keepalive() {
-              if [ "${JENKINS_SH_KEEPALIVE:-true}" = "false" ]; then
+              # Default: run in foreground. Background "$@" + sleep loop breaks Jenkins durable-task (exit -2,
+              # "process apparently never started") after controller restarts/resume or with some agents.
+              # Set JENKINS_SH_KEEPALIVE=true only if you need stdout heartbeats through a proxy that drops idle streams.
+              if [ "${JENKINS_SH_KEEPALIVE:-false}" != "true" ]; then
                 "$@"
                 return $?
               fi
