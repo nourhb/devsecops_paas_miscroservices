@@ -308,10 +308,10 @@ node(agentLabel) {
          * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
          * Next.js: npx next build --no-lint --webpack unless JENKINS_NEXT_BUILD_WEBPACK=false / USE_NPM_SCRIPT.
          * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed.
-         * JENKINS-48300: long steps with little stdout → durable-task abort (exit -1). Background subshells
-         * may NOT refresh the wrapper log; run long commands via run_with_keepalive (foreground loop in THIS shell).
-         * Default interval JENKINS_SH_KEEPALIVE_SEC=60; JENKINS_SH_KEEPALIVE=false disables; JVM option
-         * BourneShellScript.HEARTBEAT_CHECK_INTERVAL still helps on slow FS / after controller restarts. */
+         * JENKINS-48300: long steps with little stdout → durable-task abort (exit -1). Background child + sleep
+         * in THIS shell can confuse durable-task after controller restart (exit -2). Default: run npm in
+         * foreground (JENKINS_SH_KEEPALIVE not true). Set JENKINS_SH_KEEPALIVE=true only for proxy idle-timeout issues.
+         * Default interval JENKINS_SH_KEEPALIVE_SEC=60 when keepalive is on. */
         /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
          * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
@@ -363,9 +363,8 @@ node(agentLabel) {
             npm config set fetch-timeout 1800000
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
             JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
-            # Run long command in background; heartbeat from THIS shell (JENKINS-48300 — background echo is not enough).
             run_with_keepalive() {
-              if [ "${JENKINS_SH_KEEPALIVE:-true}" = "false" ]; then
+              if [ "${JENKINS_SH_KEEPALIVE:-false}" != "true" ]; then
                 "$@"
                 return $?
               fi
