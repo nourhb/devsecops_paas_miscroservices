@@ -1,7 +1,5 @@
-// DevSecOps PaaS — incremental Jenkinsfile (single stage for step-by-step validation).
-// Full pipeline (build, SCA, SAST, image, Helm, Harbor, Cosign, etc.):
-//   see `Jenkinsfile.paas-deploy.full` in this folder. To restore: copy the .full file over this one.
-// Sync to Jenkins still uses this filename — inline job sync reads `Jenkinsfile.paas-deploy`.
+// DevSecOps PaaS — incremental Jenkinsfile: Step 1 (params) + Step 2 (checkout), same as start of `Jenkinsfile.paas-deploy.full`.
+// Add more stages from .full when ready. Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
 // is still an old/broken script: re-run inline job sync from the PaaS or reload pipeline from this repo.
@@ -48,14 +46,18 @@ node(agentLabel) {
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
   env.PROJECT_ID = projectId
 
-  stage("Step 1 — Validate parameters and checkout") {
-    println "*** BEGIN : Step 1 — parameters + Git checkout ***"
+  stage("Step 1 — Params validation") {
+    println "*** BEGIN : Check Parameters ***"
     nonEmptyNoSpace(gitUrl, "GIT_URL PARAMS")
     nonEmptyNoSpace(branchName, "BRANCH PARAMS")
     nonEmptyNoSpace(imageName, "IMAGE_NAME PARAMS")
     nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
-    println "[step1] project=${projectId} branch=${branchName} image=${imageName}"
+    println "[params] project=${projectId} branch=${branchName} image=${imageName}"
+    println "*** END : Check Parameters ***"
+  }
 
+  stage("Step 2 — Checkout du code (Git / GitHub)") {
+    println "*** BEGIN : 2. Checkout du code — référentiel Git (GIT_URL / BRANCH) ***"
     deleteDir()
     def host = gitUrl.replaceAll("^https?://([^/@]+).*", "\$1")
     println "[checkout] branch=${branchName} url host=${host} creds=${gitCredentialsId ? 'yes' : 'no'}"
@@ -64,15 +66,13 @@ node(agentLabel) {
     } else {
       git branch: branchName, url: gitUrl
     }
-
     sh '''
       set -eu
-      echo "[step1] workspace root: $(pwd)"
-      echo "[step1] git HEAD: $(git rev-parse HEAD 2>/dev/null || echo 'n/a')"
-      echo "[step1] top of tree:"
+      echo "[checkout] workspace root: $(pwd)"
+      echo "[checkout] git HEAD: $(git rev-parse HEAD 2>/dev/null || echo 'n/a')"
+      echo "[checkout] top of tree:"
       ls -la | head -25
     '''
-    println "*** END : Step 1 — parameters + Git checkout ***"
-    println "[step1] Next: add further stages from Jenkinsfile.paas-deploy.full (or paste the next stage block here)."
+    println "*** END : 2. Checkout du code ***"
   }
 }
