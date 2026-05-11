@@ -58,7 +58,13 @@ export async function syncArgoApplication(projectName: string): Promise<{
                 `Regenerate a JWT (Argo CD UI: generate token, or run \`python paas/scripts/refresh_argocd_token.py\` with ARGOCD_REFRESH_SSH_PASSWORD) and set ARGOCD_AUTH_TOKEN.`);
         }
         if (response.status === 403) {
-            throw new IntegrationError(`Argo CD denied this request (HTTP 403). Check RBAC and that the Application exists and your token may access it.`);
+            const hint = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
+            throw new IntegrationError(
+                `Argo CD denied this request (HTTP 403) for application "${appName}". ` +
+                    `The bearer token must be allowed to **sync** this app (Argo CD RBAC / AppProject policies), or use an admin API token. ` +
+                    `Confirm the Application exists and matches ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}" (expected name: "${appName}").` +
+                    hint
+            );
         }
         throw new IntegrationError(`Argo CD sync failed (${response.status}): ${body.slice(0, 800)}`);
     }
