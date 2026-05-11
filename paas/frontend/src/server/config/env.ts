@@ -115,7 +115,7 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
-    PAAS_STRICT_INTEGRATIONS: z.enum(["true", "false"]).default("true")
+    PAAS_STRICT_INTEGRATIONS: z.enum(["true", "false"]).default("false")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
 const harborBaseEffective = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
