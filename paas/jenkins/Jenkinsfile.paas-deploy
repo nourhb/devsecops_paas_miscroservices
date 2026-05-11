@@ -153,6 +153,14 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
 
   sh """
     set -eu
+    CR_HEART_PID=""
+    if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
+      _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+      echo "[image] crane/registry stdout heartbeat every \${_hb}s — mitigates durable-task exit -2 during long quiet layer pushes"
+      ( while true; do sleep "\${_hb}"; echo "[image] (crane heartbeat) still pushing layers… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+      CR_HEART_PID=\$!
+      trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
+    fi
     mkdir -p paas-artifacts
     tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
       --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
@@ -167,6 +175,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       --cmd=-c \\
       --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
       --exposed-ports=3000/tcp
+    if [ -n "\$CR_HEART_PID" ]; then kill "\$CR_HEART_PID" 2>/dev/null || true; trap - EXIT; fi
   """
 }
 
