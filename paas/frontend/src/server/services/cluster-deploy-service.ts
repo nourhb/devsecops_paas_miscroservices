@@ -1,5 +1,6 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
+import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { buildMetadataLines, formatArtifactReference } from "@/server/build-metadata";
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
@@ -123,9 +124,23 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        sections.push(`[argocd] FAILED: ${msg}`);
-        await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
-        return;
+        const loose = env.PAAS_STRICT_INTEGRATIONS === "false";
+        const authzFail =
+            /\bHTTP\s*401\b/i.test(msg) ||
+            /\bHTTP\s*403\b/i.test(msg) ||
+            /authentication failed/i.test(msg) ||
+            /denied this request/i.test(msg);
+        if (loose && authzFail) {
+            sections.push(
+                `[argocd] WARN: ${msg} — deployment continues because PAAS_STRICT_INTEGRATIONS=false. ` +
+                    "GitOps already committed; sync this Application in the Argo CD UI or grant the API token sync permission."
+            );
+        }
+        else {
+            sections.push(`[argocd] FAILED: ${msg}`);
+            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
+            return;
+        }
     }
     const okLog = tail(sections.join("\n"));
     const appUrl = buildAppPublicUrl(projectName);

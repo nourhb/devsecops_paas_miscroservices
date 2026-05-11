@@ -8,6 +8,19 @@ function firstNonEmpty(...values: (string | undefined)[]): string {
     }
     return "";
 }
+function preprocessStrictIntegrations(v: unknown): unknown {
+    if (v === undefined || v === null) {
+        return undefined;
+    }
+    const s = String(v).trim().toLowerCase();
+    if (s === "" || s === "0" || s === "no" || s === "off" || s === "false") {
+        return "false";
+    }
+    if (s === "1" || s === "yes" || s === "on" || s === "true") {
+        return "true";
+    }
+    return v;
+}
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DEVSECOPS_ALLOW_SIMULATION: z.enum(["true", "false"]).default("false"),
@@ -115,7 +128,7 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
-    PAAS_STRICT_INTEGRATIONS: z.enum(["true", "false"]).default("false")
+    PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false"))
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
 const harborBaseEffective = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
