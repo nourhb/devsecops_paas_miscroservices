@@ -45,13 +45,11 @@ export async function syncArgoApplication(projectName: string): Promise<{
     }
     if (!response.ok) {
         const body = await response.text();
-        if (
-            (response.status === 401 || response.status === 403) &&
-            env.PAAS_STRICT_INTEGRATIONS === "false"
-        ) {
+        const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
+        if ((response.status === 401 || response.status === 403) && lenientIntegrations) {
             const tail = body.trim() ? body.slice(0, 400) : "";
             return {
-                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — deployment continues because PAAS_STRICT_INTEGRATIONS=false (lab). ` +
+                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
                     `GitOps already committed Helm values; sync manually in Argo CD or grant the API token permission to sync this Application. ${tail}`
             };
         }
@@ -69,10 +67,14 @@ export async function syncArgoApplication(projectName: string): Promise<{
         }
         if (response.status === 403) {
             const hint = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
+            const labHint =
+                " In lab, either fix Argo CD RBAC for this token, or set PAAS_STRICT_INTEGRATIONS=false in the frontend environment " +
+                "(paas/docker-compose.yml already sets it) so deploy can complete after GitOps when only the Argo **API** sync is denied.";
             throw new IntegrationError(
                 `Argo CD denied this request (HTTP 403) for application "${appName}". ` +
-                    `The bearer token must be allowed to **sync** this app (Argo CD RBAC / AppProject policies), or use an admin API token. ` +
-                    `Confirm the Application exists and matches ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}" (expected name: "${appName}").` +
+                    `Check RBAC and that the Application exists and your token may **sync** it (Argo CD policies / admin token). ` +
+                    `Expected application name: "${appName}" (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").` +
+                    labHint +
                     hint
             );
         }

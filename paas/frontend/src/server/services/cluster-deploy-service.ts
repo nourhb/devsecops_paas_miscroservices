@@ -118,21 +118,22 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
         return;
     }
+    sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
     try {
         const argo = await syncArgoApplication(projectName);
         sections.push(argo.logs);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        const loose = env.PAAS_STRICT_INTEGRATIONS === "false";
+        const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
         const authzFail =
             /\bHTTP\s*401\b/i.test(msg) ||
             /\bHTTP\s*403\b/i.test(msg) ||
             /authentication failed/i.test(msg) ||
             /denied this request/i.test(msg);
-        if (loose && authzFail) {
+        if (lenientIntegrations && authzFail) {
             sections.push(
-                `[argocd] WARN: ${msg} — deployment continues because PAAS_STRICT_INTEGRATIONS=false. ` +
+                `[argocd] WARN: ${msg} — deployment continues (PAAS_STRICT_INTEGRATIONS is not "true"). ` +
                     "GitOps already committed; sync this Application in the Argo CD UI or grant the API token sync permission."
             );
         }
