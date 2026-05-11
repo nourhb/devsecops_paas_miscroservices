@@ -323,7 +323,7 @@ export default function ProjectDetailsPage() {
                     : appReachQuery.data.error === "no_url"
                         ? "App URL not set"
                         : appReachQuery.data.error === "synthetic_local"
-                            ? ".local URL \u2014 not probed from PaaS"
+                            ? ".local URL \u2014 not probed from PaaS (open in your browser)"
                             : "Not reachable (probe)"}
                 </Badge>) : appReachQuery.isLoading ? (<Badge variant="outline" className="h-9">
                   Checking reachability…

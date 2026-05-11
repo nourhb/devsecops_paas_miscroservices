@@ -171,7 +171,7 @@ export default function DeploymentDetailPage() {
                     : reachQuery.data.error === "no_url"
                         ? "No URL on project"
                         : reachQuery.data.error === "synthetic_local"
-                            ? ".local URL \u2014 not probed from PaaS (open in a browser that resolves this host)"
+                            ? ".local URL \u2014 not probed from PaaS (open in your browser if this host resolves)"
                             : "Probe failed / timeout"}
               </Badge>) : reachQuery.isFetching ? (<Badge variant="outline">Probing…</Badge>) : null}
           </CardContent>
