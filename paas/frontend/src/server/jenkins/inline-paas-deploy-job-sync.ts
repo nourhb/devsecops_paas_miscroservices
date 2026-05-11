@@ -239,6 +239,58 @@ function jenkinsAuthHeader(): string {
     const token = env.JENKINS_API_TOKEN.trim();
     return `Basic ${Buffer.from(`${user}:${token}`, "utf-8").toString("base64")}`;
 }
+/** Jenkins serves HTTP 503 + "Starting Jenkins" HTML while the controller is still booting. */
+const JENKINS_BOOT_MAX_ATTEMPTS = 15;
+const JENKINS_BOOT_RETRY_MS = 4000;
+function sleepMs(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function looksLikeJenkinsStarting(status: number, body: string): boolean {
+    if (status === 502 || status === 503 || status === 504) {
+        return true;
+    }
+    const head = body.slice(0, 4000).toLowerCase();
+    return head.includes("starting jenkins") || head.includes("app-jenkins-booting");
+}
+async function waitForJenkinsApiJson(base: string, authHeader: string, jar: CookieJar): Promise<{
+    status: number;
+    body: string;
+}> {
+    let last: { status: number; body: string } = { status: 0, body: "" };
+    for (let attempt = 1; attempt <= JENKINS_BOOT_MAX_ATTEMPTS; attempt++) {
+        last = await jenkinsReq(base, "/api/json", { method: "GET" }, authHeader, jar);
+        if (last.status === 200) {
+            return last;
+        }
+        if (last.status === 401) {
+            throw new IntegrationError(`Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
+                `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
+                `JENKINS_API_TOKEN must be a Jenkins **user API token** (Your name → Configure → API Token), not your login password. Regenerate the token if it was rotated. ` +
+                `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
+                `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`);
+        }
+        if (last.status === 403) {
+            throw new IntegrationError(`Jenkins returned HTTP 403 for GET ${base}/api/json. This usually means the URL host does not match Jenkins' configured root URL ` +
+                `(Manage Jenkins → System → Jenkins URL). Use that exact URL in JENKINS_BASE_URL — not http://172.18.0.1:PORT when Jenkins is published as http://YOUR_VM_IP:PORT. ` +
+                `Verify from the container with the same URL: docker compose exec frontend wget -S -O- --user='…' --password='…' '${base}/api/json'`);
+        }
+        if (looksLikeJenkinsStarting(last.status, last.body) && attempt < JENKINS_BOOT_MAX_ATTEMPTS) {
+            await sleepMs(JENKINS_BOOT_RETRY_MS);
+            continue;
+        }
+        break;
+    }
+    const waitedSec = Math.ceil(((JENKINS_BOOT_MAX_ATTEMPTS - 1) * JENKINS_BOOT_RETRY_MS) / 1000);
+    if (looksLikeJenkinsStarting(last.status, last.body)) {
+        throw new IntegrationError(
+            `Jenkins is still starting or unavailable: GET ${base}/api/json stayed at HTTP ${last.status} after ${JENKINS_BOOT_MAX_ATTEMPTS} attempts (~${waitedSec}s). ` +
+                `Wait until the Jenkins UI shows the dashboard (not the "Starting Jenkins" page), then sync or deploy again. ` +
+                `If Jenkins is behind Docker or K8s, ensure the controller/pod is ready: kubectl get pods -n jenkins (or your namespace). ` +
+                `Body preview: ${last.body.slice(0, 400)}`
+        );
+    }
+    throw new IntegrationError(`Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${last.status}. Body: ${last.body.slice(0, 500)}`);
+}
 async function jenkinsReq(base: string, pathname: string, init: RequestInit, authHeader: string, jar: CookieJar, postCrumb?: {
     field: string;
     value: string;
@@ -278,22 +330,7 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
     }
     const authHeader = jenkinsAuthHeader();
     const jar: CookieJar = { cookie: null };
-    const whoami = await jenkinsReq(base, "/api/json", { method: "GET" }, authHeader, jar);
-    if (whoami.status === 401) {
-        throw new IntegrationError(`Jenkins rejected these credentials against ${base} (GET /api/json → HTTP 401). ` +
-            `Fix JENKINS_BASE_URL, JENKINS_USERNAME, and JENKINS_API_TOKEN in frontend/docker-compose.env (no duplicate keys; last line wins). ` +
-            `JENKINS_API_TOKEN must be a Jenkins **user API token** (Your name → Configure → API Token), not your login password. Regenerate the token if it was rotated. ` +
-            `From the VM host, verify: curl -sS -u 'USER:TOKEN' '${base}/api/json' → 200. ` +
-            `From inside the app container: docker compose exec frontend wget -qO- --user='USER' --password='TOKEN' '${base}/api/json' | head -c 200`);
-    }
-    if (whoami.status === 403) {
-        throw new IntegrationError(`Jenkins returned HTTP 403 for GET ${base}/api/json. This usually means the URL host does not match Jenkins' configured root URL ` +
-            `(Manage Jenkins → System → Jenkins URL). Use that exact URL in JENKINS_BASE_URL — not http://172.18.0.1:PORT when Jenkins is published as http://YOUR_VM_IP:PORT. ` +
-            `Verify from the container with the same URL: docker compose exec frontend wget -S -O- --user='…' --password='…' '${base}/api/json'`);
-    }
-    if (whoami.status !== 200) {
-        throw new IntegrationError(`Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${whoami.status}. Body: ${whoami.body.slice(0, 500)}`);
-    }
+    await waitForJenkinsApiJson(base, authHeader, jar);
     const crumbInfo = await fetchJenkinsCrumb(base, authHeader, jar);
     const jobName = opts.jobName.trim();
     const lines: string[] = [];
