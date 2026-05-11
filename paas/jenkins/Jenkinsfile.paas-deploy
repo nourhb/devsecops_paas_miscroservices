@@ -1,5 +1,5 @@
-// DevSecOps PaaS — incremental Jenkinsfile: Step 1–2 (params, checkout) + Step 3 (app build = .full « 5. Construction »)
-// + Step 4 (Docker image = .full « 6. Création de l'image Docker »). Further stages: `Jenkinsfile.paas-deploy.full`.
+// DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (app build), 4 (Docker image),
+// 5 (Helm packaging + release-metadata = .full « 7 »). Further stages: `Jenkinsfile.paas-deploy.full`.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -16,6 +16,14 @@ def nonEmptyNoSpace(String value, String label) {
 
 def commandExists(String commandName) {
   return sh(script: "command -v ${commandName} >/dev/null 2>&1", returnStatus: true) == 0
+}
+
+def nonFatalStage(String label, Closure body) {
+  catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
+    println "*** BEGIN : ${label} ***"
+    body()
+    println "*** END : ${label} ***"
+  }
 }
 
 def prependPath(String path) {
@@ -231,7 +239,7 @@ node(agentLabel) {
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.PROJECT_ID = projectId
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -263,7 +271,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Step 3 = « 5. Construction »; Step 4 = « 6. Image Docker » (.full). SCA/SAST remain in .full only."
+  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = packaging Helm + release-metadata (.full §7)."
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
@@ -558,5 +566,26 @@ node(agentLabel) {
       echo "PAAS_ARTIFACT_IMAGE=${artifactImage}" >> paas-artifacts/build-artifact-manifest.txt
     """
     println "*** END : 6. Création de l'image Docker ***"
+  }
+
+  stage("Step 5 — Packaging du chart Helm") {
+    nonFatalStage("7. Packaging du chart Helm (aligné Jenkinsfile.paas-deploy.full)") {
+      sh """
+        set -eu
+        mkdir -p paas-artifacts
+        cat > paas-artifacts/release-metadata.txt <<EOF
+PROJECT_ID=${projectId}
+BRANCH=${branchName}
+BUILD_NUMBER=${env.BUILD_NUMBER}
+PAAS_ARTIFACT_IMAGE=${artifactImage}
+EOF
+      """
+      if (fileExists("Chart.yaml") && commandExists("helm")) {
+        sh "mkdir -p paas-artifacts/helm && helm package . --destination paas-artifacts/helm"
+        println "[helm] Chart packagé : paas-artifacts/helm/*.tgz (déploiement Kubernetes via Helm / GitOps)."
+      } else {
+        println "[helm] Pas de Chart.yaml à la racine ou CLI helm absente ; le packaging est délégué au dépôt GitOps du PaaS."
+      }
+    }
   }
 }
