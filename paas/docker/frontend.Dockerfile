@@ -1,4 +1,6 @@
-﻿# Build context: paas/ (see docker-compose.yml). App source: frontend/ARG NODE_VERSION=20-alpine
+﻿# Build context: paas/ (see docker-compose.yml). App source: frontend/
+
+ARG NODE_VERSION=20-alpine
 
 # --- dependencies (lockfile-reproducible)
 FROM node:${NODE_VERSION} AS deps
@@ -34,6 +36,8 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Fallback for Jenkins inline sync when PAAS_MONOREPO_ROOT mount is missing (image-only / wrong host path).
+COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy
 
 USER nextjs
 EXPOSE 3000
