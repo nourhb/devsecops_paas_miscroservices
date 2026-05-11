@@ -37,14 +37,13 @@ function findMonorepoRoot(): string | null {
     return null;
 }
 export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: string): Promise<string> {
-    const rawFlag = process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER;
-    const flag = rawFlag === undefined || rawFlag === null ? "" : String(rawFlag).trim();
+    const flag = env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER.trim();
     const mountHint = env.PAAS_MONOREPO_ROOT.trim();
     const mounted = Boolean(mountHint && jenkinsfileRelativePathExists(path.resolve(mountHint)));
     const root = findMonorepoRoot();
     const shouldSync = flag === "true" || mounted || (flag !== "false" && root !== null);
     if (!shouldSync) {
-        return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=${flag || "unset"}; mounted Jenkinsfile=${mounted}).`;
+        return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=${flag}; mounted Jenkinsfile=${mounted}).`;
     }
     if (allowSimulation()) {
         return "[jenkins-sync] Skipped: DEVSECOPS_ALLOW_SIMULATION=true.";

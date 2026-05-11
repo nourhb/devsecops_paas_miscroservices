@@ -126,15 +126,10 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
-        const authzFail =
-            /\bHTTP\s*401\b/i.test(msg) ||
-            /\bHTTP\s*403\b/i.test(msg) ||
-            /authentication failed/i.test(msg) ||
-            /denied this request/i.test(msg);
-        if (lenientIntegrations && authzFail) {
+        if (lenientIntegrations) {
             sections.push(
-                `[argocd] WARN: ${msg} — deployment continues (PAAS_STRICT_INTEGRATIONS is not "true"). ` +
-                    "GitOps already committed; sync this Application in the Argo CD UI or grant the API token sync permission."
+                `[argocd] WARN: ${msg} — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
+                    "GitOps already committed; open Argo CD to sync or fix ARGOCD_* / network."
             );
         }
         else {

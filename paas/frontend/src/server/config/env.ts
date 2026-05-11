@@ -21,6 +21,37 @@ function preprocessStrictIntegrations(v: unknown): unknown {
     }
     return v;
 }
+type EnvParsed = z.infer<typeof envSchema>;
+/**
+ * Next.js may inline static `process.env.KEY` reads at build time. Keys built dynamically
+ * still read the real container/process environment when the standalone server starts.
+ */
+function runtimeProcessEnvRaw(keyParts: string[]): string | undefined {
+    const key = keyParts.join("");
+    if (typeof process === "undefined") {
+        return undefined;
+    }
+    const v = process.env[key];
+    return v === undefined ? undefined : String(v);
+}
+function applyRuntimeIntegrationFlags(data: EnvParsed): EnvParsed {
+    let out = data;
+    const strictRaw = runtimeProcessEnvRaw(["PAAS_STRICT", "_INTEGRATIONS"]);
+    if (strictRaw !== undefined && strictRaw.trim() !== "") {
+        const p = preprocessStrictIntegrations(strictRaw);
+        if (p === "true" || p === "false") {
+            out = { ...out, PAAS_STRICT_INTEGRATIONS: p };
+        }
+    }
+    const syncRaw = runtimeProcessEnvRaw(["JENKINS_SYNC_INLINE_JOB_BEFORE", "_TRIGGER"]);
+    if (syncRaw !== undefined && syncRaw.trim() !== "") {
+        const t = syncRaw.trim().toLowerCase();
+        if (t === "true" || t === "false") {
+            out = { ...out, JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: t };
+        }
+    }
+    return out;
+}
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DEVSECOPS_ALLOW_SIMULATION: z.enum(["true", "false"]).default("false"),
@@ -327,8 +358,9 @@ const parsed = envSchema.safeParse({
 if (!parsed.success) {
     throw new Error(`env: ${parsed.error.message}`);
 }
-const productionErrors = collectProductionEnvErrors(parsed.data);
+const envData = applyRuntimeIntegrationFlags(parsed.data);
+const productionErrors = collectProductionEnvErrors(envData);
 if (productionErrors.length > 0) {
     throw new Error(`prod env: ${productionErrors.join(" \u00B7 ")}`);
 }
-export const env = parsed.data;
+export const env = envData;
