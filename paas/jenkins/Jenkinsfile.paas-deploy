@@ -83,6 +83,8 @@ node(agentLabel) {
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
   env.PROJECT_ID = projectId
 
+  println "[paas-jenkinsfile] marker=steps-1-2-3-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
     nonEmptyNoSpace(gitUrl, "GIT_URL PARAMS")
