@@ -254,9 +254,18 @@ node(agentLabel) {
                 echo "[build] npm run build:ci (script build:ci du dépôt)"
                 run_with_keepalive npm run build:ci
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
-                NB_FLAGS="--no-lint"
+                NB_FLAGS=""
+                if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
+                  echo "[build] Next.js 16+: omitting --no-lint (CLI flag removed; lint is not part of build)"
+                else
+                  NB_FLAGS="--no-lint"
+                fi
                 if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
-                  NB_FLAGS="$NB_FLAGS --webpack"
+                  if [ -n "${NB_FLAGS}" ]; then
+                    NB_FLAGS="$NB_FLAGS --webpack"
+                  else
+                    NB_FLAGS="--webpack"
+                  fi
                 fi
                 if [ "${JENKINS_NEXT_PERSIST_CACHE:-}" = "true" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
                   NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
@@ -265,7 +274,7 @@ node(agentLabel) {
                   ln -sfn "$NCROOT" .next/cache
                   echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
                 fi
-                echo "[build] npx next build $NB_FLAGS — Next.js 16: Turbopack par défaut est souvent lent en CI; --webpack + --no-lint (JENKINS_NEXT_BUILD_WEBPACK=false pour forcer Turbopack)"
+                echo "[build] npx next build $NB_FLAGS — Next 15: may use --no-lint; Next 16+: only --webpack when enabled; JENKINS_NEXT_BUILD_WEBPACK=false → default bundler"
                 run_with_keepalive npx next build $NB_FLAGS
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
