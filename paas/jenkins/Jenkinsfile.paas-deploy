@@ -1,5 +1,5 @@
-// DevSecOps PaaS — incremental Jenkinsfile: Step 1 (params) + Step 2 (checkout), same as start of `Jenkinsfile.paas-deploy.full`.
-// Add more stages from .full when ready. Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
+// DevSecOps PaaS — incremental Jenkinsfile: Step 1 (params) + Step 2 (checkout) + Step 3 (app build = .full « 5. Construction »).
+// More stages: `Jenkinsfile.paas-deploy.full`. Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
 // is still an old/broken script: re-run inline job sync from the PaaS or reload pipeline from this repo.
@@ -11,6 +11,43 @@ def nonEmptyNoSpace(String value, String label) {
   if (value.trim().contains(" ")) {
     error("${label} must not contain spaces")
   }
+}
+
+def commandExists(String commandName) {
+  return sh(script: "command -v ${commandName} >/dev/null 2>&1", returnStatus: true) == 0
+}
+
+def prependPath(String path) {
+  env.PATH = "${path}:${env.PATH}"
+}
+
+def ensureNodeTool() {
+  if (commandExists("npm")) {
+    return
+  }
+  def nodeVer = "20.19.5"
+  def cacheRoot = (env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
+  if (!cacheRoot) {
+    def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
+    cacheRoot = base ? "${base}/.jenkins-paas-cache/node" : "${pwd()}/.paas-tools"
+  }
+  def nodeDir = "${cacheRoot}/node-v${nodeVer}-linux-x64"
+  println "[tooling] npm missing on Jenkins node; portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_CACHE to override root; persists across workspaces)"
+  sh """
+    set -eu
+    NODE_VERSION="${nodeVer}"
+    NODE_DIR="${nodeDir}"
+    mkdir -p "\$(dirname "\${NODE_DIR}")"
+    if [ ! -x "\${NODE_DIR}/bin/npm" ]; then
+      TDIR="\$(mktemp -d)"
+      trap 'rm -rf "\${TDIR}"' EXIT
+      curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-x64.tar.gz" -o "\${TDIR}/node.tar.gz"
+      tar -xzf "\${TDIR}/node.tar.gz" -C "\${TDIR}"
+      rm -rf "\${NODE_DIR}"
+      mv "\${TDIR}/node-v\${NODE_VERSION}-linux-x64" "\${NODE_DIR}"
+    fi
+  """
+  prependPath("${nodeDir}/bin")
 }
 
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: "built-in"
@@ -74,5 +111,201 @@ node(agentLabel) {
       ls -la | head -25
     '''
     println "*** END : 2. Checkout du code ***"
+  }
+
+  println "[pipeline] Step 3 = « 5. Construction » (.full) — build runs before SCA/SAST when those stages are added."
+
+  stage("Step 3 — Construction de l'application") {
+    println "*** BEGIN : 5. Construction de l'application ***"
+    if (fileExists("pom.xml")) {
+      if (commandExists("mvn")) {
+        sh "mvn -B -DskipTests package"
+      } else {
+        println "[build] Maven project detected but mvn is not installed; compile skipped."
+      }
+    } else if (fileExists("package.json")) {
+      ensureNodeTool()
+      if (commandExists("npm")) {
+        def npmTimeoutMin = 180
+        try {
+          def raw = (env.BUILD_NODE_NPM_TIMEOUT_MIN ?: "").trim()
+          if (raw) {
+            npmTimeoutMin = Integer.parseInt(raw)
+          }
+        } catch (Exception ignored) {
+          npmTimeoutMin = 180
+        }
+        timeout(time: npmTimeoutMin, unit: 'MINUTES') {
+          sh '''
+            set -e
+            export CI=true
+            export NEXT_TELEMETRY_DISABLED=1
+            export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
+            export npm_config_maxsockets="${npm_config_maxsockets:-16}"
+            NPM_CACHE="${JENKINS_PAAS_NPM_CACHE:-}"
+            if [ -z "${NPM_CACHE}" ] && [ -n "${JENKINS_HOME:-}" ]; then
+              NPM_CACHE="${JENKINS_HOME}/.jenkins-paas-cache/npm"
+            fi
+            if [ -z "${NPM_CACHE}" ] && [ -n "${HOME:-}" ]; then
+              NPM_CACHE="${HOME}/.jenkins-paas-cache/npm"
+            fi
+            if [ -n "${NPM_CACHE}" ]; then
+              mkdir -p "${NPM_CACHE}"
+              export npm_config_cache="${NPM_CACHE}"
+              echo "[build] npm cache dir: ${NPM_CACHE}"
+            else
+              echo "[build] npm cache: default (set JENKINS_PAAS_NPM_CACHE if no JENKINS_HOME/HOME)"
+            fi
+            if [ -n "${BUILD_PACKAGE_PROXY_URL:-}" ]; then
+              npm config set proxy "$BUILD_PACKAGE_PROXY_URL"
+              npm config set https-proxy "$BUILD_PACKAGE_PROXY_URL"
+              export HTTP_PROXY="$BUILD_PACKAGE_PROXY_URL"
+              export HTTPS_PROXY="$BUILD_PACKAGE_PROXY_URL"
+              echo "[build] package proxy: configured (BUILD_PACKAGE_PROXY_URL)"
+            else
+              echo "[build] package proxy: none (direct egress to registry)"
+            fi
+            npm config set audit false
+            npm config set fund false
+            npm config set progress true
+            npm config set fetch-retries 5
+            npm config set fetch-retry-factor 2
+            npm config set fetch-retry-mintimeout 20000
+            npm config set fetch-retry-maxtimeout 120000
+            npm config set fetch-timeout 1800000
+            echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
+            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
+            run_with_keepalive() {
+              if [ "${JENKINS_SH_KEEPALIVE:-true}" = "false" ]; then
+                "$@"
+                return $?
+              fi
+              _rwk_sec="${JENKINS_SH_KEEPALIVE_SEC}"
+              "$@" &
+              _rwk_cmdpid=$!
+              echo "[build] (keepalive) subprocess pid=${_rwk_cmdpid} started $(date -u +%Y-%m-%dT%H:%M:%SZ) — main-shell heartbeat every ${_rwk_sec}s"
+              _rwk_n=0
+              while kill -0 "${_rwk_cmdpid}" 2>/dev/null; do
+                sleep "${_rwk_sec}"
+                _rwk_n=$((_rwk_n+1))
+                echo "[build] (keepalive #${_rwk_n}) pid=${_rwk_cmdpid} still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              done
+              wait "${_rwk_cmdpid}"
+            }
+            LOG_ARG=""
+            if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
+              LOG_ARG="--loglevel ${JENKINS_NPM_LOGLEVEL}"
+            fi
+            OFFLINE_ARG=""
+            if [ "${JENKINS_NPM_CI_PREFER_OFFLINE:-true}" != "false" ]; then
+              OFFLINE_ARG="--prefer-offline"
+            fi
+            LOCK_HASH=""
+            if [ -f package-lock.json ]; then
+              if command -v sha256sum >/dev/null 2>&1; then
+                LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
+              else
+                LOCK_HASH=$(openssl dgst -sha256 package-lock.json 2>/dev/null | awk '{print $NF}')
+              fi
+            fi
+            NM_SNAP=""
+            if [ "${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${LOCK_HASH}" ] && [ -n "${PROJECT_ID:-}" ]; then
+              NM_SNAP="${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/${PROJECT_ID}/${LOCK_HASH}"
+            fi
+            DEPS_OK=0
+            if [ -n "${NM_SNAP}" ] && [ -d "${NM_SNAP}" ] && [ -n "$(ls -A "${NM_SNAP}" 2>/dev/null)" ]; then
+              echo "[build] node_modules snapshot hit → ${NM_SNAP}"
+              rm -rf node_modules
+              mkdir -p node_modules
+              run_with_keepalive cp -a "${NM_SNAP}/." node_modules/
+              if run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG; then
+                DEPS_OK=1
+                echo "[build] npm install from snapshot OK (skipped full npm ci)"
+              else
+                echo "[build] snapshot stale or incompatible; removing node_modules and running npm ci"
+                rm -rf node_modules
+              fi
+            fi
+            if [ "${DEPS_OK}" != "1" ]; then
+              if [ -f package-lock.json ]; then
+                run_with_keepalive npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              else
+                run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              fi
+            fi
+            if [ -n "${NM_SNAP}" ] && [ -f package-lock.json ] && [ -d node_modules ] && [ "${DEPS_OK}" != "1" ]; then
+              mkdir -p "$(dirname "${NM_SNAP}")"
+              rm -rf "${NM_SNAP}.new" "${NM_SNAP}"
+              mkdir -p "${NM_SNAP}.new"
+              run_with_keepalive cp -a node_modules/. "${NM_SNAP}.new/"
+              mv "${NM_SNAP}.new" "${NM_SNAP}"
+              echo "[build] node_modules snapshot saved → ${NM_SNAP}"
+            fi
+            if [ "${JENKINS_SKIP_NEXT_BUILD:-}" = "true" ]; then
+              echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
+            else
+              if node -e "const p=require('./package.json'); const s=p.scripts||{}; process.exit(s['build:ci']?0:1)"; then
+                echo "[build] npm run build:ci (script build:ci du dépôt)"
+                run_with_keepalive npm run build:ci
+              elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
+                NB_FLAGS="--no-lint"
+                if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
+                  NB_FLAGS="$NB_FLAGS --webpack"
+                fi
+                if [ "${JENKINS_NEXT_PERSIST_CACHE:-}" = "true" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
+                  NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
+                  mkdir -p "$NCROOT" .next
+                  rm -rf .next/cache
+                  ln -sfn "$NCROOT" .next/cache
+                  echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
+                fi
+                echo "[build] npx next build $NB_FLAGS — Next.js 16: Turbopack par défaut est souvent lent en CI; --webpack + --no-lint (JENKINS_NEXT_BUILD_WEBPACK=false pour forcer Turbopack)"
+                run_with_keepalive npx next build $NB_FLAGS
+              elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
+                echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
+                run_with_keepalive npm run build
+              else
+                echo "[build] Pas de script build — skip."
+              fi
+            fi
+          '''
+        }
+      } else {
+        println "[build] Node project detected but npm is not installed; compile skipped."
+      }
+    } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+      if (commandExists("python3")) {
+        sh "python3 -m compileall . || true"
+      } else {
+        println "[build] Python project detected but python3 is not installed; compile skipped."
+      }
+    } else {
+      println "[build] No Maven/Node/Python manifest found; treating repository as static/Kubernetes manifests."
+    }
+    sh """
+      set +e
+      mkdir -p paas-artifacts
+      STACK=static
+      if [ -f pom.xml ]; then STACK=maven; fi
+      if [ -f package.json ]; then STACK=node; fi
+      if [ -f requirements.txt ] || [ -f pyproject.toml ]; then STACK=python; fi
+      PATHS=""
+      for d in target dist build .next out; do
+        if [ -d "\$d" ]; then PATHS="\$PATHS \$d"; fi
+      done
+      echo "# 5. Construction — manifeste d'artefacts intermédiaires" > paas-artifacts/build-artifact-manifest.txt
+      echo "PROJECT_ID=${projectId}" >> paas-artifacts/build-artifact-manifest.txt
+      echo "BRANCH=${branchName}" >> paas-artifacts/build-artifact-manifest.txt
+      echo "BUILD_NUMBER=${env.BUILD_NUMBER}" >> paas-artifacts/build-artifact-manifest.txt
+      echo "STACK=\$STACK" >> paas-artifacts/build-artifact-manifest.txt
+      if [ -f pom.xml ] && ls target/*.jar >/dev/null 2>&1; then
+        echo "PRIMARY_ARTIFACTS=target/*.jar" >> paas-artifacts/build-artifact-manifest.txt
+      elif [ -n "\$PATHS" ]; then
+        echo "OUTPUT_DIRS=\$PATHS" >> paas-artifacts/build-artifact-manifest.txt
+      else
+        echo "OUTPUT_DIRS=(workspace sources / pas de répertoire de sortie détecté)" >> paas-artifacts/build-artifact-manifest.txt
+      fi
+    """
+    println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
 }
