@@ -18,6 +18,11 @@ function findMonorepoRoot(): string | null {
         if (jenkinsfileRelativePathExists(abs)) {
             return abs;
         }
+        throw new IntegrationError(
+            `PAAS_MONOREPO_ROOT is set to "${override}" but paas/jenkins/Jenkinsfile.paas-deploy was not found under that path. ` +
+                "Fix the Docker volume in paas/docker-compose.yml (host repo root must be mounted at that path, e.g. ..:/monorepo:ro), " +
+                "or clear PAAS_MONOREPO_ROOT to use only the Jenkinsfile baked into the frontend image (rebuild the image after git pull)."
+        );
     }
     let dir = process.cwd();
     for (let i = 0; i < 10; i++) {
@@ -66,13 +71,25 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         throw new IntegrationError(`Missing Jenkinsfile for sync: ${jenkinsfilePath}`);
     }
     const groovy = fs.readFileSync(jenkinsfilePath, "utf-8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+    if (/stage\s*\(\s*["']Step 1 — Validate parameters and checkout["']/m.test(groovy)) {
+        throw new IntegrationError(
+            "The Jenkinsfile used for sync is an obsolete one-stage stub (merged validate+checkout). " +
+                "It cannot be pushed to Jenkins. Use a current paas/jenkins/Jenkinsfile.paas-deploy from the repo: " +
+                "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file."
+        );
+    }
+    if (!groovy.includes("[paas-jenkinsfile] marker=steps-1-2-3-202602")) {
+        throw new IntegrationError(
+            `Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker. Git pull the devsecops monorepo and ensure this path points at paas/jenkins/Jenkinsfile.paas-deploy, then retry.`
+        );
+    }
     try {
         const out = await syncInlinePaasDeployJobToJenkins({
             jobName: trimmedJob,
             groovyScript: groovy,
             jenkinsfileLabel: path.basename(jenkinsfilePath)
         });
-        return `[jenkins-sync] OK (${trimmedJob})\n${out}`.trim();
+        return `[jenkins-sync] OK — source: ${root} → job "${trimmedJob}"\n${out}`.trim();
     }
     catch (err: unknown) {
         const detail = formatFetchErrorChain(err);
