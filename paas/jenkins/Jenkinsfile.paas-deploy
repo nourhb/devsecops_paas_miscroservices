@@ -82,6 +82,8 @@ node(agentLabel) {
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
   env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "false").trim()
+  env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
+  env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.PROJECT_ID = projectId
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -256,25 +258,24 @@ node(agentLabel) {
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS=""
                 if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
-                  echo "[build] Next.js 16+: omitting --no-lint (CLI flag removed; lint is not part of build)"
-                else
-                  NB_FLAGS="--no-lint"
-                fi
-                if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
-                  if [ -n "${NB_FLAGS}" ]; then
-                    NB_FLAGS="$NB_FLAGS --webpack"
-                  else
+                  echo "[build] Next.js 16+: omitting --no-lint; default bundler is Turbopack (faster, more log output). Set JENKINS_NEXT_BUILD_WEBPACK=true for webpack only if needed."
+                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then
                     NB_FLAGS="--webpack"
                   fi
+                else
+                  NB_FLAGS="--no-lint"
+                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
+                    NB_FLAGS="$NB_FLAGS --webpack"
+                  fi
                 fi
-                if [ "${JENKINS_NEXT_PERSIST_CACHE:-}" = "true" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
+                if [ "${JENKINS_NEXT_PERSIST_CACHE:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
                   NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
                   mkdir -p "$NCROOT" .next
                   rm -rf .next/cache
                   ln -sfn "$NCROOT" .next/cache
-                  echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
+                  echo "[build] Next.js cache → $NCROOT (disable: JENKINS_NEXT_PERSIST_CACHE=false)"
                 fi
-                echo "[build] npx next build $NB_FLAGS — Next 15: may use --no-lint; Next 16+: only --webpack when enabled; JENKINS_NEXT_BUILD_WEBPACK=false → default bundler"
+                echo "[build] npx next build ${NB_FLAGS:-"(default bundler)"} — Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false"
                 run_with_keepalive npx next build $NB_FLAGS
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"

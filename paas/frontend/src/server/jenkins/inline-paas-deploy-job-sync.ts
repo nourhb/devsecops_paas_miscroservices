@@ -34,6 +34,8 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_PAAS_NODE_CACHE", "", "Directory root for cached portable Node (default: JENKINS_HOME/.jenkins-paas-cache/node); survives clean workspace"],
     ["JENKINS_PAAS_NPM_CACHE", "", "Persistent npm cache dir (default: JENKINS_HOME/.jenkins-paas-cache/npm)"],
     ["JENKINS_SH_KEEPALIVE", "false", "true = background npm + heartbeat (can break durable-task after Jenkins restart); keep false unless a proxy drops idle logs"],
+    ["JENKINS_NEXT_BUILD_WEBPACK", "false", "Next 16+: use true only if you need webpack (slow cold builds). Default Turbopack. Next 15: false disables --webpack."],
+    ["JENKINS_NEXT_PERSIST_CACHE", "true", "Persist .next/cache under JENKINS_HOME (per PROJECT_ID); set false to disable symlink cache"],
     ["ARTIFACTORY_URL", "", "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload"],
     ["ARTIFACTORY_REPOSITORY", "libs-release-local", "Generic repository key in Artifactory for uploaded .tgz bundles"],
     ["ARTIFACTORY_USERNAME", "", "Artifactory user (optional if ACCESS_TOKEN or ARTIFACTORY_CREDENTIALS_ID)"],

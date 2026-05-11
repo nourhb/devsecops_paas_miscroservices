@@ -255,6 +255,8 @@ node(agentLabel) {
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
+  env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
+  env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.PROJECT_ID = projectId
 
   /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
@@ -306,7 +308,8 @@ node(agentLabel) {
          * optional node_modules snapshot under .../nm-snap/${PROJECT_ID}/${sha256(package-lock)} (default on;
          * set JENKINS_NPM_SNAPSHOT_NODE_MODULES=false to disable — saves disk, slower installs).
          * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
-         * Next.js: npx next build adds --no-lint only for Next 15.x (CLI removed it in 16+). --webpack when JENKINS_NEXT_BUILD_WEBPACK!=false / USE_NPM_SCRIPT.
+         * Next.js 16+: default Turbopack (no --webpack); opt-in webpack via JENKINS_NEXT_BUILD_WEBPACK=true.
+         * Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false. Next cache: JENKINS_NEXT_PERSIST_CACHE default on.
          * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed.
          * JENKINS-48300: long steps with little stdout → durable-task abort (exit -1). Background child + sleep
          * in THIS shell can confuse durable-task after controller restart (exit -2). Default: run npm in
@@ -438,25 +441,24 @@ node(agentLabel) {
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS=""
                 if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
-                  echo "[build] Next.js 16+: omitting --no-lint (CLI flag removed; lint is not part of build)"
-                else
-                  NB_FLAGS="--no-lint"
-                fi
-                if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
-                  if [ -n "${NB_FLAGS}" ]; then
-                    NB_FLAGS="$NB_FLAGS --webpack"
-                  else
+                  echo "[build] Next.js 16+: omitting --no-lint; default bundler is Turbopack (faster, more log output). Set JENKINS_NEXT_BUILD_WEBPACK=true for webpack only if needed."
+                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then
                     NB_FLAGS="--webpack"
                   fi
+                else
+                  NB_FLAGS="--no-lint"
+                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
+                    NB_FLAGS="$NB_FLAGS --webpack"
+                  fi
                 fi
-                if [ "${JENKINS_NEXT_PERSIST_CACHE:-}" = "true" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
+                if [ "${JENKINS_NEXT_PERSIST_CACHE:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
                   NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
                   mkdir -p "$NCROOT" .next
                   rm -rf .next/cache
                   ln -sfn "$NCROOT" .next/cache
-                  echo "[build] Next.js cache → $NCROOT (JENKINS_NEXT_PERSIST_CACHE=true)"
+                  echo "[build] Next.js cache → $NCROOT (disable: JENKINS_NEXT_PERSIST_CACHE=false)"
                 fi
-                echo "[build] npx next build $NB_FLAGS — Next 15: may use --no-lint; Next 16+: only --webpack when enabled; JENKINS_NEXT_BUILD_WEBPACK=false → default bundler"
+                echo "[build] npx next build ${NB_FLAGS:-"(default bundler)"} — Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false"
                 run_with_keepalive npx next build $NB_FLAGS
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
