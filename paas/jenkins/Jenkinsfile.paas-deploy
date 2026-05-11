@@ -210,6 +210,8 @@ node(agentLabel) {
   env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "false").trim()
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
+  env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
+  env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.PROJECT_ID = projectId
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -402,7 +404,16 @@ node(agentLabel) {
                   echo "[build] Next.js cache → $NCROOT (disable: JENKINS_NEXT_PERSIST_CACHE=false)"
                 fi
                 echo "[build] npx next build ${NB_FLAGS:-"(default bundler)"} — Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false"
+                _next_hb=""
+                if [ "${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
+                  _hb_sec="${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+                  echo "[build] next build stdout heartbeat every ${_hb_sec}s (disable: JENKINS_NEXT_BUILD_HEARTBEAT=false) — mitigates Jenkins durable-task exit -2 during long quiet Turbopack"
+                  ( while true; do sleep "${_hb_sec}"; echo "[build] (next heartbeat) still building… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+                  _next_hb=$!
+                  trap 'kill "${_next_hb}" 2>/dev/null || true' EXIT
+                fi
                 run_with_keepalive npx next build $NB_FLAGS
+                if [ -n "${_next_hb}" ]; then kill "${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
                 run_with_keepalive npm run build
