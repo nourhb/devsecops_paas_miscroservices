@@ -78,7 +78,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
                 "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file."
         );
     }
-    if (!groovy.includes("[paas-jenkinsfile] marker=steps-1-2-3-202602")) {
+    if (!groovy.includes("[paas-jenkinsfile] marker=steps-1-2-3-4-202602")) {
         throw new IntegrationError(
             `Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker. Git pull the devsecops monorepo and ensure this path points at paas/jenkins/Jenkinsfile.paas-deploy, then retry.`
         );
