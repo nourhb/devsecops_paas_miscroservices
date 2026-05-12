@@ -1,5 +1,6 @@
 // DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (build), 4–5 (SCA, SAST = .full §3–4),
 // 6 (Docker image), 7 (Helm), 8 (Artifactory), 9 (Cosign), 10 (ZAP), 11 (Helm OCI), 12 (GitOps + archive). See `Jenkinsfile.paas-deploy.full`.
+// Fast mode: JENKINS_PAAS_FAST_PIPELINE=true (job param or env) skips Steps 4–5, 8, 10 and sets JENKINS_SKIP_NEXT_BUILD=true (one Next compile in image). Use for dev / rapid iteration; keep full mode for release.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -213,7 +214,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
       echo "[image] crane/registry stdout heartbeat every \${_hb}s — mitigates durable-task exit -2 during long quiet layer pushes"
-      ( while true; do sleep "\${_hb}"; echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+      ( while true; do echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb}"; done ) &
       CR_HEART_PID=\$!
       trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
     fi
@@ -312,10 +313,27 @@ node(agentLabel) {
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
+  // Heartbeat is a background loop (echo then sleep): it keeps stdout alive for durable-task; it does not block npm/next/cp/crane. Lower JENKINS_NEXT_BUILD_HEARTBEAT_SEC for more frequent lines.
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
+  def paasFastPipeline = false
+  try {
+    def p = params.JENKINS_PAAS_FAST_PIPELINE
+    paasFastPipeline = (p == true) || "${p ?: ''}".trim().equalsIgnoreCase("true")
+  }
+  catch (ignored) {
+    paasFastPipeline = false
+  }
+  if (!paasFastPipeline) {
+    paasFastPipeline = (env.JENKINS_PAAS_FAST_PIPELINE ?: "").trim().equalsIgnoreCase("true")
+  }
+  env.JENKINS_PAAS_FAST_PIPELINE = paasFastPipeline ? "true" : "false"
+  if (paasFastPipeline) {
+    env.JENKINS_SKIP_NEXT_BUILD = "true"
+    println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Keeping deps + Docker/Helm/Cosign/GitOps. Next.js app build runs in the image only (no double compile)."
+  }
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   // Legacy PaaS sync (pre-regex) allowlisted only through step 5; keep this line so deploy works before frontend image update.
@@ -513,7 +531,7 @@ node(agentLabel) {
                 if [ "${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
                   _hb_sec="${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
                   echo "[build] next build stdout heartbeat every ${_hb_sec}s (disable: JENKINS_NEXT_BUILD_HEARTBEAT=false) — mitigates Jenkins durable-task exit -2 during long quiet Turbopack"
-                  ( while true; do sleep "${_hb_sec}"; echo "[build] (next heartbeat) still building… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+                  ( while true; do echo "[build] (next heartbeat) still building… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "${_hb_sec}"; done ) &
                   _next_hb=$!
                   trap 'kill "${_next_hb}" 2>/dev/null || true' EXIT
                 fi
@@ -568,7 +586,10 @@ node(agentLabel) {
   }
 
   stage("Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)") {
-    nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
+    if (paasFastPipeline) {
+      println "[paas] Fast pipeline: skip Step 4 (SCA / Dependency-Check / cdxgen)."
+    } else {
+      nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
       dockerAvailable = commandExists("docker")
       sh "mkdir -p sca"
       if (!dockerAvailable) {
@@ -633,10 +654,14 @@ exit 0
       }
       uploadBomToDependencyTrack(projectId, branchName)
     }
+    }
   }
 
   stage("Step 5 — Tests SAST (SonarQube)") {
-    nonFatalStage("4. SAST — SonarQube") {
+    if (paasFastPipeline) {
+      println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
+    } else {
+      nonFatalStage("4. SAST — SonarQube") {
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
         def sonarUrl = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
@@ -693,6 +718,7 @@ docker run --rm \
 exit 0
 '''
       }
+    }
     }
   }
 
@@ -802,7 +828,10 @@ EOF
   }
 
   stage("Step 8 — Publication des artefacts (Artifactory)") {
-    nonFatalStage("8. Publication Artifactory (aligné Jenkinsfile.paas-deploy.full)") {
+    if (paasFastPipeline) {
+      println "[paas] Fast pipeline: skip Step 8 (Artifactory bundle upload)."
+    } else {
+      nonFatalStage("8. Publication Artifactory (aligné Jenkinsfile.paas-deploy.full)") {
       def artiBase = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()
       def artiRepo = (params.ARTIFACTORY_REPOSITORY?.trim() ?: env.ARTIFACTORY_REPOSITORY ?: "libs-release-local").trim()
       def credId = params.ARTIFACTORY_CREDENTIALS_ID?.trim() ?: ""
@@ -851,6 +880,7 @@ EOF
       } else {
         println "[artifactory] Définir ARTIFACTORY_CREDENTIALS_ID (Jenkins) ou ACCESS_TOKEN ou USER+PASSWORD — étape ignorée."
       }
+    }
     }
   }
 
@@ -913,7 +943,10 @@ EOF
   }
 
   stage("Step 10 — DAST (OWASP ZAP baseline)") {
-    nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
+    if (paasFastPipeline) {
+      println "[paas] Fast pipeline: skip Step 10 (OWASP ZAP baseline)."
+    } else {
+      nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
       def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
       if (!zapTarget) {
         println "[zap] ZAP_TARGET_URL absent — étape ignorée."
@@ -937,6 +970,7 @@ EOF
           echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
         '''
       }
+    }
     }
   }
 

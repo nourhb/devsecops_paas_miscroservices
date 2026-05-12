@@ -17,11 +17,11 @@ services:
       timeout: 5s
       retries: 5
 
+  # Use the default Compose network so DATABASE_URL host "postgres" resolves (host network breaks that name).
   db-push:
     build:
       context: .
       dockerfile: docker/prisma-db-push.Dockerfile
-      network: host
     container_name: paas-db-push
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
@@ -34,7 +34,6 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-      network: host
     container_name: paas-frontend
     depends_on:
       postgres:
@@ -58,9 +57,14 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ..:/monorepo:ro
-      # Optional: expose cluster API to the app (KUBERNETES_ENABLED=true, KUBE_CONFIG_PATH=/home/nextjs/.kube/config).
-      # Windows: use the path Docker can read, e.g. C:\Users\you\.kube\config:/home/nextjs/.kube/config:ro
-      # - "${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/home/nextjs/.kube/config:ro"
+      # Kubernetes from inside the container: mount your host kubeconfig + set in frontend/docker-compose.env:
+      #   KUBERNETES_ENABLED=true
+      #   KUBE_CONFIG_PATH=/home/nextjs/.kube/config
+      # Define KUBECONFIG_HOST_PATH in paas/.env (used for Compose substitution). Examples:
+      #   Windows:  KUBECONFIG_HOST_PATH=C:/Users/YourName/.kube/config
+      #   Spaces:   KUBECONFIG_HOST_PATH="C:/Users/Your Name/.kube/config"
+      # Linux/macOS: omit KUBECONFIG_HOST_PATH to default to ${HOME}/.kube/config
+      - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/home/nextjs/.kube/config:ro
     ports:
       - "3000:3000"
 

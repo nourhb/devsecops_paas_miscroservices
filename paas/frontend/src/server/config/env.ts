@@ -87,6 +87,8 @@ const envSchema = z.object({
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
+    /** When true, PaaS triggers Jenkins with fast pipeline: skips SCA, SAST, Artifactory artifact bundle, ZAP; sets skip in-Groovy Next build (build in image only). */
+    JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
     PAAS_MONOREPO_ROOT: z.string().default(""),
     HARBOR_REGISTRY: z.string().default(""),
     HARBOR_BASE_URL: z.string().default(""),
@@ -295,6 +297,7 @@ const parsed = envSchema.safeParse({
     JENKINS_DEPLOY_POLL_MAX_MS: process.env.JENKINS_DEPLOY_POLL_MAX_MS,
     JENKINS_HTTP_TIMEOUT_MS: process.env.JENKINS_HTTP_TIMEOUT_MS,
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER,
+    JENKINS_PAAS_FAST_PIPELINE: process.env.JENKINS_PAAS_FAST_PIPELINE,
     PAAS_MONOREPO_ROOT: process.env.PAAS_MONOREPO_ROOT,
     HARBOR_REGISTRY: resolvedHarborRegistryHost(),
     HARBOR_BASE_URL: harborBaseEffective,

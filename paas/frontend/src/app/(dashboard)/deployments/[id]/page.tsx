@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel, jenkinsScmCloneFailureHint } from "@/components/deployments/deployment-logs-view";
 import { pipelineApi, projectApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
@@ -187,6 +188,8 @@ export default function DeploymentDetailPage() {
             {d.artifactDigest ? <p className="break-all text-muted">{d.artifactDigest}</p> : null}
           </CardContent>
         </Card>) : null}
+
+      <DeploymentPipelinePreview buildNumber={d.buildNumber} buildProvider={d.buildProvider} deploymentStatus={d.status} projectId={d.projectId}/>
 
       <Card>
         <CardHeader>

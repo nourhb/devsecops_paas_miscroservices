@@ -1,4 +1,4 @@
-def nonEmptyNoSpace(String value, String label) {
+﻿def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
     error("${label} is required")
   }
@@ -206,7 +206,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
       echo "[image] crane/registry stdout heartbeat every \${_hb}s — mitigates durable-task exit -2 during long quiet layer pushes"
-      ( while true; do sleep "\${_hb}"; echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+      ( while true; do echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb}"; done ) &
       CR_HEART_PID=\$!
       trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
     fi
@@ -307,6 +307,7 @@ node(agentLabel) {
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
+  // Heartbeat is a background loop (echo then sleep): keeps stdout alive for durable-task; does not block npm/next/cp/crane.
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
@@ -516,7 +517,7 @@ node(agentLabel) {
                 if [ "${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
                   _hb_sec="${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
                   echo "[build] next build stdout heartbeat every ${_hb_sec}s (disable: JENKINS_NEXT_BUILD_HEARTBEAT=false) — mitigates Jenkins durable-task exit -2 during long quiet Turbopack"
-                  ( while true; do sleep "${_hb_sec}"; echo "[build] (next heartbeat) still building… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; done ) &
+                  ( while true; do echo "[build] (next heartbeat) still building… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "${_hb_sec}"; done ) &
                   _next_hb=$!
                   trap 'kill "${_next_hb}" 2>/dev/null || true' EXIT
                 fi

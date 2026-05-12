@@ -3,12 +3,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, ExternalLink, GitBranch, Loader2, MinusCircle, Rocket, RotateCcw, Server, Shield, SkipForward, Workflow, Wrench, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, ExternalLink, GitBranch, Loader2, Rocket, RotateCcw, Server, Shield, Workflow, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
+import { formatStageDurationMs, jenkinsStageRowUi } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStageRow, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus, Project } from "@/types";
@@ -36,70 +37,6 @@ const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
     "Step 11 — Publication charts Helm (OCI → Harbor)",
     "Step 12 — GitOps (Argo CD) & archivage Jenkins"
 ] as const;
-function formatStageDurationMs(ms: number | null): string {
-    if (ms == null || ms < 0) {
-        return "\u2014";
-    }
-    if (ms < 1000) {
-        return `${ms}ms`;
-    }
-    const s = Math.round(ms / 1000);
-    if (s < 60) {
-        return `${s}s`;
-    }
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return r > 0 ? `${m}m ${r}s` : `${m}m`;
-}
-function jenkinsStageRowUi(status: string) {
-    const u = status.toUpperCase();
-    if (u === "SUCCESS") {
-        return {
-            icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-success"/>,
-            rowClass: "border-success/20 bg-success/5",
-            badgeVariant: "success" as const,
-            label: "Success"
-        };
-    }
-    if (u === "IN_PROGRESS" || u === "RUNNING" || u === "BUILDING") {
-        return {
-            icon: <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary"/>,
-            rowClass: "border-primary/25 bg-primary/5",
-            badgeVariant: "warning" as const,
-            label: "Running"
-        };
-    }
-    if (u === "FAILED" || u === "ABORTED") {
-        return {
-            icon: <XCircle className="h-5 w-5 shrink-0 text-danger"/>,
-            rowClass: "border-danger/25 bg-danger/5",
-            badgeVariant: "danger" as const,
-            label: u === "ABORTED" ? "Aborted" : "Failed"
-        };
-    }
-    if (u === "UNSTABLE" || u === "PAUSED_PENDING_INPUT") {
-        return {
-            icon: <MinusCircle className="h-5 w-5 shrink-0 text-warning"/>,
-            rowClass: "border-warning/30 bg-warning/5",
-            badgeVariant: "warning" as const,
-            label: u === "PAUSED_PENDING_INPUT" ? "Paused" : "Unstable"
-        };
-    }
-    if (u === "SKIPPED" || u === "NOT_EXECUTED" || u === "NOT_BUILT") {
-        return {
-            icon: <SkipForward className="h-5 w-5 shrink-0 text-muted"/>,
-            rowClass: "border-border bg-muted/15",
-            badgeVariant: "outline" as const,
-            label: u === "NOT_EXECUTED" ? "Pending" : "Skipped"
-        };
-    }
-    return {
-        icon: <Circle className="h-5 w-5 shrink-0 text-muted"/>,
-        rowClass: "border-border bg-muted/10",
-        badgeVariant: "outline" as const,
-        label: status || "Unknown"
-    };
-}
 function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
     const bs = (projectStatus || "").toUpperCase();
     const ds = (lastDeploymentStatus || "").toUpperCase();
