@@ -41,6 +41,12 @@ function inferActiveStageIndex(logs: string): number {
     if (/\*\*\* BEGIN :\s*9\.\s*Publication/i.test(logs)) {
         return 2;
     }
+    if (/Step 10 —/i.test(logs) || /\*\*\* BEGIN :\s*14\.\s*Archivage/i.test(logs)) {
+        return 3;
+    }
+    if (/Step 8 —/i.test(logs) || /Step 9 —/i.test(logs) || /10b\.\s*ZAP baseline/i.test(logs) || /11\.\s*Publication Helm OCI/i.test(logs)) {
+        return 2;
+    }
     if (/\*\*\* BEGIN :\s*6\.\s*Création de l['']image Docker/i.test(logs)) {
         return 2;
     }
