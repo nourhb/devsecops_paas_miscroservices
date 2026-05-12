@@ -1,5 +1,5 @@
 // DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (app build), 4 (Docker image),
-// 5 (Helm + release-metadata), 6 (Artifactory bundle = .full « 8 »). Further stages: `Jenkinsfile.paas-deploy.full`.
+// 5 (Helm + release-metadata), 6 (Artifactory = .full « 8 »), 7 (Cosign = .full « 10 »). More: `Jenkinsfile.paas-deploy.full`.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -76,6 +76,23 @@ def ensureCraneTool() {
     fi
   '''
   return "${pwd()}/.paas-tools/crane/crane"
+}
+
+def ensureCosignTool() {
+  if (commandExists("cosign")) {
+    return "cosign"
+  }
+  println "[cosign] cosign absent du PATH ; installation locale dans le workspace."
+  sh '''
+    set -eu
+    mkdir -p .paas-tools/cosign
+    CC="$PWD/.paas-tools/cosign/cosign"
+    if [ ! -x "$CC" ]; then
+      curl -fsSL -o .paas-tools/cosign/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      chmod +x .paas-tools/cosign/cosign
+    fi
+  '''
+  return "${pwd()}/.paas-tools/cosign/cosign"
 }
 
 def dockerfileForDetectedProject(String df) {
@@ -236,6 +253,7 @@ def artifactImage = ""
 def dockerAvailable = false
 def imagePushPending = false
 def imagePublishedViaCrane = false
+def cosignImageRef = ""
 
 node(agentLabel) {
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
@@ -272,7 +290,9 @@ node(agentLabel) {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  // Legacy PaaS sync (pre-regex) allowlisted only through step 5; keep this line so deploy works before frontend image update.
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -304,7 +324,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = Helm/metadata, Step 6 = Artifactory optionnel (.full §8)."
+  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = Helm/metadata, Step 6 = Artifactory optionnel (.full §8), Step 7 = Cosign optionnel (.full §10)."
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
@@ -528,6 +548,7 @@ node(agentLabel) {
     def ctx = params.DOCKER_BUILD_CONTEXT?.trim() ?: "."
     imagePushPending = false
     imagePublishedViaCrane = false
+    cosignImageRef = ""
     if (!dockerAvailable) {
       println "[image] Pas de Docker CLI : construction + envoi des couches OCI via crane (Harbor ou Docker Hub)."
       def resolvedDockerfile = dockerfileForDetectedProject(df)
@@ -550,6 +571,7 @@ node(agentLabel) {
       dockerlessImagePush(craneBin, dest, resolvedDockerfile)
       artifactImage = dest
       imagePublishedViaCrane = true
+      cosignImageRef = dest
       println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
     } else {
       def resolvedDockerfile = dockerfileForDetectedProject(df)
@@ -558,6 +580,7 @@ node(agentLabel) {
       }
       sh "docker build -f '${resolvedDockerfile}' -t '${dest}' '${ctx}'"
       artifactImage = dest
+      cosignImageRef = dest
       imagePushPending = true
       println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
     }
@@ -671,6 +694,64 @@ EOF
         }
       } else {
         println "[artifactory] Définir ARTIFACTORY_CREDENTIALS_ID (Jenkins) ou ACCESS_TOKEN ou USER+PASSWORD — étape ignorée."
+      }
+    }
+  }
+
+  stage("Step 7 — Signature de l'image (Cosign)") {
+    nonFatalStage("10. Cosign (aligné Jenkinsfile.paas-deploy.full)") {
+      if (!cosignImageRef?.trim()) {
+        println "[cosign] Pas d'image construite / poussée par ce build — signature ignorée."
+        return
+      }
+      def credId = params.COSIGN_CREDENTIALS_ID?.trim() ?: ""
+      def pemFromEnv = env.COSIGN_PRIVATE_KEY?.trim() ?: ""
+      if (!credId && !pemFromEnv) {
+        println "[cosign] COSIGN_CREDENTIALS_ID (fichier clé Jenkins) ou COSIGN_PRIVATE_KEY (PEM sur l'agent) absent — étape ignorée."
+        return
+      }
+      def cosignExe = ensureCosignTool()
+      def insecure = (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim().equalsIgnoreCase("true")
+      def insecureFlag = insecure ? "--allow-insecure-registry" : ""
+      if (commandExists("docker") && env.HARBOR_REGISTRY?.trim() && env.HARBOR_USERNAME?.trim() && env.HARBOR_PASSWORD?.trim()) {
+        sh """
+          set +e
+          echo "\${HARBOR_PASSWORD}" | docker login "\${HARBOR_REGISTRY}" -u "\${HARBOR_USERNAME}" --password-stdin
+        """
+      }
+      if (credId) {
+        withCredentials([file(credentialsId: credId, variable: "COSIGN_KEY_FILE")]) {
+          withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}"]) {
+            sh '''
+              set +e
+              export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+              if [ -n "${INSEC}" ]; then
+                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY_FILE}" "${COSIGN_IMG}"
+              else
+                "${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY_FILE}" "${COSIGN_IMG}"
+              fi
+              RC=$?
+              exit $RC
+            '''
+          }
+        }
+      } else {
+        writeFile file: "paas-cosign-private.key", text: pemFromEnv
+        withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}"]) {
+          sh '''
+            set +e
+            chmod 600 paas-cosign-private.key
+            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            if [ -n "${INSEC}" ]; then
+              "${COSIGN_EXE}" sign --yes ${INSEC} --key paas-cosign-private.key "${COSIGN_IMG}"
+            else
+              "${COSIGN_EXE}" sign --yes --key paas-cosign-private.key "${COSIGN_IMG}"
+            fi
+            RC=$?
+            rm -f paas-cosign-private.key
+            exit $RC
+          '''
+        }
       }
     }
   }
