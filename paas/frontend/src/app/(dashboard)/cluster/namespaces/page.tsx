@@ -6,8 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
-import type { Project } from "@/types";
+import { jenkinsUi, kubernetesApi, pipelineApi } from "@/lib/api";
 function formatTimestamp(value: string) {
     if (!value) {
         return "-";
@@ -61,58 +60,23 @@ function PodHealthPill({ health }: {
                 : "neutral";
     return <StatusPill label={health || "Unknown"} tone={tone}/>;
 }
-function rollUpClusterFromProjects(projects: Project[]): {
-    runningPods: number;
-    unhealthyPods: number;
-    services: number;
-    deployments: number;
-    healthyDeployments: number;
-} {
-    const runningPods = projects.filter((p) => {
-        const d = (p.lastDeploymentStatus || "").toUpperCase();
-        if (d === "DEPLOYED" || d === "SUCCESS") {
-            return true;
-        }
-        return /\d+\s*running/i.test(p.podStatus || "") || /\brunning\b/i.test(p.podStatus || "");
-    }).length;
-    const unhealthyPods = projects.filter((p) => {
-        if ((p.lastDeploymentStatus || "").toUpperCase() === "FAILED") {
-            return true;
-        }
-        const ps = (p.podStatus || "").toUpperCase();
-        return ps.includes("FAIL") || ps.includes("ERROR") || ps.includes("CRASH") || ps === "UNKNOWN";
-    }).length;
-    const healthyDeployments = projects.filter((p) => {
-        const d = (p.lastDeploymentStatus || "").toUpperCase();
-        return d === "DEPLOYED" || d === "SUCCESS";
-    }).length;
-    return {
-        runningPods,
-        unhealthyPods,
-        services: projects.filter((p) => Boolean(p.url?.trim())).length,
-        deployments: projects.length,
-        healthyDeployments
-    };
-}
-function RecordStatusPill({ status }: {
-    status: string;
+function NamespacePhasePill({ phase }: {
+    phase: string;
 }) {
-    const s = status.toUpperCase();
-    const tone = s === "DEPLOYED" || s === "SUCCESS" || s === "RUNNING" || s === "PASSED"
+    const p = (phase || "").toLowerCase();
+    const tone = p === "active"
         ? "success"
-        : s === "FAILED" || s.includes("ERROR")
-            ? "danger"
-            : s === "PENDING" || s === "DEPLOYING"
-                ? "warning"
-                : "neutral";
-    return <StatusPill label={status || "\u2014"} tone={tone}/>;
+        : p === "terminating"
+            ? "warning"
+            : "neutral";
+    return <StatusPill label={phase || "Unknown"} tone={tone}/>;
 }
 function EmptyMessage({ children }: {
     children: React.ReactNode;
 }) {
     return <p className="pt-4 text-sm text-muted">{children}</p>;
 }
-export default function ClusterPage() {
+export default function ClusterNamespacesPage() {
     const [selectedNamespace, setSelectedNamespace] = useState("all");
     const [selectedPod, setSelectedPod] = useState<{
         namespace: string;
@@ -139,10 +103,10 @@ export default function ClusterPage() {
         queryFn: () => kubernetesApi.getDeployments(),
         refetchInterval: 10000
     });
-    const projectsQuery = useQuery({
-        queryKey: ["projects", "cluster-fallback"],
-        queryFn: () => projectApi.getProjects(),
-        refetchInterval: 15000
+    const namespacesQuery = useQuery({
+        queryKey: ["k8s", "namespaces"],
+        queryFn: () => kubernetesApi.getNamespaces(),
+        refetchInterval: 20000
     });
     const podLogsQuery = useQuery({
         queryKey: ["k8s", "pod-logs", selectedPod?.namespace, selectedPod?.name, selectedPod?.container],
@@ -150,64 +114,44 @@ export default function ClusterPage() {
         enabled: Boolean(selectedPod?.namespace && selectedPod?.name)
     });
     const recentDeploymentsQuery = useQuery({
-        queryKey: ["deployments-recent", "cluster-page"],
+        queryKey: ["deployments-recent", "cluster-namespaces-page"],
         queryFn: () => pipelineApi.listRecentDeployments(25),
         refetchInterval: 20000
     });
     const effectivePlatformLogId = platformLogDeploymentId ?? recentDeploymentsQuery.data?.deployments[0]?.id ?? null;
     const platformDeploymentQuery = useQuery({
-        queryKey: ["deployment", "cluster-logs", effectivePlatformLogId],
+        queryKey: ["deployment", "cluster-namespaces-logs", effectivePlatformLogId],
         queryFn: () => pipelineApi.getDeployment(effectivePlatformLogId!),
         enabled: Boolean(effectivePlatformLogId),
         refetchInterval: 12000
     });
     const selectedRecentMeta = recentDeploymentsQuery.data?.deployments.find((d) => d.id === effectivePlatformLogId);
-    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching || projectsQuery.isFetching || recentDeploymentsQuery.isFetching || platformDeploymentQuery.isFetching;
+    const isRefreshing = podsQuery.isFetching || servicesQuery.isFetching || deploymentsQuery.isFetching || namespacesQuery.isFetching || recentDeploymentsQuery.isFetching || platformDeploymentQuery.isFetching;
     const clusterConfigured = useMemo(() => Boolean(podsQuery.data?.configured || servicesQuery.data?.configured || deploymentsQuery.data?.configured), [deploymentsQuery.data?.configured, podsQuery.data?.configured, servicesQuery.data?.configured]);
     const clusterError = podsQuery.data?.error || servicesQuery.data?.error || deploymentsQuery.data?.error || "";
     const clusterConnected = clusterConfigured && !clusterError;
-    const useControlPlaneFallback = !clusterConnected;
-    const projectList = projectsQuery.data ?? [];
-    const useRollupStats = useControlPlaneFallback && projectList.length > 0;
-    const allNamespaces = useMemo(() => {
-        const names = new Set<string>();
-        if (clusterConnected) {
-            for (const pod of podsQuery.data?.pods ?? []) {
-                names.add(pod.namespace);
-            }
-            for (const service of servicesQuery.data?.services ?? []) {
-                names.add(service.namespace);
-            }
-            for (const deployment of deploymentsQuery.data?.deployments ?? []) {
-                names.add(deployment.namespace);
-            }
+    const namespaceListError = namespacesQuery.data?.error?.trim() || "";
+    const clusterNamespaceNames = useMemo(() => {
+        if (!clusterConnected) {
+            return [] as string[];
         }
-        else {
-            for (const project of projectsQuery.data ?? []) {
-                const ns = project.namespace?.trim();
-                if (ns) {
-                    names.add(ns);
-                }
-            }
-        }
-        return Array.from(names).sort();
-    }, [
-        clusterConnected,
-        deploymentsQuery.data?.deployments,
-        podsQuery.data?.pods,
-        projectsQuery.data,
-        servicesQuery.data?.services
-    ]);
-    const filteredProjects = useMemo(() => (projectsQuery.data ?? []).filter((project) => selectedNamespace === "all" || project.namespace === selectedNamespace), [projectsQuery.data, selectedNamespace]);
-    const projectRollup = useMemo(() => rollUpClusterFromProjects(filteredProjects), [filteredProjects]);
+        return (namespacesQuery.data?.namespaces ?? []).map((n) => n.name).filter(Boolean);
+    }, [clusterConnected, namespacesQuery.data?.namespaces]);
     const filteredPods = useMemo(() => (podsQuery.data?.pods ?? []).filter((pod) => selectedNamespace === "all" || pod.namespace === selectedNamespace), [podsQuery.data?.pods, selectedNamespace]);
     const filteredServices = useMemo(() => (servicesQuery.data?.services ?? []).filter((service) => selectedNamespace === "all" || service.namespace === selectedNamespace), [selectedNamespace, servicesQuery.data?.services]);
     const filteredDeployments = useMemo(() => (deploymentsQuery.data?.deployments ?? []).filter((deployment) => selectedNamespace === "all" || deployment.namespace === selectedNamespace), [deploymentsQuery.data?.deployments, selectedNamespace]);
-    const runningPods = useRollupStats ? projectRollup.runningPods : filteredPods.filter((pod) => pod.status === "Running").length;
-    const unhealthyPods = useRollupStats ? projectRollup.unhealthyPods : filteredPods.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
-    const servicesTotal = useRollupStats ? projectRollup.services : filteredServices.length;
-    const deploymentsTotal = useRollupStats ? projectRollup.deployments : filteredDeployments.length;
-    const healthyDeployments = useRollupStats ? projectRollup.healthyDeployments : filteredDeployments.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
+    const filteredNamespaceRows = useMemo(() => {
+        const rows = namespacesQuery.data?.namespaces ?? [];
+        if (selectedNamespace === "all") {
+            return rows;
+        }
+        return rows.filter((r) => r.name === selectedNamespace);
+    }, [namespacesQuery.data?.namespaces, selectedNamespace]);
+    const runningPods = filteredPods.filter((pod) => pod.status === "Running").length;
+    const unhealthyPods = filteredPods.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
+    const servicesTotal = filteredServices.length;
+    const deploymentsTotal = filteredDeployments.length;
+    const healthyDeployments = filteredDeployments.filter((deployment) => deployment.ready === `${deployment.replicas}/${deployment.replicas}`).length;
     useEffect(() => {
         setJenkinsConsoleExtra(null);
     }, [effectivePlatformLogId]);
@@ -216,7 +160,7 @@ export default function ClusterPage() {
             podsQuery.refetch(),
             servicesQuery.refetch(),
             deploymentsQuery.refetch(),
-            projectsQuery.refetch(),
+            namespacesQuery.refetch(),
             recentDeploymentsQuery.refetch(),
             effectivePlatformLogId ? platformDeploymentQuery.refetch() : Promise.resolve(),
             selectedPod ? podLogsQuery.refetch() : Promise.resolve()
@@ -252,15 +196,11 @@ export default function ClusterPage() {
             return [
                 "No deployment records yet for your workspace.",
                 "",
-                "This is normal before the first build/deploy. Records appear when you:",
-                "  \u2022 Open Projects \u2192 choose an application \u2192 trigger Build or Deploy from Operations;",
-                "  \u2022 Wait for the Jenkins job to start \u2014 this app polls Jenkins and stores console output on the Deployment row.",
+                "This is normal before the first build/deploy. Records appear when you trigger Build or Deploy from a project.",
                 "",
                 "Useful links:",
-                "  \u2022 /projects \u2014 register or open apps",
-                "  \u2022 /projects/create \u2014 new repository wiring",
-                "",
-                "Docker Swarm / plain Docker do not push pod logs into this UI; CI/CD logs from Jenkins are what you will see here until Kubernetes is configured."
+                "  \u2022 /projects",
+                "  \u2022 /projects/create"
             ].join("\n");
         }
         if (!effectivePlatformLogId) {
@@ -293,7 +233,7 @@ export default function ClusterPage() {
         const buf = p.logs?.trim();
         lines.push(buf && buf.length > 0
             ? buf
-            : "(No log text stored on this row yet. If the job is still running, wait for the next poll; or click \u201CFetch Jenkins console\u201D when a build number is attached.)");
+            : "(No log text stored on this row yet.)");
         if (jenkinsConsoleExtra) {
             lines.push("", "--- Live Jenkins consoleText (fetched on demand via API) ---", jenkinsConsoleExtra);
         }
@@ -320,34 +260,35 @@ export default function ClusterPage() {
       <section className="flex flex-col gap-4 rounded-3xl border border-border/80 bg-card/85 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.12)] backdrop-blur lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted">Cluster status</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes Control View</h2>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes namespaces</h2>
           <p className="mt-2 max-w-3xl text-sm text-muted">
-            {useControlPlaneFallback
-            ? "Kubernetes is not connected. This page does not discover Docker Compose or Swarm services on a server by itself. You will see workload counts and rows only for projects registered here (with deploy status from your pipelines) unless you enable the Kubernetes API and kubeconfig."
-            : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
+            The namespace filter and table below come from the cluster API (<code className="rounded bg-muted px-1 py-0.5 text-xs">list Namespace</code>
+            ), not from PaaS project names. Workloads are the same live pod/service/deployment lists as the control view, scoped to the namespace you pick.
           </p>
           <p className="mt-3 text-sm">
-            <Link href="/cluster/namespaces" className="font-medium text-primary hover:underline">
-              Kubernetes namespaces (API only)
+            <Link href="/cluster" className="font-medium text-primary hover:underline">
+              Open cluster control view
             </Link>
-            <span className="text-muted"> — filter and table use cluster Namespace objects, not project names.</span>
+            <span className="text-muted"> — includes a project-based fallback when Kubernetes is disconnected.</span>
           </p>
-          {useControlPlaneFallback ? <p className="mt-3 max-w-3xl text-xs text-muted">
-              Namespace filter uses each project&apos;s <strong className="font-medium text-foreground">deploy target namespace</strong> field (distinct from the cluster&apos;s full namespace list).
-            </p> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {clusterConnected ? <StatusPill label="Connected" tone="success"/> : clusterConfigured ? <StatusPill label="Connection failed" tone="danger"/> : <StatusPill label="Not configured" tone="warning"/>}
-          <select aria-label="Filter cluster resources by namespace" value={selectedNamespace} onChange={(event) => setSelectedNamespace(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
-            <option value="all">All namespaces</option>
-            {allNamespaces.map((namespace) => <option key={namespace} value={namespace}>
-                {namespace}
-              </option>)}
-          </select>
-          <Button type="button" variant="outline" onClick={() => void refreshAll()} disabled={isRefreshing}>
-            <RefreshCcw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}/>
-            Refresh
-          </Button>
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {clusterConnected ? <StatusPill label="Connected" tone="success"/> : clusterConfigured ? <StatusPill label="Connection failed" tone="danger"/> : <StatusPill label="Not configured" tone="warning"/>}
+            <select aria-label="Filter workloads by Kubernetes namespace" value={selectedNamespace} onChange={(event) => setSelectedNamespace(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
+              <option value="all">All namespaces</option>
+              {clusterNamespaceNames.map((namespace) => <option key={namespace} value={namespace}>
+                  {namespace}
+                </option>)}
+            </select>
+            <Button type="button" variant="outline" onClick={() => void refreshAll()} disabled={isRefreshing}>
+              <RefreshCcw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}/>
+              Refresh
+            </Button>
+          </div>
+          {!clusterConnected ? <p className="max-w-md text-right text-xs text-muted">
+              Connect Kubernetes to populate this list from the API. Until then only &quot;All namespaces&quot; is available.
+            </p> : null}
         </div>
       </section>
 
@@ -355,22 +296,18 @@ export default function ClusterPage() {
           {clusterError}
         </div> : null}
 
-      {useControlPlaneFallback ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Why counts may stay at zero:</strong> Docker Engine and Docker Swarm are not wired into this screen. Either create projects under{" "}
-          <Link href="/projects" className="font-medium text-primary hover:underline">
-            Projects
-          </Link>{" "}
-          and deploy through this platform (status is stored in the database), or set <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> with a valid kubeconfig to list pods and services from a cluster.
+      {clusterConnected && namespaceListError ? <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-300">
+          Namespace list: {namespaceListError}
         </div> : null}
 
-      {projectsQuery.isError ? <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-          Could not load projects for this view. Refresh or check your session.
+      {!clusterConnected ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
+          <strong className="font-medium text-foreground">Kubernetes not connected:</strong> workload cards and tables stay empty on this page. Set <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> and a readable kubeconfig. Platform CI/CD logs below still work from the database.
         </div> : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{useControlPlaneFallback ? "Healthy workloads" : "Pods running"}</CardTitle>
+            <CardTitle className="text-sm">Pods running</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Activity className="h-6 w-6 text-success"/>
@@ -379,7 +316,7 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{useControlPlaneFallback ? "Needs attention" : "Unhealthy pods"}</CardTitle>
+            <CardTitle className="text-sm">Unhealthy pods</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Activity className="h-6 w-6 text-danger"/>
@@ -388,7 +325,7 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{useControlPlaneFallback ? "Public URLs" : "Services"}</CardTitle>
+            <CardTitle className="text-sm">Services</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <ServerCog className="h-6 w-6 text-primary"/>
@@ -397,7 +334,7 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{useControlPlaneFallback ? "Applications" : "Deployments"}</CardTitle>
+            <CardTitle className="text-sm">Deployments</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <ShipWheel className="h-6 w-6 text-primary"/>
@@ -406,7 +343,7 @@ export default function ClusterPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{useControlPlaneFallback ? "Last deploy OK" : "Healthy deployments"}</CardTitle>
+            <CardTitle className="text-sm">Healthy deployments</CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3 text-3xl font-semibold">
             <Boxes className="h-6 w-6 text-foreground"/>
@@ -476,173 +413,156 @@ export default function ClusterPage() {
         </CardContent>
       </Card>
 
-      {useControlPlaneFallback ? (<Card>
+      {clusterConnected ? (<>
+        <Card>
           <CardHeader>
-            <CardTitle>Applications (control plane)</CardTitle>
+            <CardTitle>Namespaces (cluster API)</CardTitle>
+            <CardDescription>
+              {namespacesQuery.data?.summary.total ?? 0} namespace(s) visible to your kubeconfig
+              {selectedNamespace !== "all" ? ` — showing rows for ${selectedNamespace}` : ""}.
+            </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            {projectsQuery.isLoading ? <p className="text-sm text-muted">Loading projects…</p> : null}
-            {!projectsQuery.isLoading && !projectList.length ? <EmptyMessage>
-                No projects in this workspace yet, so there is nothing to roll up. Docker services running outside this app are not listed here — add a project and deploy through the platform, or connect Kubernetes.
-                {" "}
-                <Link href="/projects/create" className="font-medium text-primary hover:underline">
-                  Create a project
-                </Link>
+            {namespacesQuery.isLoading ? <p className="text-sm text-muted">Loading namespaces…</p> : null}
+            {!namespacesQuery.isLoading && !filteredNamespaceRows.length ? <EmptyMessage>
+                No namespaces returned (check RBAC for list namespace). If you filtered one namespace, it may not exist in the API list.
               </EmptyMessage> : null}
-            {!projectsQuery.isLoading && projectList.length > 0 ? (<>
-              <table className="w-full min-w-[920px] text-left text-sm">
+            {!namespacesQuery.isLoading && filteredNamespaceRows.length > 0 ? (<table className="w-full min-w-[640px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-border text-muted">
-                    <th className="py-3 pr-4 font-medium">Project</th>
-                    <th className="py-3 pr-4 font-medium">Namespace</th>
-                    <th className="py-3 pr-4 font-medium">Deploy</th>
-                    <th className="py-3 pr-4 font-medium">Pod</th>
-                    <th className="py-3 pr-4 font-medium">Build</th>
-                    <th className="py-3 font-medium">URL</th>
+                    <th className="py-3 pr-4 font-medium">Name</th>
+                    <th className="py-3 pr-4 font-medium">Phase</th>
+                    <th className="py-3 font-medium">Created</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredProjects.map((project) => <tr key={project.id} className="border-b border-border/60">
-                      <td className="py-3 pr-4 font-medium">
-                        <Link href={`/projects/${project.id}`} className="text-primary hover:underline">
-                          {project.projectName}
-                        </Link>
-                      </td>
-                      <td className="py-3 pr-4">{project.namespace || "\u2014"}</td>
-                      <td className="py-3 pr-4"><RecordStatusPill status={project.lastDeploymentStatus}/></td>
-                      <td className="py-3 pr-4"><RecordStatusPill status={project.podStatus}/></td>
-                      <td className="py-3 pr-4"><RecordStatusPill status={project.buildStatus}/></td>
-                      <td className="py-3">
-                        {project.url?.trim()
-                        ? (<a href={project.url} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
-                              Open
-                            </a>)
-                        : "\u2014"}
-                      </td>
+                  {filteredNamespaceRows.map((row) => <tr key={row.name} className="border-b border-border/60">
+                      <td className="py-3 pr-4 font-mono text-sm font-medium text-foreground">{row.name}</td>
+                      <td className="py-3 pr-4"><NamespacePhasePill phase={row.phase}/></td>
+                      <td className="py-3">{formatTimestamp(row.createdAt)}</td>
                     </tr>)}
                 </tbody>
-              </table>
-              {!filteredProjects.length ? <EmptyMessage>No projects match the selected namespace.</EmptyMessage> : null}
-            </>) : null}
+              </table>) : null}
           </CardContent>
-        </Card>) : (<>
-      <Card>
-        <CardHeader>
-          <CardTitle>Pods</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-muted">
-                <th className="py-3 pr-4 font-medium">Name</th>
-                <th className="py-3 pr-4 font-medium">Namespace</th>
-                <th className="py-3 pr-4 font-medium">Status</th>
-                <th className="py-3 pr-4 font-medium">Health</th>
-                <th className="py-3 pr-4 font-medium">Ready</th>
-                <th className="py-3 pr-4 font-medium">Restarts</th>
-                <th className="py-3 pr-4 font-medium">Node</th>
-                <th className="py-3 pr-4 font-medium">Pod IP</th>
-                <th className="py-3 pr-4 font-medium">Created</th>
-                <th className="py-3 font-medium">Logs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPods.map((pod) => <tr key={`${pod.namespace}-${pod.name}`} className="border-b border-border/60">
-                  <td className="py-3 pr-4 font-medium text-foreground">{pod.name}</td>
-                  <td className="py-3 pr-4">{pod.namespace}</td>
-                  <td className="py-3 pr-4"><PodStatusPill status={pod.status}/></td>
-                  <td className="py-3 pr-4">
-                    <div className="space-y-2">
-                      <PodHealthPill health={pod.health}/>
-                      <p className="max-w-xs text-xs text-muted">{pod.healthReason}</p>
-                    </div>
-                  </td>
-                  <td className="py-3 pr-4">{pod.ready}</td>
-                  <td className="py-3 pr-4">{pod.restarts}</td>
-                  <td className="py-3 pr-4">{pod.nodeName}</td>
-                  <td className="py-3 pr-4">{pod.podIP}</td>
-                  <td className="py-3 pr-4">{formatTimestamp(pod.createdAt)}</td>
-                  <td className="py-3">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setSelectedPod({
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Pods</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full min-w-[1180px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-muted">
+                  <th className="py-3 pr-4 font-medium">Name</th>
+                  <th className="py-3 pr-4 font-medium">Namespace</th>
+                  <th className="py-3 pr-4 font-medium">Status</th>
+                  <th className="py-3 pr-4 font-medium">Health</th>
+                  <th className="py-3 pr-4 font-medium">Ready</th>
+                  <th className="py-3 pr-4 font-medium">Restarts</th>
+                  <th className="py-3 pr-4 font-medium">Node</th>
+                  <th className="py-3 pr-4 font-medium">Pod IP</th>
+                  <th className="py-3 pr-4 font-medium">Created</th>
+                  <th className="py-3 font-medium">Logs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPods.map((pod) => <tr key={`${pod.namespace}-${pod.name}`} className="border-b border-border/60">
+                    <td className="py-3 pr-4 font-medium text-foreground">{pod.name}</td>
+                    <td className="py-3 pr-4">{pod.namespace}</td>
+                    <td className="py-3 pr-4"><PodStatusPill status={pod.status}/></td>
+                    <td className="py-3 pr-4">
+                      <div className="space-y-2">
+                        <PodHealthPill health={pod.health}/>
+                        <p className="max-w-xs text-xs text-muted">{pod.healthReason}</p>
+                      </div>
+                    </td>
+                    <td className="py-3 pr-4">{pod.ready}</td>
+                    <td className="py-3 pr-4">{pod.restarts}</td>
+                    <td className="py-3 pr-4">{pod.nodeName}</td>
+                    <td className="py-3 pr-4">{pod.podIP}</td>
+                    <td className="py-3 pr-4">{formatTimestamp(pod.createdAt)}</td>
+                    <td className="py-3">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setSelectedPod({
                     namespace: pod.namespace,
                     name: pod.name,
                     containers: pod.containers,
                     container: pod.containers[0] || ""
                 })}>
-                      <FileText className="mr-2 h-4 w-4"/>
-                      View logs
-                    </Button>
-                  </td>
-                </tr>)}
-            </tbody>
-          </table>
-          {filteredPods.length ? null : <EmptyMessage>No pods match the selected namespace.</EmptyMessage>}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Services</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted">
-                  <th className="py-3 pr-4 font-medium">Name</th>
-                  <th className="py-3 pr-4 font-medium">Namespace</th>
-                  <th className="py-3 pr-4 font-medium">Type</th>
-                  <th className="py-3 pr-4 font-medium">Cluster IP</th>
-                  <th className="py-3 pr-4 font-medium">External IP</th>
-                  <th className="py-3 font-medium">Ports</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredServices.map((service) => <tr key={`${service.namespace}-${service.name}`} className="border-b border-border/60">
-                    <td className="py-3 pr-4 font-medium text-foreground">{service.name}</td>
-                    <td className="py-3 pr-4">{service.namespace}</td>
-                    <td className="py-3 pr-4"><StatusPill label={service.type} tone="info"/></td>
-                    <td className="py-3 pr-4">{service.clusterIP}</td>
-                    <td className="py-3 pr-4">{service.externalIP}</td>
-                    <td className="py-3">{service.ports.join(", ") || "-"}</td>
+                        <FileText className="mr-2 h-4 w-4"/>
+                        View logs
+                      </Button>
+                    </td>
                   </tr>)}
               </tbody>
             </table>
-            {filteredServices.length ? null : <EmptyMessage>No services match the selected namespace.</EmptyMessage>}
+            {filteredPods.length ? null : <EmptyMessage>No pods in scope for the current filter.</EmptyMessage>}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Deployments</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted">
-                  <th className="py-3 pr-4 font-medium">Name</th>
-                  <th className="py-3 pr-4 font-medium">Namespace</th>
-                  <th className="py-3 pr-4 font-medium">Ready</th>
-                  <th className="py-3 pr-4 font-medium">Available</th>
-                  <th className="py-3 pr-4 font-medium">Updated</th>
-                  <th className="py-3 font-medium">Strategy</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDeployments.map((deployment) => <tr key={`${deployment.namespace}-${deployment.name}`} className="border-b border-border/60">
-                    <td className="py-3 pr-4 font-medium text-foreground">{deployment.name}</td>
-                    <td className="py-3 pr-4">{deployment.namespace}</td>
-                    <td className="py-3 pr-4">{deployment.ready}</td>
-                    <td className="py-3 pr-4">{deployment.available}</td>
-                    <td className="py-3 pr-4">{deployment.updated}</td>
-                    <td className="py-3">{deployment.strategy}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-            {filteredDeployments.length ? null : <EmptyMessage>No deployments match the selected namespace.</EmptyMessage>}
-          </CardContent>
-        </Card>
-      </div>
-        </>)}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Services</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th className="py-3 pr-4 font-medium">Name</th>
+                    <th className="py-3 pr-4 font-medium">Namespace</th>
+                    <th className="py-3 pr-4 font-medium">Type</th>
+                    <th className="py-3 pr-4 font-medium">Cluster IP</th>
+                    <th className="py-3 pr-4 font-medium">External IP</th>
+                    <th className="py-3 font-medium">Ports</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredServices.map((service) => <tr key={`${service.namespace}-${service.name}`} className="border-b border-border/60">
+                      <td className="py-3 pr-4 font-medium text-foreground">{service.name}</td>
+                      <td className="py-3 pr-4">{service.namespace}</td>
+                      <td className="py-3 pr-4"><StatusPill label={service.type} tone="info"/></td>
+                      <td className="py-3 pr-4">{service.clusterIP}</td>
+                      <td className="py-3 pr-4">{service.externalIP}</td>
+                      <td className="py-3">{service.ports.join(", ") || "-"}</td>
+                    </tr>)}
+                </tbody>
+              </table>
+              {filteredServices.length ? null : <EmptyMessage>No services in scope for the current filter.</EmptyMessage>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Deployments</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th className="py-3 pr-4 font-medium">Name</th>
+                    <th className="py-3 pr-4 font-medium">Namespace</th>
+                    <th className="py-3 pr-4 font-medium">Ready</th>
+                    <th className="py-3 pr-4 font-medium">Available</th>
+                    <th className="py-3 pr-4 font-medium">Updated</th>
+                    <th className="py-3 font-medium">Strategy</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDeployments.map((deployment) => <tr key={`${deployment.namespace}-${deployment.name}`} className="border-b border-border/60">
+                      <td className="py-3 pr-4 font-medium text-foreground">{deployment.name}</td>
+                      <td className="py-3 pr-4">{deployment.namespace}</td>
+                      <td className="py-3 pr-4">{deployment.ready}</td>
+                      <td className="py-3 pr-4">{deployment.available}</td>
+                      <td className="py-3 pr-4">{deployment.updated}</td>
+                      <td className="py-3">{deployment.strategy}</td>
+                    </tr>)}
+                </tbody>
+              </table>
+              {filteredDeployments.length ? null : <EmptyMessage>No deployments in scope for the current filter.</EmptyMessage>}
+            </CardContent>
+          </Card>
+        </div>
+      </>) : null}
     </div>);
 }

@@ -1,7 +1,7 @@
 import type { ResponseCookie } from "next/dist/compiled/@edge-runtime/cookies";
 const SESSION_COOKIE_NAME = "paas_session";
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 2;
-function resolveSecureSessionCookieFlag() {
+export function resolveSecureSessionCookieFlag() {
     const explicit = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
     if (explicit === "true") {
         return true;

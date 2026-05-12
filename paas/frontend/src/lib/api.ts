@@ -1,5 +1,5 @@
 import apiClient from "@/lib/api-client";
-import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse } from "@/types";
+import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot } from "@/types";
 export interface DashboardMetrics {
     cluster: {
         nodeCount: number;
@@ -95,6 +95,40 @@ export interface KubernetesPodLogsResponse {
     podName: string;
     container: string;
     logs: string;
+}
+export interface JenkinsPipelineStageRow {
+    name: string;
+    status: string;
+    durationMs: number | null;
+}
+export interface JenkinsPipelineStagesResponse {
+    configured: boolean;
+    skipped?: boolean;
+    reason?: string;
+    error?: string;
+    jobUrlPath: string;
+    displayJobName: string;
+    buildNumber: number | null;
+    building: boolean;
+    result: string | null;
+    runStatus: string | null;
+    stages: JenkinsPipelineStageRow[];
+    buildUrl: string | null;
+}
+export interface KubernetesNamespaceRecord {
+    name: string;
+    phase: string;
+    createdAt: string;
+}
+export interface KubernetesNamespacesResponse {
+    configured: boolean;
+    error: string;
+    summary: {
+        total: number;
+        active: number;
+        terminating: number;
+    };
+    namespaces: KubernetesNamespaceRecord[];
 }
 export const authApi = {
     login: async (payload: LoginRequest) => {
@@ -211,6 +245,12 @@ export const metricsApi = {
         return data;
     }
 };
+export const monitoringApi = {
+    getSnapshot: async (projectId: string) => {
+        const { data } = await apiClient.get<ProjectMonitoringSnapshot>(`/api/monitoring/${projectId}`);
+        return data;
+    }
+};
 export const securityApi = {
     getSecurity: async (projectId: string): Promise<SecurityMetrics> => {
         const { data } = await apiClient.get<SecurityMetrics>(`/api/security/${projectId}`);
@@ -266,6 +306,10 @@ export const kubernetesApi = {
         const { data } = await apiClient.get<KubernetesDeploymentsResponse>("/api/k8s/deployments");
         return data;
     },
+    getNamespaces: async () => {
+        const { data } = await apiClient.get<KubernetesNamespacesResponse>("/api/k8s/namespaces");
+        return data;
+    },
     getPodLogs: async (namespace: string, podName: string, container?: string) => {
         const params = new URLSearchParams({
             namespace,
@@ -318,5 +362,16 @@ export const jenkinsUi = {
     logs: (jobName: string, buildId: string | number, signal?: AbortSignal) => apiClient.get(`/api/jenkins/logs/${encodeURIComponent(String(buildId))}`, {
         params: { jobName },
         signal
-    }).then((r) => r.data)
+    }).then((r) => r.data),
+    pipelineStages: async (projectId: string, buildNumber?: number, signal?: AbortSignal) => {
+        const params: Record<string, string> = { projectId };
+        if (buildNumber != null && Number.isFinite(buildNumber)) {
+            params.buildNumber = String(Math.trunc(buildNumber));
+        }
+        const { data } = await apiClient.get<JenkinsPipelineStagesResponse>("/api/jenkins/pipeline-stages", {
+            params,
+            signal
+        });
+        return data;
+    }
 };

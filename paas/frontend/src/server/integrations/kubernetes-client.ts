@@ -174,6 +174,11 @@ export interface ClusterDeploymentRecord {
     strategy: string;
     createdAt: string;
 }
+export interface ClusterNamespaceRecord {
+    name: string;
+    phase: string;
+    createdAt: string;
+}
 function readBody<T>(response: unknown): T {
     if (response && typeof response === "object" && "body" in (response as Record<string, unknown>)) {
         return (response as {
@@ -370,6 +375,59 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
         };
     }
 }
+export async function listNamespacePods(namespace: string): Promise<{
+    configured: boolean;
+    items: ClusterPodRecord[];
+    error?: string;
+}> {
+    const api = getCoreV1Api();
+    if (!api) {
+        return {
+            configured: false,
+            items: [],
+            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+        };
+    }
+    const ns = namespace.trim();
+    if (!ns) {
+        return {
+            configured: true,
+            items: [],
+            error: "Project namespace is empty."
+        };
+    }
+    try {
+        const { body } = await api.listNamespacedPod(ns);
+        const items = (body.items ?? []).map((pod) => {
+            const health = getPodHealth(pod);
+            return {
+                name: pod.metadata?.name ?? "",
+                namespace: pod.metadata?.namespace ?? ns,
+                containers: getPodContainers(pod),
+                status: pod.status?.phase ?? "Unknown",
+                health: health.health,
+                healthReason: health.healthReason,
+                ready: formatPodReady(pod),
+                restarts: sumPodRestarts(pod),
+                nodeName: pod.spec?.nodeName ?? "-",
+                podIP: pod.status?.podIP ?? "-",
+                createdAt: pod.metadata?.creationTimestamp?.toISOString?.() ?? ""
+            };
+        });
+        return {
+            configured: true,
+            items
+        };
+    }
+    catch (e) {
+        const message = kubernetesErrorMessage(e);
+        return {
+            configured: true,
+            items: [],
+            error: message
+        };
+    }
+}
 export async function listClusterPods(): Promise<{
     configured: boolean;
     items: ClusterPodRecord[];
@@ -556,6 +614,54 @@ export async function getClusterNodeCount(): Promise<number | null> {
     }
     catch {
         return null;
+    }
+}
+export async function listClusterNamespaces(): Promise<{
+    configured: boolean;
+    items: ClusterNamespaceRecord[];
+    error?: string;
+}> {
+    const api = getCoreV1Api();
+    if (!api) {
+        return {
+            configured: false,
+            items: [],
+            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+        };
+    }
+    try {
+        const response = await (api as any).listNamespace();
+        const body = readBody<{
+            items?: Array<{
+                metadata?: {
+                    name?: string;
+                    creationTimestamp?: Date;
+                };
+                status?: {
+                    phase?: string;
+                };
+            }>;
+        }>(response);
+        const items = (body.items ?? [])
+            .map((ns) => ({
+                name: ns.metadata?.name ?? "",
+                phase: ns.status?.phase ?? "Unknown",
+                createdAt: ns.metadata?.creationTimestamp?.toISOString?.() ?? ""
+            }))
+            .filter((row) => Boolean(row.name))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        return {
+            configured: true,
+            items
+        };
+    }
+    catch (e) {
+        const message = kubernetesErrorMessage(e);
+        return {
+            configured: true,
+            items: [],
+            error: message
+        };
     }
 }
 export async function aggregatePodCountsAcrossNamespaces(namespaces: string[]): Promise<{

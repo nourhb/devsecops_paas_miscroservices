@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, LayoutGrid, Loader2, Package, Percent, Plus, Rocket, Shield, ServerCog } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
+import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -355,6 +356,8 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </section>
+
+      <DashboardPodsPanel />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="rounded-xl border-border/70 shadow-sm lg:col-span-2">

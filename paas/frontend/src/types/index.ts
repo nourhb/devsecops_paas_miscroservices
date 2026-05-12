@@ -306,6 +306,57 @@ export interface RuntimeMetrics {
     signedImages: number;
     unsignedImages: number;
 }
+export interface MonitoringSeriesPoint {
+    ts: number;
+    value: number;
+}
+export interface MonitoringKubernetesPod {
+    name: string;
+    namespace: string;
+    containers: string[];
+    status: string;
+    health: string;
+    healthReason: string;
+    ready: string;
+    restarts: number;
+    nodeName: string;
+    podIP: string;
+    createdAt: string;
+}
+export interface ProjectMonitoringSnapshot {
+    project: {
+        id: string;
+        projectName: string;
+        namespace: string;
+        imageTag: string;
+        url: string;
+        lastDeploymentStatus: string;
+        buildStatus: string;
+        podStatus: string;
+    };
+    runtime: RuntimeMetrics;
+    prometheus: {
+        configured: boolean;
+        rangeError?: string;
+        durationSeconds: number;
+        stepSeconds: number;
+        cpuSeries: MonitoringSeriesPoint[];
+        memorySeries: MonitoringSeriesPoint[];
+    };
+    kubernetes: {
+        configured: boolean;
+        error?: string;
+        summary: {
+            running: number;
+            failed: number;
+            pending: number;
+            succeeded: number;
+            other: number;
+            total: number;
+        };
+        pods: MonitoringKubernetesPod[];
+    };
+}
 export interface DeploymentStatus {
     projectId: string;
     namespace: string;
@@ -331,6 +382,8 @@ export interface ArgoCdStatus {
     health: string;
     syncStatus: string;
     appName: string;
+    /** When set, the UI could not read live Argo state (config missing, RBAC, TLS, or app not registered). */
+    unreachableReason?: string;
 }
 export type PlatformIntegrationCategoryId = "control-infra" | "security-policy" | "monitoring" | "cicd" | "registry" | "security-scan" | "infra" | "runtimes";
 export type PlatformIntegrationKind = "external" | "internal" | "cli";

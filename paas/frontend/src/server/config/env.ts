@@ -159,7 +159,13 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
-    PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false"))
+    PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
+    KEYCLOAK_ENABLED: z.enum(["true", "false"]).default("false"),
+    KEYCLOAK_ISSUER: z.string().default(""),
+    KEYCLOAK_CLIENT_ID: z.string().default(""),
+    KEYCLOAK_CLIENT_SECRET: z.string().default(""),
+    /** If set (e.g. paas-admin), users whose access token includes this realm role become ADMIN (see Keycloak realm roles). */
+    KEYCLOAK_ADMIN_ROLE: z.string().default("")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
 const harborBaseEffective = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
@@ -242,6 +248,14 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
         }
         if (!parsedEnv.GITOPS_REPO_URL || !parsedEnv.GITOPS_REPO_TOKEN) {
             errors.push("need gitops repo URL + token (or set PAAS_STRICT_INTEGRATIONS=false)");
+        }
+    }
+    if (parsedEnv.KEYCLOAK_ENABLED === "true") {
+        const issuer = parsedEnv.KEYCLOAK_ISSUER.trim();
+        const cid = parsedEnv.KEYCLOAK_CLIENT_ID.trim();
+        const secret = parsedEnv.KEYCLOAK_CLIENT_SECRET.trim();
+        if (!issuer || !cid || !secret) {
+            errors.push("KEYCLOAK_ENABLED requires KEYCLOAK_ISSUER, KEYCLOAK_CLIENT_ID, and KEYCLOAK_CLIENT_SECRET");
         }
     }
     return errors;
@@ -353,7 +367,12 @@ const parsed = envSchema.safeParse({
     APPS_PUBLIC_URL_TEMPLATE: process.env.APPS_PUBLIC_URL_TEMPLATE,
     APPS_REACHABILITY_TIMEOUT_MS: process.env.APPS_REACHABILITY_TIMEOUT_MS,
     AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN,
-    PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS
+    PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS,
+    KEYCLOAK_ENABLED: process.env.KEYCLOAK_ENABLED,
+    KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
+    KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,
+    KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET,
+    KEYCLOAK_ADMIN_ROLE: process.env.KEYCLOAK_ADMIN_ROLE
 });
 if (!parsed.success) {
     throw new Error(`env: ${parsed.error.message}`);
