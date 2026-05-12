@@ -8,7 +8,7 @@ import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-d
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
 /** Baked into paas/docker/frontend.Dockerfile when the UI runs as a container without a monorepo volume. */
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
-/** Incremental `Jenkinsfile.paas-deploy` prints e.g. `[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602`. Match by pattern so new steps do not require updating an allowlist (or rebuilding the UI just for marker strings). */
+/** Incremental `Jenkinsfile.paas-deploy` prints e.g. `[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-202602`. Match by pattern so new steps do not require updating an allowlist (or rebuilding the UI just for marker strings). */
 const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
