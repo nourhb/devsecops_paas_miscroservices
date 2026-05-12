@@ -1,5 +1,5 @@
 // DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (app build), 4 (Docker image),
-// 5 (Helm packaging + release-metadata = .full « 7 »). Further stages: `Jenkinsfile.paas-deploy.full`.
+// 5 (Helm + release-metadata), 6 (Artifactory bundle = .full « 8 »). Further stages: `Jenkinsfile.paas-deploy.full`.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -239,7 +239,7 @@ node(agentLabel) {
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.PROJECT_ID = projectId
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -271,7 +271,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = packaging Helm + release-metadata (.full §7)."
+  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = Helm/metadata, Step 6 = Artifactory optionnel (.full §8)."
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
@@ -585,6 +585,59 @@ EOF
         println "[helm] Chart packagé : paas-artifacts/helm/*.tgz (déploiement Kubernetes via Helm / GitOps)."
       } else {
         println "[helm] Pas de Chart.yaml à la racine ou CLI helm absente ; le packaging est délégué au dépôt GitOps du PaaS."
+      }
+    }
+  }
+
+  stage("Step 6 — Publication des artefacts (Artifactory)") {
+    nonFatalStage("8. Publication Artifactory (aligné Jenkinsfile.paas-deploy.full)") {
+      def artiBase = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()
+      def artiRepo = (params.ARTIFACTORY_REPOSITORY?.trim() ?: env.ARTIFACTORY_REPOSITORY ?: "libs-release-local").trim()
+      def credId = params.ARTIFACTORY_CREDENTIALS_ID?.trim() ?: ""
+      def bearer = env.ARTIFACTORY_ACCESS_TOKEN?.trim() ?: ""
+      def basicUser = env.ARTIFACTORY_USERNAME?.trim() ?: ""
+      def basicPass = env.ARTIFACTORY_PASSWORD?.trim() ?: ""
+      if (!artiBase) {
+        println "[artifactory] ARTIFACTORY_URL absent — étape ignorée (optionnel)."
+        return
+      }
+      def destUrl = "${artiBase.replaceAll(/\/$/, '')}/${artiRepo}/paas-builds/${projectId}/${env.BUILD_NUMBER}/paas-build-${env.BUILD_NUMBER}.tgz"
+      def uploadShell = '''
+        set +e
+        rm -f paas-jenkins-bundle.tgz
+        if [ -d paas-artifacts ] || [ -d sca ]; then
+          tar -czf paas-jenkins-bundle.tgz paas-artifacts sca 2>/dev/null || tar -czf paas-jenkins-bundle.tgz paas-artifacts 2>/dev/null || tar -czf paas-jenkins-bundle.tgz sca 2>/dev/null
+        fi
+        if [ ! -f paas-jenkins-bundle.tgz ]; then
+          echo "[artifactory] Aucun répertoire paas-artifacts ou sca à publier."
+          exit 0
+        fi
+        if [ "${USE_BEARER}" = "1" ] && [ -n "${ARTI_BEARER:-}" ]; then
+          curl -f -sS --connect-timeout 15 --max-time 300 -H "Authorization: Bearer ${ARTI_BEARER}" -T paas-jenkins-bundle.tgz "${ARTI_DEST}" || exit 1
+        elif [ -n "${ARTI_USER:-}" ]; then
+          curl -f -sS --connect-timeout 15 --max-time 300 -u "${ARTI_USER}:${ARTI_PASS}" -T paas-jenkins-bundle.tgz "${ARTI_DEST}" || exit 1
+        else
+          echo "[artifactory] Authentification manquante."
+          exit 1
+        fi
+        echo "[artifactory] Publié : ${ARTI_DEST}"
+      '''
+      if (credId) {
+        withCredentials([usernamePassword(credentialsId: credId, usernameVariable: "ARTI_USER", passwordVariable: "ARTI_PASS")]) {
+          withEnv(["ARTI_DEST=${destUrl}", "USE_BEARER=0"]) {
+            sh uploadShell
+          }
+        }
+      } else if (bearer) {
+        withEnv(["ARTI_DEST=${destUrl}", "USE_BEARER=1", "ARTI_BEARER=${bearer}", "ARTI_USER=", "ARTI_PASS="]) {
+          sh uploadShell
+        }
+      } else if (basicUser && basicPass) {
+        withEnv(["ARTI_DEST=${destUrl}", "USE_BEARER=0", "ARTI_USER=${basicUser}", "ARTI_PASS=${basicPass}"]) {
+          sh uploadShell
+        }
+      } else {
+        println "[artifactory] Définir ARTIFACTORY_CREDENTIALS_ID (Jenkins) ou ACCESS_TOKEN ou USER+PASSWORD — étape ignorée."
       }
     }
   }
