@@ -8,13 +8,8 @@ import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-d
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
 /** Baked into paas/docker/frontend.Dockerfile when the UI runs as a container without a monorepo volume. */
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
-/** Known markers printed by `paas/jenkins/Jenkinsfile.paas-deploy` (accept several so a newer UI syncs an older mounted repo until `git pull`). */
-const ACCEPTED_PAAS_JENKINSFILE_MARKERS = [
-    "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602",
-    "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602",
-    "[paas-jenkinsfile] marker=steps-1-2-3-4-202602",
-    "[paas-jenkinsfile] marker=steps-1-2-3-202602"
-] as const;
+/** Incremental `Jenkinsfile.paas-deploy` prints e.g. `[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602`. Match by pattern so new steps do not require updating an allowlist (or rebuilding the UI just for marker strings). */
+const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
 }
@@ -85,10 +80,11 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
                 "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file."
         );
     }
-    if (!ACCEPTED_PAAS_JENKINSFILE_MARKERS.some((m) => groovy.includes(m))) {
+    if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
         throw new IntegrationError(
-            `Jenkinsfile at ${jenkinsfilePath} does not contain a recognized PaaS pipeline marker (expected one of: ${ACCEPTED_PAAS_JENKINSFILE_MARKERS.join(", ")}). ` +
-                "Git pull the devsecops monorepo on the host that mounts this path (e.g. /monorepo) so paas/jenkins/Jenkinsfile.paas-deploy is current, then retry."
+            `Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
+                "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
+                "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation."
         );
     }
     try {
