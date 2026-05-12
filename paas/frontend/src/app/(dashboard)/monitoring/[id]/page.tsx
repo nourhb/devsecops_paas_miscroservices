@@ -284,7 +284,7 @@ export default function MonitoringPage() {
                 </CardTitle>
                 <CardDescription>
                   <span className="font-mono text-xs">{snap.project.namespace}</span>
-                  {snap.kubernetes.configured ? snap.kubernetes.error ? null : <span> — {snap.kubernetes.summary.total} workloads</span> : " — enable KUBERNETES_ENABLED for live data."}
+                  {snap.kubernetes.configured ? snap.kubernetes.error ? null : <span> — {snap.kubernetes.summary.total} workloads</span> : " — live cluster data unavailable."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[280px]">

@@ -301,7 +301,7 @@ export default function ClusterNamespacesPage() {
         </div> : null}
 
       {!clusterConnected ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Kubernetes not connected:</strong> workload cards and tables stay empty on this page. Set <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> and a readable kubeconfig. Platform CI/CD logs below still work from the database.
+          <strong className="font-medium text-foreground">Kubernetes not connected:</strong> workload cards and tables stay empty on this page. Platform CI/CD logs below still work from the database.
         </div> : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -382,7 +382,7 @@ export default function ClusterNamespacesPage() {
             </div>) : (<div className="rounded-lg border border-border/80 bg-muted/10 p-4 text-sm text-muted">
               <p className="font-medium text-foreground">Kubernetes pod streaming is unavailable</p>
               <p className="mt-2">
-                Enable <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED</code> and mount a kubeconfig the server can read. Until then, pod log lines cannot be fetched — use the{" "}
+                With no cluster connection, pod logs cannot be streamed here. Use the{" "}
                 <strong className="text-foreground">platform CI/CD</strong> section for Jenkins output.
               </p>
             </div>)}
@@ -418,7 +418,7 @@ export default function ClusterNamespacesPage() {
           <CardHeader>
             <CardTitle>Namespaces (cluster API)</CardTitle>
             <CardDescription>
-              {namespacesQuery.data?.summary.total ?? 0} namespace(s) visible to your kubeconfig
+              {namespacesQuery.data?.summary.total ?? 0} namespace(s) from the cluster API
               {selectedNamespace !== "all" ? ` — showing rows for ${selectedNamespace}` : ""}.
             </CardDescription>
           </CardHeader>

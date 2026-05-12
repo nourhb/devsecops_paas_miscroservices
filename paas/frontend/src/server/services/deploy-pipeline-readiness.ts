@@ -40,7 +40,7 @@ export function getDeployPipelineReadiness(): DeployPipelineReadiness {
         missingForFullPipeline.push("JENKINS_URL (or JENKINS_BASE_URL), JENKINS_USERNAME (or JENKINS_USER), JENKINS_API_TOKEN (or JENKINS_TOKEN)");
     }
     if (env.BUILD_BACKEND === "tekton" && !tektonConfigured) {
-        missingForFullPipeline.push("KUBERNETES_ENABLED=true, a valid kubeconfig, and Tekton installed in TEKTON_NAMESPACE");
+        missingForFullPipeline.push("Kubernetes cluster access with Tekton installed in TEKTON_NAMESPACE");
     }
     if (!gitopsConfigured) {
         missingForFullPipeline.push("GITOPS_REPO_URL, GITOPS_REPO_TOKEN");

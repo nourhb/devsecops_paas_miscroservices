@@ -103,7 +103,7 @@ export class TektonBuildBackend implements BuildBackend {
         const gitRevision = (options?.branchOverride?.trim() || project.branch?.trim() || env.DEPLOY_BRANCH_FALLBACK);
         if (!tektonConfigured()) {
             if (!allowSimulation()) {
-                throw new IntegrationError("Tekton build backend is not configured. Set KUBERNETES_ENABLED=true and point the server at a cluster with Tekton installed.");
+                throw new IntegrationError("Tekton build backend is not configured. Kubernetes cluster access and Tekton are required.");
             }
             return {
                 accepted: true,

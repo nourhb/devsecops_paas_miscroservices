@@ -153,8 +153,9 @@ export default function DashboardPage() {
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted">Overview</p>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">DevSecOps command center</h1>
-          <p className="max-w-lg text-sm text-muted">
-            One place for cluster health, CI/CD, security gates, artifacts, and platform tool signals.
+          <p className="max-w-2xl text-sm leading-relaxed text-muted">
+            A single, guided experience for build, deploy, and cluster visibility. Security is layered in over time: static analysis (SAST),
+            vulnerability and SBOM workflows, signed images, and policy on Kubernetes—each appears here and in CI as you connect tools.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -175,6 +176,16 @@ export default function DashboardPage() {
           </Button>
         </div>
       </header>
+
+      <Card className="rounded-xl border-primary/20 bg-primary/5 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold text-foreground">Unified delivery and DevSecOps</CardTitle>
+          <CardDescription className="text-sm text-muted">
+            Jenkins/Tekton builds, GitOps handoff, and Argo CD sync stay in one workflow. Gates you can turn on gradually: Sonar (SAST), Dependency-Track and SBOM,
+            Trivy and SCA archives, Cosign signatures, and Kyverno, Gatekeeper, or Kubewarden policy on the cluster.
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
       {overviewQuery.isError ? (<Card className="rounded-xl border-danger/30 bg-danger/5 shadow-sm">
           <CardHeader className="pb-2">

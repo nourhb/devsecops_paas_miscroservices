@@ -86,7 +86,7 @@ export async function getProjectStatus(projectId: string): Promise<DeploymentSta
     let podStatus = base.podStatus;
     if (!podStatus || podStatus === "UNKNOWN") {
         if (ds === "DEPLOYED") {
-            podStatus = env.KUBERNETES_ENABLED === "true" ? "DEPLOYED (0 pods in namespace)" : "DEPLOYED (enable KUBERNETES_ENABLED for live pod status)";
+            podStatus = env.KUBERNETES_ENABLED === "true" ? "DEPLOYED (0 pods in namespace)" : "DEPLOYED (no live cluster data)";
         }
         else if (ds === "FAILED") {
             podStatus = "FAILED";
@@ -98,7 +98,7 @@ export async function getProjectStatus(projectId: string): Promise<DeploymentSta
             podStatus = "Success (post-build promotion)";
         }
         else {
-            podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "Kubernetes disabled \u2014 pod health from cluster unavailable";
+            podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "No live cluster data";
         }
     }
     return { ...base, podStatus };

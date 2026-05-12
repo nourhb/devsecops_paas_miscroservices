@@ -97,8 +97,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer)),
                     notes: kubeApiServer
-                        ? `Using kube API server from kubeconfig: ${kubeApiServer}`
-                        : "Optional: Lens / k9s / dashboard URL. Pod list also appears under Cluster in this UI when kubeconfig is enabled."
+                        ? `API server: ${kubeApiServer}`
+                        : "Optional: Lens / k9s / dashboard URL. The Cluster page lists workloads when the API is connected."
                 },
                 {
                     id: "cluster-paas-ui",
@@ -108,7 +108,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: null,
                     internalPath: "/cluster",
                     configured: env.KUBERNETES_ENABLED === "true" && Boolean(trimUrl(env.KUBE_CONFIG_PATH)),
-                    notes: "Set KUBERNETES_ENABLED=true and KUBE_CONFIG_PATH to your kubeconfig."
+                    notes: "Requires server-side cluster access to list pods and resources."
                 },
                 {
                     id: "ingress-nginx",

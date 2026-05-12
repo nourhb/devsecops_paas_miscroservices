@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { platformApi } from "@/lib/api";
 import type { PlatformIntegrationCategory, PlatformIntegrationItem, PlatformIntegrationReachability, PlatformToolGroup, PlatformToolTone } from "@/types";
@@ -90,10 +90,14 @@ export default function IntegrationsPage() {
     });
     const categories = query.data ? visibleCategories(query.data.categories) : [];
     return (<div className="mx-auto max-w-5xl space-y-10">
-      <header className="flex items-center justify-between border-b border-border/60 pb-8">
-        <div>
+      <header className="flex flex-col gap-6 border-b border-border/60 pb-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-2">
         <p className="text-xs font-medium text-muted">Integrations</p>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Platform hub</h1>
+        <CardDescription className="max-w-2xl text-sm leading-relaxed text-muted">
+          One intuitive surface for everything below: wire CI/CD and GitOps first, then layer DevSecOps progressively—SAST, vulnerability and SBOM workflows,
+          Cosign-signed images, and Kyverno, Gatekeeper, or Kubewarden policy on Kubernetes.
+        </CardDescription>
         </div>
         {query.isFetching && query.data ? (<Loader2 className="h-4 w-4 animate-spin text-muted" aria-label="Refreshing"/>) : null}
       </header>

@@ -207,10 +207,10 @@ function kubernetesErrorMessage(error: unknown): string {
         }).message ?? "")
         : "";
     if (status === 401) {
-        return "Kubernetes API unauthorized. Refresh the kubeconfig credentials used by KUBE_CONFIG_PATH.";
+        return "Kubernetes API unauthorized.";
     }
     if (status === 403) {
-        return "Kubernetes API forbidden. The kubeconfig user does not have permission to list cluster resources.";
+        return "Kubernetes API forbidden.";
     }
     if (status) {
         return bodyMessage ? `Kubernetes API returned HTTP ${status}: ${bodyMessage}` : `Kubernetes API returned HTTP ${status}.`;
@@ -346,7 +346,7 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
             succeeded: 0,
             other: 0,
             total: 0,
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     try {
@@ -385,7 +385,7 @@ export async function listNamespacePods(namespace: string): Promise<{
         return {
             configured: false,
             items: [],
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     const ns = namespace.trim();
@@ -438,7 +438,7 @@ export async function listClusterPods(): Promise<{
         return {
             configured: false,
             items: [],
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     try {
@@ -486,7 +486,7 @@ export async function listClusterServices(): Promise<{
         return {
             configured: false,
             items: [],
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     try {
@@ -553,7 +553,7 @@ export async function listClusterDeployments(): Promise<{
         return {
             configured: false,
             items: [],
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     try {
@@ -626,7 +626,7 @@ export async function listClusterNamespaces(): Promise<{
         return {
             configured: false,
             items: [],
-            error: "Kubernetes API not configured (set KUBERNETES_ENABLED=true and a valid kubeconfig)."
+            error: "Kubernetes API not configured."
         };
     }
     try {
