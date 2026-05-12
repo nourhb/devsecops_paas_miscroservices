@@ -382,7 +382,6 @@ export interface ArgoCdStatus {
     health: string;
     syncStatus: string;
     appName: string;
-    /** When set, the UI could not read live Argo state (config missing, RBAC, TLS, or app not registered). */
     unreachableReason?: string;
 }
 export type PlatformIntegrationCategoryId = "control-infra" | "security-policy" | "monitoring" | "cicd" | "registry" | "security-scan" | "infra" | "runtimes";

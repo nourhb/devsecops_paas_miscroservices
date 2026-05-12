@@ -22,7 +22,6 @@ const STAGES = [
     { key: "gitops", label: "GitOps", description: "Helm values commit" },
     { key: "argo", label: "Argo CD", description: "Cluster sync" }
 ] as const;
-/** Stage names match `paas/jenkins/Jenkinsfile.paas-deploy` (inline sync job). Keep in sync when stages are added. */
 const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
     "Step 1 — Params validation",
     "Step 2 — Checkout du code (Git / GitHub)",

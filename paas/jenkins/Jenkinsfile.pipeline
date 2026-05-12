@@ -1,7 +1,3 @@
-// DevSecOps PaaS – Main pipeline (example)
-// Triggered by PaaS API; developers do not access Jenkins directly.
-// Stages: Checkout → Build → SAST (SonarQube) → SCA (Dependency-Check) → Docker build →
-//         Trivy → Push Harbor → Cosign sign → Helm package → GitOps update
 
 pipeline {
   agent any

@@ -171,9 +171,9 @@ export function DashboardPodsPanel() {
                         {selected.namespace}/{selected.name}
                       </Badge>
                       {selected.containers.length > 0 ? (<select aria-label="Container" value={selected.container} onChange={(event) => setSelected({
-                            ...selected,
-                            container: event.target.value
-                        })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
+                        ...selected,
+                        container: event.target.value
+                    })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
                           {selected.containers.map((c) => <option key={c} value={c}>
                               {c}
                             </option>)}

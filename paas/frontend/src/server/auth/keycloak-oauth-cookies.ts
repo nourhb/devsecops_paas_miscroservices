@@ -1,11 +1,9 @@
 import type { ResponseCookie } from "next/dist/compiled/@edge-runtime/cookies";
 import { resolveSecureSessionCookieFlag } from "@/server/auth/session-cookie";
-
 const MAX_AGE_SEC = 60 * 10;
 export const KC_STATE_COOKIE = "paas_kc_oauth_state";
 export const KC_VERIFIER_COOKIE = "paas_kc_oauth_verifier";
 export const KC_NEXT_COOKIE = "paas_kc_oauth_next";
-
 function transientCookie(name: string, value: string, maxAge: number): ResponseCookie {
     return {
         name,
@@ -17,7 +15,6 @@ function transientCookie(name: string, value: string, maxAge: number): ResponseC
         maxAge
     };
 }
-
 export function buildKeycloakOAuthCookies(input: {
     state: string;
     codeVerifier: string;
@@ -30,7 +27,6 @@ export function buildKeycloakOAuthCookies(input: {
         transientCookie(KC_NEXT_COOKIE, encodeURIComponent(next), MAX_AGE_SEC)
     ];
 }
-
 export function buildExpiredKeycloakOAuthCookies(): ResponseCookie[] {
     return [
         { ...transientCookie(KC_STATE_COOKIE, "", 0), maxAge: 0 },

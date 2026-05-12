@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
@@ -71,7 +72,7 @@ export default function ProjectDetailsPage() {
     const appReachQuery = useQuery({
         queryKey: ["app-reachability", projectId],
         queryFn: () => projectApi.getAppReachability(projectId),
-        enabled: Boolean(projectQuery.data?.url),
+        enabled: Boolean(projectQuery.data?.url) && !shouldSkipAppReachabilityProbe(projectQuery.data?.url),
         refetchInterval: 15000
     });
     const securityQuery = useQuery({
@@ -313,18 +314,10 @@ export default function ProjectDetailsPage() {
                   Open app
                 </a>
               </Button>
-              {appReachQuery.data ? (<Badge variant={appReachQuery.data.reachable
-                    ? "success"
-                    : appReachQuery.data.error === "synthetic_local"
-                        ? "outline"
-                        : "warning"} className="h-9">
-                  {appReachQuery.data.reachable
-                    ? `Live · HTTP ${appReachQuery.data.statusCode ?? "OK"}`
-                    : appReachQuery.data.error === "no_url"
-                        ? "App URL not set"
-                        : appReachQuery.data.error === "synthetic_local"
-                            ? ".local URL \u2014 not probed from PaaS (open in your browser)"
-                            : "Not reachable (probe)"}
+              {appReachQuery.data?.reachable ? (<Badge variant="success" className="h-9">
+                  Live · HTTP {appReachQuery.data.statusCode ?? "OK"}
+                </Badge>) : appReachQuery.data && !appReachQuery.data.reachable && appReachQuery.data.error !== "no_url" && appReachQuery.data.error !== "synthetic_local" ? (<Badge variant="warning" className="h-9">
+                  Not reachable (probe)
                 </Badge>) : appReachQuery.isLoading ? (<Badge variant="outline" className="h-9">
                   Checking reachability…
                 </Badge>) : null}

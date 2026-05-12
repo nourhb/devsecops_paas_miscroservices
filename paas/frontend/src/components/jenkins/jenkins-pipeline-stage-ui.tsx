@@ -15,7 +15,6 @@ export function formatStageDurationMs(ms: number | null): string {
     const r = s % 60;
     return r > 0 ? `${m}m ${r}s` : `${m}m`;
 }
-/** Strip leading "Step N —" for compact labels in timeline chips. */
 export function shortJenkinsStageTitle(fullName: string): string {
     const t = fullName.replace(/^Step\s+\d+\s*[—–-]\s*/i, "").trim();
     return t.length > 0 ? t : fullName;

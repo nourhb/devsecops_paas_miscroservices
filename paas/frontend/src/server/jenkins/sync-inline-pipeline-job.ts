@@ -6,9 +6,7 @@ import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-deploy-job-sync";
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
-/** Baked into paas/docker/frontend.Dockerfile when the UI runs as a container without a monorepo volume. */
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
-/** Incremental `Jenkinsfile.paas-deploy` prints e.g. `[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602`. Match by pattern so new steps do not require updating an allowlist (or rebuilding the UI just for marker strings). */
 const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
@@ -20,11 +18,9 @@ function findMonorepoRoot(): string | null {
         if (jenkinsfileRelativePathExists(abs)) {
             return abs;
         }
-        throw new IntegrationError(
-            `PAAS_MONOREPO_ROOT is set to "${override}" but paas/jenkins/Jenkinsfile.paas-deploy was not found under that path. ` +
-                "Fix the Docker volume in paas/docker-compose.yml (host repo root must be mounted at that path, e.g. ..:/monorepo:ro), " +
-                "or clear PAAS_MONOREPO_ROOT to use only the Jenkinsfile baked into the frontend image (rebuild the image after git pull)."
-        );
+        throw new IntegrationError(`PAAS_MONOREPO_ROOT is set to "${override}" but paas/jenkins/Jenkinsfile.paas-deploy was not found under that path. ` +
+            "Fix the Docker volume in paas/docker-compose.yml (host repo root must be mounted at that path, e.g. ..:/monorepo:ro), " +
+            "or clear PAAS_MONOREPO_ROOT to use only the Jenkinsfile baked into the frontend image (rebuild the image after git pull).");
     }
     let dir = process.cwd();
     for (let i = 0; i < 10; i++) {
@@ -74,18 +70,14 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     }
     const groovy = fs.readFileSync(jenkinsfilePath, "utf-8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
     if (/stage\s*\(\s*["']Step 1 — Validate parameters and checkout["']/m.test(groovy)) {
-        throw new IntegrationError(
-            "The Jenkinsfile used for sync is an obsolete one-stage stub (merged validate+checkout). " +
-                "It cannot be pushed to Jenkins. Use a current paas/jenkins/Jenkinsfile.paas-deploy from the repo: " +
-                "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file."
-        );
+        throw new IntegrationError("The Jenkinsfile used for sync is an obsolete one-stage stub (merged validate+checkout). " +
+            "It cannot be pushed to Jenkins. Use a current paas/jenkins/Jenkinsfile.paas-deploy from the repo: " +
+            "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file.");
     }
     if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
-        throw new IntegrationError(
-            `Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
-                "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
-                "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation."
-        );
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
+            "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
+            "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation.");
     }
     try {
         const out = await syncInlinePaasDeployJobToJenkins({

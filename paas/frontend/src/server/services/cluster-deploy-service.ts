@@ -127,10 +127,8 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         const msg = e instanceof Error ? e.message : String(e);
         const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
         if (lenientIntegrations) {
-            sections.push(
-                `[argocd] WARN: ${msg} — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
-                    "GitOps already committed; open Argo CD to sync or fix ARGOCD_* / network."
-            );
+            sections.push(`[argocd] WARN: ${msg} — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
+                "GitOps already committed; open Argo CD to sync or fix ARGOCD_* / network.");
         }
         else {
             sections.push(`[argocd] FAILED: ${msg}`);

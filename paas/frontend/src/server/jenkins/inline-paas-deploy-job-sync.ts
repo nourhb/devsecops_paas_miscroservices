@@ -70,9 +70,7 @@ function stringParameterDefinitionXml(paramIndent: string, name: string, default
 }
 function parameterPropertyXml(indent: string): string {
     const paramIndent = `${indent}      `;
-    const params = PARAMETER_DEFINITIONS.map(([name, defaultValue, description]) =>
-        stringParameterDefinitionXml(paramIndent, name, defaultValue, description)
-    );
+    const params = PARAMETER_DEFINITIONS.map(([name, defaultValue, description]) => stringParameterDefinitionXml(paramIndent, name, defaultValue, description));
     return (`${indent}<hudson.model.ParametersDefinitionProperty>\n` +
         `${indent}  <parameterDefinitions>\n` +
         `${params.join("\n")}\n` +
@@ -85,7 +83,6 @@ function jobDefinesStringParameter(xml: string, name: string): boolean {
         .split("<hudson.model.StringParameterDefinition>")
         .some((chunk) => chunk.includes(token));
 }
-/** Existing jobs keep stale <parameterDefinitions>; merge names from PARAMETER_DEFINITIONS so new toggles work after sync. */
 function mergeMissingParameterDefinitions(xml: string): string {
     const closeRe = /\n([\t ]*)<\/parameterDefinitions>/;
     const m = closeRe.exec(xml);
@@ -281,7 +278,6 @@ function jenkinsAuthHeader(): string {
     const token = env.JENKINS_API_TOKEN.trim();
     return `Basic ${Buffer.from(`${user}:${token}`, "utf-8").toString("base64")}`;
 }
-/** Jenkins serves HTTP 503 + "Starting Jenkins" HTML while the controller is still booting. */
 const JENKINS_BOOT_MAX_ATTEMPTS = 15;
 const JENKINS_BOOT_RETRY_MS = 4000;
 function sleepMs(ms: number): Promise<void> {
@@ -298,7 +294,10 @@ async function waitForJenkinsApiJson(base: string, authHeader: string, jar: Cook
     status: number;
     body: string;
 }> {
-    let last: { status: number; body: string } = { status: 0, body: "" };
+    let last: {
+        status: number;
+        body: string;
+    } = { status: 0, body: "" };
     for (let attempt = 1; attempt <= JENKINS_BOOT_MAX_ATTEMPTS; attempt++) {
         last = await jenkinsReq(base, "/api/json", { method: "GET" }, authHeader, jar);
         if (last.status === 200) {
@@ -324,12 +323,10 @@ async function waitForJenkinsApiJson(base: string, authHeader: string, jar: Cook
     }
     const waitedSec = Math.ceil(((JENKINS_BOOT_MAX_ATTEMPTS - 1) * JENKINS_BOOT_RETRY_MS) / 1000);
     if (looksLikeJenkinsStarting(last.status, last.body)) {
-        throw new IntegrationError(
-            `Jenkins is still starting or unavailable: GET ${base}/api/json stayed at HTTP ${last.status} after ${JENKINS_BOOT_MAX_ATTEMPTS} attempts (~${waitedSec}s). ` +
-                `Wait until the Jenkins UI shows the dashboard (not the "Starting Jenkins" page), then sync or deploy again. ` +
-                `If Jenkins is behind Docker or K8s, ensure the controller/pod is ready: kubectl get pods -n jenkins (or your namespace). ` +
-                `Body preview: ${last.body.slice(0, 400)}`
-        );
+        throw new IntegrationError(`Jenkins is still starting or unavailable: GET ${base}/api/json stayed at HTTP ${last.status} after ${JENKINS_BOOT_MAX_ATTEMPTS} attempts (~${waitedSec}s). ` +
+            `Wait until the Jenkins UI shows the dashboard (not the "Starting Jenkins" page), then sync or deploy again. ` +
+            `If Jenkins is behind Docker or K8s, ensure the controller/pod is ready: kubectl get pods -n jenkins (or your namespace). ` +
+            `Body preview: ${last.body.slice(0, 400)}`);
     }
     throw new IntegrationError(`Jenkins URL misconfigured or unreachable: GET ${base}/api/json returned HTTP ${last.status}. Body: ${last.body.slice(0, 500)}`);
 }

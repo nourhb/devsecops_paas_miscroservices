@@ -33,7 +33,6 @@ pipeline {
   }
 
   stages {
-    /* 2. Checkout du code : clone du dépôt Git (GIT_URL / BRANCH) avant build ou image — voir README.md */
     stage("2. Checkout du code (Git / GitHub)") {
       steps {
         script {
@@ -77,7 +76,6 @@ pipeline {
       }
     }
 
-    /* Étape 3 — SCA (voir README). Étape 4 — SAST SonarQube : analyse statique du code source. */
     stage("3. Tests de sécurité et conformité (SCA → CycloneDX → Dependency-Track)") {
       steps {
         container("docker") {
@@ -186,7 +184,6 @@ pipeline {
       }
     }
 
-    /* §6 + §9 — Kaniko : build et publication vers Harbor en une étape (--destination). */
     stage("6. Création et publication de l'image Docker (Harbor via Kaniko)") {
       steps {
         container("docker") {
