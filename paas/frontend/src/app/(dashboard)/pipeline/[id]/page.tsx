@@ -21,6 +21,19 @@ const STAGES = [
     { key: "gitops", label: "GitOps", description: "Helm values commit" },
     { key: "argo", label: "Argo CD", description: "Cluster sync" }
 ] as const;
+/** Stage names match `paas/jenkins/Jenkinsfile.paas-deploy` (inline sync job). Keep in sync when stages are added. */
+const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
+    "Step 1 — Params validation",
+    "Step 2 — Checkout du code (Git / GitHub)",
+    "Step 3 — Construction de l'application",
+    "Step 4 — Création de l'image Docker",
+    "Step 5 — Packaging du chart Helm",
+    "Step 6 — Publication des artefacts (Artifactory)",
+    "Step 7 — Signature de l'image (Cosign)",
+    "Step 8 — DAST (OWASP ZAP baseline)",
+    "Step 9 — Publication charts Helm (OCI → Harbor)",
+    "Step 10 — GitOps (Argo CD) & archivage Jenkins"
+] as const;
 function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
     const bs = (projectStatus || "").toUpperCase();
     const ds = (lastDeploymentStatus || "").toUpperCase();
@@ -233,7 +246,11 @@ export default function PipelinePage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Delivery path</CardTitle>
-          <CardDescription>Progress is inferred from Jenkins console markers (checkouts, SCA/SAST, image, Harbor) plus GitOps/Argo and deployment status.</CardDescription>
+          <CardDescription>
+            High-level phases below. The Jenkins inline job (<span className="font-mono text-xs">Jenkinsfile.paas-deploy</span>) runs{" "}
+            <strong className="font-medium text-foreground">{PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length}</strong> numbered stages; search the build
+            console for <span className="font-mono text-xs">Step N —</span> (steps 8–10: ZAP, Helm OCI, archive / GitOps notes).
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
@@ -248,6 +265,24 @@ export default function PipelinePage() {
                 </li>);
         })}
           </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Jenkins stages (incremental)</CardTitle>
+          <CardDescription>
+            These names match the Pipeline job Groovy when PaaS syncs <span className="font-mono text-xs">paas/jenkins/Jenkinsfile.paas-deploy</span>.
+            If Jenkins stops at Step 7, the controller job is probably stale: pull the monorepo, enable inline sync, or rebuild the frontend image that
+            bundles the Jenkinsfile.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted marker:text-foreground">
+            {PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((label) => (<li key={label} className="pl-1">
+                <span className="text-foreground">{label}</span>
+              </li>))}
+          </ol>
         </CardContent>
       </Card>
 
