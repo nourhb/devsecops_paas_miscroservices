@@ -39,6 +39,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_NEXT_BUILD_HEARTBEAT", "true", "Periodic stdout during long quiet steps: npx next build + crane image push (reduces Jenkins durable-task exit -2); false disables"],
     ["JENKINS_NEXT_BUILD_HEARTBEAT_SEC", "45", "Seconds between heartbeat log lines (next build + crane push)"],
     ["JENKINS_NPM_PRUNE_BEFORE_CRANE", "true", "Before crane tar: npm prune --omit=dev to shrink node_modules (faster push); false if runtime needs devDependencies"],
+    ["JENKINS_CRANE_STANDALONE_LAYER", "auto", "auto: if .next/standalone exists, pack minimal layer for crane (fast). true/false to force; false = always full workspace tar"],
     ["ARTIFACTORY_URL", "", "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload"],
     ["ARTIFACTORY_REPOSITORY", "libs-release-local", "Generic repository key in Artifactory for uploaded .tgz bundles"],
     ["ARTIFACTORY_USERNAME", "", "Artifactory user (optional if ACCESS_TOKEN or ARTIFACTORY_CREDENTIALS_ID)"],

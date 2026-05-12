@@ -161,8 +161,8 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
 
   sh """
     set -eu
-    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ]; then
-      echo "[image] npm prune --omit=dev — shrink node_modules before crane layer (skip: JENKINS_NPM_PRUNE_BEFORE_CRANE=false)"
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
+      echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
     fi
     CR_HEART_PID=""
@@ -174,22 +174,54 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
     fi
     mkdir -p paas-artifacts
-    tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
-      --exclude='./.next/cache' \\
-      --exclude='./node_modules/.cache' \\
-      --exclude='./coverage' --exclude='./.eslintcache' \\
-      --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
+    STL="\${JENKINS_CRANE_STANDALONE_LAYER:-auto}"
+    USE_STANDALONE=0
+    if [ -d .next/standalone ]; then
+      if [ "\$STL" != "false" ] && [ "\$STL" != "0" ] && [ "\$STL" != "no" ]; then
+        USE_STANDALONE=1
+      fi
+    fi
+    if [ "\$USE_STANDALONE" = "1" ]; then
+      echo "[image] Next.js standalone → minimal crane layer (much smaller/faster than full node_modules). Disable: JENKINS_CRANE_STANDALONE_LAYER=false"
+      rm -rf paas-artifacts/_crane_st
+      mkdir -p paas-artifacts/_crane_st/.next
+      cp -a .next/standalone/. paas-artifacts/_crane_st/
+      cp -a .next/static paas-artifacts/_crane_st/.next/static
+      if [ -d public ]; then cp -a public paas-artifacts/_crane_st/public; fi
+      tar -C paas-artifacts/_crane_st --transform='s#^#app/#' -cf paas-artifacts/app-layer.tar .
+      rm -rf paas-artifacts/_crane_st
+    else
+      if [ -d .next/standalone ]; then
+        echo "[image] .next/standalone present but JENKINS_CRANE_STANDALONE_LAYER=\$STL — using full workspace tar (slow)."
+      else
+        echo "[image] No .next/standalone — full workspace + node_modules in layer (often 10–40+ min upload). Fix: add output: 'standalone' in next.config.js."
+      fi
+      tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
+        --exclude='./.next/cache' \\
+        --exclude='./node_modules/.cache' \\
+        --exclude='./coverage' --exclude='./.eslintcache' \\
+        --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
+    fi
     '${craneBin}' append \\
       -b mirror.gcr.io/library/node:20-bookworm-slim \\
       -f paas-artifacts/app-layer.tar \\
       -t '${imageRef}'
-    '${craneBin}' mutate '${imageRef}' \\
-      -t '${imageRef}' \\
-      --workdir=/app \\
-      --entrypoint=/bin/sh \\
-      --cmd=-c \\
-      --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
-      --exposed-ports=3000/tcp
+    if [ "\$USE_STANDALONE" = "1" ]; then
+      '${craneBin}' mutate '${imageRef}' \\
+        -t '${imageRef}' \\
+        --workdir=/app \\
+        --entrypoint=/usr/local/bin/node \\
+        --cmd=server.js \\
+        --exposed-ports=3000/tcp
+    else
+      '${craneBin}' mutate '${imageRef}' \\
+        -t '${imageRef}' \\
+        --workdir=/app \\
+        --entrypoint=/bin/sh \\
+        --cmd=-c \\
+        --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
+        --exposed-ports=3000/tcp
+    fi
     if [ -n "\$CR_HEART_PID" ]; then kill "\$CR_HEART_PID" 2>/dev/null || true; trap - EXIT; fi
   """
 }
@@ -237,6 +269,7 @@ node(agentLabel) {
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
+  env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
