@@ -368,7 +368,7 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      <DashboardPodsPanel />
+      <DashboardPodsPanel fallbackProjects={projects} overviewLoading={overviewQuery.isLoading && !overviewQuery.data} clusterDataSource={clusterDataSource}/>
 
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="rounded-xl border-border/70 shadow-sm lg:col-span-2">

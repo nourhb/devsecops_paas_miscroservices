@@ -206,6 +206,7 @@ export interface DashboardOverviewResponse {
     projects: {
         id: string;
         projectName: string;
+        namespace: string;
         buildStatus: string;
         lastDeploymentStatus: string;
         podStatus: string;

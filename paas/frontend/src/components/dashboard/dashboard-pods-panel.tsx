@@ -10,7 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { kubernetesApi, type KubernetesPodRecord } from "@/lib/api";
+import type { DashboardOverviewResponse } from "@/types";
 import { cn } from "@/lib/utils";
+export type DashboardPodsFallbackProject = DashboardOverviewResponse["projects"][number];
 function podStatusBadgeVariant(status: string): "success" | "warning" | "danger" | "outline" {
     const s = status.toLowerCase();
     if (s === "running") {
@@ -37,7 +39,24 @@ function podHealthBadgeVariant(health: string): "success" | "warning" | "danger"
     }
     return "outline";
 }
-export function DashboardPodsPanel() {
+function deployRollupBadgeVariant(status: string): "success" | "warning" | "danger" | "outline" {
+    const s = status.toUpperCase();
+    if (s === "DEPLOYED" || s === "SUCCESS") {
+        return "success";
+    }
+    if (s === "FAILED") {
+        return "danger";
+    }
+    if (s === "PENDING" || s === "DEPLOYING") {
+        return "warning";
+    }
+    return "outline";
+}
+export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = false, clusterDataSource = "none" }: {
+    fallbackProjects?: DashboardPodsFallbackProject[];
+    overviewLoading?: boolean;
+    clusterDataSource?: "kubernetes" | "project_rollups" | "none";
+}) {
     const [nsFilter, setNsFilter] = useState("all");
     const [selected, setSelected] = useState<{
         namespace: string;
@@ -50,15 +69,27 @@ export function DashboardPodsPanel() {
         queryFn: () => kubernetesApi.getPods(),
         refetchInterval: 12000
     });
+    const useK8sTable = Boolean(podsQuery.data?.configured && !podsQuery.data.error);
+    const useRollupFallback =
+        Boolean(podsQuery.data && !podsQuery.data.configured) && !overviewLoading && fallbackProjects.length > 0;
     const namespaces = useMemo(() => {
         const names = new Set<string>();
-        for (const p of podsQuery.data?.pods ?? []) {
-            if (p.namespace) {
-                names.add(p.namespace);
+        if (useK8sTable) {
+            for (const p of podsQuery.data?.pods ?? []) {
+                if (p.namespace) {
+                    names.add(p.namespace);
+                }
+            }
+        }
+        else if (useRollupFallback) {
+            for (const p of fallbackProjects) {
+                if (p.namespace) {
+                    names.add(p.namespace);
+                }
             }
         }
         return Array.from(names).sort();
-    }, [podsQuery.data?.pods]);
+    }, [podsQuery.data?.pods, fallbackProjects, useK8sTable, useRollupFallback]);
     const filtered = useMemo(() => {
         const list = podsQuery.data?.pods ?? [];
         if (nsFilter === "all") {
@@ -67,10 +98,17 @@ export function DashboardPodsPanel() {
         return list.filter((p) => p.namespace === nsFilter);
     }, [podsQuery.data?.pods, nsFilter]);
     const sorted = useMemo(() => [...filtered].sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name)), [filtered]);
+    const sortedRollup = useMemo(() => {
+        const list =
+            nsFilter === "all"
+                ? fallbackProjects
+                : fallbackProjects.filter((p) => p.namespace === nsFilter);
+        return [...list].sort((a, b) => a.namespace.localeCompare(b.namespace) || a.projectName.localeCompare(b.projectName));
+    }, [fallbackProjects, nsFilter]);
     const podLogsQuery = useQuery({
         queryKey: ["k8s", "pod-logs", "dashboard", selected?.namespace, selected?.name, selected?.container],
         queryFn: () => kubernetesApi.getPodLogs(selected!.namespace, selected!.name, selected!.container || undefined),
-        enabled: Boolean(selected?.namespace && selected?.name)
+        enabled: Boolean(useK8sTable && selected?.namespace && selected?.name)
     });
     function openLogs(pod: KubernetesPodRecord) {
         const first = pod.containers[0] ?? "";
@@ -89,8 +127,11 @@ export function DashboardPodsPanel() {
         <div className="space-y-1">
           <CardTitle className="text-base">Cluster pods &amp; logs</CardTitle>
           <CardDescription>
-            Live workloads from the Kubernetes API when a cluster is connected. Use the namespace filter, then open logs
-            for a container.
+            {useK8sTable
+            ? "Live workloads from the Kubernetes API. Use the namespace filter, then open logs for a container."
+            : useRollupFallback
+                ? "Platform rollups from your projects (deploy target namespace and last known status). Enable Kubernetes on the server for live pod lists and log streaming."
+                : "Live workloads from the Kubernetes API when a cluster is connected. Use the namespace filter, then open logs for a container."}
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -113,18 +154,85 @@ export function DashboardPodsPanel() {
         </div>
       </CardHeader>
       <CardContent className="space-y-6 pt-6">
-        {podsQuery.isLoading && !podsQuery.data ? <Skeleton className="h-48 w-full"/> : null}
+        {(podsQuery.isLoading && !podsQuery.data) || (overviewLoading && !useK8sTable && !podsQuery.data?.configured)
+            ? <Skeleton className="h-48 w-full"/>
+            : null}
         {podsQuery.isError ? (<p className="text-sm text-danger">Could not reach the Kubernetes API. Check your session and network.</p>) : null}
-        {podsQuery.data && !podsQuery.data.configured ? (<p className="text-sm text-muted">
-              Kubernetes is not enabled for this server. The{" "}
-              <Link href="/cluster" className="font-medium text-primary hover:underline">
-                Cluster
-              </Link>{" "}
-              screen lists the same resources with services and deployments when a cluster is connected.
-              {podsQuery.data.error ? (<span className="mt-2 block text-warning">{podsQuery.data.error}</span>) : null}
-            </p>) : null}
+        {podsQuery.data && !podsQuery.data.configured && !overviewLoading && !fallbackProjects.length ? (<div className="space-y-3 text-sm text-muted">
+              <p>
+                Kubernetes is not enabled for this server, and there are no projects to roll up yet. Add a project and deploy, or configure cluster access on the server.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/projects/create">New project</Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/integrations">Platform hub</Link>
+                </Button>
+              </div>
+              {podsQuery.data.error ? (<p className="text-warning">{podsQuery.data.error}</p>) : null}
+            </div>) : null}
+        {podsQuery.data && !podsQuery.data.configured && overviewLoading ? (<p className="text-sm text-muted">Loading project workload summary\u2026</p>) : null}
+        {useRollupFallback ? (<>
+              <p className="text-xs text-muted">
+                Data source: <span className="font-medium text-foreground">{clusterDataSource === "project_rollups" ? "project rollups" : "platform database"}</span>
+                {" "}(not the live cluster). Connect the server to Kubernetes to replace this with real pod rows and log streaming.
+              </p>
+              <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-border/70">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Namespace</TableHead>
+                      <TableHead>Project</TableHead>
+                      <TableHead>Deploy</TableHead>
+                      <TableHead>Workload signal</TableHead>
+                      <TableHead>Image</TableHead>
+                      <TableHead className="text-right">Open</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedRollup.length === 0 ? (<TableRow>
+                        <TableCell colSpan={6} className="text-center text-sm text-muted">
+                          No projects in this namespace filter.
+                        </TableCell>
+                      </TableRow>) : (sortedRollup.map((project) => (<TableRow key={project.id}>
+                          <TableCell className="font-mono text-xs">{project.namespace}</TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            <Link href={`/projects/${project.id}`} className="hover:text-primary hover:underline">
+                              {project.projectName}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={deployRollupBadgeVariant(project.lastDeploymentStatus)}>
+                              {project.lastDeploymentStatus}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-[12rem] truncate text-xs text-muted" title={project.podStatus}>
+                            {project.podStatus}
+                          </TableCell>
+                          <TableCell className="max-w-[10rem] truncate font-mono text-xs text-muted" title={project.imageTag ?? ""}>
+                            {project.imageTag ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={`/projects/${project.id}`}>Project</Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>)))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted">Pod logs</p>
+                <Textarea
+              readOnly
+              value={"Live pod logs need a connected Kubernetes API. Open a project to read deployment logs and Jenkins output from the platform."}
+              className="min-h-[120px] font-mono text-xs text-muted"
+            />
+              </div>
+            </>) : null}
         {podsQuery.data?.configured && podsQuery.data.error ? (<p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{podsQuery.data.error}</p>) : null}
-        {podsQuery.data?.configured && !podsQuery.data.error ? (<>
+        {useK8sTable ? (<>
               <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-border/70">
                 <Table>
                   <TableHeader>
@@ -170,12 +278,12 @@ export function DashboardPodsPanel() {
                         {selected.namespace}/{selected.name}
                       </Badge>
                       {selected.containers.length > 0 ? (<select aria-label="Container" value={selected.container} onChange={(event) => setSelected({
-                        ...selected,
-                        container: event.target.value
-                    })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
-                          {selected.containers.map((c) => <option key={c} value={c}>
+                            ...selected,
+                            container: event.target.value
+                        })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
+                          {selected.containers.map((c) => (<option key={c} value={c}>
                               {c}
-                            </option>)}
+                            </option>))}
                         </select>) : null}
                       <Button type="button" variant="outline" size="sm" aria-label="Refresh pod logs" onClick={() => void podLogsQuery.refetch()} disabled={podLogsQuery.isFetching}>
                         {podLogsQuery.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <RefreshCcw className="h-3.5 w-3.5"/>}
