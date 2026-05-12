@@ -1,10 +1,7 @@
 import { keycloakSsoConfigured } from "@/server/auth/keycloak-sso";
 import { LoginForm } from "./login-form";
-
 export const dynamic = "force-dynamic";
-
 type Search = Record<string, string | string[] | undefined>;
-
 function firstParam(v: string | string[] | undefined): string | undefined {
     if (typeof v === "string") {
         return v;
@@ -14,8 +11,9 @@ function firstParam(v: string | string[] | undefined): string | undefined {
     }
     return undefined;
 }
-
-export default function LoginPage({ searchParams }: { searchParams: Search }) {
+export default function LoginPage({ searchParams }: {
+    searchParams: Search;
+}) {
     const kcError = firstParam(searchParams.kc_error);
     return <LoginForm keycloakEnabled={keycloakSsoConfigured()} keycloakError={kcError}/>;
 }

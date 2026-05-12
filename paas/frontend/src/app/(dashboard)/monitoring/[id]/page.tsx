@@ -3,29 +3,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-    Activity,
-    AlertCircle,
-    Boxes,
-    ChevronRight,
-    ExternalLink,
-    FileText,
-    Loader2,
-    RefreshCcw,
-    Server
-} from "lucide-react";
-import {
-    Bar,
-    BarChart,
-    CartesianGrid,
-    Cell,
-    Line,
-    LineChart,
-    ResponsiveContainer,
-    Tooltip,
-    XAxis,
-    YAxis
-} from "recharts";
+import { Activity, AlertCircle, Boxes, ChevronRight, ExternalLink, FileText, Loader2, RefreshCcw, Server } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,7 +75,6 @@ export default function MonitoringPage() {
     const statusQuery = useQuery({
         queryKey: ["status", projectId],
         queryFn: () => pipelineApi.getStatus(projectId),
-
         refetchInterval: 20000
     });
     const argoQuery = useQuery({
@@ -149,7 +127,7 @@ export default function MonitoringPage() {
     const deployLogText = statusQuery.data?.deploymentLogs?.trim() || "No deployment / GitOps log buffer stored yet.";
     const podLogText = selectedPod
         ? podLogsQuery.data?.logs ||
-          (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned for this pod/container.")
+            (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned for this pod/container.")
         : "Select a workload in the table below and choose View logs.";
     const logBody = logTab === "build" ? buildLogText : logTab === "deploy" ? deployLogText : podLogText;
     const loading = snapshotQuery.isLoading && !snapshotQuery.data;

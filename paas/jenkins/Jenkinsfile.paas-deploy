@@ -1,10 +1,3 @@
-// DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (build), 4–5 (SCA, SAST = .full §3–4),
-// 6 (Docker image), 7 (Helm), 8 (Artifactory), 9 (Cosign), 10 (ZAP), 11 (Helm OCI), 12 (GitOps + archive). See `Jenkinsfile.paas-deploy.full`.
-// Fast mode: JENKINS_PAAS_FAST_PIPELINE=true (job param or env) skips Steps 4–5, 8, 10 and sets JENKINS_SKIP_NEXT_BUILD=true (one Next compile in image). Use for dev / rapid iteration; keep full mode for release.
-// Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
-//
-// If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
-// is still an old/broken script: re-run inline job sync from the PaaS or reload pipeline from this repo.
 
 def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
@@ -27,7 +20,6 @@ def nonFatalStage(String label, Closure body) {
   }
 }
 
-/** Publie sca/bom.json vers OWASP Dependency-Track (API BOM) si URL + clé sont configurés. */
 def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
   def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
@@ -70,20 +62,37 @@ def ensureNodeTool() {
   }
   def nodeDir = "${cacheRoot}/node-v${nodeVer}-linux-x64"
   println "[tooling] npm missing on Jenkins node; portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_CACHE to override root; persists across workspaces)"
-  sh """
-    set -eu
-    NODE_VERSION="${nodeVer}"
-    NODE_DIR="${nodeDir}"
-    mkdir -p "\$(dirname "\${NODE_DIR}")"
-    if [ ! -x "\${NODE_DIR}/bin/npm" ]; then
-      TDIR="\$(mktemp -d)"
-      trap 'rm -rf "\${TDIR}"' EXIT
-      curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-x64.tar.gz" -o "\${TDIR}/node.tar.gz"
-      tar -xzf "\${TDIR}/node.tar.gz" -C "\${TDIR}"
-      rm -rf "\${NODE_DIR}"
-      mv "\${TDIR}/node-v\${NODE_VERSION}-linux-x64" "\${NODE_DIR}"
-    fi
-  """
+  withEnv(["ENS_NODE_BOOT_VER=${nodeVer}", "ENS_NODE_BOOT_DIR=${nodeDir}"]) {
+    sh '''#!/bin/sh
+set -eu
+NODE_VERSION="${ENS_NODE_BOOT_VER}"
+NODE_DIR="${ENS_NODE_BOOT_DIR}"
+mkdir -p "$(dirname "${NODE_DIR}")"
+if [ ! -x "${NODE_DIR}/bin/npm" ]; then
+  TDIR="$(mktemp -d)"
+  trap 'rm -rf "${TDIR}"' EXIT
+  echo "[tooling] downloading Node.js ${NODE_VERSION} tarball…"
+  (
+    _n=0
+    while true; do
+      sleep 20
+      _n=$((_n + 1))
+      echo "[tooling] Node.js download still running (${_n}×20s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    done
+  ) &
+  HB_PID=$!
+  trap 'kill "${HB_PID}" 2>/dev/null || true; rm -rf "${TDIR}"' EXIT
+  curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
+    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
+    -o "${TDIR}/node.tar.gz"
+  kill "${HB_PID}" 2>/dev/null || true
+  trap 'rm -rf "${TDIR}"' EXIT
+  tar -xzf "${TDIR}/node.tar.gz" -C "${TDIR}"
+  rm -rf "${NODE_DIR}"
+  mv "${TDIR}/node-v${NODE_VERSION}-linux-x64" "${NODE_DIR}"
+fi
+'''
+  }
   prependPath("${nodeDir}/bin")
 }
 
@@ -98,7 +107,23 @@ def ensureCraneTool() {
     CRANE_VERSION="0.20.6"
     CRANE_BIN="$PWD/.paas-tools/crane/crane"
     if [ ! -x "$CRANE_BIN" ]; then
-      curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o .paas-tools/crane.tar.gz
+      echo "[tooling] downloading crane v${CRANE_VERSION} tarball…"
+      (
+        _n=0
+        while true; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[tooling] crane download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+      ) &
+      HB_PID=$!
+      trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
+      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
+        "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+        -o .paas-tools/crane.tar.gz
+      kill "$HB_PID" 2>/dev/null || true
+      trap - EXIT
+      echo "[tooling] extracting crane…"
       tar -xzf .paas-tools/crane.tar.gz -C .paas-tools/crane crane
       chmod +x "$CRANE_BIN"
     fi
@@ -116,7 +141,22 @@ def ensureCosignTool() {
     mkdir -p .paas-tools/cosign
     CC="$PWD/.paas-tools/cosign/cosign"
     if [ ! -x "$CC" ]; then
-      curl -fsSL -o .paas-tools/cosign/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      echo "[tooling] downloading cosign binary…"
+      (
+        _n=0
+        while true; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[tooling] cosign download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+      ) &
+      HB_PID=$!
+      trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
+      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 900 \
+        -o .paas-tools/cosign/cosign \
+        "https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64"
+      kill "$HB_PID" 2>/dev/null || true
+      trap - EXIT
       chmod +x .paas-tools/cosign/cosign
     fi
   '''
@@ -313,7 +353,6 @@ node(agentLabel) {
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
-  // Heartbeat is a background loop (echo then sleep): it keeps stdout alive for durable-task; it does not block npm/next/cp/crane. Lower JENKINS_NEXT_BUILD_HEARTBEAT_SEC for more frequent lines.
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
@@ -336,7 +375,6 @@ node(agentLabel) {
   }
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
-  // Legacy PaaS sync (pre-regex) allowlisted only through step 5; keep this line so deploy works before frontend image update.
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
 
   stage("Step 1 — Params validation") {
@@ -432,9 +470,6 @@ node(agentLabel) {
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
             JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
             run_with_keepalive() {
-              # Default: run in foreground. Background "$@" + sleep loop breaks Jenkins durable-task (exit -2,
-              # "process apparently never started") after controller restarts/resume or with some agents.
-              # Set JENKINS_SH_KEEPALIVE=true only if you need stdout heartbeats through a proxy that drops idle streams.
               if [ "${JENKINS_SH_KEEPALIVE:-false}" != "true" ]; then
                 "$@"
                 return $?

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { startKeycloakLoginAsync, keycloakSsoConfigured } from "@/server/auth/keycloak-sso";
 import { enforceRateLimit } from "@/server/http/rate-limit";
 export const runtime = "nodejs";
-
 export async function GET(request: NextRequest) {
     if (!keycloakSsoConfigured()) {
         return NextResponse.json({ message: "Keycloak SSO is not enabled." }, { status: 404 });

@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-    completeKeycloakLogin,
-    keycloakSsoConfigured,
-    readKeycloakOAuthFromRequestCookies
-} from "@/server/auth/keycloak-sso";
+import { completeKeycloakLogin, keycloakSsoConfigured, readKeycloakOAuthFromRequestCookies } from "@/server/auth/keycloak-sso";
 import { buildSessionCookie } from "@/server/auth/session-cookie";
 import { buildExpiredKeycloakOAuthCookies } from "@/server/auth/keycloak-oauth-cookies";
 import { env } from "@/server/config/env";
 export const runtime = "nodejs";
-
 function appOrigin(): string {
     return env.APP_BASE_URL.replace(/\/$/, "");
 }
-
 export async function GET(request: NextRequest) {
     if (!keycloakSsoConfigured()) {
         return NextResponse.json({ message: "Keycloak SSO is not enabled." }, { status: 404 });

@@ -8,14 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { jenkinsUi, type JenkinsPipelineStageRow } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
 type DeploymentPipelinePreviewProps = {
     projectId: string;
     buildNumber: number | null;
     buildProvider: string | null;
     deploymentStatus: string;
 };
-
 export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvider, deploymentStatus }: DeploymentPipelinePreviewProps) {
     const isJenkins = !buildProvider || buildProvider === "jenkins";
     const statusU = deploymentStatus.toUpperCase();

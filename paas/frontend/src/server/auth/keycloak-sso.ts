@@ -4,39 +4,24 @@ import type { BaseClient } from "openid-client";
 import { Role } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
-import {
-    buildExpiredKeycloakOAuthCookies,
-    buildKeycloakOAuthCookies,
-    KC_NEXT_COOKIE,
-    KC_STATE_COOKIE,
-    KC_VERIFIER_COOKIE
-} from "@/server/auth/keycloak-oauth-cookies";
+import { buildExpiredKeycloakOAuthCookies, buildKeycloakOAuthCookies, KC_NEXT_COOKIE, KC_STATE_COOKIE, KC_VERIFIER_COOKIE } from "@/server/auth/keycloak-oauth-cookies";
 import { signToken } from "@/server/security/jwt";
 import { ApiError, ValidationError } from "@/server/http/errors";
 import type { UserRole } from "@/types";
 import type { ResponseCookie } from "next/dist/compiled/@edge-runtime/cookies";
-
 let clientMemo: BaseClient | null = null;
-
 export function keycloakSsoConfigured(): boolean {
-    return (
-        env.KEYCLOAK_ENABLED === "true" &&
-        Boolean(
-            env.KEYCLOAK_ISSUER.trim() &&
-                env.KEYCLOAK_CLIENT_ID.trim() &&
-                env.KEYCLOAK_CLIENT_SECRET.trim()
-        )
-    );
+    return (env.KEYCLOAK_ENABLED === "true" &&
+        Boolean(env.KEYCLOAK_ISSUER.trim() &&
+            env.KEYCLOAK_CLIENT_ID.trim() &&
+            env.KEYCLOAK_CLIENT_SECRET.trim()));
 }
-
 function appOrigin(): string {
     return env.APP_BASE_URL.replace(/\/$/, "");
 }
-
 export function keycloakRedirectUri(): string {
     return `${appOrigin()}/api/auth/keycloak/callback`;
 }
-
 async function getKeycloakOpenIdClient(): Promise<BaseClient> {
     if (clientMemo) {
         return clientMemo;
@@ -52,14 +37,12 @@ async function getKeycloakOpenIdClient(): Promise<BaseClient> {
     clientMemo = client;
     return client;
 }
-
 function mergeRole(existing: Role, fromKeycloak: Role): Role {
     if (existing === Role.ADMIN || fromKeycloak === Role.ADMIN) {
         return Role.ADMIN;
     }
     return Role.DEVELOPER;
 }
-
 function roleFromAccessToken(accessToken: string | undefined): Role {
     const adminRole = env.KEYCLOAK_ADMIN_ROLE.trim();
     if (!adminRole || !accessToken) {
@@ -69,11 +52,12 @@ function roleFromAccessToken(accessToken: string | undefined): Role {
     if (!decoded || typeof decoded !== "object") {
         return Role.DEVELOPER;
     }
-    const realmAccess = Reflect.get(decoded, "realm_access") as { roles?: string[] } | undefined;
+    const realmAccess = Reflect.get(decoded, "realm_access") as {
+        roles?: string[];
+    } | undefined;
     const roles = realmAccess?.roles ?? [];
     return roles.includes(adminRole) ? Role.ADMIN : Role.DEVELOPER;
 }
-
 function pickEmail(claims: {
     email?: unknown;
     preferred_username?: unknown;
@@ -82,15 +66,16 @@ function pickEmail(claims: {
     if (emailRaw) {
         return emailRaw.toLowerCase();
     }
-    const preferred =
-        typeof claims.preferred_username === "string" ? claims.preferred_username.trim() : "";
+    const preferred = typeof claims.preferred_username === "string" ? claims.preferred_username.trim() : "";
     if (preferred.includes("@")) {
         return preferred.toLowerCase();
     }
     return "";
 }
-
-function pickFullName(claims: { name?: unknown; preferred_username?: unknown }, email: string): string {
+function pickFullName(claims: {
+    name?: unknown;
+    preferred_username?: unknown;
+}, email: string): string {
     if (typeof claims.name === "string" && claims.name.trim()) {
         return claims.name.trim();
     }
@@ -99,7 +84,6 @@ function pickFullName(claims: { name?: unknown; preferred_username?: unknown }, 
     }
     return email.split("@")[0] || "User";
 }
-
 async function upsertUserFromKeycloak(input: {
     sub: string;
     email: string;
@@ -146,7 +130,6 @@ async function upsertUserFromKeycloak(input: {
         }
     });
 }
-
 export async function startKeycloakLoginAsync(nextPath: string): Promise<{
     redirectUrl: string;
     cookies: ResponseCookie[];
@@ -174,7 +157,6 @@ export async function startKeycloakLoginAsync(nextPath: string): Promise<{
         })
     };
 }
-
 export async function completeKeycloakLogin(input: {
     requestUrl: string;
     cookies: {
@@ -184,7 +166,12 @@ export async function completeKeycloakLogin(input: {
     };
 }): Promise<{
     sessionToken: string;
-    user: { id: string; email: string; fullName: string; role: UserRole };
+    user: {
+        id: string;
+        email: string;
+        fullName: string;
+        role: UserRole;
+    };
     redirectPath: string;
     clearOAuthCookies: ResponseCookie[];
 }> {
@@ -213,17 +200,12 @@ export async function completeKeycloakLogin(input: {
         preferred_username: claims.preferred_username
     });
     if (!email) {
-        throw new ValidationError(
-            "Keycloak did not provide an email. Ensure scope includes email and the user has an email in Keycloak."
-        );
+        throw new ValidationError("Keycloak did not provide an email. Ensure scope includes email and the user has an email in Keycloak.");
     }
-    const fullName = pickFullName(
-        {
-            name: claims.name,
-            preferred_username: claims.preferred_username
-        },
-        email
-    );
+    const fullName = pickFullName({
+        name: claims.name,
+        preferred_username: claims.preferred_username
+    }, email);
     const keycloakRole = roleFromAccessToken(tokenSet.access_token);
     const user = await upsertUserFromKeycloak({ sub, email, fullName, keycloakRole });
     const sessionToken = signToken({
@@ -240,7 +222,6 @@ export async function completeKeycloakLogin(input: {
             }
         }
         catch {
-            /* ignore */
         }
     }
     return {
@@ -255,7 +236,6 @@ export async function completeKeycloakLogin(input: {
         clearOAuthCookies: buildExpiredKeycloakOAuthCookies()
     };
 }
-
 export function readKeycloakOAuthFromRequestCookies(get: (name: string) => string | undefined): {
     state: string | undefined;
     codeVerifier: string | undefined;

@@ -27,8 +27,6 @@ export async function probeProjectAppReachability(projectId: string, userId: str
     if (!url) {
         return { url: null, reachable: false, statusCode: null, error: "no_url" };
     }
-    // Browser-reachable cluster / mDNS names are often unreachable from the PaaS container (Docker/K8s),
-    // so probing would false-negative even when the app is fine.
     if (isLikelySyntheticLocalHostname(url)) {
         return {
             url,

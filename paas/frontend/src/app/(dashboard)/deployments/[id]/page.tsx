@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel, jenkinsScmCloneFailureHint } from "@/components/deployments/deployment-logs-view";
+import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
@@ -54,7 +55,7 @@ export default function DeploymentDetailPage() {
     const reachQuery = useQuery({
         queryKey: ["app-reachability", query.data?.projectId],
         queryFn: () => projectApi.getAppReachability(query.data!.projectId),
-        enabled: Boolean(query.data?.url && query.data?.projectId),
+        enabled: Boolean(query.data?.url && query.data?.projectId) && !shouldSkipAppReachabilityProbe(query.data?.url),
         refetchInterval: 15000
     });
     if (query.isLoading) {
@@ -162,18 +163,10 @@ export default function DeploymentDetailPage() {
                 Open app
               </a>
             </Button>
-            {reachQuery.data ? (<Badge variant={reachQuery.data.reachable
-                    ? "success"
-                    : reachQuery.data.error === "synthetic_local"
-                        ? "outline"
-                        : "warning"}>
-                {reachQuery.data.reachable
-                    ? `Reachable · ${reachQuery.data.statusCode ?? "?"}`
-                    : reachQuery.data.error === "no_url"
-                        ? "No URL on project"
-                        : reachQuery.data.error === "synthetic_local"
-                            ? ".local URL \u2014 not probed from PaaS (open in your browser if this host resolves)"
-                            : "Probe failed / timeout"}
+            {reachQuery.data?.reachable ? (<Badge variant="success">
+                Reachable · {reachQuery.data.statusCode ?? "?"}
+              </Badge>) : reachQuery.data && !reachQuery.data.reachable && reachQuery.data.error !== "no_url" && reachQuery.data.error !== "synthetic_local" ? (<Badge variant="warning">
+                Probe failed / timeout
               </Badge>) : reachQuery.isFetching ? (<Badge variant="outline">Probing…</Badge>) : null}
           </CardContent>
         </Card>) : null}

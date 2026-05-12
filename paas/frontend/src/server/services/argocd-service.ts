@@ -7,7 +7,6 @@ import type { ArgoCdStatus } from "@/types";
 export function argoApplicationName(projectName: string): string {
     return `${env.ARGOCD_APP_PREFIX}-${projectName}`;
 }
-/** Trailing-slash-safe API origin (supports subpath installs e.g. `https://host/argocd`). */
 export function getArgoCdApiBase(): string {
     return env.ARGOCD_BASE_URL.trim().replace(/\/+$/, "");
 }
@@ -45,9 +44,8 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
                     health: "Unknown",
                     syncStatus: "Unknown",
                     appName,
-                    unreachableReason:
-                        `Argo CD returned HTTP ${response.status} for GET ${url}. ` +
-                            `Regenerate the token or grant applications, get (and sync for deploy) on the AppProject. ${errText}`
+                    unreachableReason: `Argo CD returned HTTP ${response.status} for GET ${url}. ` +
+                        `Regenerate the token or grant applications, get (and sync for deploy) on the AppProject. ${errText}`
                 };
             }
             if (allowSimulation()) {
@@ -62,8 +60,12 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
         }
         const data = (await response.json()) as {
             status?: {
-                health?: { status?: string };
-                sync?: { status?: string };
+                health?: {
+                    status?: string;
+                };
+                sync?: {
+                    status?: string;
+                };
             };
         };
         return {
@@ -78,10 +80,9 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
         }
         const msg = formatFetchErrorChain(e);
         if (!allowSimulation()) {
-            const tlsHint =
-                env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
-                    ? " If the server uses a self-signed cert, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
-                    : "";
+            const tlsHint = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
+                ? " If the server uses a self-signed cert, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
+                : "";
             throw new IntegrationError(`Argo CD status request failed: ${msg}${tlsHint}`);
         }
         return {
@@ -121,10 +122,9 @@ export async function syncArgoApplication(projectName: string): Promise<{
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated sync for ${appName} (request failed: ${msg})` };
         }
-        const tlsHint =
-            env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
-                ? " If Argo CD uses a self-signed certificate, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
-                : "";
+        const tlsHint = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
+            ? " If Argo CD uses a self-signed certificate, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
+            : "";
         const infraHint = /connect|refused|timeout|ECONNREFUSED/i.test(msg)
             ? " On the cluster, ensure `kubectl get deploy -n argocd argocd-server` shows READY pods and `kubectl get endpoints -n argocd argocd-server` is non-empty; try ARGOCD_BASE_URL with the HTTP NodePort (port 80 mapping) if HTTPS fails."
             : "";
@@ -154,16 +154,13 @@ export async function syncArgoApplication(projectName: string): Promise<{
         }
         if (response.status === 403) {
             const hint = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
-            const labHint =
-                " In lab, either fix Argo CD RBAC for this token, or set PAAS_STRICT_INTEGRATIONS=false in the frontend environment " +
+            const labHint = " In lab, either fix Argo CD RBAC for this token, or set PAAS_STRICT_INTEGRATIONS=false in the frontend environment " +
                 "(paas/docker-compose.yml already sets it) so deploy can complete after GitOps when only the Argo **API** sync is denied.";
-            throw new IntegrationError(
-                `Argo CD denied this request (HTTP 403) for application "${appName}". ` +
-                    `Check RBAC and that the Application exists and your token may sync it (Argo CD policies / admin token). ` +
-                    `Expected application name: "${appName}" (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").` +
-                    labHint +
-                    hint
-            );
+            throw new IntegrationError(`Argo CD denied this request (HTTP 403) for application "${appName}". ` +
+                `Check RBAC and that the Application exists and your token may sync it (Argo CD policies / admin token). ` +
+                `Expected application name: "${appName}" (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").` +
+                labHint +
+                hint);
         }
         throw new IntegrationError(`Argo CD sync failed (${response.status}): ${body.slice(0, 800)}`);
     }

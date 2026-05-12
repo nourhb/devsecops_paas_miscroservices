@@ -27,20 +27,37 @@ def ensureNodeTool() {
   }
   def nodeDir = "${cacheRoot}/node-v${nodeVer}-linux-x64"
   println "[tooling] npm missing on Jenkins node; portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_CACHE to override root; persists across workspaces)"
-  sh """
-    set -eu
-    NODE_VERSION="${nodeVer}"
-    NODE_DIR="${nodeDir}"
-    mkdir -p "\$(dirname "\${NODE_DIR}")"
-    if [ ! -x "\${NODE_DIR}/bin/npm" ]; then
-      TDIR="\$(mktemp -d)"
-      trap 'rm -rf "\${TDIR}"' EXIT
-      curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-x64.tar.gz" -o "\${TDIR}/node.tar.gz"
-      tar -xzf "\${TDIR}/node.tar.gz" -C "\${TDIR}"
-      rm -rf "\${NODE_DIR}"
-      mv "\${TDIR}/node-v\${NODE_VERSION}-linux-x64" "\${NODE_DIR}"
-    fi
-  """
+  withEnv(["ENS_NODE_BOOT_VER=${nodeVer}", "ENS_NODE_BOOT_DIR=${nodeDir}"]) {
+    sh '''#!/bin/sh
+set -eu
+NODE_VERSION="${ENS_NODE_BOOT_VER}"
+NODE_DIR="${ENS_NODE_BOOT_DIR}"
+mkdir -p "$(dirname "${NODE_DIR}")"
+if [ ! -x "${NODE_DIR}/bin/npm" ]; then
+  TDIR="$(mktemp -d)"
+  trap 'rm -rf "${TDIR}"' EXIT
+  echo "[tooling] downloading Node.js ${NODE_VERSION} tarball…"
+  (
+    _n=0
+    while true; do
+      sleep 20
+      _n=$((_n + 1))
+      echo "[tooling] Node.js download still running (${_n}×20s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    done
+  ) &
+  HB_PID=$!
+  trap 'kill "${HB_PID}" 2>/dev/null || true; rm -rf "${TDIR}"' EXIT
+  curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
+    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
+    -o "${TDIR}/node.tar.gz"
+  kill "${HB_PID}" 2>/dev/null || true
+  trap 'rm -rf "${TDIR}"' EXIT
+  tar -xzf "${TDIR}/node.tar.gz" -C "${TDIR}"
+  rm -rf "${NODE_DIR}"
+  mv "${TDIR}/node-v${NODE_VERSION}-linux-x64" "${NODE_DIR}"
+fi
+'''
+  }
   prependPath("${nodeDir}/bin")
 }
 
@@ -55,7 +72,23 @@ def ensureCraneTool() {
     CRANE_VERSION="0.20.6"
     CRANE_BIN="$PWD/.paas-tools/crane/crane"
     if [ ! -x "$CRANE_BIN" ]; then
-      curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o .paas-tools/crane.tar.gz
+      echo "[tooling] downloading crane v${CRANE_VERSION} tarball…"
+      (
+        _n=0
+        while true; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[tooling] crane download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+      ) &
+      HB_PID=$!
+      trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
+      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
+        "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+        -o .paas-tools/crane.tar.gz
+      kill "$HB_PID" 2>/dev/null || true
+      trap - EXIT
+      echo "[tooling] extracting crane…"
       tar -xzf .paas-tools/crane.tar.gz -C .paas-tools/crane crane
       chmod +x "$CRANE_BIN"
     fi
@@ -73,7 +106,22 @@ def ensureCosignTool() {
     mkdir -p .paas-tools/cosign
     CC="$PWD/.paas-tools/cosign/cosign"
     if [ ! -x "$CC" ]; then
-      curl -fsSL -o .paas-tools/cosign/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      echo "[tooling] downloading cosign binary…"
+      (
+        _n=0
+        while true; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[tooling] cosign download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+      ) &
+      HB_PID=$!
+      trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
+      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 900 \
+        -o .paas-tools/cosign/cosign \
+        "https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64"
+      kill "$HB_PID" 2>/dev/null || true
+      trap - EXIT
       chmod +x .paas-tools/cosign/cosign
     fi
   '''
@@ -88,7 +136,6 @@ def nonFatalStage(String label, Closure body) {
   }
 }
 
-/** Publie sca/bom.json vers OWASP Dependency-Track (API BOM) si URL + clé sont configurés. */
 def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
   def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
@@ -276,10 +323,6 @@ def imagePublishedViaCrane = false
 def cosignImageRef = ""
 
 node(agentLabel) {
-  /* Integrations URLs usually come from (1) build parameters — PaaS passes SONAR_* / DEPENDENCY_TRACK_* /
-   * DockerHub / HARBOR_* / ARTIFACTORY_* / HELM_OCI_* via buildWithParameters when set in paas/frontend/.env —
-   * or (2) Jenkins global / agent environment. Merge params over env so UI triggers win.
-   * Swarm port map: paas/jenkins/swarm-stack.env.example */
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
   env.HARBOR_USERNAME = (params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: "").trim()
   env.HARBOR_PASSWORD = (params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: "").trim()
@@ -307,15 +350,10 @@ node(agentLabel) {
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
-  // Heartbeat is a background loop (echo then sleep): keeps stdout alive for durable-task; does not block npm/next/cp/crane.
   env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC = (params.JENKINS_NEXT_BUILD_HEARTBEAT_SEC?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT_SEC ?: "45").trim()
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
-
-  /* Étape 2 — Checkout du code : le pipeline récupère les sources depuis le référentiel Git
-   * (ex. GitHub) dont l’URL est fournie par le paramètre GIT_URL (et BRANCH), transmis par le PaaS
-   * via buildWithParameters. Aucune étape build/image n’utilise le workspace avant ce clone. */
 
   stage("Params Validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -342,11 +380,6 @@ node(agentLabel) {
 
   println "[pipeline] Ordre volontaire : après ce checkout, le stage « 5. Construction » s'exécute **avant** les stages « 3. SCA » et « 4. SAST » (dépendances et artefacts nécessaires aux analyses — numéros = chapitres mémoire, pas l'ordre 1,2,3…). Le fichier `Jenkinsfile.paas-deploy` (job inline PaaS) reprend cette séquence en Steps 3→4→5 puis enchaîne image, Helm, Artifactory, Cosign, ZAP, Helm OCI, archive (Steps 6–12)."
 
-  /* §5 — Construction de l'application : compilation selon le type de projet (Maven, npm, Python…).
-   * Cette étape utilise les outils adaptés au manifeste détecté ; les sorties (node_modules, target/, dist/, etc.)
-   * constituent l’artefact intermédiaire pour SCA, SAST et l’étape image. Numéro « 5 » = chapitre mémoire ;
-   * dans Jenkins elle s’exécute avant les étapes « 3 » SCA et « 4 » SAST pour disposer des dépendances résolues. */
-
   stage("5. Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
     if (fileExists("pom.xml")) {
@@ -358,19 +391,6 @@ node(agentLabel) {
     } else if (fileExists("package.json")) {
       ensureNodeTool()
       if (commandExists("npm")) {
-        /* Stage 5 npm: persistent Node under JENKINS_PAAS_NODE_CACHE; npm tarball cache under .../npm;
-         * optional node_modules snapshot under .../nm-snap/${PROJECT_ID}/${sha256(package-lock)} (default on;
-         * set JENKINS_NPM_SNAPSHOT_NODE_MODULES=false to disable — saves disk, slower installs).
-         * maxsockets default 16; JENKINS_NPM_CI_PREFER_OFFLINE=false forces registry refresh.
-         * Next.js 16+: default Turbopack (no --webpack); opt-in webpack via JENKINS_NEXT_BUILD_WEBPACK=true.
-         * Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false. Next cache: JENKINS_NEXT_PERSIST_CACHE default on.
-         * Exit 143 = SIGTERM / OOM — lower maxsockets on tiny agents if needed.
-         * JENKINS-48300: long steps with little stdout → durable-task abort (exit -1). Background child + sleep
-         * in THIS shell can confuse durable-task after controller restart (exit -2). Default: run npm in
-         * foreground (JENKINS_SH_KEEPALIVE not true). Set JENKINS_SH_KEEPALIVE=true only for proxy idle-timeout issues.
-         * Default interval JENKINS_SH_KEEPALIVE_SEC=60 when keepalive is on. */
-        /* Next.js: `next build` runs ESLint by default — très long en CI ; préférer `build:ci` (--no-lint) si défini dans package.json.
-         * JENKINS_SKIP_NEXT_BUILD=true : uniquement npm ci (pas de next build ici) — le Dockerfile généré / stage Docker exécute encore `npm run build`. */
         def npmTimeoutMin = 180
         try {
           def raw = (env.BUILD_NODE_NPM_TIMEOUT_MIN ?: "").trim()
@@ -571,12 +591,6 @@ node(agentLabel) {
     println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
 
-  /* Étape 3 — SCA (Software Composition Analysis) :
-   * OWASP Dependency-Check analyse les dépendances en s’appuyant sur la NVD (ou cache local si NVD_API_KEY absent),
-   * produit un rapport JSON (archivé sous sca/dependency-check.json).
-   * Un SBOM CycloneDX (bom.json), format pris en charge par OWASP Dependency-Track, est généré à part (cdxgen / cyclonedx-npm)
-   * puis publié vers Dependency-Track pour le tableau de bord des vulnérabilités par composant. */
-
   stage("3. Tests de sécurité et conformité (SCA → CycloneDX → Dependency-Track)") {
     nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
       dockerAvailable = commandExists("docker")
@@ -645,10 +659,6 @@ exit 0
     }
   }
 
-  /* Étape 4 — SAST (Static Application Security Testing) : SonarQube analyse le code source
-   * (vulnérabilités, code smells, bugs, couverture de tests si configurée) et contribue aux
-   * normes de qualité / sécurité du dépôt. Non bloquant pour le déploiement (nonFatalStage). */
-
   stage("4. Tests de sécurité statique (SAST) — SonarQube") {
     nonFatalStage("4. SAST — SonarQube") {
       if (!commandExists("docker")) {
@@ -710,10 +720,6 @@ exit 0
     }
   }
 
-  /* §6 — Création de l’image Docker : build local uniquement si Docker est disponible ; les sorties §5
-   * sont dans le contexte. La publication Harbor est le stage §9 (après §7 packaging Helm et §8 Artifactory),
-   * sauf chemin crane sans Docker où les couches sont déjà envoyées au registre (§6+§9 équivalents). */
-
   stage("6. Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker ***"
     dockerAvailable = commandExists("docker")
@@ -756,9 +762,6 @@ exit 0
     println "*** END : 6. Création de l'image Docker ***"
   }
 
-  /* §7 — Packaging Helm : chart Kubernetes (déploiement) ; helm package produit une archive .tgz
-   * avec templates et values. release-metadata.txt référence l’image §6 (même tag que §9 après push). */
-
   stage("7. Packaging du chart Helm") {
     nonFatalStage("7. Packaging du chart Helm") {
       sh """
@@ -779,8 +782,6 @@ EOF
       }
     }
   }
-
-  /* §8 — Artifactory : référentiel générique pour centraliser builds (archive .tgz : paas-artifacts + sca), après §7. */
 
   stage("8. Publication des artefacts dans Artifactory") {
     nonFatalStage("8. Publication Artifactory") {
@@ -835,8 +836,6 @@ EOF
     }
   }
 
-  /* §9 — Publication dans le registre privé Harbor (ou autre registre via identifiants Jenkins). */
-
   stage("9. Publication de l'image Docker (Harbor)") {
     println "*** BEGIN : 9. Publication de l'image Docker (Harbor) ***"
     if (imagePublishedViaCrane) {
@@ -872,8 +871,6 @@ EOF
     }
     println "*** END : 9. Publication de l'image Docker (Harbor) ***"
   }
-
-  /* §10 — Cosign : signature d’image OCI (intégrité / authenticité) après publication §9 ou via crane §6. */
 
   stage("10. Signature de l'image Docker (Cosign)") {
     nonFatalStage("10. Cosign") {
@@ -933,8 +930,6 @@ EOF
     }
   }
 
-  /* OWASP ZAP baseline (DAST) — URL must be reachable from the Jenkins agent (deployed app or preview). */
-
   stage("10b. DAST (OWASP ZAP baseline)") {
     nonFatalStage("10b. ZAP baseline") {
       def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
@@ -962,8 +957,6 @@ EOF
       }
     }
   }
-
-  /* §11 — Charts Helm : publication vers Harbor en registre OCI (helm push), même identifiants HARBOR_* que l’image. */
 
   stage("11. Publication des charts Helm (Harbor)") {
     nonFatalStage("11. Publication Helm OCI → Harbor") {

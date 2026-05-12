@@ -644,10 +644,10 @@ export async function listClusterNamespaces(): Promise<{
         }>(response);
         const items = (body.items ?? [])
             .map((ns) => ({
-                name: ns.metadata?.name ?? "",
-                phase: ns.status?.phase ?? "Unknown",
-                createdAt: ns.metadata?.creationTimestamp?.toISOString?.() ?? ""
-            }))
+            name: ns.metadata?.name ?? "",
+            phase: ns.status?.phase ?? "Unknown",
+            createdAt: ns.metadata?.creationTimestamp?.toISOString?.() ?? ""
+        }))
             .filter((row) => Boolean(row.name))
             .sort((a, b) => a.name.localeCompare(b.name));
         return {

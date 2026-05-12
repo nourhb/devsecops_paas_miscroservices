@@ -22,10 +22,6 @@ function preprocessStrictIntegrations(v: unknown): unknown {
     return v;
 }
 type EnvParsed = z.infer<typeof envSchema>;
-/**
- * Next.js may inline static `process.env.KEY` reads at build time. Keys built dynamically
- * still read the real container/process environment when the standalone server starts.
- */
 function runtimeProcessEnvRaw(keyParts: string[]): string | undefined {
     const key = keyParts.join("");
     if (typeof process === "undefined") {
@@ -87,7 +83,6 @@ const envSchema = z.object({
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
-    /** When true, PaaS triggers Jenkins with fast pipeline: skips SCA, SAST, Artifactory artifact bundle, ZAP; sets skip in-Groovy Next build (build in image only). */
     JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
     PAAS_MONOREPO_ROOT: z.string().default(""),
     HARBOR_REGISTRY: z.string().default(""),
@@ -166,7 +161,6 @@ const envSchema = z.object({
     KEYCLOAK_ISSUER: z.string().default(""),
     KEYCLOAK_CLIENT_ID: z.string().default(""),
     KEYCLOAK_CLIENT_SECRET: z.string().default(""),
-    /** If set (e.g. paas-admin), users whose access token includes this realm role become ADMIN (see Keycloak realm roles). */
     KEYCLOAK_ADMIN_ROLE: z.string().default("")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);

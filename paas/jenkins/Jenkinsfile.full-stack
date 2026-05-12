@@ -1,8 +1,3 @@
-// DevSecOps PaaS – Full-stack pipeline (Groovy)
-// Integrates: Jenkins, Harbor, SonarQube, Artifactory, Argo CD, Dependency Track,
-// Dependency Check, Trivy, Cosign, Docker, Helm, Nginx Ingress (via GitOps).
-// Supports: Spring Boot (Java), Angular (Node), or generic Node/npm.
-// Triggered by PaaS API; Kubernetes runtime uses containerd; monitoring: Prometheus + Grafana.
 
 pipeline {
   agent any
