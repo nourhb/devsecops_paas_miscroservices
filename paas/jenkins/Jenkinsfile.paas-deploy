@@ -1,6 +1,5 @@
-// DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (app build), 4 (Docker image),
-// 5 (Helm + release-metadata), 6 (Artifactory = .full « 8 »), 7 (Cosign = .full « 10 »),
-// 8 (ZAP = « 10b »), 9 (Helm OCI Harbor = « 11 »), 10 (Argo handoff + archive = « 12–14 »). More: `Jenkinsfile.paas-deploy.full`.
+// DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (build), 4–5 (SCA, SAST = .full §3–4),
+// 6 (Docker image), 7 (Helm), 8 (Artifactory), 9 (Cosign), 10 (ZAP), 11 (Helm OCI), 12 (GitOps + archive). See `Jenkinsfile.paas-deploy.full`.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -24,6 +23,33 @@ def nonFatalStage(String label, Closure body) {
     println "*** BEGIN : ${label} ***"
     body()
     println "*** END : ${label} ***"
+  }
+}
+
+/** Publie sca/bom.json vers OWASP Dependency-Track (API BOM) si URL + clé sont configurés. */
+def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
+  def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
+  def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
+  def ver = "${branchOrVersionLabel}-${env.BUILD_NUMBER}"
+  if (!dtBase || !dtKey) {
+    println "[sca] Dependency-Track non configuré (DEPENDENCY_TRACK_BASE_URL / API_KEY); pas d'upload SBOM."
+    return
+  }
+  if (!fileExists("sca/bom.json")) {
+    println "[sca] Pas de sca/bom.json; upload Dependency-Track ignoré."
+    return
+  }
+  withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${projId}"]) {
+    sh '''
+      set +e
+      curl -sS --fail-with-body -X POST "${DT_BASE%/}/api/v1/bom" \
+        -H "X-Api-Key: ${DT_KEY}" \
+        -F "autoCreate=true" \
+        -F "projectName=${DT_PROJECT}" \
+        -F "projectVersion=${DT_VERSION}" \
+        -F "bom=@sca/bom.json" \
+        || echo "[sca] Dependency-Track upload failed (non-fatal)"
+    '''
   }
 }
 
@@ -291,7 +317,7 @@ node(agentLabel) {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   // Legacy PaaS sync (pre-regex) allowlisted only through step 5; keep this line so deploy works before frontend image update.
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
 
@@ -325,7 +351,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Steps 3–7: build, image, Helm, Artifactory, Cosign (.full §5–10) ; Step 8: ZAP (.full §10b) ; Step 9: Helm OCI (.full §11) ; Step 10: GitOps handoff + archive (.full §12–14)."
+  println "[pipeline] Ordre aligné .full : construction (Step 3) puis SCA/SAST (Steps 4–5), puis image → Helm → Artifactory → Cosign → ZAP → Helm OCI → archive (.full §6–14)."
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
@@ -541,7 +567,136 @@ node(agentLabel) {
     println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
 
-  stage("Step 4 — Création de l'image Docker") {
+  stage("Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)") {
+    nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
+      dockerAvailable = commandExists("docker")
+      sh "mkdir -p sca"
+      if (!dockerAvailable) {
+        println "[sca] Docker CLI missing; npm audit + @cyclonedx/cyclonedx-npm (Node) or extend agent for full SCA."
+        if (fileExists("package.json")) {
+          ensureNodeTool()
+          sh '''
+            set +e
+            npm audit --json > sca/npm-audit.json
+            npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+            exit 0
+          '''
+        } else {
+          println "[sca] No package.json; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
+        }
+        uploadBomToDependencyTrack(projectId, branchName)
+        return
+      }
+      def nvdArg = env.NVD_API_KEY?.trim() ? "--nvdApiKey ${env.NVD_API_KEY}" : "--noupdate"
+      withEnv([
+        "PAAS_SCA_WORKSPACE=${env.WORKSPACE ?: ''}",
+        "PAAS_SCA_NVD_ARG=${nvdArg}"
+      ]) {
+        sh '''#!/bin/bash
+set +u
+if [ -z "${PAAS_SCA_WORKSPACE}" ]; then
+  export WORKSPACE="$(pwd)"
+else
+  export WORKSPACE="${PAAS_SCA_WORKSPACE}"
+fi
+set +e
+mkdir -p "${WORKSPACE}/sca"
+echo "[sca] OWASP Dependency-Check: scan des dépendances vs NVD → JSON..."
+docker pull owasp/dependency-check:latest >/dev/null
+docker run --rm -v "${WORKSPACE}:/src" owasp/dependency-check:latest \
+  --scan /src --format JSON --out /src/sca ${PAAS_SCA_NVD_ARG} || true
+if [ -f "${WORKSPACE}/sca/dependency-check-report.json" ]; then
+  mv -f "${WORKSPACE}/sca/dependency-check-report.json" "${WORKSPACE}/sca/dependency-check.json"
+fi
+echo "[sca] Génération SBOM CycloneDX (bom.json) pour Dependency-Track..."
+CDXGEN_IMG="ghcr.io/cyclonedx/cdxgen:latest"
+docker pull "${CDXGEN_IMG}" >/dev/null || echo "[sca] cdxgen image pull failed"
+if [ -f "${WORKSPACE}/package.json" ] || [ -f "${WORKSPACE}/package-lock.json" ] || [ -f "${WORKSPACE}/yarn.lock" ] || [ -f "${WORKSPACE}/pnpm-lock.yaml" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -r /repo -o /repo/sca/bom.json || true
+elif [ -f "${WORKSPACE}/pom.xml" ] || [ -f "${WORKSPACE}/build.gradle" ] || [ -f "${WORKSPACE}/build.gradle.kts" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -t java -r /repo -o /repo/sca/bom.json || true
+elif [ -f "${WORKSPACE}/requirements.txt" ] || [ -f "${WORKSPACE}/pyproject.toml" ] || [ -f "${WORKSPACE}/Pipfile.lock" ]; then
+  docker run --rm -v "${WORKSPACE}:/repo" -w /repo "${CDXGEN_IMG}" \
+    -t python -r /repo -o /repo/sca/bom.json || true
+else
+  echo "[sca] Manifeste non reconnu par cdxgen; bom.json peut être absent."
+fi
+if [ -f "${WORKSPACE}/sca/bom.json" ]; then
+  echo "[sca] SBOM: ${WORKSPACE}/sca/bom.json"
+else
+  echo "[sca] Pas de bom.json généré."
+fi
+exit 0
+'''
+      }
+      uploadBomToDependencyTrack(projectId, branchName)
+    }
+  }
+
+  stage("Step 5 — Tests SAST (SonarQube)") {
+    nonFatalStage("4. SAST — SonarQube") {
+      if (!commandExists("docker")) {
+        println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
+        def sonarUrl = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
+        def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
+        if (!sonarUrl || !sonarToken) {
+          println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+          return
+        }
+        ensureNodeTool()
+        withEnv(["SONAR_HOST_URL=${sonarUrl}", "SONAR_TOKEN=${sonarToken}", "SONAR_PROJECT_KEY=${projectId}", "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"]) {
+          sh '''
+            set +e
+            npx --yes sonarqube-scanner \
+              -Dsonar.host.url="${SONAR_HOST_URL}" \
+              -Dsonar.token="${SONAR_TOKEN}" \
+              -Dsonar.login="${SONAR_TOKEN}" \
+              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+              -Dsonar.projectName="${SONAR_PROJECT_KEY}" \
+              -Dsonar.projectVersion="${SONAR_VERSION}" \
+              -Dsonar.sources=. \
+              -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
+            exit 0
+          '''
+        }
+        return
+      }
+      if (!env.SONAR_HOST_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
+        println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+        return
+      }
+      withEnv([
+        "SONAR_SCAN_HOST_URL=${env.SONAR_HOST_URL}",
+        "SONAR_SCAN_TOKEN=${env.SONAR_TOKEN}",
+        "SONAR_SCAN_WORKSPACE=${env.WORKSPACE ?: ''}",
+        "SONAR_SCAN_PROJECT_KEY=${projectId}",
+        "SONAR_SCAN_PROJECT_VERSION=${branchName}-${env.BUILD_NUMBER}"
+      ]) {
+        sh '''#!/bin/bash
+set +e
+SONAR_WS="${SONAR_SCAN_WORKSPACE}"
+if [ -z "${SONAR_WS}" ]; then SONAR_WS="$(pwd)"; fi
+docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
+docker run --rm \
+  -e SONAR_HOST_URL="$SONAR_SCAN_HOST_URL" \
+  -e SONAR_TOKEN="$SONAR_SCAN_TOKEN" \
+  -v "${SONAR_WS}:/usr/src" \
+  sonarsource/sonar-scanner-cli:latest \
+  -Dsonar.projectKey="$SONAR_SCAN_PROJECT_KEY" \
+  -Dsonar.projectName="$SONAR_SCAN_PROJECT_KEY" \
+  -Dsonar.projectVersion="$SONAR_SCAN_PROJECT_VERSION" \
+  -Dsonar.sources=. \
+  -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
+  -Dsonar.scm.provider=git
+exit 0
+'''
+      }
+    }
+  }
+
+  stage("Step 6 — Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker (aligné Jenkinsfile.paas-deploy.full) ***"
     dockerAvailable = commandExists("docker")
     def dest = "${imageName}:${env.BUILD_NUMBER}"
@@ -625,7 +780,7 @@ node(agentLabel) {
     println "*** END : 6. Création de l'image Docker ***"
   }
 
-  stage("Step 5 — Packaging du chart Helm") {
+  stage("Step 7 — Packaging du chart Helm") {
     nonFatalStage("7. Packaging du chart Helm (aligné Jenkinsfile.paas-deploy.full)") {
       sh """
         set -eu
@@ -646,7 +801,7 @@ EOF
     }
   }
 
-  stage("Step 6 — Publication des artefacts (Artifactory)") {
+  stage("Step 8 — Publication des artefacts (Artifactory)") {
     nonFatalStage("8. Publication Artifactory (aligné Jenkinsfile.paas-deploy.full)") {
       def artiBase = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()
       def artiRepo = (params.ARTIFACTORY_REPOSITORY?.trim() ?: env.ARTIFACTORY_REPOSITORY ?: "libs-release-local").trim()
@@ -699,7 +854,7 @@ EOF
     }
   }
 
-  stage("Step 7 — Signature de l'image (Cosign)") {
+  stage("Step 9 — Signature de l'image (Cosign)") {
     nonFatalStage("10. Cosign (aligné Jenkinsfile.paas-deploy.full)") {
       if (!cosignImageRef?.trim()) {
         println "[cosign] Pas d'image construite / poussée par ce build — signature ignorée."
@@ -757,7 +912,7 @@ EOF
     }
   }
 
-  stage("Step 8 — DAST (OWASP ZAP baseline)") {
+  stage("Step 10 — DAST (OWASP ZAP baseline)") {
     nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
       def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
       if (!zapTarget) {
@@ -785,7 +940,7 @@ EOF
     }
   }
 
-  stage("Step 9 — Publication charts Helm (OCI → Harbor)") {
+  stage("Step 11 — Publication charts Helm (OCI → Harbor)") {
     nonFatalStage("11. Publication Helm OCI → Harbor (aligné Jenkinsfile.paas-deploy.full)") {
       def reg = (env.HARBOR_REGISTRY ?: "").trim()
       def hu = (env.HARBOR_USERNAME ?: "").trim()
@@ -800,7 +955,7 @@ EOF
         return
       }
       if (!fileExists("paas-artifacts/helm")) {
-        println "[helm-oci] Pas de paas-artifacts/helm (exécutez d'abord le packaging Step 5) — ignoré."
+        println "[helm-oci] Pas de paas-artifacts/helm (exécutez d'abord le packaging Step 7) — ignoré."
         return
       }
       def regHost = reg.replaceFirst("^https?://", "").replaceAll(/\/$/, "")
@@ -828,7 +983,7 @@ EOF
     }
   }
 
-  stage("Step 10 — GitOps (Argo CD) & archivage Jenkins") {
+  stage("Step 12 — GitOps (Argo CD) & archivage Jenkins") {
     println "*** BEGIN : GitOps / Argo CD (délégué au PaaS) — aligné Jenkinsfile.paas-deploy.full §12–13 ***"
     println "[argocd] Applications Argo CD et sync : délégués au contrôle PaaS après succès Jenkins ; ce build expose PAAS_ARTIFACT_IMAGE pour le suivi déploiement."
     println "[argocd-helm] Chart OCI (Harbor) : quand l'Application référence oci://…, Argo réconcilie avec la version publiée (credentials côté cluster, pas Jenkins)."
