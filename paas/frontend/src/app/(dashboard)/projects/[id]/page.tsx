@@ -431,14 +431,19 @@ export default function ProjectDetailsPage() {
           <CardDescription>Application health and sync status when Argo API is configured.</CardDescription>
         </CardHeader>
         <CardContent>
-          {argoQuery.isLoading ? (<Skeleton className="h-10 w-full max-w-md"/>) : (<div className="flex flex-wrap gap-2">
-              <Badge variant="outline" className="font-mono text-xs">
-                {argoQuery.data?.appName ?? "\u2014"}
-              </Badge>
-              <Badge variant={argoQuery.data?.health === "Healthy" ? "success" : "warning"}>
-                {argoQuery.data?.health ?? "Unknown"}
-              </Badge>
-              <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
+          {argoQuery.isLoading ? (<Skeleton className="h-10 w-full max-w-md"/>) : (<div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline" className="font-mono text-xs">
+                  {argoQuery.data?.appName ?? "\u2014"}
+                </Badge>
+                <Badge variant={argoQuery.data?.health === "Healthy" ? "success" : "warning"}>
+                  {argoQuery.data?.health ?? "Unknown"}
+                </Badge>
+                <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
+              </div>
+              {argoQuery.data?.unreachableReason ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  {argoQuery.data.unreachableReason}
+                </p>) : null}
             </div>)}
         </CardContent>
       </Card>

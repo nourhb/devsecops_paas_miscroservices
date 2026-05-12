@@ -1,11 +1,10 @@
 import { env } from "@/server/config/env";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
-import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
-import { syncArgoApplication } from "@/server/services/argocd-service";
+import { getArgoApplicationStatus, getArgoCdApiBase, syncArgoApplication } from "@/server/services/argocd-service";
 import { verifyImageWithCosign } from "@/server/security/cosign-verify";
 import { evaluateOpaImagePolicy } from "@/server/security/opa-eval";
 export type JenkinsBuildResult = {
@@ -28,6 +27,22 @@ export type JenkinsDashboardBuild = {
     url: string | null;
     timestamp: string | null;
     durationMs: number | null;
+};
+export type JenkinsWorkflowStageRow = {
+    name: string;
+    status: string;
+    durationMs: number | null;
+};
+export type JenkinsWorkflowDescribeResult = {
+    configured: boolean;
+    error?: string;
+    jobUrlPath: string;
+    displayJobName: string;
+    buildNumber: number | null;
+    building: boolean;
+    result: string | null;
+    runStatus: string | null;
+    stages: JenkinsWorkflowStageRow[];
 };
 export interface DockerHubTagInfo {
     name: string;
@@ -152,6 +167,37 @@ function parseQueueItemId(location: string | null): string | null {
     }
     const match = location.match(/\/queue\/item\/(\d+)\/?$/);
     return match?.[1] ?? null;
+}
+function flattenWorkflowStages(rawStages: unknown, depth = 0): JenkinsWorkflowStageRow[] {
+    if (depth > 24 || !Array.isArray(rawStages)) {
+        return [];
+    }
+    const out: JenkinsWorkflowStageRow[] = [];
+    for (const item of rawStages) {
+        if (!item || typeof item !== "object") {
+            continue;
+        }
+        const node = item as {
+            name?: unknown;
+            status?: unknown;
+            totalDurationMillis?: unknown;
+            stages?: unknown;
+        };
+        const name = typeof node.name === "string" ? node.name.trim() : "";
+        const statusRaw = typeof node.status === "string" ? node.status.trim().toUpperCase() : "UNKNOWN";
+        const durationMs = typeof node.totalDurationMillis === "number" ? node.totalDurationMillis : null;
+        if (name) {
+            out.push({
+                name,
+                status: statusRaw,
+                durationMs
+            });
+        }
+        if (Array.isArray(node.stages) && node.stages.length > 0) {
+            out.push(...flattenWorkflowStages(node.stages, depth + 1));
+        }
+    }
+    return out;
 }
 function dashboardBuildStatus(result: string | null, building: boolean): "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" {
     if (building) {
@@ -865,6 +911,148 @@ export class JenkinsClient {
             .sort((a, b) => b.number - a.number)
             .slice(0, limit);
     }
+    async getWorkflowStagesForProject(projectName: string, projectId: string, buildNumber?: number | null): Promise<JenkinsWorkflowDescribeResult & {
+        buildUrl: string | null;
+    }> {
+        const displayJobName = jenkinsJobName(projectName, projectId, "build");
+        const jobPath = jenkinsJobUrlPath(projectName, projectId, "build");
+        const base = jenkinsBaseUrl();
+        const withUrl = (row: JenkinsWorkflowDescribeResult): JenkinsWorkflowDescribeResult & {
+            buildUrl: string | null;
+        } => ({
+            ...row,
+            buildUrl: row.buildNumber != null ? `${base}/${jobPath}/${row.buildNumber}` : null
+        });
+        if (!this.enabled) {
+            return withUrl({
+                configured: false,
+                jobUrlPath: jobPath,
+                displayJobName,
+                buildNumber: null,
+                building: false,
+                result: null,
+                runStatus: null,
+                stages: [],
+                error: allowSimulation() ? undefined : "Jenkins is not configured."
+            });
+        }
+        const headers: Record<string, string> = {
+            Authorization: jenkinsAuthHeader(),
+            Accept: "application/json"
+        };
+        const crumb = await jenkinsFetchCrumb(base, headers);
+        if (crumb) {
+            headers[crumb.crumbRequestField] = crumb.crumb;
+            if (crumb.cookieHeader) {
+                headers.Cookie = crumb.cookieHeader;
+            }
+        }
+        let bn: number | null = typeof buildNumber === "number" && Number.isFinite(buildNumber) ? Math.trunc(buildNumber) : null;
+        let building = false;
+        let result: string | null = null;
+        if (bn == null) {
+            const lastRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/lastBuild/api/json?tree=number,building,result`, { headers });
+            if (!lastRes.ok) {
+                const t = await lastRes.text();
+                return withUrl({
+                    configured: true,
+                    error: lastRes.status === 404
+                        ? "Jenkins job or lastBuild not found."
+                        : `lastBuild lookup failed (${lastRes.status}): ${t.slice(0, 400)}`,
+                    jobUrlPath: jobPath,
+                    displayJobName,
+                    buildNumber: null,
+                    building: false,
+                    result: null,
+                    runStatus: null,
+                    stages: []
+                });
+            }
+            const lastJson = (await lastRes.json()) as {
+                number?: number;
+                building?: boolean;
+                result?: string | null;
+            };
+            bn = typeof lastJson.number === "number" ? lastJson.number : null;
+            building = Boolean(lastJson.building);
+            result = lastJson.result ?? null;
+            if (bn == null) {
+                return withUrl({
+                    configured: true,
+                    jobUrlPath: jobPath,
+                    displayJobName,
+                    buildNumber: null,
+                    building: false,
+                    result: null,
+                    runStatus: null,
+                    stages: []
+                });
+            }
+        }
+        else {
+            const metaRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/${bn}/api/json?tree=building,result`, { headers });
+            if (metaRes.ok) {
+                const meta = (await metaRes.json()) as {
+                    building?: boolean;
+                    result?: string | null;
+                };
+                building = Boolean(meta.building);
+                result = meta.result ?? null;
+            }
+        }
+        const wfRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/${bn}/wfapi/describe`, { headers });
+        if (!wfRes.ok) {
+            const text = await wfRes.text();
+            return withUrl({
+                configured: true,
+                error: wfRes.status === 404
+                    ? "Workflow REST API (wfapi/describe) is not available. Install the Pipeline Stage View plugin on Jenkins, or open the build in Jenkins for the stage graph."
+                    : `wfapi/describe failed (${wfRes.status}): ${text.slice(0, 400)}`,
+                jobUrlPath: jobPath,
+                displayJobName,
+                buildNumber: bn,
+                building,
+                result,
+                runStatus: null,
+                stages: []
+            });
+        }
+        let wf: {
+            status?: string;
+            stages?: unknown[];
+        };
+        try {
+            wf = (await wfRes.json()) as {
+                status?: string;
+                stages?: unknown[];
+            };
+        }
+        catch {
+            return withUrl({
+                configured: true,
+                error: "Could not parse wfapi/describe JSON.",
+                jobUrlPath: jobPath,
+                displayJobName,
+                buildNumber: bn,
+                building,
+                result,
+                runStatus: null,
+                stages: []
+            });
+        }
+        const runStatus = typeof wf.status === "string" ? wf.status.trim().toUpperCase() : null;
+        const stages = flattenWorkflowStages(wf.stages);
+        return withUrl({
+            configured: true,
+            jobUrlPath: jobPath,
+            displayJobName,
+            buildNumber: bn,
+            building,
+            result,
+            runStatus,
+            stages
+        });
+    }
     async getDashboardBuildLogs(jobName: string, buildId: string): Promise<{
         id: string;
         logs: string;
@@ -1164,17 +1352,17 @@ export class HarborClient {
   }
 }
 export class ArgoCdClient {
-  private enabled = Boolean(env.ARGOCD_BASE_URL);
     async sync(projectName: string): Promise<{
         status: string;
         logs: string;
     }> {
-    const appName = `${env.ARGOCD_APP_PREFIX}-${projectName}`;
-    const fallback = {
-      status: "SYNCED",
-      logs: `[argocd] Synced application ${appName}`
-    };
-        if (!this.enabled) {
+        const appName = `${env.ARGOCD_APP_PREFIX}-${projectName}`;
+        const fallback = {
+            status: "SYNCED",
+            logs: `[argocd] Synced application ${appName}`
+        };
+        const configured = Boolean(getArgoCdApiBase() && env.ARGOCD_AUTH_TOKEN.trim());
+        if (!configured) {
             return fetchOrFallback("Argo CD sync", false, "", {}, fallback, async () => fallback);
         }
         try {
@@ -1192,31 +1380,9 @@ export class ArgoCdClient {
         health: string;
         syncStatus: string;
         appName: string;
+        unreachableReason?: string;
     }> {
-        const appName = `${env.ARGOCD_APP_PREFIX}-${projectName}`;
-        const fallback = { health: "Healthy", syncStatus: "Synced", appName };
-        return fetchOrFallback("Argo CD", this.enabled, `${env.ARGOCD_BASE_URL}/api/v1/applications/${encodeURIComponent(appName)}`, {
-            method: "GET",
-            headers: {
-                Authorization: `Bearer ${env.ARGOCD_AUTH_TOKEN}`
-            }
-        }, fallback, async (response) => {
-            const data = (await response.json()) as {
-                status?: {
-                    health?: {
-                        status?: string;
-                    };
-                    sync?: {
-                        status?: string;
-                    };
-                };
-            };
-            return {
-                health: data.status?.health?.status ?? "Unknown",
-                syncStatus: data.status?.sync?.status ?? "Unknown",
-                appName
-            };
-        }, argocdIntegrationFetch);
+        return getArgoApplicationStatus(projectName);
     }
 }
 export class DockerHubClient {
@@ -1354,6 +1520,32 @@ function prometheusInstantScalar(payload: unknown): number | null {
     }
     return Math.min(100, Math.max(0, n));
 }
+function prometheusRangeFirstSeries(payload: unknown): {
+    ts: number;
+    value: number;
+}[] {
+    const data = payload as {
+        data?: {
+            result?: Array<{
+                values?: Array<[
+                    number,
+                    string
+                ]>;
+            }>;
+        };
+    };
+    const values = data.data?.result?.[0]?.values;
+    if (!Array.isArray(values)) {
+        return [];
+    }
+    return values.map(([t, v]) => {
+        const n = Number.parseFloat(String(v));
+        return {
+            ts: t * 1000,
+            value: Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0
+        };
+    });
+}
 export class PrometheusClient {
   private enabled = Boolean(env.PROMETHEUS_BASE_URL);
     async clusterUsage(projectId: string): Promise<{
@@ -1382,6 +1574,66 @@ export class PrometheusClient {
             }
             return { cpu, ram };
         });
+    }
+    /** Cluster-wide PromQL over a sliding window (same queries as instant CPU / memory). */
+    async clusterUsageRange(opts: {
+        durationSeconds: number;
+        stepSeconds: number;
+    }): Promise<{
+        cpuSeries: {
+            ts: number;
+            value: number;
+        }[];
+        memorySeries: {
+            ts: number;
+            value: number;
+        }[];
+        error?: string;
+    }> {
+        if (!this.enabled) {
+            return { cpuSeries: [], memorySeries: [] };
+        }
+        const base = env.PROMETHEUS_BASE_URL.replace(/\/$/, "");
+        const cpuQuery = env.PROMETHEUS_QUERY_CPU.trim() || PROM_DEFAULT_CPU_QUERY;
+        const memQuery = env.PROMETHEUS_QUERY_MEMORY.trim() || PROM_DEFAULT_MEMORY_QUERY;
+        const end = Math.floor(Date.now() / 1000);
+        const start = end - opts.durationSeconds;
+        const step = Math.max(15, opts.stepSeconds);
+        const qCpu = `${base}/api/v1/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${end}&step=${step}`;
+        const qMem = `${base}/api/v1/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${end}&step=${step}`;
+        try {
+            const cpuRes = await integrationFetch(qCpu, { method: "GET" });
+            if (!cpuRes.ok) {
+                const t = await cpuRes.text();
+                return {
+                    cpuSeries: [],
+                    memorySeries: [],
+                    error: `Prometheus query_range (CPU) failed (${cpuRes.status}): ${t.slice(0, 400)}`
+                };
+            }
+            const cpuPayload = await cpuRes.json();
+            const cpuSeries = prometheusRangeFirstSeries(cpuPayload);
+            let memorySeries: {
+                ts: number;
+                value: number;
+            }[] = [];
+            try {
+                const memRes = await integrationFetch(qMem, { method: "GET" });
+                if (memRes.ok) {
+                    memorySeries = prometheusRangeFirstSeries(await memRes.json());
+                }
+            }
+            catch {
+            }
+            return { cpuSeries, memorySeries };
+        }
+        catch (e) {
+            return {
+                cpuSeries: [],
+                memorySeries: [],
+                error: e instanceof Error ? e.message : String(e)
+            };
+        }
     }
 }
 export class GitOpsClient {

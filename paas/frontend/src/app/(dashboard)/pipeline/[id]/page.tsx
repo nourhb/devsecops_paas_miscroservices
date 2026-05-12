@@ -3,15 +3,15 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, GitBranch, Loader2, Rocket, RotateCcw, Server, Shield, Workflow, Wrench } from "lucide-react";
+import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, ExternalLink, GitBranch, Loader2, MinusCircle, Rocket, RotateCcw, Server, Shield, SkipForward, Workflow, Wrench, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
-import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
+import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStageRow, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
-import type { DeploymentStatus } from "@/types";
+import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
 import { cn } from "@/lib/utils";
 const STAGES = [
@@ -36,6 +36,70 @@ const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
     "Step 11 — Publication charts Helm (OCI → Harbor)",
     "Step 12 — GitOps (Argo CD) & archivage Jenkins"
 ] as const;
+function formatStageDurationMs(ms: number | null): string {
+    if (ms == null || ms < 0) {
+        return "\u2014";
+    }
+    if (ms < 1000) {
+        return `${ms}ms`;
+    }
+    const s = Math.round(ms / 1000);
+    if (s < 60) {
+        return `${s}s`;
+    }
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r > 0 ? `${m}m ${r}s` : `${m}m`;
+}
+function jenkinsStageRowUi(status: string) {
+    const u = status.toUpperCase();
+    if (u === "SUCCESS") {
+        return {
+            icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-success"/>,
+            rowClass: "border-success/20 bg-success/5",
+            badgeVariant: "success" as const,
+            label: "Success"
+        };
+    }
+    if (u === "IN_PROGRESS" || u === "RUNNING" || u === "BUILDING") {
+        return {
+            icon: <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary"/>,
+            rowClass: "border-primary/25 bg-primary/5",
+            badgeVariant: "warning" as const,
+            label: "Running"
+        };
+    }
+    if (u === "FAILED" || u === "ABORTED") {
+        return {
+            icon: <XCircle className="h-5 w-5 shrink-0 text-danger"/>,
+            rowClass: "border-danger/25 bg-danger/5",
+            badgeVariant: "danger" as const,
+            label: u === "ABORTED" ? "Aborted" : "Failed"
+        };
+    }
+    if (u === "UNSTABLE" || u === "PAUSED_PENDING_INPUT") {
+        return {
+            icon: <MinusCircle className="h-5 w-5 shrink-0 text-warning"/>,
+            rowClass: "border-warning/30 bg-warning/5",
+            badgeVariant: "warning" as const,
+            label: u === "PAUSED_PENDING_INPUT" ? "Paused" : "Unstable"
+        };
+    }
+    if (u === "SKIPPED" || u === "NOT_EXECUTED" || u === "NOT_BUILT") {
+        return {
+            icon: <SkipForward className="h-5 w-5 shrink-0 text-muted"/>,
+            rowClass: "border-border bg-muted/15",
+            badgeVariant: "outline" as const,
+            label: u === "NOT_EXECUTED" ? "Pending" : "Skipped"
+        };
+    }
+    return {
+        icon: <Circle className="h-5 w-5 shrink-0 text-muted"/>,
+        rowClass: "border-border bg-muted/10",
+        badgeVariant: "outline" as const,
+        label: status || "Unknown"
+    };
+}
 function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
     const bs = (projectStatus || "").toUpperCase();
     const ds = (lastDeploymentStatus || "").toUpperCase();
@@ -97,11 +161,25 @@ export default function PipelinePage() {
         queryFn: () => securityApi.getDependencyTrack(projectId),
         refetchInterval: 12000
     });
+    const pipelineStagesQuery = useQuery({
+        queryKey: ["jenkins-pipeline-stages", projectId],
+        queryFn: ({ signal }) => jenkinsUi.pipelineStages(projectId, undefined, signal),
+        enabled: Boolean(projectQuery.data),
+        refetchInterval: () => {
+            const proj = queryClient.getQueryData<Project>(["project", projectId]);
+            const u = (s: string | undefined) => (s || "").toUpperCase();
+            const appBusy = ["BUILDING", "QUEUED", "PUSHING"].includes(u(proj?.buildStatus));
+            const stagesData = queryClient.getQueryData<JenkinsPipelineStagesResponse>(["jenkins-pipeline-stages", projectId]);
+            const jenkinsBusy = Boolean(stagesData?.building);
+            return appBusy || jenkinsBusy ? 3000 : 20000;
+        }
+    });
     const buildMutation = useMutation({
         mutationFn: () => pipelineApi.triggerBuild(projectId),
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ["status", projectId] });
             queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["jenkins-pipeline-stages", projectId] });
             toast.success(data.message || "Build triggered");
         },
         onError: (e: unknown) => {
@@ -199,6 +277,11 @@ export default function PipelinePage() {
         argoHealth: argoQuery.data?.health,
         argoSyncStatus: argoQuery.data?.syncStatus
     });
+    const wfStages = pipelineStagesQuery.data;
+    const liveStagesList = wfStages?.stages ?? [];
+    const jStarted = liveStagesList.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
+    const jTotal = liveStagesList.length;
+    const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -272,19 +355,85 @@ export default function PipelinePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Jenkins stages (incremental)</CardTitle>
-          <CardDescription>
-            These names match the Pipeline job Groovy when PaaS syncs <span className="font-mono text-xs">paas/jenkins/Jenkinsfile.paas-deploy</span>.
-            If Jenkins stops at Step 7, the controller job is probably stale: pull the monorepo, enable inline sync, or rebuild the frontend image that
-            bundles the Jenkinsfile.
-          </CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="text-base">Jenkins pipeline (live)</CardTitle>
+              <CardDescription>
+                Stages mirror the Jenkins stage graph via <span className="font-mono text-xs">wfapi/describe</span> (install{" "}
+                <strong className="font-medium text-foreground">Pipeline Stage View</strong> if you see a setup error). Polling speeds up while a build is
+                running.
+              </CardDescription>
+            </div>
+            {wfStages?.buildUrl ? (<Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+                <a href={wfStages.buildUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-3.5 w-3.5"/>
+                  Open in Jenkins
+                </a>
+              </Button>) : null}
+          </div>
+          {wfStages ? (<div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+              <code className="rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground/90">
+                {wfStages.displayJobName || wfStages.jobUrlPath || "—"}
+              </code>
+              {typeof wfStages.buildNumber === "number" ? <Badge variant="outline">#{wfStages.buildNumber}</Badge> : null}
+              {wfStages.building ? <Badge variant="warning">Running on Jenkins</Badge> : null}
+              {wfStages.runStatus ? <Badge variant="outline">Workflow: {wfStages.runStatus}</Badge> : null}
+              {wfStages.result ? <Badge variant={buildHeaderBadgeVariant(wfStages.result)}>Result: {wfStages.result}</Badge> : null}
+              {pipelineStagesQuery.isFetching ? <span className="inline-flex items-center gap-1 text-muted">
+                  <Loader2 className="h-3 w-3 animate-spin"/>
+                  Updating…
+                </span> : null}
+            </div>) : null}
         </CardHeader>
-        <CardContent>
-          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted marker:text-foreground">
-            {PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((label) => (<li key={label} className="pl-1">
-                <span className="text-foreground">{label}</span>
-              </li>))}
-          </ol>
+        <CardContent className="space-y-4">
+          {pipelineStagesQuery.isLoading ? <Skeleton className="h-40 w-full"/> : null}
+          {pipelineStagesQuery.isError ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
+              Could not load live stages from the API. Check your session and try again.
+            </p>) : null}
+          {wfStages?.skipped ? (<p className="rounded-md border border-border bg-muted/25 px-3 py-2 text-sm text-muted">{wfStages.reason || "Live Jenkins stages are not available for this project."}</p>) : null}
+          {wfStages?.error ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{wfStages.error}</p>) : null}
+          {!wfStages?.skipped && !wfStages?.error && liveStagesList.length > 0 ? (<>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-muted">
+                  <span>Progress</span>
+                  <span>
+                    {jStarted} / {jTotal} stages touched
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${jProgressPct}%` }}/>
+                </div>
+              </div>
+              <ul className="max-h-[min(28rem,56vh)] space-y-2 overflow-auto pr-1">
+                {liveStagesList.map((stage: JenkinsPipelineStageRow, idx: number) => {
+                const rowUi = jenkinsStageRowUi(stage.status);
+                return (<li key={`${idx}-${stage.name}`} className={cn("flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm", rowUi.rowClass)}>
+                      <div className="mt-0.5">{rowUi.icon}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium leading-snug text-foreground">{stage.name}</p>
+                        <p className="mt-0.5 text-xs text-muted">Duration: {formatStageDurationMs(stage.durationMs)}</p>
+                      </div>
+                      <Badge variant={rowUi.badgeVariant} className="shrink-0 text-[10px] uppercase tracking-wide">
+                        {rowUi.label}
+                      </Badge>
+                    </li>);
+            })}
+              </ul>
+            </>) : null}
+          {!wfStages?.skipped && !wfStages?.error && wfStages?.configured && liveStagesList.length === 0 && !pipelineStagesQuery.isLoading ? (<p className="text-sm text-muted">
+              No stage breakdown returned for the current build (for example no <span className="font-mono text-xs">lastBuild</span> yet, or the job does not expose workflow stages).
+            </p>) : null}
+          <div className="border-t border-border pt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Reference — expected steps in Jenkinsfile.paas-deploy</p>
+            <p className="mb-3 text-xs text-muted">
+              If Jenkins stops at Step 7, the controller job may be stale: pull the monorepo, enable inline sync, or rebuild the frontend image that bundles the Jenkinsfile.
+            </p>
+            <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted marker:text-foreground">
+              {PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((label) => (<li key={label} className="pl-1">
+                  <span className="text-foreground">{label}</span>
+                </li>))}
+            </ol>
+          </div>
         </CardContent>
       </Card>
 
@@ -340,6 +489,9 @@ export default function PipelinePage() {
                   <ArgoHealthBadge health={argoQuery.data?.health}/>
                   <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
                 </div>
+                {argoQuery.data?.unreachableReason ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                    {argoQuery.data.unreachableReason}
+                  </p>) : null}
               </>)}
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted">
               <p>

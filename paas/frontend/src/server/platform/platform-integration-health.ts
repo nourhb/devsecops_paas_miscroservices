@@ -168,7 +168,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 return {
                     state: "unreachable",
                     latencyMs: ms,
-                    message: `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY for self-signed certs`
+                    message: `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`
                 };
             }
             catch (error) {

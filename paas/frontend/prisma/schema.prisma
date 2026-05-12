@@ -12,7 +12,8 @@ model User {
   id                      String                   @id @default(uuid())
   email                   String                   @unique
   fullName                String
-  passwordHash            String
+  passwordHash            String?
+  keycloakSub             String?                  @unique
   role                    Role                     @default(DEVELOPER)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt

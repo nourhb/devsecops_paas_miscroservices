@@ -1,9 +1,85 @@
 import { prisma } from "@/server/db/prisma";
-import type { RuntimeMetrics } from "@/types";
+import type { ProjectMonitoringSnapshot, RuntimeMetrics } from "@/types";
 import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
-import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount } from "@/server/integrations/kubernetes-client";
+import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
+function summarizePodRecords(items: ClusterPodRecord[]) {
+    const summary = {
+        running: 0,
+        failed: 0,
+        pending: 0,
+        succeeded: 0,
+        other: 0,
+        total: items.length
+    };
+    for (const p of items) {
+        const phase = (p.status || "").trim();
+        if (phase === "Running") {
+            summary.running += 1;
+        }
+        else if (phase === "Pending") {
+            summary.pending += 1;
+        }
+        else if (phase === "Failed") {
+            summary.failed += 1;
+        }
+        else if (phase === "Succeeded") {
+            summary.succeeded += 1;
+        }
+        else {
+            summary.other += 1;
+        }
+    }
+    return summary;
+}
+export async function getProjectMonitoringSnapshot(projectId: string): Promise<ProjectMonitoringSnapshot> {
+    const project = await getProjectById(projectId);
+    const k8sWanted = env.KUBERNETES_ENABLED === "true";
+    const [runtime, range, nsPods] = await Promise.all([
+        getRuntimeMetrics(projectId),
+        prometheusClient.clusterUsageRange({
+            durationSeconds: 3600,
+            stepSeconds: 60
+        }),
+        k8sWanted
+            ? listNamespacePods(project.namespace)
+            : Promise.resolve({
+                configured: false,
+                items: [] as ClusterPodRecord[],
+                error: undefined as string | undefined
+            })
+    ]);
+    const items = nsPods.items;
+    const summary = summarizePodRecords(items);
+    return {
+        project: {
+            id: project.id,
+            projectName: project.projectName,
+            namespace: project.namespace,
+            imageTag: project.imageTag ?? "",
+            url: project.url ?? "",
+            lastDeploymentStatus: project.lastDeploymentStatus,
+            buildStatus: project.buildStatus,
+            podStatus: project.podStatus
+        },
+        runtime,
+        prometheus: {
+            configured: Boolean(env.PROMETHEUS_BASE_URL?.trim()),
+            rangeError: range.error,
+            durationSeconds: 3600,
+            stepSeconds: 60,
+            cpuSeries: range.cpuSeries,
+            memorySeries: range.memorySeries
+        },
+        kubernetes: {
+            configured: nsPods.configured,
+            error: nsPods.error,
+            summary,
+            pods: items
+        }
+    };
+}
 export interface DashboardMetricsPayload {
     cluster: {
         nodeCount: number;

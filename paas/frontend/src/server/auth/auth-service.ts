@@ -23,7 +23,7 @@ type AuthUserLookupRow = {
     id: string;
     email: string;
     fullName: string;
-    passwordHash: string;
+    passwordHash: string | null;
     role: Role;
     emailVerifiedAt: Date | null;
 };
@@ -210,6 +210,9 @@ export async function loginUser(payload: unknown): Promise<AuthResponse> {
         throw new UnauthorizedError("Invalid credentials");
     }
     const allowUnverifiedDev = env.NODE_ENV === "development" && env.AUTH_ALLOW_UNVERIFIED_LOGIN === "true";
+    if (!user.passwordHash) {
+        throw new UnauthorizedError('This account signs in with Keycloak. Use "Continue with Keycloak".');
+    }
     if (!user.emailVerifiedAt && !allowUnverifiedDev) {
         throw new ApiError(403, "Please verify your email before signing in.", {
             data: {
