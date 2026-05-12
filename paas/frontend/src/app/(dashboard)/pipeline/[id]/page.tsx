@@ -26,13 +26,15 @@ const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
     "Step 1 — Params validation",
     "Step 2 — Checkout du code (Git / GitHub)",
     "Step 3 — Construction de l'application",
-    "Step 4 — Création de l'image Docker",
-    "Step 5 — Packaging du chart Helm",
-    "Step 6 — Publication des artefacts (Artifactory)",
-    "Step 7 — Signature de l'image (Cosign)",
-    "Step 8 — DAST (OWASP ZAP baseline)",
-    "Step 9 — Publication charts Helm (OCI → Harbor)",
-    "Step 10 — GitOps (Argo CD) & archivage Jenkins"
+    "Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)",
+    "Step 5 — Tests SAST (SonarQube)",
+    "Step 6 — Création de l'image Docker",
+    "Step 7 — Packaging du chart Helm",
+    "Step 8 — Publication des artefacts (Artifactory)",
+    "Step 9 — Signature de l'image (Cosign)",
+    "Step 10 — DAST (OWASP ZAP baseline)",
+    "Step 11 — Publication charts Helm (OCI → Harbor)",
+    "Step 12 — GitOps (Argo CD) & archivage Jenkins"
 ] as const;
 function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
     const bs = (projectStatus || "").toUpperCase();
@@ -249,7 +251,7 @@ export default function PipelinePage() {
           <CardDescription>
             High-level phases below. The Jenkins inline job (<span className="font-mono text-xs">Jenkinsfile.paas-deploy</span>) runs{" "}
             <strong className="font-medium text-foreground">{PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length}</strong> numbered stages; search the build
-            console for <span className="font-mono text-xs">Step N —</span> (steps 8–10: ZAP, Helm OCI, archive / GitOps notes).
+            console for <span className="font-mono text-xs">Step N —</span> (e.g. Steps 4–5 SCA/SAST; Steps 10–12 ZAP, Helm OCI, archive / GitOps notes).
           </CardDescription>
         </CardHeader>
         <CardContent>
