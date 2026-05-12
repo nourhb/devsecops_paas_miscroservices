@@ -93,6 +93,7 @@ export interface DashboardOverview {
     projects: {
         id: string;
         projectName: string;
+        namespace: string;
         buildStatus: string;
         lastDeploymentStatus: string;
         podStatus: string;
@@ -222,6 +223,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
         select: {
             id: true,
             projectName: true,
+            namespace: true,
             buildStatus: true,
             lastDeploymentStatus: true,
             podStatus: true,
@@ -374,9 +376,10 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
         security: securityRollup,
         artifacts: artifactsPayload.artifacts.slice(0, 8),
         platformTools: tooling.groups,
-        projects: projects.slice(0, 10).map((project) => ({
+        projects: projects.slice(0, 25).map((project) => ({
             id: project.id,
             projectName: project.projectName,
+            namespace: project.namespace || "default",
             buildStatus: project.buildStatus,
             lastDeploymentStatus: project.lastDeploymentStatus,
             podStatus: project.podStatus,
