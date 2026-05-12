@@ -1,4 +1,4 @@
-﻿def nonEmptyNoSpace(String value, String label) {
+def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
     error("${label} is required")
   }
@@ -339,7 +339,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Ordre volontaire : après ce checkout, le stage « 5. Construction » s’exécute **avant** les stages « 3. SCA » et « 4. SAST » (dépendances et artefacts nécessaires aux analyses — numéros = chapitres mémoire, pas l’ordre 1,2,3…). Le fichier `Jenkinsfile.paas-deploy` (job inline PaaS) enchaîne « 6. Image Docker », « 7. Helm », « 8. Artifactory » après la construction (Steps 4–6) sans SCA/SAST."
+  println "[pipeline] Ordre volontaire : après ce checkout, le stage « 5. Construction » s'exécute **avant** les stages « 3. SCA » et « 4. SAST » (dépendances et artefacts nécessaires aux analyses — numéros = chapitres mémoire, pas l'ordre 1,2,3…). Le fichier `Jenkinsfile.paas-deploy` (job inline PaaS) reprend cette séquence en Steps 3→4→5 puis enchaîne image, Helm, Artifactory, Cosign, ZAP, Helm OCI, archive (Steps 6–12)."
 
   /* §5 — Construction de l'application : compilation selon le type de projet (Maven, npm, Python…).
    * Cette étape utilise les outils adaptés au manifeste détecté ; les sorties (node_modules, target/, dist/, etc.)
