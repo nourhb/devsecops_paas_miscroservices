@@ -50,7 +50,7 @@ export async function syncArgoApplication(projectName: string): Promise<{
             const tail = body.trim() ? body.slice(0, 400) : "";
             return {
                 logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
-                    `GitOps already committed Helm values; sync manually in Argo CD or grant the API token permission to sync this Application. ${tail}`
+                    `GitOps already committed Helm values; sync manually in Argo CD or grant this JWT **applications, sync** on the AppProject (or use an admin token). ${tail}`
             };
         }
         if (allowSimulation() && (response.status === 401 || response.status === 403)) {

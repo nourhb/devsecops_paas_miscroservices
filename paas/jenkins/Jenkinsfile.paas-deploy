@@ -990,7 +990,7 @@ EOF
     println "*** END : GitOps / Argo CD ***"
     println "*** BEGIN : 14. Archivage des artefacts Jenkins ***"
     archiveArtifacts artifacts: "sca/**,paas-artifacts/**", allowEmptyArchive: true, onlyIfSuccessful: false
-    println "[artifacts] Archives locales (Jenkins) : SCA, ZAP, charts Helm, métadonnées ; Artifactory reste optionnel (Step 6)."
+    println "[artifacts] Archives locales (Jenkins) : SCA, ZAP, charts Helm, métadonnées ; Artifactory reste optionnel (Step 8)."
     println "IMAGE_NAME=${imageName} PROJECT_ID=${projectId} BUILD_NUMBER=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
