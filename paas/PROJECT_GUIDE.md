@@ -65,7 +65,7 @@ flowchart LR
 
 1. User triggers **deploy** in the UI.
 2. App creates a **Deployment** row, calls **Jenkins** with parameters (Git URL, branch, project id, registry hints, etc.).
-3. Jenkins runs **`Jenkinsfile.paas-deploy`**: checkout, build/test, SCA/SAST stages, image build/push, optional signing, then hands off to PaaS logic for **Helm values commit** and **Argo sync** when configured.
+3. Jenkins runs **`Jenkinsfile.paas-deploy`**: checkout, **application build**, **SCA** then **SAST** (non-fatal when tools or credentials are missing), Docker image build/registry push, Helm packaging, optional Artifactory/Cosign/ZAP/Helm-OCI, then the **PaaS** commits **Helm values** to Git and calls **Argo CD sync** when configured.
 4. On success, the app updates **project** fields (e.g. image tag, URLs, logs) and marks the deployment **deployed** or **failed** with reasons.
 
 ---
@@ -127,18 +127,53 @@ Controlled by **`BUILD_BACKEND`**: **`jenkins`** (default) or **`tekton`**.
 
 ---
 
-## 8. Jenkins pipeline (conceptual stages)
+## 8. Jenkins pipeline (`Jenkinsfile.paas-deploy`)
 
-The main file is **`paas/jenkins/Jenkinsfile.paas-deploy`**. In order of execution you will see stages such as:
+**Executed order on the controller** (Steps 1–12 in the inline job; see also `/pipeline/[id]` in the UI):
 
-1. **Parameter / validation** — Git, branch, image name, credentials.
-2. **Checkout** — clone `GIT_URL` / `BRANCH`.
-3. **Application build** — Maven, npm/Next, or Python depending on repo manifests.
-4. **SCA / SAST** — Dependency-Track/SBOM path, Sonar when env provides URLs/tokens (often non-fatal).
-5. **Docker image** — build or “dockerless” paths depending on agent capabilities.
-6. **Helm chart packaging** — artifact under workspace for GitOps.
-7. **Registry push** — Harbor or crane-style push depending on setup.
-8. **Optional Cosign / ZAP / Helm OCI push** — gated by parameters and tools on the agent.
+| Step | Stage (summary) | Role |
+|------|-----------------|------|
+| 1 | Params validation | `GIT_URL`, `BRANCH`, `IMAGE_NAME`, `PROJECT_ID`, optional `GIT_CREDENTIALS_ID`. |
+| 2 | Git checkout | Clone from GitHub/Git (same as mémoire §2). |
+| 3 | **Construction** | Compile/package (Maven, npm/Next, Python) — **before** SCA/SAST so dependencies and outputs exist (OWASP Dependency-Check / SBOM tools often need a resolved tree). |
+| 4 | **SCA** | OWASP Dependency-Check + CycloneDX SBOM (`sca/`), optional upload to **Dependency-Track** — corresponds to mémoire §3. |
+| 5 | **SAST** | SonarQube (Docker scanner or `npx sonarqube-scanner`) — mémoire §4. |
+| 6 | **Docker image** | Build image; **registry push** (Harbor / Docker Hub / Jenkins credentials) is done in this step on the incremental file (*mémoire §6 + §9 combined*; the **`.full`** pipeline can push after Artifactory as chapter §9). Crane path pushes during layer upload. |
+| 7 | **Helm package** | `helm package` → `paas-artifacts/helm/` — mémoire §7. |
+| 8 | **Artifactory** | Optional bundle upload — mémoire §8. |
+| 9 | **Cosign** | Optional image signing — mémoire §10. |
+| 10 | **ZAP** (DAST) | Optional baseline scan if `ZAP_TARGET_URL` is set (extra hardening; not in the 13-point mémoire list). |
+| 11 | **Helm OCI → Harbor** | Optional `helm push oci://…` — mémoire §11. |
+| 12 | **GitOps handoff + Jenkins archive** | Log lines for Argo (mémoire §12–13); **`archiveArtifacts`** for `sca/**`, `paas-artifacts/**`. |
+
+**After Jenkins**, the **Next.js control plane** (not inside the Groovy file) performs:
+
+- **GitOps**: commit Helm values (image tag) — see `gitops-github-service`, `cluster-deploy-service`.
+- **Argo CD**: `POST …/applications/{app}/sync` — see `argocd-service.ts`; **HTTP 403** means RBAC on the JWT (sync manually or widen token permissions). **`PAAS_STRICT_INTEGRATIONS`** controls whether that failure breaks the deployment.
+
+Reference Groovy variant with chapter-numbered stages: **`Jenkinsfile.paas-deploy.full`**.
+
+### 8.1 Mémoire DevSecOps — intégration dans ce dépôt (points 1–13)
+
+The following maps the **mémoire** narrative to **this repository** (IHM + API + Jenkins + PaaS).
+
+| # | Mémoire (résumé) | Où c’est implémenté dans le projet |
+|---|------------------|-------------------------------------|
+| **1** | Déclenchement depuis l’IHM / paramètres; webhook GitHub → prompt de build | **UI**: Projects → *Trigger build*, Pipeline page; **`GitHubPushBuildPrompt`** (`paas/frontend/src/components/build/github-push-build-prompt.tsx`) quand un push est enregistré; **API**: `POST /api/build/[projectId]` → `pipeline-service.triggerBuild` → `JenkinsClient` (crumb + `buildWithParameters`). Paramètres alignés avec `inline-paas-deploy-job-sync.ts` (`PARAMETER_DEFINITIONS`). |
+| **2** | Checkout du code Git/GitHub | **Jenkins** `stage("Step 2 — Checkout…")` dans `Jenkinsfile.paas-deploy` (step **git** + logs). |
+| **3** | SCA: Dependency-Check, NVD, JSON → SBOM CycloneDX → **Dependency-Track** | **Jenkins** `Step 4` + **`uploadBomToDependencyTrack`**; répertoire **`sca/`**; env **`NVD_API_KEY`**, **`DEPENDENCY_TRACK_*`**. **UI** agrège DT sur `/security/[id]` si configuré. |
+| **4** | SAST **SonarQube** | **Jenkins** `Step 5`; env **`SONAR_HOST_URL`**, **`SONAR_TOKEN`** (params ou agent). **UI** Sonar agrégat si **`SONAR_BASE_URL`** côté app. |
+| **5** | Construction / artefacts | **Jenkins** `Step 3` (Maven, npm/Next, Python); manifeste **`paas-artifacts/build-artifact-manifest.txt`**. *Ordre technique: étape 3 avant 4–5 pour résoudre dépendances et builds.* |
+| **6** | Image Docker | **Jenkins** `Step 6` (Dockerfile ou **crane** sans Docker). |
+| **7** | Packaging **Helm** | **Jenkins** `Step 7`; charts sous **`paas-artifacts/helm/`**. |
+| **8** | **Artifactory** | **Jenkins** `Step 8`; env **`ARTIFACTORY_*`**, **`ARTIFACTORY_CREDENTIALS_ID`**. |
+| **9** | Publication image **Harbor** (registre privé) | **Inclus dans Jenkins `Step 6`** sur le fichier *incremental* (push après `docker build` ou via crane). Variante **`Jenkinsfile.paas-deploy.full`**: stage dédié **§9** après Artifactory. |
+| **10** | **Cosign** (signature OCI) | **Jenkins** `Step 9`; **`COSIGN_CREDENTIALS_ID`** ou **`COSIGN_PRIVATE_KEY`** sur l’agent. |
+| **11** | Publication charts Helm vers **Harbor** (OCI) | **Jenkins** `Step 11`; **`HARBOR_*`**, **`HELM_OCI_*`**. |
+| **12** | Déploiement **Argo CD** | **PaaS** après Jenkins: **`syncArgoApplication`** dans `argocd-service.ts`; nom d’app **`${ARGOCD_APP_PREFIX}-${projectName}`**. **Step 12** Jenkins = journalisation + archive (orchestration réelle côté cluster/UI Argo). |
+| **13** | Récupération / sync du chart depuis Harbor | Assurée par **Argo CD** (source `oci://…` ou GitOps) une fois l’Application configurée; le pipeline imprime des repères **`[argocd]`** / **`[argocd-helm]`** en Step 12; pas d’appel Jenkins direct au contrôleur Argo. |
+
+**Variables d’environnement** de référence: `paas/frontend/docker-compose.env.example` et `paas/frontend/src/server/config/env.ts`.
 
 The **control plane** stores **tail of console logs** on deployments/projects for the UI; for long steps the pipeline uses **keepalive** patterns to avoid Jenkins durable-task timeouts on quiet output.
 
@@ -760,7 +795,7 @@ When disabled, the UI uses **DB-backed rollups** and strings so pages remain usa
 
 ### 34.14 Jenkins pipeline vs control plane split
 
-- **Jenkins** runs **`Jenkinsfile.paas-deploy`** (or a minimal variant during incremental testing): checkout, build, SCA/SAST (often non-fatal stages), image build/push (Docker or crane path), optional Cosign/ZAP/Helm push, archives. It prints **`PAAS_ARTIFACT_IMAGE=...`** for log consumers.
+- **Jenkins** runs **`Jenkinsfile.paas-deploy`** (or a minimal variant during incremental testing): checkout, **build**, then **SCA/SAST** (often non-fatal), image build/push (Docker or crane path), optional Cosign/ZAP/Helm OCI, archives. It prints **`PAAS_ARTIFACT_IMAGE=...`** for log consumers.
 - **Control plane** does **not** execute Maven/npm inside Next.js**; it **orchestrates** Jenkins and then **promotes** and **records** outcomes in Postgres.
 
 A **full** Groovy backup may live in **`Jenkinsfile.paas-deploy.full`** while **`Jenkinsfile.paas-deploy`** is trimmed for step-by-step bring-up; inline sync pulls the filename the PaaS expects.
