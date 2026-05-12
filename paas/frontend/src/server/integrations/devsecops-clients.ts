@@ -98,6 +98,9 @@ function appendRegistryParameters(q: URLSearchParams): void {
     if (env.HELM_OCI_PLAIN_HTTP === "true") {
         q.set("HELM_OCI_PLAIN_HTTP", "true");
     }
+    if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
+        q.set("JENKINS_PAAS_FAST_PIPELINE", "true");
+    }
 }
 function redactJenkinsUrl(url: string): string {
     try {

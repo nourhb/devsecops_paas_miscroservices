@@ -34,10 +34,15 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_PAAS_NODE_CACHE", "", "Directory root for cached portable Node (default: JENKINS_HOME/.jenkins-paas-cache/node); survives clean workspace"],
     ["JENKINS_PAAS_NPM_CACHE", "", "Persistent npm cache dir (default: JENKINS_HOME/.jenkins-paas-cache/npm)"],
     ["JENKINS_SH_KEEPALIVE", "false", "true = background npm + heartbeat (can break durable-task after Jenkins restart); keep false unless a proxy drops idle logs"],
+    [
+        "JENKINS_PAAS_FAST_PIPELINE",
+        "false",
+        "Dev iteration: true skips Steps 4-5 (SCA/SAST), 8 (Artifactory bundle), 10 (ZAP) and avoids double Next.js compile. false for release or compliance runs."
+    ],
     ["JENKINS_NEXT_BUILD_WEBPACK", "false", "Next 16+: use true only if you need webpack (slow cold builds). Default Turbopack. Next 15: false disables --webpack."],
     ["JENKINS_NEXT_PERSIST_CACHE", "true", "Persist .next/cache under JENKINS_HOME (per PROJECT_ID); set false to disable symlink cache"],
     ["JENKINS_NEXT_BUILD_HEARTBEAT", "true", "Periodic stdout during long quiet steps: npx next build + crane image push (reduces Jenkins durable-task exit -2); false disables"],
-    ["JENKINS_NEXT_BUILD_HEARTBEAT_SEC", "45", "Seconds between heartbeat log lines (next build + crane push)"],
+    ["JENKINS_NEXT_BUILD_HEARTBEAT_SEC", "45", "Seconds between background heartbeat log lines (next build + crane push). Main build commands are not blocked; lower (e.g. 20) for denser logs."],
     ["JENKINS_NPM_PRUNE_BEFORE_CRANE", "true", "Before crane tar: npm prune --omit=dev to shrink node_modules (faster push); false if runtime needs devDependencies"],
     ["JENKINS_CRANE_STANDALONE_LAYER", "auto", "auto: if .next/standalone exists, pack minimal layer for crane (fast). true/false to force; false = always full workspace tar"],
     ["ARTIFACTORY_URL", "", "Optional JFrog Artifactory base URL (e.g. https://host/artifactory) for build bundle upload"],
@@ -54,34 +59,64 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
 function escapeXmlText(s: string): string {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+function stringParameterDefinitionXml(paramIndent: string, name: string, defaultValue: string, description: string): string {
+    const fieldIndent = `${paramIndent}  `;
+    return (`${paramIndent}<hudson.model.StringParameterDefinition>\n` +
+        `${fieldIndent}<name>${escapeXmlText(name)}</name>\n` +
+        `${fieldIndent}<description>${escapeXmlText(description)}</description>\n` +
+        `${fieldIndent}<defaultValue>${escapeXmlText(defaultValue)}</defaultValue>\n` +
+        `${fieldIndent}<trim>true</trim>\n` +
+        `${paramIndent}</hudson.model.StringParameterDefinition>`);
+}
 function parameterPropertyXml(indent: string): string {
     const paramIndent = `${indent}      `;
-    const params = PARAMETER_DEFINITIONS.map(([name, defaultValue, description]) => {
-        return (`${paramIndent}<hudson.model.StringParameterDefinition>\n` +
-            `${paramIndent}  <name>${escapeXmlText(name)}</name>\n` +
-            `${paramIndent}  <description>${escapeXmlText(description)}</description>\n` +
-            `${paramIndent}  <defaultValue>${escapeXmlText(defaultValue)}</defaultValue>\n` +
-            `${paramIndent}  <trim>true</trim>\n` +
-            `${paramIndent}</hudson.model.StringParameterDefinition>`);
-    });
+    const params = PARAMETER_DEFINITIONS.map(([name, defaultValue, description]) =>
+        stringParameterDefinitionXml(paramIndent, name, defaultValue, description)
+    );
     return (`${indent}<hudson.model.ParametersDefinitionProperty>\n` +
         `${indent}  <parameterDefinitions>\n` +
         `${params.join("\n")}\n` +
         `${indent}  </parameterDefinitions>\n` +
         `${indent}</hudson.model.ParametersDefinitionProperty>`);
 }
-function ensureParameterizedJobXml(xml: string): string {
-    if (xml.includes("hudson.model.ParametersDefinitionProperty")) {
+function jobDefinesStringParameter(xml: string, name: string): boolean {
+    const token = `<name>${escapeXmlText(name)}</name>`;
+    return xml
+        .split("<hudson.model.StringParameterDefinition>")
+        .some((chunk) => chunk.includes(token));
+}
+/** Existing jobs keep stale <parameterDefinitions>; merge names from PARAMETER_DEFINITIONS so new toggles work after sync. */
+function mergeMissingParameterDefinitions(xml: string): string {
+    const closeRe = /\n([\t ]*)<\/parameterDefinitions>/;
+    const m = closeRe.exec(xml);
+    if (!m) {
         return xml;
     }
-    const prop = parameterPropertyXml("    ");
-    if (/<properties\s*\/>/.test(xml)) {
-        return xml.replace(/<properties\s*\/>/, `<properties>\n${prop}\n  </properties>`);
+    const paramBlockIndent = `${m[1]}  `;
+    const missing = PARAMETER_DEFINITIONS.filter(([n]) => !jobDefinesStringParameter(xml, n));
+    if (!missing.length) {
+        return xml;
     }
-    if (xml.includes("</properties>")) {
-        return xml.replace("</properties>", `${prop}\n  </properties>`);
+    const blocks = missing
+        .map(([n, dv, desc]) => stringParameterDefinitionXml(paramBlockIndent, n, dv, desc))
+        .join("\n");
+    return xml.replace(closeRe, `\n${blocks}\n${m[1]}</parameterDefinitions>`);
+}
+function ensureParameterizedJobXml(xml: string): string {
+    let out = xml;
+    if (!out.includes("hudson.model.ParametersDefinitionProperty")) {
+        const prop = parameterPropertyXml("    ");
+        if (/<properties\s*\/>/.test(out)) {
+            out = out.replace(/<properties\s*\/>/, `<properties>\n${prop}\n  </properties>`);
+        }
+        else if (out.includes("</properties>")) {
+            out = out.replace("</properties>", `${prop}\n  </properties>`);
+        }
+        else {
+            out = out.replace("<keepDependencies>false</keepDependencies>", `<keepDependencies>false</keepDependencies>\n  <properties>\n${prop}\n  </properties>`);
+        }
     }
-    return xml.replace("<keepDependencies>false</keepDependencies>", `<keepDependencies>false</keepDependencies>\n  <properties>\n${prop}\n  </properties>`);
+    return mergeMissingParameterDefinitions(out);
 }
 function escapeCdata(s: string): string {
     return s.replace(/]]>/g, "]]]]><![CDATA[>");
