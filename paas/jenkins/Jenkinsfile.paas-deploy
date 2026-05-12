@@ -1,5 +1,6 @@
 // DevSecOps PaaS — incremental Jenkinsfile: Steps 1–2 (params, checkout), 3 (app build), 4 (Docker image),
-// 5 (Helm + release-metadata), 6 (Artifactory = .full « 8 »), 7 (Cosign = .full « 10 »). More: `Jenkinsfile.paas-deploy.full`.
+// 5 (Helm + release-metadata), 6 (Artifactory = .full « 8 »), 7 (Cosign = .full « 10 »),
+// 8 (ZAP = « 10b »), 9 (Helm OCI Harbor = « 11 »), 10 (Argo handoff + archive = « 12–14 »). More: `Jenkinsfile.paas-deploy.full`.
 // Inline job sync reads this file as `Jenkinsfile.paas-deploy`.
 //
 // If Jenkins fails at compile time with "expecting '(', found '['" on a shell `if [` line, the job XML
@@ -290,7 +291,7 @@ node(agentLabel) {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
+  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   // Legacy PaaS sync (pre-regex) allowlisted only through step 5; keep this line so deploy works before frontend image update.
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
 
@@ -324,7 +325,7 @@ node(agentLabel) {
     println "*** END : 2. Checkout du code ***"
   }
 
-  println "[pipeline] Step 3 = construction, Step 4 = image Docker, Step 5 = Helm/metadata, Step 6 = Artifactory optionnel (.full §8), Step 7 = Cosign optionnel (.full §10)."
+  println "[pipeline] Steps 3–7: build, image, Helm, Artifactory, Cosign (.full §5–10) ; Step 8: ZAP (.full §10b) ; Step 9: Helm OCI (.full §11) ; Step 10: GitOps handoff + archive (.full §12–14)."
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
@@ -754,5 +755,88 @@ EOF
         }
       }
     }
+  }
+
+  stage("Step 8 — DAST (OWASP ZAP baseline)") {
+    nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
+      def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
+      if (!zapTarget) {
+        println "[zap] ZAP_TARGET_URL absent — étape ignorée."
+        return
+      }
+      if (!commandExists("docker")) {
+        println "[zap] docker CLI absent — ZAP baseline ignoré."
+        return
+      }
+      println "[zap] Cible DAST: ${zapTarget}"
+      withEnv(["ZAP_TARGET=${zapTarget}"]) {
+        sh '''
+          set +e
+          mkdir -p paas-artifacts
+          docker run --rm \
+            -v "$PWD/paas-artifacts:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "$ZAP_TARGET" \
+              -r /zap/wrk/zap-baseline-report.html \
+              -J /zap/wrk/zap-baseline-report.json
+          echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
+        '''
+      }
+    }
+  }
+
+  stage("Step 9 — Publication charts Helm (OCI → Harbor)") {
+    nonFatalStage("11. Publication Helm OCI → Harbor (aligné Jenkinsfile.paas-deploy.full)") {
+      def reg = (env.HARBOR_REGISTRY ?: "").trim()
+      def hu = (env.HARBOR_USERNAME ?: "").trim()
+      def hp = (env.HARBOR_PASSWORD ?: "").trim()
+      def ociProj = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT?.trim() ?: "paas")
+      if (!reg || !hu || !hp) {
+        println "[helm-oci] HARBOR_REGISTRY / HARBOR_USERNAME / HARBOR_PASSWORD requis — publication Helm ignorée."
+        return
+      }
+      if (!commandExists("helm")) {
+        println "[helm-oci] helm CLI absent — publication ignorée."
+        return
+      }
+      if (!fileExists("paas-artifacts/helm")) {
+        println "[helm-oci] Pas de paas-artifacts/helm (exécutez d'abord le packaging Step 5) — ignoré."
+        return
+      }
+      def regHost = reg.replaceFirst("^https?://", "").replaceAll(/\/$/, "")
+      def ociRef = "oci://${regHost}/${ociProj}"
+      withEnv(["HELM_OCI_REF=${ociRef}", "REG_HOST=${regHost}"]) {
+        sh '''
+          set +e
+          shopt -s nullglob
+          LOGIN_OPTS=""
+          if [ "${HELM_OCI_INSECURE:-}" = "true" ]; then LOGIN_OPTS="--insecure"; fi
+          PUSH_OPTS=""
+          if [ "${HELM_OCI_PLAIN_HTTP:-}" = "true" ]; then PUSH_OPTS="--plain-http"; fi
+          charts=(paas-artifacts/helm/*.tgz)
+          if [ ${#charts[@]} -eq 0 ]; then
+            echo "[helm-oci] Aucun chart .tgz à publier."
+            exit 0
+          fi
+          echo "${HARBOR_PASSWORD}" | helm registry login ${LOGIN_OPTS} "${REG_HOST}" -u "${HARBOR_USERNAME}" --password-stdin || exit 1
+          for f in "${charts[@]}"; do
+            echo "[helm-oci] helm push $f ${HELM_OCI_REF}"
+            helm push ${PUSH_OPTS} "$f" "${HELM_OCI_REF}" || exit 1
+          done
+        '''
+      }
+    }
+  }
+
+  stage("Step 10 — GitOps (Argo CD) & archivage Jenkins") {
+    println "*** BEGIN : GitOps / Argo CD (délégué au PaaS) — aligné Jenkinsfile.paas-deploy.full §12–13 ***"
+    println "[argocd] Applications Argo CD et sync : délégués au contrôle PaaS après succès Jenkins ; ce build expose PAAS_ARTIFACT_IMAGE pour le suivi déploiement."
+    println "[argocd-helm] Chart OCI (Harbor) : quand l'Application référence oci://…, Argo réconcilie avec la version publiée (credentials côté cluster, pas Jenkins)."
+    println "*** END : GitOps / Argo CD ***"
+    println "*** BEGIN : 14. Archivage des artefacts Jenkins ***"
+    archiveArtifacts artifacts: "sca/**,paas-artifacts/**", allowEmptyArchive: true, onlyIfSuccessful: false
+    println "[artifacts] Archives locales (Jenkins) : SCA, ZAP, charts Helm, métadonnées ; Artifactory reste optionnel (Step 6)."
+    println "IMAGE_NAME=${imageName} PROJECT_ID=${projectId} BUILD_NUMBER=${env.BUILD_NUMBER}"
+    println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
 }
