@@ -323,7 +323,7 @@ export default function ClusterPage() {
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes Control View</h2>
           <p className="mt-2 max-w-3xl text-sm text-muted">
             {useControlPlaneFallback
-            ? "Kubernetes is not connected. This page does not discover Docker Compose or Swarm services on a server by itself. You will see workload counts and rows only for projects registered here (with deploy status from your pipelines) unless you enable the Kubernetes API and kubeconfig."
+            ? "Kubernetes is not connected. Workload counts and rows here reflect projects registered in this app and pipeline status. Connect a Kubernetes API to list live pods, services, and deployments from the cluster."
             : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
           </p>
           <p className="mt-3 text-sm">
@@ -356,11 +356,11 @@ export default function ClusterPage() {
         </div> : null}
 
       {useControlPlaneFallback ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Why counts may stay at zero:</strong> Docker Engine and Docker Swarm are not wired into this screen. Either create projects under{" "}
+          <strong className="font-medium text-foreground">Why counts may stay at zero:</strong> Docker Engine and Docker Swarm are not wired into this screen. Create projects under{" "}
           <Link href="/projects" className="font-medium text-primary hover:underline">
             Projects
           </Link>{" "}
-          and deploy through this platform (status is stored in the database), or set <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> with a valid kubeconfig to list pods and services from a cluster.
+          and deploy through this platform (status is stored in the database), or connect Kubernetes for live pod and service listings.
         </div> : null}
 
       {projectsQuery.isError ? <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
@@ -445,7 +445,7 @@ export default function ClusterPage() {
             </div>) : (<div className="rounded-lg border border-border/80 bg-muted/10 p-4 text-sm text-muted">
               <p className="font-medium text-foreground">Kubernetes pod streaming is unavailable</p>
               <p className="mt-2">
-                Enable <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED</code> and mount a kubeconfig the server can read. Until then, pod log lines cannot be fetched — use the{" "}
+                With no cluster connection, pod logs cannot be streamed here. Use the{" "}
                 <strong className="text-foreground">platform CI/CD</strong> section for Jenkins output.
               </p>
             </div>)}

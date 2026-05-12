@@ -89,7 +89,7 @@ export function DashboardPodsPanel() {
         <div className="space-y-1">
           <CardTitle className="text-base">Cluster pods &amp; logs</CardTitle>
           <CardDescription>
-            Live workloads from the Kubernetes API when <span className="font-mono text-xs">KUBERNETES_ENABLED</span> is on. Use the namespace filter, then open logs
+            Live workloads from the Kubernetes API when a cluster is connected. Use the namespace filter, then open logs
             for a container.
           </CardDescription>
         </div>
@@ -116,12 +116,11 @@ export function DashboardPodsPanel() {
         {podsQuery.isLoading && !podsQuery.data ? <Skeleton className="h-48 w-full"/> : null}
         {podsQuery.isError ? (<p className="text-sm text-danger">Could not reach the Kubernetes API. Check your session and network.</p>) : null}
         {podsQuery.data && !podsQuery.data.configured ? (<p className="text-sm text-muted">
-              Kubernetes is not enabled for this server. Set{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">KUBERNETES_ENABLED=true</code> and give the app a kubeconfig. The{" "}
+              Kubernetes is not enabled for this server. The{" "}
               <Link href="/cluster" className="font-medium text-primary hover:underline">
                 Cluster
               </Link>{" "}
-              screen lists the same resources with services and deployments.
+              screen lists the same resources with services and deployments when a cluster is connected.
               {podsQuery.data.error ? (<span className="mt-2 block text-warning">{podsQuery.data.error}</span>) : null}
             </p>) : null}
         {podsQuery.data?.configured && podsQuery.data.error ? (<p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{podsQuery.data.error}</p>) : null}

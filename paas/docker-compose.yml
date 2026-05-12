@@ -57,13 +57,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ..:/monorepo:ro
-      # Kubernetes from inside the container: mount your host kubeconfig + set in frontend/docker-compose.env:
-      #   KUBERNETES_ENABLED=true
-      #   KUBE_CONFIG_PATH=/home/nextjs/.kube/config
-      # Define KUBECONFIG_HOST_PATH in paas/.env (used for Compose substitution). Examples:
-      #   Windows:  KUBECONFIG_HOST_PATH=C:/Users/YourName/.kube/config
-      #   Spaces:   KUBECONFIG_HOST_PATH="C:/Users/Your Name/.kube/config"
-      # Linux/macOS: omit KUBECONFIG_HOST_PATH to default to ${HOME}/.kube/config
+      # Optional cluster credentials: set KUBECONFIG_HOST_PATH in paas/.env if the default mount is wrong for your host.
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/home/nextjs/.kube/config:ro
     ports:
       - "3000:3000"

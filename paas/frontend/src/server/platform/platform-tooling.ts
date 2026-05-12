@@ -123,8 +123,48 @@ export async function getPlatformTooling(): Promise<{
         countClusterObjects("projectcalico.org", "v3", "networkpolicies"),
         namespacePods("vault")
     ]);
+    const policyActive = kyvernoPolicies > 0 || gatekeeperCrds > 0 || kubewarden.running > 0;
+    const sonarConfigured = configuredUrl(env.SONAR_BASE_URL) || sonarqube.total > 0;
+    const scaSbomConfigured =
+        configuredUrl(env.DEPENDENCY_TRACK_BASE_URL) ||
+        dependencyTrack.total > 0 ||
+        configuredUrl(env.TRIVY_BASE_URL);
+    const cosignConfigured = Boolean(env.COSIGN_PUBLIC_KEY?.trim() || env.COSIGN_PRIVATE_KEY?.trim());
     return {
         groups: [
+            {
+                title: "Unified delivery and progressive DevSecOps",
+                items: [
+                    tool(
+                        "Static analysis (SAST)",
+                        sonarConfigured
+                            ? "SonarQube URL or workload detected; pipelines can enforce quality gates."
+                            : "Configure SONAR_* and Jenkins stages to run SAST on every build.",
+                        sonarConfigured ? "success" : "outline",
+                    ),
+                    tool(
+                        "Vulnerabilities and SBOM",
+                        scaSbomConfigured
+                            ? "Dependency-Track or Trivy configured; CI can publish CycloneDX and gate on findings."
+                            : "Add Dependency-Track and/or TRIVY_BASE_URL; enable SCA and SBOM steps in Jenkins.",
+                        scaSbomConfigured ? "success" : "outline",
+                    ),
+                    tool(
+                        "Image signing",
+                        cosignConfigured
+                            ? "Cosign keys configured for signing and verification in CI and on the cluster."
+                            : "Set COSIGN_PUBLIC_KEY (and signing material in CI) to sign and verify release images.",
+                        cosignConfigured ? "success" : "outline",
+                    ),
+                    tool(
+                        "Kubernetes security policy",
+                        policyActive
+                            ? "Kyverno, Gatekeeper CRDs, or Kubewarden pods detected—policy applies at admission."
+                            : "Deploy Kyverno, Gatekeeper, or Kubewarden so guardrails are enforced cluster-wide.",
+                        policyActive ? "success" : "outline",
+                    ),
+                ],
+            },
             {
                 title: "Control & infra",
                 items: [

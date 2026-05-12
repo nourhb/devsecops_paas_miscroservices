@@ -74,7 +74,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (!api) {
                 return {
                     state: "skipped",
-                    message: "Kubernetes not enabled or kubeconfig missing"
+                    message: "Kubernetes API not available"
                 };
             }
             try {
