@@ -244,6 +244,8 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     }
   }
 
+  // Split tar+append vs mutate into two sh steps: one very long durable-task shell often hits
+  // "process apparently never started" / exit -2 on some agents (tmpfs, plugin race, abort propagation).
   sh """
     set -eu
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
@@ -253,10 +255,10 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     CR_HEART_PID=""
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
-      echo "[image] crane/registry stdout heartbeat every \${_hb}s — mitigates durable-task exit -2 during long quiet layer pushes"
+      echo "[image] crane append: stdout heartbeat every \${_hb}s (mitigates durable-task exit -2 during long registry pushes)"
       ( while true; do echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb}"; done ) &
       CR_HEART_PID=\$!
-      trap "kill \$CR_HEART_PID 2>/dev/null || true" EXIT
+      trap "kill \${CR_HEART_PID:-} 2>/dev/null || true" EXIT
     fi
     mkdir -p paas-artifacts
     STL="\${JENKINS_CRANE_STANDALONE_LAYER:-auto}"
@@ -266,6 +268,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         USE_STANDALONE=1
       fi
     fi
+    printf '%s' "\$USE_STANDALONE" > paas-artifacts/_crane_use_standalone
     if [ "\$USE_STANDALONE" = "1" ]; then
       echo "[image] Next.js standalone → minimal crane layer (much smaller/faster than full node_modules). Disable: JENKINS_CRANE_STANDALONE_LAYER=false"
       rm -rf paas-artifacts/_crane_st
@@ -287,10 +290,17 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         --exclude='./coverage' --exclude='./.eslintcache' \\
         --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
     fi
+    echo "[image] crane append → registry (this step can take many minutes on slow links)"
     '${craneBin}' append \\
       -b mirror.gcr.io/library/node:20-bookworm-slim \\
       -f paas-artifacts/app-layer.tar \\
       -t '${imageRef}'
+    if [ -n "\${CR_HEART_PID:-}" ]; then kill "\$CR_HEART_PID" 2>/dev/null || true; trap - EXIT; fi
+    echo "[image] crane append finished; mutate runs as a separate pipeline sh step"
+  """
+  sh """
+    set -eu
+    USE_STANDALONE=\$(cat paas-artifacts/_crane_use_standalone)
     if [ "\$USE_STANDALONE" = "1" ]; then
       '${craneBin}' mutate '${imageRef}' \\
         -t '${imageRef}' \\
@@ -307,7 +317,6 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
         --exposed-ports=3000/tcp
     fi
-    if [ -n "\$CR_HEART_PID" ]; then kill "\$CR_HEART_PID" 2>/dev/null || true; trap - EXIT; fi
   """
 }
 
@@ -372,6 +381,14 @@ node(agentLabel) {
   if (paasFastPipeline) {
     env.JENKINS_SKIP_NEXT_BUILD = "true"
     println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Keeping deps + Docker/Helm/Cosign/GitOps. Next.js app build runs in the image only (no double compile)."
+  }
+
+  def cranePushTimeoutMin = 240
+  try {
+    def rawTp = (params.JENKINS_CRANE_PUSH_TIMEOUT_MIN?.trim() ?: env.JENKINS_CRANE_PUSH_TIMEOUT_MIN ?: "").trim()
+    if (rawTp) cranePushTimeoutMin = Integer.parseInt(rawTp)
+  } catch (Exception ignored) {
+    cranePushTimeoutMin = 240
   }
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -785,7 +802,10 @@ exit 0
         ensureNodeTool()
       }
       def craneBin = ensureCraneTool()
-      dockerlessImagePush(craneBin, dest, resolvedDockerfile)
+      println "[image] dockerless crane: durable-task timeout ${cranePushTimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
+      timeout(time: cranePushTimeoutMin, unit: 'MINUTES') {
+        dockerlessImagePush(craneBin, dest, resolvedDockerfile)
+      }
       artifactImage = dest
       imagePublishedViaCrane = true
       cosignImageRef = dest
