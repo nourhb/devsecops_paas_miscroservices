@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { IntegrationError } from "@/server/http/errors";
+import { integrationFetch } from "@/server/http/integration-fetch";
 type OpaResponse = {
     result?: boolean | {
         allow?: boolean;
@@ -13,7 +14,7 @@ export async function evaluateOpaImagePolicy(imageRef: string, signed: boolean):
     if (!url) {
         return true;
     }
-    const response = await fetch(url, {
+    const response = await integrationFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input: { image: imageRef, signed } })

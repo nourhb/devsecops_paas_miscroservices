@@ -1,12 +1,14 @@
 import { INTEGRATION_HTTP_TIMEOUT_MS } from "@/server/constants/deploy";
-import { Agent, fetch as undiciFetch } from "undici";
 import { env } from "@/server/config/env";
+import { remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
+import { Agent, fetch as undiciFetch } from "undici";
 const insecureAgent = new Agent({
     connect: {
         rejectUnauthorized: false
     }
 });
 export async function integrationFetch(url: string, init: RequestInit = {}, timeoutMs: number = INTEGRATION_HTTP_TIMEOUT_MS): Promise<Response> {
+    const resolvedUrl = remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`Integration request timed out after ${ms}ms`)), ms);
@@ -26,13 +28,13 @@ export async function integrationFetch(url: string, init: RequestInit = {}, time
         const skipTls =
             env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" || env.KUBE_TLS_SKIP_VERIFY === "true";
         if (skipTls) {
-            return await undiciFetch(url, {
+            return await undiciFetch(resolvedUrl, {
                 ...init,
                 signal: controller.signal,
                 dispatcher: insecureAgent
             } as Parameters<typeof undiciFetch>[1]) as unknown as Response;
         }
-        return await fetch(url, { ...init, signal: controller.signal });
+        return await fetch(resolvedUrl, { ...init, signal: controller.signal });
     }
     finally {
         clearTimeout(timer);
