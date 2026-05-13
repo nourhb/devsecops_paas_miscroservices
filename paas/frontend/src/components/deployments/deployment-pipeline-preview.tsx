@@ -76,7 +76,10 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
           </p>) : null}
         {data?.skipped ? (<p className="text-sm text-muted">{data.reason || "Jenkins stages are not available."}</p>) : null}
         {data?.error ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{data.error}</p>) : null}
-        {!data?.skipped && !data?.error && stages.length > 0 ? (<>
+        {data?.wfapiHint ? (<p className={`rounded-md border px-3 py-2 text-sm leading-relaxed ${data.error ? "mt-2 border-border bg-muted/20 text-muted" : "border-primary/35 bg-primary/10 text-foreground/90"}`}>
+            {data.wfapiHint}
+          </p>) : null}
+        {!data?.skipped && stages.length > 0 ? (<>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-muted">
                 <span>Stage progress</span>

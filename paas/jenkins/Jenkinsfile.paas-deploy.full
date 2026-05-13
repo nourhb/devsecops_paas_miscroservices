@@ -251,14 +251,6 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
     fi
-    CR_HEART_PID=""
-    if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
-      _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
-      echo "[image] crane append: stdout heartbeat every \${_hb}s (mitigates durable-task exit -2 during long registry pushes)"
-      ( while true; do echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb}"; done ) &
-      CR_HEART_PID=\$!
-      trap "kill \${CR_HEART_PID:-} 2>/dev/null || true" EXIT
-    fi
     mkdir -p paas-artifacts
     STL="\${JENKINS_CRANE_STANDALONE_LAYER:-auto}"
     USE_STANDALONE=0
@@ -290,11 +282,25 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
     fi
     echo "[image] crane append → registry (this step can take many minutes on slow links)"
-    '${craneBin}' append \\
-      -b mirror.gcr.io/library/node:20-bookworm-slim \\
-      -f paas-artifacts/app-layer.tar \\
-      -t '${imageRef}'
-    if [ -n "\${CR_HEART_PID:-}" ]; then kill "\$CR_HEART_PID" 2>/dev/null || true; trap - EXIT; fi
+    if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
+      _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+      echo "[image] crane append: foreground heartbeat every \${_hb}s while crane runs (durable-task friendly)"
+      '${craneBin}' append \\
+        -b mirror.gcr.io/library/node:20-bookworm-slim \\
+        -f paas-artifacts/app-layer.tar \\
+        -t '${imageRef}' &
+      CRANE_APPEND_PID=\$!
+      while kill -0 "\${CRANE_APPEND_PID}" 2>/dev/null; do
+        echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        sleep "\${_hb}" || true
+      done
+      wait "\${CRANE_APPEND_PID}"
+    else
+      '${craneBin}' append \\
+        -b mirror.gcr.io/library/node:20-bookworm-slim \\
+        -f paas-artifacts/app-layer.tar \\
+        -t '${imageRef}'
+    fi
     echo "[image] crane append finished; mutate runs as a separate pipeline sh step"
   """
   sh """

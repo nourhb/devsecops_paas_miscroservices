@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
 import { rollUpClusterFromProjects } from "@/lib/cluster-project-rollup";
+import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
 function formatTimestamp(value: string) {
     if (!value) {
@@ -113,8 +114,8 @@ export default function ClusterPage() {
         refetchInterval: 15000
     });
     const podLogsQuery = useQuery({
-        queryKey: ["k8s", "pod-logs", selectedPod?.namespace, selectedPod?.name, selectedPod?.container],
-        queryFn: () => kubernetesApi.getPodLogs(selectedPod?.namespace || "", selectedPod?.name || "", selectedPod?.container),
+        queryKey: ["k8s", "pod-logs", selectedPod?.namespace, selectedPod?.name, selectedPod?.container?.trim() || ""],
+        queryFn: () => kubernetesApi.getPodLogs(selectedPod?.namespace || "", selectedPod?.name || "", selectedPod?.container?.trim() || undefined),
         enabled: Boolean(selectedPod?.namespace && selectedPod?.name)
     });
     const recentDeploymentsQuery = useQuery({
@@ -171,6 +172,15 @@ export default function ClusterPage() {
     const filteredPods = useMemo(() => (podsQuery.data?.pods ?? []).filter((pod) => selectedNamespace === "all" || pod.namespace === selectedNamespace), [podsQuery.data?.pods, selectedNamespace]);
     const filteredServices = useMemo(() => (servicesQuery.data?.services ?? []).filter((service) => selectedNamespace === "all" || service.namespace === selectedNamespace), [selectedNamespace, servicesQuery.data?.services]);
     const filteredDeployments = useMemo(() => (deploymentsQuery.data?.deployments ?? []).filter((deployment) => selectedNamespace === "all" || deployment.namespace === selectedNamespace), [deploymentsQuery.data?.deployments, selectedNamespace]);
+    useEffect(() => {
+        if (!selectedPod) {
+            return;
+        }
+        const stillVisible = filteredPods.some((pod) => pod.namespace === selectedPod.namespace && pod.name === selectedPod.name);
+        if (!stillVisible) {
+            setSelectedPod(null);
+        }
+    }, [filteredPods, selectedPod]);
     const runningPods = useRollupStats ? projectRollup.runningPods : filteredPods.filter((pod) => pod.status === "Running").length;
     const unhealthyPods = useRollupStats ? projectRollup.unhealthyPods : filteredPods.filter((pod) => pod.health !== "Healthy" && pod.health !== "Succeeded").length;
     const servicesTotal = useRollupStats ? projectRollup.services : filteredServices.length;
@@ -307,7 +317,7 @@ export default function ClusterPage() {
         <div className="flex flex-wrap items-center gap-3">
           {clusterConnected ? <StatusPill label="Connected" tone="success"/> : clusterConfigured ? <StatusPill label="Connection failed" tone="danger"/> : <StatusPill label="Not configured" tone="warning"/>}
           <select aria-label="Filter cluster resources by namespace" value={selectedNamespace} onChange={(event) => setSelectedNamespace(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
-            <option value="all">All namespaces</option>
+            <option value="all">Cluster-wide</option>
             {allNamespaces.map((namespace) => <option key={namespace} value={namespace}>
                 {namespace}
               </option>)}
@@ -383,67 +393,6 @@ export default function ClusterPage() {
         </Card>
       </section>
 
-      <Card ref={logsRef}>
-        <CardHeader>
-          <CardTitle>Logs</CardTitle>
-          <CardDescription>
-            Kubernetes pod stream when the API is connected; platform deployment output (database + optional live Jenkins) is always available below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {clusterConnected ? (<div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Kubernetes — pod stream</p>
-              <div className="flex flex-wrap items-center gap-3">
-                <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
-                <StatusPill label={selectedPod ? selectedPod.namespace : "Namespace"} tone="neutral"/>
-                {selectedPod?.containers.length ? (<select aria-label="Select pod container" value={selectedPod.container} onChange={(event) => setSelectedPod({
-                    ...selectedPod,
-                    container: event.target.value
-                })} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
-                    {selectedPod.containers.map((container) => <option key={container} value={container}>
-                        {container}
-                      </option>)}
-                  </select>) : null}
-                {selectedPod ? (<Button type="button" variant="outline" size="sm" onClick={() => void podLogsQuery.refetch()} disabled={podLogsQuery.isFetching}>
-                    <RefreshCcw className={`mr-2 h-4 w-4 ${podLogsQuery.isFetching ? "animate-spin" : ""}`}/>
-                    Refresh pod logs
-                  </Button>) : null}
-              </div>
-              <Textarea readOnly value={podLogBody} className="min-h-[220px] font-mono text-xs"/>
-            </div>) : (<div className="rounded-lg border border-border/80 bg-muted/10 p-4 text-sm text-muted">
-              <p className="font-medium text-foreground">Kubernetes pod streaming is unavailable</p>
-              <p className="mt-2">
-                With no cluster connection, pod logs cannot be streamed here. Use the{" "}
-                <strong className="text-foreground">platform CI/CD</strong> section for Jenkins output.
-              </p>
-            </div>)}
-
-          <div className="space-y-3 border-t border-border/60 pt-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Platform — CI/CD (stored in this application)</p>
-            {recentList.length > 0 ? (<div className="flex flex-wrap items-center gap-3">
-                <select aria-label="Select deployment run" className="h-10 min-w-[280px] rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40" value={effectivePlatformLogId ?? ""} onChange={(event) => setPlatformLogDeploymentId(event.target.value || null)}>
-                  {recentList.map((row) => <option key={row.id} value={row.id}>
-                      {formatTimestamp(row.createdAt)} — {row.projectName} — {row.status}
-                      {row.buildNumber != null ? ` #${row.buildNumber}` : ""}
-                    </option>)}
-                </select>
-                <Button type="button" variant="outline" size="sm" onClick={() => void platformDeploymentQuery.refetch()} disabled={platformDeploymentQuery.isFetching}>
-                  <RefreshCcw className={`mr-2 h-4 w-4 ${platformDeploymentQuery.isFetching ? "animate-spin" : ""}`}/>
-                  Refresh record
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => void pullJenkinsConsole()} disabled={jenkinsConsoleLoading || !effectivePlatformLogId}>
-                  {jenkinsConsoleLoading ? (<RefreshCcw className="mr-2 h-4 w-4 animate-spin"/>) : null}
-                  Fetch Jenkins console
-                </Button>
-                {effectivePlatformLogId ? <Button type="button" variant="ghost" size="sm" asChild>
-                    <Link href={`/deployments/${effectivePlatformLogId}`}>Open deployment page</Link>
-                  </Button> : null}
-              </div>) : null}
-            <Textarea readOnly value={platformLogText} className="min-h-[360px] font-mono text-xs"/>
-          </div>
-        </CardContent>
-      </Card>
-
       {useControlPlaneFallback ? (<Card>
           <CardHeader>
             <CardTitle>Applications (control plane)</CardTitle>
@@ -515,7 +464,7 @@ export default function ClusterPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredPods.map((pod) => <tr key={`${pod.namespace}-${pod.name}`} className="border-b border-border/60">
+              {filteredPods.map((pod) => <tr key={`${pod.namespace}-${pod.name}`} className={cn("border-b border-border/60 transition-colors", selectedPod?.namespace === pod.namespace && selectedPod?.name === pod.name && "bg-primary/5")}>
                   <td className="py-3 pr-4 font-medium text-foreground">{pod.name}</td>
                   <td className="py-3 pr-4">{pod.namespace}</td>
                   <td className="py-3 pr-4"><PodStatusPill status={pod.status}/></td>
@@ -531,12 +480,15 @@ export default function ClusterPage() {
                   <td className="py-3 pr-4">{pod.podIP}</td>
                   <td className="py-3 pr-4">{formatTimestamp(pod.createdAt)}</td>
                   <td className="py-3">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setSelectedPod({
-                    namespace: pod.namespace,
-                    name: pod.name,
-                    containers: pod.containers,
-                    container: pod.containers[0] || ""
-                })}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                    const containers = Array.isArray(pod.containers) ? pod.containers : [];
+                    setSelectedPod({
+                        namespace: pod.namespace || "",
+                        name: pod.name || "",
+                        containers,
+                        container: containers[0] ?? ""
+                    });
+                }}>
                       <FileText className="mr-2 h-4 w-4"/>
                       View logs
                     </Button>
@@ -612,5 +564,69 @@ export default function ClusterPage() {
         </Card>
       </div>
         </>)}
+
+      <Card ref={logsRef}>
+        <CardHeader>
+          <CardTitle>Logs</CardTitle>
+          <CardDescription>
+            {clusterConnected ? (<>
+                After you choose <strong className="font-medium text-foreground">View logs</strong> on a pod in the Pods table, the Kubernetes stream updates in this card (scroll down from the table if you do not see it).{" "}
+              </>) : null}
+            Platform deployment output (database + optional live Jenkins) is always in the lower section.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {clusterConnected ? (<div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Kubernetes — pod stream</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <StatusPill label={selectedPod ? selectedPod.name : "No pod selected"} tone={selectedPod ? "info" : "neutral"}/>
+                <StatusPill label={selectedPod ? selectedPod.namespace : "—"} tone={selectedPod ? "neutral" : "neutral"}/>
+                {selectedPod?.containers.length ? (<select aria-label="Select pod container" value={selectedPod.container} onChange={(event) => setSelectedPod({
+                    ...selectedPod,
+                    container: event.target.value
+                })} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
+                    {selectedPod.containers.map((container) => <option key={container} value={container}>
+                        {container}
+                      </option>)}
+                  </select>) : null}
+                {selectedPod ? (<Button type="button" variant="outline" size="sm" onClick={() => void podLogsQuery.refetch()} disabled={podLogsQuery.isFetching}>
+                    <RefreshCcw className={`mr-2 h-4 w-4 ${podLogsQuery.isFetching ? "animate-spin" : ""}`}/>
+                    Refresh pod logs
+                  </Button>) : null}
+              </div>
+              <Textarea readOnly key={selectedPod ? `${selectedPod.namespace}/${selectedPod.name}/${selectedPod.container}` : "no-pod"} value={podLogBody} className="min-h-[220px] font-mono text-xs"/>
+            </div>) : (<div className="rounded-lg border border-border/80 bg-muted/10 p-4 text-sm text-muted">
+              <p className="font-medium text-foreground">Kubernetes pod streaming is unavailable</p>
+              <p className="mt-2">
+                With no cluster connection, pod logs cannot be streamed here. Use the{" "}
+                <strong className="text-foreground">platform CI/CD</strong> section for Jenkins output.
+              </p>
+            </div>)}
+
+          <div className="space-y-3 border-t border-border/60 pt-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Platform — CI/CD (stored in this application)</p>
+            {recentList.length > 0 ? (<div className="flex flex-wrap items-center gap-3">
+                <select aria-label="Select deployment run" className="h-10 min-w-[280px] rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40" value={effectivePlatformLogId ?? ""} onChange={(event) => setPlatformLogDeploymentId(event.target.value || null)}>
+                  {recentList.map((row) => <option key={row.id} value={row.id}>
+                      {formatTimestamp(row.createdAt)} — {row.projectName} — {row.status}
+                      {row.buildNumber != null ? ` #${row.buildNumber}` : ""}
+                    </option>)}
+                </select>
+                <Button type="button" variant="outline" size="sm" onClick={() => void platformDeploymentQuery.refetch()} disabled={platformDeploymentQuery.isFetching}>
+                  <RefreshCcw className={`mr-2 h-4 w-4 ${platformDeploymentQuery.isFetching ? "animate-spin" : ""}`}/>
+                  Refresh record
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void pullJenkinsConsole()} disabled={jenkinsConsoleLoading || !effectivePlatformLogId}>
+                  {jenkinsConsoleLoading ? (<RefreshCcw className="mr-2 h-4 w-4 animate-spin"/>) : null}
+                  Fetch Jenkins console
+                </Button>
+                {effectivePlatformLogId ? <Button type="button" variant="ghost" size="sm" asChild>
+                    <Link href={`/deployments/${effectivePlatformLogId}`}>Open deployment page</Link>
+                  </Button> : null}
+              </div>) : null}
+            <Textarea readOnly value={platformLogText} className="min-h-[360px] font-mono text-xs"/>
+          </div>
+        </CardContent>
+      </Card>
     </div>);
 }

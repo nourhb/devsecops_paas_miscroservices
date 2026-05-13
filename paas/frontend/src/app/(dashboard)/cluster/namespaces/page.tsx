@@ -352,7 +352,7 @@ export default function ClusterNamespacesPage() {
           <div className="flex flex-wrap items-center justify-end gap-3">
             {clusterConnected ? <StatusPill label="Connected" tone="success"/> : clusterConfigured ? <StatusPill label="Connection failed" tone="danger"/> : <StatusPill label="Not configured" tone="warning"/>}
             <select aria-label="Filter workloads by Kubernetes namespace" value={selectedNamespace} onChange={(event) => setSelectedNamespace(event.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/40">
-              <option value="all">All namespaces</option>
+              <option value="all">Cluster-wide</option>
               {namespaceDropdownNames.map((namespace) => <option key={namespace} value={namespace}>
                   {namespace}
                 </option>)}

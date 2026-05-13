@@ -325,17 +325,20 @@ export default function PipelinePage() {
           {wfStages?.error ? (<div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
               <p className="font-medium text-foreground">{wfStages.error}</p>
               <p className="mt-2 text-xs leading-relaxed text-foreground/90">
-                The checklist below still shows every numbered step. With <strong>Pipeline Stage View</strong> installed, each row switches to{" "}
+                The checklist below still shows every numbered step. With <strong>Pipeline: Stage View</strong> installed, each row switches to{" "}
                 <strong>Live</strong> with real durations. If the build failed, open the console in Jenkins to see the exact{" "}
                 <span className="font-mono">Step N</span> that stopped.
               </p>
             </div>) : null}
+          {wfStages?.wfapiHint ? (<p className={`rounded-md border px-3 py-2 text-sm leading-relaxed ${wfStages.error ? "mt-2 border-border bg-muted/20 text-muted" : "border-primary/35 bg-primary/10 text-foreground/90"}`}>
+              {wfStages.wfapiHint}
+            </p>) : null}
           {!wfStages?.skipped && wfStages?.configured && !pipelineStagesQuery.isLoading ? (<>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-muted">
                   <span>Progress ({jStarted} / {jTotal} stages with activity)</span>
                   <span>
-                    {wfStages?.error || liveStagesList.length === 0 ? <span className="text-foreground/80">Includes estimated rows when wfapi is off</span> : null}
+                    {wfStages?.error || wfStages?.stagesSynthetic || liveStagesList.length === 0 ? <span className="text-foreground/80">Includes estimated rows when wfapi is off</span> : null}
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -354,7 +357,7 @@ export default function PipelinePage() {
                           </span>
                           <p className="font-medium leading-snug text-foreground">{shortJenkinsStageTitle(stage.name)}</p>
                           <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-                            {!stage.synthetic ? "Live" : wfStages?.error || liveStagesList.length === 0 ? "Est." : "Pending"}
+                            {!stage.synthetic ? "Live" : wfStages?.error || wfStages?.stagesSynthetic || liveStagesList.length === 0 ? "Est." : "Pending"}
                           </Badge>
                         </div>
                         <p className="mt-1 text-xs leading-snug text-muted">{stage.name}</p>

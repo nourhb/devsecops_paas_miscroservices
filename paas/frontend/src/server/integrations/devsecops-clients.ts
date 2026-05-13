@@ -3,6 +3,7 @@ import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sy
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
+import { syntheticStagesWhenWfapiUnavailable } from "@/lib/paas-deploy-jenkins-stages";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
 import { getArgoApplicationStatus, getArgoCdApiBase, syncArgoApplication } from "@/server/services/argocd-service";
 import { verifyImageWithCosign } from "@/server/security/cosign-verify";
@@ -36,6 +37,10 @@ export type JenkinsWorkflowStageRow = {
 export type JenkinsWorkflowDescribeResult = {
     configured: boolean;
     error?: string;
+    /** True when stages are a coarse fallback (wfapi missing or unreadable); UI should not treat per-step status as authoritative. */
+    stagesSynthetic?: boolean;
+    /** Shown as informational copy when wfapi is unavailable (not a hard error). */
+    wfapiHint?: string;
     jobUrlPath: string;
     displayJobName: string;
     buildNumber: number | null;
@@ -1003,21 +1008,48 @@ export class JenkinsClient {
                 result = meta.result ?? null;
             }
         }
+        const wfapiFallbackStages = (): JenkinsWorkflowStageRow[] => {
+            const rows = syntheticStagesWhenWfapiUnavailable({
+                configured: true,
+                building,
+                result
+            });
+            return rows.map(({ name, status, durationMs }) => ({
+                name,
+                status,
+                durationMs
+            }));
+        };
         const wfRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/${bn}/wfapi/describe`, { headers });
         if (!wfRes.ok) {
             const text = await wfRes.text();
+            const coarseStages = wfapiFallbackStages();
+            if (wfRes.status === 404) {
+                return withUrl({
+                    configured: true,
+                    jobUrlPath: jobPath,
+                    displayJobName,
+                    buildNumber: bn,
+                    building,
+                    result,
+                    runStatus: null,
+                    stages: coarseStages,
+                    stagesSynthetic: true,
+                    wfapiHint: "Per-stage timing is unavailable because Jenkins did not expose wfapi/describe (usually fixed by installing the Pipeline: Stage View plugin). The checklist below reflects build state only, not live stage edges. Open the build in Jenkins for the full graph."
+                });
+            }
             return withUrl({
                 configured: true,
-                error: wfRes.status === 404
-                    ? "Workflow REST API (wfapi/describe) is not available. Install the Pipeline Stage View plugin on Jenkins, or open the build in Jenkins for the stage graph."
-                    : `wfapi/describe failed (${wfRes.status}): ${text.slice(0, 400)}`,
+                error: `wfapi/describe failed (${wfRes.status}): ${text.slice(0, 400)}`,
                 jobUrlPath: jobPath,
                 displayJobName,
                 buildNumber: bn,
                 building,
                 result,
                 runStatus: null,
-                stages: []
+                stages: coarseStages,
+                stagesSynthetic: true,
+                wfapiHint: "Showing an approximate checklist; stage API returned an error."
             });
         }
         let wf: {
@@ -1040,7 +1072,9 @@ export class JenkinsClient {
                 building,
                 result,
                 runStatus: null,
-                stages: []
+                stages: wfapiFallbackStages(),
+                stagesSynthetic: true,
+                wfapiHint: "Showing an approximate checklist because the stage API response was not valid JSON."
             });
         }
         const runStatus = typeof wf.status === "string" ? wf.status.trim().toUpperCase() : null;
