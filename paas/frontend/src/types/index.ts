@@ -5,6 +5,8 @@ export interface UserProfile {
     email: string;
     fullName: string;
     role: UserRole;
+    /** Present after session refresh: local password accounts vs Keycloak-linked */
+    accountKind?: "local" | "keycloak";
 }
 export interface LoginRequest {
     email: string;
@@ -23,6 +25,16 @@ export interface AuthResponse {
 export interface AuthSessionResponse {
     authenticated: boolean;
     user: UserProfile | null;
+}
+export interface UpdateProfileRequest {
+    fullName?: string;
+    email?: string;
+    currentPassword?: string;
+    newPassword?: string;
+}
+export interface UpdateProfileResponse {
+    user: UserProfile;
+    message: string;
 }
 export interface AuthStatusResponse {
     success: boolean;

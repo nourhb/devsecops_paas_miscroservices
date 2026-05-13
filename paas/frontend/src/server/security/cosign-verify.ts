@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { env } from "@/server/config/env";
 const execFileAsync = promisify(execFile);
-export async function verifyImageWithCosign(imageRef: string): Promise<boolean> {
+export async function verifyImageWithCosign(imageRef: string, options?: {
+    timeoutMs?: number;
+}): Promise<boolean> {
     if (env.COSIGN_ENFORCE_SIGNED === "false") {
         return true;
     }
@@ -17,8 +19,9 @@ export async function verifyImageWithCosign(imageRef: string): Promise<boolean> 
     await writeFile(keyPath, `${pem}\n`, { mode: 384 });
     try {
         const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
+        const timeout = options?.timeoutMs ?? 180000;
         await execFileAsync(bin, ["verify", "--key", keyPath, imageRef], {
-            timeout: 180000,
+            timeout,
             maxBuffer: 10 * 1024 * 1024,
             windowsHide: true
         });

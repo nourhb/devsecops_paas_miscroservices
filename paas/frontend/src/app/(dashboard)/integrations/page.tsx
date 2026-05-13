@@ -17,7 +17,7 @@ import {
     Shield,
     Wrench
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,6 +31,30 @@ import type {
     PlatformToolGroup,
     PlatformToolTone
 } from "@/types";
+function toolingStatusLabel(tone: PlatformToolTone): string {
+    if (tone === "success") {
+        return "Live";
+    }
+    if (tone === "warning") {
+        return "Degraded";
+    }
+    if (tone === "danger") {
+        return "Down";
+    }
+    return "Info";
+}
+function toolingStatusExplanation(tone: PlatformToolTone): string {
+    if (tone === "success") {
+        return "Live: recent check against env or Kubernetes reported a healthy signal.";
+    }
+    if (tone === "warning") {
+        return "Degraded: partial data or a non-critical issue from the last probe.";
+    }
+    if (tone === "danger") {
+        return "Down: probe failed or the integration is unreachable.";
+    }
+    return "Info: no live probe for this item (placeholder or not detected). Configure related env vars or cluster components if you need it.";
+}
 function categoryIcon(id: PlatformIntegrationCategory["id"]) {
     const className = "h-5 w-5 shrink-0 text-primary";
     switch (id) {
@@ -178,16 +202,18 @@ function ToolingGroup({ group }: {
           <CardTitle className="text-base font-semibold">{group.title}</CardTitle>
         </div>
         <CardDescription className="text-xs sm:text-sm">
-          Signals from env vars and, when enabled, your Kubernetes cluster. “Live” means we see a healthy signal; “Info” is placeholder or not detected.
+          Signals from env vars and, when enabled, your Kubernetes cluster. “Live” means we see a healthy signal; “Info” means no live probe yet. Hover a status pill for a short explanation — they are indicators, not buttons.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 sm:grid-cols-2">
         {group.items.map((item) => (<div key={`${group.title}-${item.name}`} className={cn("rounded-xl border border-border/60 bg-muted/5 p-3.5 border-l-4 pl-4", toolingAccent(item.tone))}>
             <div className="flex items-center justify-between gap-3">
               <p className="font-medium leading-snug text-foreground">{item.name}</p>
-              <Badge variant={toneVariant(item.tone)} className="shrink-0 text-xs">
-                {item.tone === "success" ? "Live" : item.tone === "warning" ? "Degraded" : item.tone === "danger" ? "Down" : "Info"}
-              </Badge>
+              <span title={toolingStatusExplanation(item.tone)} role="status" aria-label={toolingStatusExplanation(item.tone)} className={cn(badgeVariants({
+                    variant: toneVariant(item.tone)
+                }), "shrink-0 cursor-help select-none")}>
+                {toolingStatusLabel(item.tone)}
+              </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-muted">{item.detail}</p>
           </div>))}
@@ -253,7 +279,7 @@ function DeployReadinessSummary({ dr }: {
         </div>
         {missing.length > 0 ? (<div className="rounded-xl border border-warning/40 bg-warning/5 p-4">
             <p className="text-sm font-medium text-foreground">Still needed for a full pipeline</p>
-            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-muted">
+            <ul className="mt-2 list-inside list-disc space-y-1 text-sm leading-relaxed text-foreground/90">
               {missing.map((line: string) => <li key={line}>{line}</li>)}
             </ul>
           </div>) : (<p className="flex items-center gap-2 text-sm text-success">

@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Activity, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, ExternalLink, GitBranch, Loader2, Rocket, RotateCcw, Server, Shield, Workflow, Wrench } from "lucide-react";
@@ -9,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
-import { formatStageDurationMs, jenkinsStageRowUi } from "@/components/jenkins/jenkins-pipeline-stage-ui";
-import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStageRow, type JenkinsPipelineStagesResponse } from "@/lib/api";
+import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
+import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
+import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
@@ -21,20 +23,6 @@ const STAGES = [
     { key: "registry", label: "Registry", description: "Harbor / push" },
     { key: "gitops", label: "GitOps", description: "Helm values commit" },
     { key: "argo", label: "Argo CD", description: "Cluster sync" }
-] as const;
-const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
-    "Step 1 — Params validation",
-    "Step 2 — Checkout du code (Git / GitHub)",
-    "Step 3 — Construction de l'application",
-    "Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)",
-    "Step 5 — Tests SAST (SonarQube)",
-    "Step 6 — Création de l'image Docker",
-    "Step 7 — Packaging du chart Helm",
-    "Step 8 — Publication des artefacts (Artifactory)",
-    "Step 9 — Signature de l'image (Cosign)",
-    "Step 10 — DAST (OWASP ZAP baseline)",
-    "Step 11 — Publication charts Helm (OCI → Harbor)",
-    "Step 12 — GitOps (Argo CD) & archivage Jenkins"
 ] as const;
 function displayBuildStatus(projectStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
     const bs = (projectStatus || "").toUpperCase();
@@ -168,6 +156,15 @@ export default function PipelinePage() {
         },
         onError: () => toast.error("Rollback failed")
     });
+    const wfStages = pipelineStagesQuery.data;
+    const liveStagesList = wfStages?.stages ?? [];
+    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages), [liveStagesList, wfStages]);
+    const jStarted = useMemo(() => displayStages.filter((s) => {
+        const u = (s.status || "").toUpperCase();
+        return u !== "NOT_EXECUTED" && u !== "NOT_BUILT" && u !== "SKIPPED";
+    }).length, [displayStages]);
+    const jTotal = displayStages.length;
+    const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
     if (projectQuery.isLoading) {
         return (<div className="space-y-6">
         <Skeleton className="h-4 w-56"/>
@@ -213,11 +210,6 @@ export default function PipelinePage() {
         argoHealth: argoQuery.data?.health,
         argoSyncStatus: argoQuery.data?.syncStatus
     });
-    const wfStages = pipelineStagesQuery.data;
-    const liveStagesList = wfStages?.stages ?? [];
-    const jStarted = liveStagesList.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
-    const jTotal = liveStagesList.length;
-    const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -293,11 +285,14 @@ export default function PipelinePage() {
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1">
-              <CardTitle className="text-base">Jenkins pipeline (live)</CardTitle>
+              <CardTitle className="text-base">Jenkins pipeline — 12 deploy steps</CardTitle>
               <CardDescription>
-                Stages mirror the Jenkins stage graph via <span className="font-mono text-xs">wfapi/describe</span> (install{" "}
-                <strong className="font-medium text-foreground">Pipeline Stage View</strong> if you see a setup error). Polling speeds up while a build is
-                running.
+                All <strong className="font-medium text-foreground">{PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length}</strong> steps from{" "}
+                <span className="font-mono text-xs">Jenkinsfile.paas-deploy</span> are listed below. When{" "}
+                <span className="font-mono text-xs">wfapi/describe</span> is available (install{" "}
+                <strong className="font-medium text-foreground">Pipeline Stage View</strong>), badges show <strong className="text-foreground">Live</strong>{" "}
+                timing per stage; otherwise status may be <strong className="text-foreground">Est.</strong> from the overall build. Polling speeds up while a
+                build runs.
               </CardDescription>
             </div>
             {wfStages?.buildUrl ? (<Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
@@ -327,26 +322,42 @@ export default function PipelinePage() {
               Could not load live stages from the API. Check your session and try again.
             </p>) : null}
           {wfStages?.skipped ? (<p className="rounded-md border border-border bg-muted/25 px-3 py-2 text-sm text-muted">{wfStages.reason || "Live Jenkins stages are not available for this project."}</p>) : null}
-          {wfStages?.error ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{wfStages.error}</p>) : null}
-          {!wfStages?.skipped && !wfStages?.error && liveStagesList.length > 0 ? (<>
+          {wfStages?.error ? (<div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+              <p className="font-medium text-foreground">{wfStages.error}</p>
+              <p className="mt-2 text-xs leading-relaxed text-foreground/90">
+                The checklist below still shows every numbered step. With <strong>Pipeline Stage View</strong> installed, each row switches to{" "}
+                <strong>Live</strong> with real durations. If the build failed, open the console in Jenkins to see the exact{" "}
+                <span className="font-mono">Step N</span> that stopped.
+              </p>
+            </div>) : null}
+          {!wfStages?.skipped && wfStages?.configured && !pipelineStagesQuery.isLoading ? (<>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-muted">
-                  <span>Progress</span>
+                  <span>Progress ({jStarted} / {jTotal} stages with activity)</span>
                   <span>
-                    {jStarted} / {jTotal} stages touched
+                    {wfStages?.error || liveStagesList.length === 0 ? <span className="text-foreground/80">Includes estimated rows when wfapi is off</span> : null}
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${jProgressPct}%` }}/>
                 </div>
               </div>
-              <ul className="max-h-[min(28rem,56vh)] space-y-2 overflow-auto pr-1">
-                {liveStagesList.map((stage: JenkinsPipelineStageRow, idx: number) => {
+              <ul className="max-h-[min(36rem,70vh)] space-y-2 overflow-auto pr-1">
+                {displayStages.map((stage: PaasDeployDisplayStage, idx: number) => {
                 const rowUi = jenkinsStageRowUi(stage.status);
                 return (<li key={`${idx}-${stage.name}`} className={cn("flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm", rowUi.rowClass)}>
                       <div className="mt-0.5">{rowUi.icon}</div>
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium leading-snug text-foreground">{stage.name}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-bold tabular-nums text-primary">
+                            {jenkinsStageStepIndexLabel(stage.name, idx)}
+                          </span>
+                          <p className="font-medium leading-snug text-foreground">{shortJenkinsStageTitle(stage.name)}</p>
+                          <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                            {!stage.synthetic ? "Live" : wfStages?.error || liveStagesList.length === 0 ? "Est." : "Pending"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs leading-snug text-muted">{stage.name}</p>
                         <p className="mt-0.5 text-xs text-muted">Duration: {formatStageDurationMs(stage.durationMs)}</p>
                       </div>
                       <Badge variant={rowUi.badgeVariant} className="shrink-0 text-[10px] uppercase tracking-wide">
@@ -356,20 +367,18 @@ export default function PipelinePage() {
             })}
               </ul>
             </>) : null}
-          {!wfStages?.skipped && !wfStages?.error && wfStages?.configured && liveStagesList.length === 0 && !pipelineStagesQuery.isLoading ? (<p className="text-sm text-muted">
-              No stage breakdown returned for the current build (for example no <span className="font-mono text-xs">lastBuild</span> yet, or the job does not expose workflow stages).
-            </p>) : null}
-          <div className="border-t border-border pt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Reference — expected steps in Jenkinsfile.paas-deploy</p>
-            <p className="mb-3 text-xs text-muted">
-              If Jenkins stops at Step 7, the controller job may be stale: pull the monorepo, enable inline sync, or rebuild the frontend image that bundles the Jenkinsfile.
+          <details className="rounded-xl border border-border/60 bg-muted/10 px-4 py-3 text-sm">
+            <summary className="cursor-pointer font-medium text-foreground">Reference — full step titles</summary>
+            <p className="mt-2 text-xs text-muted">
+              If Jenkins stops at Step 7, the controller job may be stale: pull the monorepo, enable inline sync, or rebuild the frontend image that bundles the
+              Jenkinsfile.
             </p>
-            <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted marker:text-foreground">
+            <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm text-muted marker:text-foreground">
               {PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((label) => (<li key={label} className="pl-1">
                   <span className="text-foreground">{label}</span>
                 </li>))}
             </ol>
-          </div>
+          </details>
         </CardContent>
       </Card>
 

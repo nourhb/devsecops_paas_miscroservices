@@ -1,4 +1,5 @@
 "use client";
+import axios from "axios";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -131,6 +132,11 @@ export default function MonitoringPage() {
         : "Select a workload in the table below and choose View logs.";
     const logBody = logTab === "build" ? buildLogText : logTab === "deploy" ? deployLogText : podLogText;
     const loading = snapshotQuery.isLoading && !snapshotQuery.data;
+    const snapshotErrorDetail = snapshotQuery.isError && snapshotQuery.error && axios.isAxiosError(snapshotQuery.error)
+        ? typeof snapshotQuery.error.response?.data?.message === "string"
+            ? snapshotQuery.error.response.data.message
+            : snapshotQuery.error.message
+        : null;
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -181,7 +187,10 @@ export default function MonitoringPage() {
               <AlertCircle className="h-5 w-5"/>
               Could not load monitoring snapshot
             </CardTitle>
-            <CardDescription>Check permissions or try again.</CardDescription>
+            <CardDescription className="space-y-1">
+              <span className="block">Check permissions, Prometheus, or Kubernetes settings, then retry.</span>
+              {snapshotErrorDetail ? <span className="block text-foreground/90 text-sm font-normal">{snapshotErrorDetail}</span> : null}
+            </CardDescription>
           </CardHeader>
         </Card>) : null}
 

@@ -4,6 +4,8 @@ import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
+/** Cosign per image in dashboard/monitoring rollups — keep bounded so HTTP handlers do not hang. */
+const METRICS_COSIGN_TIMEOUT_MS = 12_000;
 function summarizePodRecords(items: ClusterPodRecord[]) {
     const summary = {
         running: 0,
@@ -118,14 +120,11 @@ export async function getRuntimeMetrics(projectId: string): Promise<RuntimeMetri
     });
     const runningApplications = projects.filter((project) => project.lastDeploymentStatus === "SUCCESS").length;
     const failedBuilds = projects.filter((project) => project.buildStatus === "FAILED").length;
+    const imageTags = projects.map((project) => project.imageTag).filter((tag): tag is string => Boolean(tag));
+    const signResults = await Promise.all(imageTags.map((imageTag) => cosignClient.isSigned(imageTag, { timeoutMs: METRICS_COSIGN_TIMEOUT_MS })));
     let signedImages = 0;
     let unsignedImages = 0;
-    for (const project of projects) {
-        const imageTag = project.imageTag;
-        if (!imageTag) {
-            continue;
-        }
-        const signed = await cosignClient.isSigned(imageTag);
+    for (const signed of signResults) {
         if (signed) {
             signedImages += 1;
         }
@@ -170,14 +169,11 @@ export async function getDashboardMetrics(): Promise<DashboardMetricsPayload> {
     const lastDeploymentTime = projects
         .map((p) => p.updatedAt)
         .sort((a, b) => b.getTime() - a.getTime())[0]?.toISOString() ?? null;
+    const dashImageTags = projects.map((p) => p.imageTag).filter((tag): tag is string => Boolean(tag));
+    const dashSignResults = await Promise.all(dashImageTags.map((imageTag) => cosignClient.isSigned(imageTag, { timeoutMs: METRICS_COSIGN_TIMEOUT_MS })));
     let signedImages = 0;
     let unsignedImages = 0;
-    for (const p of projects) {
-        const imageTag = p.imageTag;
-        if (!imageTag) {
-            continue;
-        }
-        const signed = await cosignClient.isSigned(imageTag);
+    for (const signed of dashSignResults) {
         if (signed) {
             signedImages += 1;
         }
