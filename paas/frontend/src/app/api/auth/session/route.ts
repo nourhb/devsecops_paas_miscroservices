@@ -11,9 +11,10 @@ export async function GET(request: NextRequest) {
             authenticated: true,
             user: {
                 id: auth.userId,
-                email: auth.email,
+                email: user?.email ?? auth.email,
                 fullName: user?.fullName || auth.email,
-                role: auth.role
+                role: auth.role,
+                accountKind: user?.keycloakSub ? "keycloak" : "local"
             }
         });
     }

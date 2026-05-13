@@ -8,7 +8,7 @@ import { ApiError, UnauthorizedError, ValidationError } from "@/server/http/erro
 import { signToken } from "@/server/security/jwt";
 import { createRawAuthToken, hashAuthToken } from "@/server/auth/auth-tokens";
 import { getAppBaseUrl, sendAuthMail } from "@/server/auth/auth-mailer";
-import type { AuthResponse, AuthStatusResponse, UserRole } from "@/types";
+import type { AuthResponse, AuthStatusResponse, UserProfile, UserRole } from "@/types";
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60 * 24;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 60;
 type AuthTokenLookupRow = {
@@ -24,6 +24,7 @@ type AuthUserLookupRow = {
     email: string;
     fullName: string;
     passwordHash: string | null;
+    keycloakSub: string | null;
     role: Role;
     emailVerifiedAt: Date | null;
 };
@@ -68,12 +69,14 @@ function toAuthUser(user: {
     email: string;
     fullName: string;
     role: Role;
+    keycloakSub?: string | null;
 }) {
     return {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        role: user.role as UserRole
+        role: user.role as UserRole,
+        accountKind: (user.keycloakSub ? "keycloak" : "local") as UserProfile["accountKind"]
     };
 }
 async function createEmailVerificationToken(userId: string) {
@@ -116,7 +119,7 @@ async function getPasswordResetToken(token: string) {
 }
 async function getAuthUserByEmail(email: string) {
     const rows = await prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
-        SELECT "id", "email", "fullName", "passwordHash", "role", "emailVerifiedAt"
+        SELECT "id", "email", "fullName", "passwordHash", "keycloakSub", "role", "emailVerifiedAt"
         FROM "User"
         WHERE "email" = ${email}
         LIMIT 1
@@ -125,7 +128,7 @@ async function getAuthUserByEmail(email: string) {
 }
 export async function getAuthUserById(userId: string) {
     const rows = await prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
-        SELECT "id", "email", "fullName", "passwordHash", "role", "emailVerifiedAt"
+        SELECT "id", "email", "fullName", "passwordHash", "keycloakSub", "role", "emailVerifiedAt"
         FROM "User"
         WHERE "id" = ${userId}
         LIMIT 1
@@ -347,5 +350,138 @@ export async function resetPassword(payload: unknown): Promise<AuthStatusRespons
         message: "Password updated successfully. You can now sign in.",
         requiresVerification: false,
         mailDelivery: "none"
+    };
+}
+const updateProfileSchema = z.object({
+    fullName: z.string().trim().min(2).max(120).optional(),
+    email: z.string().trim().email().optional(),
+    currentPassword: z.string().min(8).max(100).optional(),
+    newPassword: z.string().min(8).max(100).optional()
+}).superRefine((val, ctx) => {
+    const has = Boolean(val.newPassword?.length) ||
+        (val.fullName !== undefined && val.fullName.length > 0) ||
+        (val.email !== undefined && val.email.length > 0);
+    if (!has) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Provide at least one change: fullName, email, or newPassword."
+        });
+    }
+    if (val.newPassword && (!val.currentPassword || val.currentPassword.length < 8)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "currentPassword is required (min 8 characters) when setting a new password.",
+            path: ["currentPassword"]
+        });
+    }
+});
+export async function updateUserProfile(userId: string, payload: unknown): Promise<{
+    user: UserProfile;
+    token: string;
+    message: string;
+}> {
+    const parsed = updateProfileSchema.safeParse(payload);
+    if (!parsed.success) {
+        throw new ValidationError(zodErrorMessage(parsed.error));
+    }
+    const row = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            email: true,
+            fullName: true,
+            passwordHash: true,
+            keycloakSub: true,
+            role: true
+        }
+    });
+    if (!row) {
+        throw new UnauthorizedError("Account not found.");
+    }
+    const isKeycloak = Boolean(row.keycloakSub);
+    const d = parsed.data;
+    if (isKeycloak && (d.email || d.newPassword)) {
+        throw new ValidationError("Email and password are managed in Keycloak. You can still update your display name here.");
+    }
+    let nextEmail = row.email;
+    let nextFullName = row.fullName;
+    let nextPasswordHash = row.passwordHash;
+    const parts: string[] = [];
+    if (d.fullName !== undefined && d.fullName.length > 0 && d.fullName !== row.fullName) {
+        nextFullName = d.fullName;
+        parts.push("name");
+    }
+    if (!isKeycloak && d.email !== undefined && d.email.length > 0) {
+        const email = d.email.toLowerCase();
+        if (email !== row.email) {
+            const clash = await prisma.user.findFirst({
+                where: {
+                    email,
+                    NOT: { id: userId }
+                },
+                select: { id: true }
+            });
+            if (clash) {
+                throw new ValidationError("That email is already in use.");
+            }
+            nextEmail = email;
+            parts.push("email");
+        }
+    }
+    if (!isKeycloak && d.newPassword) {
+        if (!row.passwordHash) {
+            throw new ValidationError("Password change is not available for this account.");
+        }
+        const ok = await bcrypt.compare(d.currentPassword || "", row.passwordHash);
+        if (!ok) {
+            throw new ValidationError("Current password is incorrect.");
+        }
+        nextPasswordHash = await bcrypt.hash(d.newPassword, 12);
+        parts.push("password");
+    }
+    if (parts.length === 0) {
+        throw new ValidationError("No changes to apply.");
+    }
+    const emailChanged = nextEmail !== row.email;
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            fullName: nextFullName,
+            email: nextEmail,
+            ...(nextPasswordHash !== row.passwordHash ? { passwordHash: nextPasswordHash } : {}),
+            ...(emailChanged ? { emailVerifiedAt: null } : {})
+        }
+    });
+    let mailNote = "";
+    if (emailChanged && !isKeycloak) {
+        await sendVerificationEmail({
+            id: userId,
+            email: nextEmail,
+            fullName: nextFullName
+        });
+        mailNote = " We sent a verification message to your new address.";
+    }
+    const updated = await prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+            id: true,
+            email: true,
+            fullName: true,
+            keycloakSub: true,
+            role: true
+        }
+    });
+    const token = signToken({
+        userId: updated.id,
+        email: updated.email,
+        role: updated.role as UserRole
+    });
+    const message = parts.includes("password") && parts.length === 1
+        ? "Password updated."
+        : `Profile updated (${parts.join(", ")}).${mailNote}`;
+    return {
+        user: toAuthUser(updated),
+        token,
+        message: message.trim()
     };
 }

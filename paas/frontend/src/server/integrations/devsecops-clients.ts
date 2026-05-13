@@ -1331,8 +1331,10 @@ export class TrivyClient {
     }
 }
 export class CosignClient {
-    async isSigned(imageRef: string): Promise<boolean> {
-        return verifyImageWithCosign(imageRef);
+    async isSigned(imageRef: string, options?: {
+        timeoutMs?: number;
+    }): Promise<boolean> {
+        return verifyImageWithCosign(imageRef, options);
     }
 }
 export class OpaClient {
@@ -1559,24 +1561,32 @@ export class PrometheusClient {
             cpu: 30 + seeded(projectId + "-cpu", 60),
             ram: 35 + seeded(projectId + "-ram", 55)
         };
+        if (!this.enabled) {
+            return fallback;
+        }
         const base = env.PROMETHEUS_BASE_URL.replace(/\/$/, "");
         const cpuQuery = env.PROMETHEUS_QUERY_CPU.trim() || PROM_DEFAULT_CPU_QUERY;
         const memQuery = env.PROMETHEUS_QUERY_MEMORY.trim() || PROM_DEFAULT_MEMORY_QUERY;
-        return fetchOrFallback("Prometheus", this.enabled, `${base}/api/v1/query?query=${encodeURIComponent(cpuQuery)}`, { method: "GET" }, fallback, async (response) => {
-            const cpuPayload = await response.json();
-            const cpu = prometheusInstantScalar(cpuPayload) ?? fallback.cpu;
-            let ram = fallback.ram;
-            try {
-                const memRes = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(memQuery)}`, { method: "GET" });
-                if (memRes.ok) {
-                    ram = prometheusInstantScalar(await memRes.json()) ?? fallback.ram;
+        try {
+            return await fetchOrFallback("Prometheus", true, `${base}/api/v1/query?query=${encodeURIComponent(cpuQuery)}`, { method: "GET" }, fallback, async (response) => {
+                const cpuPayload = await response.json();
+                const cpu = prometheusInstantScalar(cpuPayload) ?? fallback.cpu;
+                let ram = fallback.ram;
+                try {
+                    const memRes = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(memQuery)}`, { method: "GET" });
+                    if (memRes.ok) {
+                        ram = prometheusInstantScalar(await memRes.json()) ?? fallback.ram;
+                    }
                 }
-            }
-            catch {
-                ram = fallback.ram;
-            }
-            return { cpu, ram };
-        });
+                catch {
+                    ram = fallback.ram;
+                }
+                return { cpu, ram };
+            });
+        }
+        catch {
+            return fallback;
+        }
     }
     async clusterUsageRange(opts: {
         durationSeconds: number;

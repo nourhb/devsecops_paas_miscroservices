@@ -4,7 +4,6 @@ const PLACEHOLDER_PATTERNS = [
     "changeme",
     "change-this",
     "example.com",
-    "apps.local",
     "localhost",
     "dependencytrack.local",
     "harbor.local",

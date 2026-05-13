@@ -1,5 +1,5 @@
 import apiClient from "@/lib/api-client";
-import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot } from "@/types";
+import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot, UpdateProfileRequest, UpdateProfileResponse } from "@/types";
 export interface DashboardMetrics {
     cluster: {
         nodeCount: number;
@@ -160,6 +160,10 @@ export const authApi = {
     },
     resetPassword: async (token: string, password: string) => {
         const { data } = await apiClient.post<AuthStatusResponse>("/api/auth/reset-password", { token, password });
+        return data;
+    },
+    updateProfile: async (payload: UpdateProfileRequest) => {
+        const { data } = await apiClient.patch<UpdateProfileResponse>("/api/auth/profile", payload);
         return data;
     }
 };
