@@ -184,7 +184,7 @@ export async function registerUser(payload: unknown): Promise<AuthStatusResponse
                 email,
                 passwordHash: hashedPassword,
                 role: Role.DEVELOPER,
-                emailVerifiedAt: new Date()
+                emailVerifiedAt: null
             }
         });
     }
@@ -194,12 +194,20 @@ export async function registerUser(payload: unknown): Promise<AuthStatusResponse
         }
         throw e;
     }
+    let mailDelivery: AuthStatusResponse["mailDelivery"] = "none";
+    try {
+        mailDelivery = await sendVerificationEmail(user);
+    }
+    catch (err) {
+        console.error("[register] verification email", err);
+        mailDelivery = "none";
+    }
     return {
         success: true,
         email: user.email,
-        message: "Account created. Signing you in...",
-        requiresVerification: false,
-        mailDelivery: "none"
+        message: "Account created. Check your email for a verification link before signing in.",
+        requiresVerification: true,
+        mailDelivery
     };
 }
 export async function loginUser(payload: unknown): Promise<AuthResponse> {

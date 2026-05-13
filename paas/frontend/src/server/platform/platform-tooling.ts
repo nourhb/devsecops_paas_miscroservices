@@ -97,6 +97,17 @@ async function namespacePodsMatchingName(namespace: string, pattern: RegExp): Pr
         return { total: 0, running: 0 };
     }
 }
+/** Prefer ingress-nginx namespace; otherwise Traefik (or similar) in kube-system. */
+async function ingressControllerPods(): Promise<{
+    total: number;
+    running: number;
+}> {
+    const nginxNs = await namespacePods("ingress-nginx");
+    if (nginxNs.total > 0) {
+        return nginxNs;
+    }
+    return namespacePodsMatchingName("kube-system", /traefik/i);
+}
 async function countClusterObjects(group: string, version: string, plural: string): Promise<number> {
     const api = getCustomObjectsApi();
     if (!api) {
@@ -136,7 +147,7 @@ export async function getPlatformTooling(): Promise<{
 }> {
     const calicoAgentPattern = /calico|tigera|canal/i;
     const [ingress, certManager, calicoWorkload, monitoring, jenkins, argocd, dependencyTrack, sonarqube, nexus, vault, kubewarden, kyvernoPolicies, gatekeeperCrds, certs, calicoPolicies, kubeStateMetrics, portainerNs] = await Promise.all([
-        namespacePods("ingress-nginx"),
+        ingressControllerPods(),
         namespacePods("cert-manager"),
         namespacePodsMatchingName("kube-system", calicoAgentPattern),
         namespacePods("monitoring"),
@@ -219,7 +230,7 @@ export async function getPlatformTooling(): Promise<{
                               : "Enable KUBERNETES_ENABLED and mount kubeconfig for live API telemetry.",
                         k8sClientReady ? "success" : "outline",
                     ),
-                    tool("Ingress NGINX", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
+                    tool("Ingress (NGINX / Traefik)", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
                     tool("cert-manager", `${certManager.running}/${certManager.total} pods running · ${certs} certificates`, toneFromPods(certManager.running, certManager.total)),
                     tool(
                         "Calico (CNI)",

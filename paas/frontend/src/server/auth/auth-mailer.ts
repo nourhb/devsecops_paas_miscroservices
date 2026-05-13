@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { env } from "@/server/config/env";
 type MailPayload = {
     to: string;
+    cc?: string;
     subject: string;
     html: string;
     text: string;
@@ -39,6 +40,7 @@ export async function sendAuthMail(payload: MailPayload) {
     if (!hasSmtpConfig()) {
         console.info("[auth-mail]", {
             to: payload.to,
+            cc: payload.cc,
             subject: payload.subject,
             text: payload.text
         });
@@ -51,6 +53,7 @@ export async function sendAuthMail(payload: MailPayload) {
     await transporter.sendMail({
         from,
         to: payload.to,
+        ...(payload.cc ? { cc: payload.cc } : {}),
         subject: payload.subject,
         text: payload.text,
         html: payload.html

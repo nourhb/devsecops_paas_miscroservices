@@ -23,7 +23,9 @@ export async function integrationFetch(url: string, init: RequestInit = {}, time
         }
     }
     try {
-        if (env.INTEGRATIONS_TLS_SKIP_VERIFY === "true") {
+        const skipTls =
+            env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" || env.KUBE_TLS_SKIP_VERIFY === "true";
+        if (skipTls) {
             return await undiciFetch(url, {
                 ...init,
                 signal: controller.signal,

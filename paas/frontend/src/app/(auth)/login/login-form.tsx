@@ -12,8 +12,10 @@ import { authApi } from "@/lib/api";
 type LoginFormProps = {
     keycloakEnabled: boolean;
     keycloakError?: string;
+    postRegisterEmail?: string;
+    postRegisterMailConsole?: boolean;
 };
-export function LoginForm({ keycloakEnabled, keycloakError }: LoginFormProps) {
+export function LoginForm({ keycloakEnabled, keycloakError, postRegisterEmail, postRegisterMailConsole }: LoginFormProps) {
     const router = useRouter();
     const getNextParam = () => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("next") : null);
     const { login } = useAuth();
@@ -33,6 +35,17 @@ export function LoginForm({ keycloakEnabled, keycloakError }: LoginFormProps) {
     useEffect(() => {
         router.prefetch(destination);
     }, [destination, router]);
+    useEffect(() => {
+        if (!postRegisterEmail) {
+            return;
+        }
+        const el = document.getElementById("email") as HTMLInputElement | null;
+        if (el) {
+            el.value = postRegisterEmail;
+        }
+        const extra = postRegisterMailConsole ? " Without SMTP, the link was also written to the server console." : "";
+        setNotice(`We sent a verification link to ${postRegisterEmail}.${extra} Open it, then sign in below.`);
+    }, [postRegisterEmail, postRegisterMailConsole]);
     const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setLoading(true);

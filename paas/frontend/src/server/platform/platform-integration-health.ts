@@ -46,13 +46,23 @@ async function httpProbe(url: string, init: RequestInit = {}): Promise<PlatformI
     }
     catch (error) {
         const ms = Date.now() - t0;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = integrationProbeErrorMessage(error);
         return {
             state: "unreachable",
             latencyMs: ms,
             message
         };
     }
+}
+function integrationProbeErrorMessage(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return String(error);
+    }
+    const c = error.cause;
+    if (c instanceof Error && c.message && !error.message.includes(c.message)) {
+        return `${error.message} (${c.message})`;
+    }
+    return error.message;
 }
 async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformIntegrationReachability> {
     if (item.kind === "external" && item.href && isPlaceholderValue(item.href)) {
@@ -128,6 +138,62 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
     }
     const href = item.href;
     switch (item.id) {
+        case "k8s-control-plane": {
+            const t0 = Date.now();
+            if (env.KUBERNETES_ENABLED === "true") {
+                const api = getCoreV1Api();
+                if (api) {
+                    try {
+                        await api.listNode();
+                        return {
+                            state: "reachable",
+                            latencyMs: Date.now() - t0,
+                            message: "Cluster API reachable (kubeconfig credentials)"
+                        };
+                    }
+                    catch (error) {
+                        return {
+                            state: "unreachable",
+                            latencyMs: Date.now() - t0,
+                            message: error instanceof Error ? error.message : String(error)
+                        };
+                    }
+                }
+                return {
+                    state: "unreachable",
+                    latencyMs: Date.now() - t0,
+                    message: "KUBERNETES_ENABLED is true but the API client could not be created (check KUBE_CONFIG_PATH and kubeconfig)."
+                };
+            }
+            if (!href) {
+                return {
+                    state: "skipped",
+                    message: "Not configured"
+                };
+            }
+            return httpProbe(href);
+        }
+        case "ingress-nginx": {
+            const probeUrl = env.INGRESS_NGINX_PROBE_URL.trim() || href;
+            if (!probeUrl) {
+                return {
+                    state: "skipped",
+                    message: "Not configured"
+                };
+            }
+            const r = await httpProbe(probeUrl);
+            if (r.state === "reachable") {
+                return r;
+            }
+            if (r.message?.startsWith("HTTP 404")) {
+                return {
+                    state: "reachable",
+                    latencyMs: r.latencyMs,
+                    message: "HTTP 404 — controller is up (no default route for /)"
+                };
+            }
+            return r;
+        }
         case "jenkins": {
             if (!realValueOrEmpty(env.JENKINS_BASE_URL)) {
                 return {

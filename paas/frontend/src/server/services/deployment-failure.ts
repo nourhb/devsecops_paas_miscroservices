@@ -2,27 +2,38 @@ import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { updateProject } from "@/server/projects/project-service";
+import { notifyPipelineFailureEmail } from "@/server/notifications/pipeline-failure-notify";
+
+export { humanizeFailureReason } from "@/server/services/deployment-failure-labels";
+
 const MESSAGE_MAX = 2000;
-export function humanizeFailureReason(reason: DeploymentFailureReason | null): string {
-    if (!reason) {
-        return "";
-    }
-    const labels: Record<DeploymentFailureReason, string> = {
-        JENKINS: "Build backend",
-        GITOPS: "GitOps",
-        ARGOCD: "Argo CD",
-        IMAGE_REF: "Image configuration",
-        TRIGGER: "Deploy trigger",
-        TIMEOUT: "Timeout",
-        UNKNOWN: "Unknown"
-    };
-    return labels[reason] ?? reason;
-}
 export async function recordDeploymentFailure(deploymentId: string, projectId: string, options: {
     reason: DeploymentFailureReason;
     message: string;
     logs: string;
 }): Promise<void> {
+    const prior = await prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        select: {
+            status: true,
+            project: {
+                select: {
+                    projectName: true,
+                    createdBy: {
+                        select: {
+                            email: true,
+                            fullName: true
+                        }
+                    }
+                }
+            },
+            triggeredBy: {
+                select: {
+                    email: true
+                }
+            }
+        }
+    });
     const logs = options.logs.length <= DEPLOYMENT_LOG_TAIL_MAX_CHARS
         ? options.logs
         : options.logs.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
@@ -45,6 +56,22 @@ export async function recordDeploymentFailure(deploymentId: string, projectId: s
         deploymentLogs: logs,
         ...(failedDuringJenkinsRun ? { buildStatus: "FAILED" } : {})
     });
+    const firstFailureTransition = prior?.status !== DeploymentJobStatus.FAILED;
+    if (firstFailureTransition && prior?.project?.createdBy?.email) {
+        void notifyPipelineFailureEmail({
+            deploymentId,
+            projectId,
+            projectName: prior.project.projectName,
+            ownerEmail: prior.project.createdBy.email,
+            ownerName: prior.project.createdBy.fullName,
+            triggeredByEmail: prior.triggeredBy?.email ?? null,
+            reason: options.reason,
+            message: failureMessage,
+            logs
+        }).catch((err) => {
+            console.error("[pipeline-failure-email]", deploymentId, err);
+        });
+    }
 }
 export function clearDeploymentFailureFields(): {
     failureReason: null;
