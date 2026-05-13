@@ -9,7 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Hint } from "@/components/hint";
 import { kubernetesApi, type KubernetesPodRecord } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
+import { queryHttpMessage } from "@/lib/query-http-message";
 import type { DashboardOverviewResponse } from "@/types";
 import { cn } from "@/lib/utils";
 export type DashboardPodsFallbackProject = DashboardOverviewResponse["projects"][number];
@@ -120,12 +123,18 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         });
     }
     const logBody = selected
-        ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned yet.")
+        ? podLogsQuery.isError
+            ? queryHttpMessage(podLogsQuery.error, "Could not load pod logs from the API.")
+            : podLogsQuery.data?.logs ||
+                (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned yet.")
         : "Select a pod and choose View to stream container logs from the cluster.";
     return (<Card className="rounded-xl border-border/70 shadow-sm">
       <CardHeader className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <CardTitle className="text-base">Cluster pods &amp; logs</CardTitle>
+          <CardTitle className="flex items-center gap-1.5 text-base">
+            Cluster pods &amp; logs
+            <Hint side="bottom">{hints.podsPanel.header}</Hint>
+          </CardTitle>
           <CardDescription>
             {useK8sTable
             ? "Live workloads from the Kubernetes API. Use the namespace filter, then open logs for a container."

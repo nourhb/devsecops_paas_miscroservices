@@ -5,11 +5,13 @@ import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Hint } from "@/components/hint";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { projectApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { queryHttpMessage } from "@/lib/query-http-message";
 import type { BuildProfile } from "@/server/build-planner";
 function inferBuildProfileFromLanguage(language: string): BuildProfile {
@@ -175,7 +177,10 @@ export default function CreateProjectPage() {
     return (<div className="mx-auto max-w-3xl">
       <Card>
         <CardHeader>
-          <CardTitle>Create DevSecOps Project</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            Create DevSecOps Project
+            <Hint>{hints.projects.create}</Hint>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-5">

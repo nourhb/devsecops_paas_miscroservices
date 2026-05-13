@@ -21,7 +21,9 @@ import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Hint } from "@/components/hint";
 import { platformApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { cn } from "@/lib/utils";
 import type {
     PlatformIntegrationsResponse,
@@ -163,7 +165,10 @@ function CategoryCard({ category }: {
               {categoryIcon(category.id)}
             </div>
             <div className="space-y-1">
-              <CardTitle className="text-lg leading-tight">{category.title}</CardTitle>
+              <CardTitle className="flex flex-wrap items-center gap-2 text-lg leading-tight">
+                {category.title}
+                <Hint>{hints.integrations.categoryCard}</Hint>
+              </CardTitle>
               <CardDescription className="max-w-2xl text-sm leading-relaxed">{category.description}</CardDescription>
             </div>
           </div>
@@ -199,7 +204,10 @@ function ToolingGroup({ group }: {
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4 text-muted-foreground"/>
-          <CardTitle className="text-base font-semibold">{group.title}</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            {group.title}
+            <Hint>{hints.integrations.toolingGroup}</Hint>
+          </CardTitle>
         </div>
         <CardDescription className="text-xs sm:text-sm">
           Signals from env vars and, when enabled, your Kubernetes cluster. “Live” means we see a healthy signal; “Info” means no live probe yet. Hover a status pill for a short explanation — they are indicators, not buttons.
@@ -254,9 +262,10 @@ function DeployReadinessSummary({ dr }: {
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <AlertCircle className="h-4 w-4 text-primary"/>
               Delivery checklist
+              <Hint>{hints.integrations.deliveryChecklist}</Hint>
             </CardTitle>
             <CardDescription className="mt-1 max-w-2xl text-sm">
               What the platform needs to run builds, push to GitOps, sync Argo CD, and expose app URLs. Fix the red items in your server environment, then refresh.
@@ -334,7 +343,10 @@ export default function IntegrationsPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted">Integrations</p>
-            <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Platform hub</h1>
+            <h1 className="flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+              Platform hub
+              <Hint side="bottom">{hints.integrations.header}</Hint>
+            </h1>
             <p className="max-w-2xl text-sm leading-relaxed text-muted">
               Connect CI/CD and GitOps first, then add security and observability. Each card groups related tools; use{" "}
               <strong className="font-medium text-foreground">Open tool</strong> for external UIs and <strong className="font-medium text-foreground">Open</strong> for pages inside this app.
@@ -356,7 +368,10 @@ export default function IntegrationsPage() {
 
       {query.isError ? (<Card className="rounded-2xl border-danger/40 bg-danger/5">
           <CardHeader>
-            <CardTitle className="text-base">Could not load integrations</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Could not load integrations
+              <Hint>{hints.integrations.loadError}</Hint>
+            </CardTitle>
             <CardDescription>Check your session and try Refresh. If this persists, verify the API route and server logs.</CardDescription>
           </CardHeader>
         </Card>) : null}
@@ -370,7 +385,10 @@ export default function IntegrationsPage() {
       {toolingQuery.data?.groups?.length ? (<section className="space-y-4">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Runtime signals</h2>
+              <h2 className="text-lg font-semibold text-foreground flex flex-wrap items-center gap-2">
+              Runtime signals
+              <Hint>{hints.integrations.runtimeSignalsHeading}</Hint>
+            </h2>
               <p className="mt-1 text-sm text-muted">Quick health of controllers, scanners, and registries the platform knows about.</p>
             </div>
           </div>
@@ -381,7 +399,10 @@ export default function IntegrationsPage() {
 
       {query.data && categories.length > 0 ? (<section className="space-y-4">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Integration catalog</h2>
+            <h2 className="text-lg font-semibold text-foreground flex flex-wrap items-center gap-2">
+              Integration catalog
+              <Hint>{hints.integrations.catalogHeading}</Hint>
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Everything we can link or open from configuration. Items without a URL need env vars on the Next.js server (see project <code className="inline-code">docker-compose.env</code> / <code className="inline-code">.env</code>).
             </p>
@@ -393,7 +414,10 @@ export default function IntegrationsPage() {
 
       {query.data && categories.length === 0 ? (<Card className="rounded-2xl border-border/70 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">No integration categories</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              No integration categories
+              <Hint>{hints.integrations.emptyCatalog}</Hint>
+            </CardTitle>
             <CardDescription>Something returned an empty catalog. Check server logs and redeploy the frontend.</CardDescription>
           </CardHeader>
         </Card>) : null}

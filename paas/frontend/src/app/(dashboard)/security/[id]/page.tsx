@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Hint } from "@/components/hint";
 import { securityApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 const SEVERITY_ROWS = [
     { key: "critical", label: "Critical", dotClassName: "bg-danger" },
     { key: "high", label: "High", dotClassName: "bg-orange-500" },
@@ -46,7 +48,10 @@ export default function SecurityPage() {
     }
     return (<div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold">Security Overview: {projectId}</h2>
+        <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
+          Security Overview: {projectId}
+          <Hint side="bottom">{hints.security.overviewTitle}</Hint>
+        </h2>
         <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
           Sonar Quality Gate: {data.qualityGateStatus}
         </Badge>
@@ -54,7 +59,10 @@ export default function SecurityPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Global Security Score</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            Global Security Score
+            <Hint>{hints.security.globalScore}</Hint>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -67,7 +75,10 @@ export default function SecurityPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>SonarQube quality gate (live)</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              SonarQube quality gate (live)
+              <Hint>{hints.security.sonarGate}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[180px]">
@@ -92,7 +103,10 @@ export default function SecurityPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Dependency-Track vs Trivy (severity counts)</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              Dependency-Track vs Trivy (severity counts)
+              <Hint>{hints.security.depTrackVsTrivy}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="h-[220px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -131,7 +145,10 @@ export default function SecurityPage() {
         </Card>
         <Card className="xl:col-span-2">
           <CardHeader>
-            <CardTitle>Cosign, OPA, Kyverno / policy engine signals</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              Cosign, OPA, Kyverno / policy engine signals
+              <Hint>{hints.security.policySignals}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="h-[200px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -181,7 +198,10 @@ export default function SecurityPage() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Security Analysis</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+            Security Analysis
+            <Hint>{hints.security.analysisCard}</Hint>
+          </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-muted">
@@ -227,7 +247,10 @@ export default function SecurityPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Trivy Scan</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+            Trivy Scan
+            <Hint>{hints.security.trivyCard}</Hint>
+          </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
             <p>Critical: {data?.trivy.critical ?? 0}</p>
@@ -239,7 +262,10 @@ export default function SecurityPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Security Enforcement</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+            Security Enforcement
+            <Hint>{hints.security.enforcementCard}</Hint>
+          </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <div className="space-y-2">

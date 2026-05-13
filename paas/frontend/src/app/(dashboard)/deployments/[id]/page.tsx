@@ -10,8 +10,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel, jenkinsScmCloneFailureHint } from "@/components/deployments/deployment-logs-view";
+import { Hint } from "@/components/hint";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { queryHttpMessage } from "@/lib/query-http-message";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
     const s = status.toUpperCase();
@@ -105,7 +107,10 @@ export default function DeploymentDetailPage() {
             <ClipboardList className="h-7 w-7 shrink-0" aria-hidden/>
             <span className="text-xs font-semibold uppercase tracking-wider">Deployment</span>
           </div>
-          <h1 className="font-mono text-xl font-semibold tracking-tight sm:text-2xl">{d.id}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 font-mono text-xl font-semibold tracking-tight sm:text-2xl">
+            {d.id}
+            <Hint side="bottom">{hints.deployment.deployId}</Hint>
+          </h1>
           <p className="text-xs text-muted">
             Auto-refresh while running (~4s); otherwise on focus
             {live ? (<span className="ml-2 inline-flex items-center gap-1">
@@ -133,7 +138,10 @@ export default function DeploymentDetailPage() {
 
       {isFailed ? (<Card className="border-danger/50 bg-danger/10">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-danger">Deployment failed</CardTitle>
+            <CardTitle className="text-base text-danger flex flex-wrap items-center gap-2">
+              Deployment failed
+              <Hint>{hints.deployment.failedCallout}</Hint>
+            </CardTitle>
             <CardDescription className="text-danger/90">
               {d.failureReason ? (<>
                   <span className="font-semibold text-foreground">
@@ -150,7 +158,10 @@ export default function DeploymentDetailPage() {
 
       {d.url ? (<Card>
           <CardHeader>
-            <CardTitle className="text-base">Live application</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Live application
+              <Hint>{hints.deployment.liveApp}</Hint>
+            </CardTitle>
             <CardDescription>URL recorded when this deployment reached DEPLOYED.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -173,7 +184,10 @@ export default function DeploymentDetailPage() {
 
       {d.artifactImage ? (<Card>
           <CardHeader>
-            <CardTitle className="text-base">Artifact</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Artifact
+              <Hint>{hints.deployment.artifact}</Hint>
+            </CardTitle>
             <CardDescription>Image produced by the build backend for this deployment.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 font-mono text-xs">
@@ -186,7 +200,10 @@ export default function DeploymentDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Console output</CardTitle>
+          <CardTitle className="text-base flex flex-wrap items-center gap-2">
+            Console output
+            <Hint>{hints.deployment.console}</Hint>
+          </CardTitle>
           <CardDescription>
             Last 5000 characters; error lines are highlighted in red when the deployment failed.
           </CardDescription>

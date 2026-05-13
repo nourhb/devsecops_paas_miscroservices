@@ -5,12 +5,14 @@ import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, 
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
+import { Hint } from "@/components/hint";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dashboardOverviewApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { cn } from "@/lib/utils";
 const chartColors = {
     success: "#22c55e",
@@ -152,7 +154,10 @@ export default function DashboardPage() {
       <header className="flex flex-col gap-6 border-b border-border/60 pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted">Overview</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">DevSecOps command center</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+            DevSecOps command center
+            <Hint side="bottom">{hints.dashboard.hero}</Hint>
+          </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted">
             A single, guided experience for build, deploy, and cluster visibility. Security is layered in over time: static analysis (SAST),
             vulnerability and SBOM workflows, signed images, and policy on Kubernetes—each appears here and in CI as you connect tools.
@@ -179,7 +184,10 @@ export default function DashboardPage() {
 
       <Card className="rounded-xl border-primary/20 bg-primary/5 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-semibold text-foreground">Unified delivery and DevSecOps</CardTitle>
+          <CardTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+            Unified delivery and DevSecOps
+            <Hint side="bottom">{hints.dashboard.unifiedCard}</Hint>
+          </CardTitle>
           <CardDescription className="text-sm text-muted">
             Jenkins/Tekton builds, GitOps handoff, and Argo CD sync stay in one workflow. Gates you can turn on gradually: Sonar (SAST), Dependency-Track and SBOM,
             Trivy and SCA archives, Cosign signatures, and Kyverno, Gatekeeper, or Kubewarden policy on the cluster.
@@ -195,16 +203,19 @@ export default function DashboardPage() {
         </Card>) : null}
 
       {overviewQuery.isLoading && !overviewQuery.data ? (<StatsSkeleton />) : (<section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <OverviewStatCard title="Total projects" value={stats?.totalProjects ?? 0} icon={FolderKanban}/>
-          <OverviewStatCard title={clusterDataSource === "project_rollups" ? "Healthy workloads" : "Running pods"} value={`${stats?.runningPods ?? 0}/${cluster?.pods ?? 0}`} icon={ServerCog}/>
-          <OverviewStatCard title="Security score" value={`${security?.score ?? 0}/100`} icon={Shield}/>
-          <OverviewStatCard title="Live tools" value={`${stats?.liveTools ?? 0}`} icon={Activity}/>
+          <OverviewStatCard title="Total projects" value={stats?.totalProjects ?? 0} icon={FolderKanban} hint={hints.dashboard.totalProjects}/>
+          <OverviewStatCard title={clusterDataSource === "project_rollups" ? "Healthy workloads" : "Running pods"} value={`${stats?.runningPods ?? 0}/${cluster?.pods ?? 0}`} icon={ServerCog} hint={hints.dashboard.runningPods}/>
+          <OverviewStatCard title="Security score" value={`${security?.score ?? 0}/100`} icon={Shield} hint={hints.dashboard.securityScore}/>
+          <OverviewStatCard title="Live tools" value={`${stats?.liveTools ?? 0}`} icon={Activity} hint={hints.dashboard.liveTools}/>
         </section>)}
 
       <section className="grid gap-4 xl:grid-cols-2">
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Cluster workload</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Cluster workload
+              <Hint>{hints.dashboard.clusterWorkload}</Hint>
+            </CardTitle>
             <CardDescription>
               {clusterDataSource === "kubernetes" && "Pods, services, and deployments from Kubernetes."}
               {clusterDataSource === "project_rollups" && "Rollups from your projects and deployment history (Kubernetes API not in use)."}
@@ -236,7 +247,10 @@ export default function DashboardPage() {
 
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Delivery outcome</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Delivery outcome
+              <Hint>{hints.dashboard.deliveryOutcome}</Hint>
+            </CardTitle>
             <CardDescription>Success, active, and failed deployment history.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
@@ -265,7 +279,10 @@ export default function DashboardPage() {
 
         <Card className="rounded-xl border-border/70 shadow-sm xl:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Security posture (live tool data)</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Security posture (live tool data)
+              <Hint>{hints.dashboard.securityPosture}</Hint>
+            </CardTitle>
             <CardDescription>
               Rolled up from the same SonarQube, Dependency-Track, Trivy, Cosign, OPA, and Kyverno calls as the project Security page, across up to {security?.sampledProjects ?? 0} recent projects.
             </CardDescription>
@@ -342,7 +359,10 @@ export default function DashboardPage() {
 
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Tool health</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Tool health
+              <Hint>{hints.dashboard.toolHealth}</Hint>
+            </CardTitle>
             <CardDescription>Live and degraded platform tools from configured integrations.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
@@ -373,7 +393,10 @@ export default function DashboardPage() {
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="rounded-xl border-border/70 shadow-sm lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Platform health</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Platform health
+              <Hint>{hints.dashboard.platformHealth}</Hint>
+            </CardTitle>
             <CardDescription>Live signals collected through this app, not VM access.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -401,7 +424,10 @@ export default function DashboardPage() {
 
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Quick actions</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Quick actions
+              <Hint>{hints.dashboard.quickActions}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-2">
             <Button asChild variant="outline" className="justify-start">
@@ -421,7 +447,10 @@ export default function DashboardPage() {
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
             <div>
-              <CardTitle className="text-base">Project command board</CardTitle>
+              <CardTitle className="flex items-center gap-1.5 text-base">
+                Project command board
+                <Hint>{hints.dashboard.projectBoard}</Hint>
+              </CardTitle>
               <CardDescription>Build, deploy, pod and artifact state per project.</CardDescription>
             </div>
             {overviewQuery.isFetching && overviewQuery.data ? (<Loader2 className="h-4 w-4 animate-spin text-muted" aria-label="Refreshing"/>) : null}
@@ -463,6 +492,7 @@ export default function DashboardPage() {
             <CardTitle className="flex items-center gap-2 text-base">
               <AlertTriangle className="h-4 w-4 text-warning"/>
               Latest failures
+              <Hint>{hints.dashboard.latestFailures}</Hint>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -481,7 +511,10 @@ export default function DashboardPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Platform tool signals</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Platform tool signals
+              <Hint>{hints.dashboard.toolSignals}</Hint>
+            </CardTitle>
             <CardDescription>Kubernetes-backed status for the tools replacing VM visits.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -505,7 +538,10 @@ export default function DashboardPage() {
 
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Latest image artifacts</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Latest image artifacts
+              <Hint>{hints.dashboard.latestArtifacts}</Hint>
+            </CardTitle>
             <CardDescription>Images and build outputs tracked by the platform.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -529,7 +565,10 @@ export default function DashboardPage() {
         <Card className="rounded-xl border-border/70 shadow-sm">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
             <div className="space-y-1">
-              <CardTitle className="text-base font-semibold">Recent deployments</CardTitle>
+              <CardTitle className="flex items-center gap-1.5 text-base font-semibold">
+                Recent deployments
+                <Hint>{hints.dashboard.recentDeployments}</Hint>
+              </CardTitle>
               <CardDescription>Latest activity across your projects</CardDescription>
     </div>
             {overviewQuery.isFetching && overviewQuery.data ? (<Loader2 className="h-4 w-4 animate-spin text-muted" aria-label="Refreshing"/>) : null}

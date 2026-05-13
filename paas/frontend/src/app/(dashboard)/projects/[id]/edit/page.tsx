@@ -9,7 +9,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Hint } from "@/components/hint";
 import { projectApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 export default function EditProjectPage() {
     const params = useParams<{
         id: string;
@@ -65,7 +67,10 @@ export default function EditProjectPage() {
     return (<div className="mx-auto max-w-3xl">
       <Card>
         <CardHeader>
-          <CardTitle>Edit project</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            Edit project
+            <Hint>{hints.projects.edit}</Hint>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-5">
