@@ -101,6 +101,12 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         return list.filter((p) => p.namespace === nsFilter);
     }, [podsQuery.data?.pods, nsFilter]);
     const sorted = useMemo(() => [...filtered].sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name)), [filtered]);
+    const selectedPod = useMemo(() => {
+        if (!selected) {
+            return undefined;
+        }
+        return sorted.find((p) => p.namespace === selected.namespace && p.name === selected.name);
+    }, [selected, sorted]);
     const sortedRollup = useMemo(() => {
         const list =
             nsFilter === "all"
@@ -299,6 +305,11 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
                       </Button>
                     </div>) : null}
                 </div>
+                {selectedPod && selectedPod.status !== "Running" ? (<p className="text-xs text-muted">
+                    Pod phase is <span className="font-medium text-foreground">{selectedPod.status}</span>
+                    {selectedPod.health ? <> — {selectedPod.health}.</> : "."}{" "}
+                    Logs usually appear once a container is running; pick another container if you need init or sidecar output.
+                  </p>) : null}
                 <Textarea readOnly value={logBody} className="min-h-[220px] font-mono text-xs"/>
               </div>
             </>) : null}

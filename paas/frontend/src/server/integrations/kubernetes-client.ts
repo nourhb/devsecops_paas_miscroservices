@@ -224,13 +224,9 @@ function formatPodReady(pod: V1Pod): string {
     return `${ready}/${total}`;
 }
 function getPodContainers(pod: V1Pod): string[] {
-    const names = [
-        ...(pod.spec?.initContainers ?? []),
-        ...(pod.spec?.containers ?? [])
-    ]
-        .map((container) => container.name)
-        .filter(Boolean);
-    return [...new Set(names)];
+    const main = (pod.spec?.containers ?? []).map((container) => container.name).filter(Boolean);
+    const init = (pod.spec?.initContainers ?? []).map((container) => container.name).filter(Boolean);
+    return [...new Set([...main, ...init])];
 }
 function getPodHealth(pod: V1Pod): {
     health: string;

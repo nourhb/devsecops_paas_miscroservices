@@ -36,6 +36,11 @@ export default function RegisterPage() {
                 return;
             }
             const email = String(formData.get("email") || "").trim();
+            if (response.requiresVerification) {
+                const consoleMail = response.mailDelivery === "console" ? "&mailConsole=1" : "";
+                router.replace(`/login?pendingVerification=1&email=${encodeURIComponent(email)}${consoleMail}`);
+                return;
+            }
             const password = String(formData.get("password") || "");
             await login({ email, password });
             if (seq !== submitSeq.current) {
@@ -66,7 +71,7 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md backdrop-blur">
         <CardHeader>
           <CardTitle>Create your account</CardTitle>
-          <CardDescription>Access secure CI/CD workflows from one platform.</CardDescription>
+          <CardDescription>You will receive an email to verify your address before you can sign in.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>

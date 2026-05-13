@@ -100,7 +100,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer)),
                     notes: kubeApiServer
-                        ? `API server: ${kubeApiServer}`
+                        ? `API server: ${kubeApiServer}. When KUBERNETES_ENABLED=true, reachability uses the kubeconfig client (not a browser GET to this URL).`
                         : "Optional: Lens / k9s / dashboard URL. The Cluster page lists workloads when the API is connected."
                 },
                 {
@@ -128,7 +128,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "HTTP/S ingress controller for cluster services.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL")),
+                    notes: "From Docker Compose, the server may need INGRESS_NGINX_PROBE_URL (e.g. http://host.docker.internal:31504) if NEXT_PUBLIC_* uses localhost or is only reachable from the browser."
                 },
                 {
                     id: "cert-manager",

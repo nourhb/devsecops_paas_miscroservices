@@ -47,6 +47,8 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
+      # Must match the kubeconfig volume mount below (overrides a host-only path from .env).
+      KUBE_CONFIG_PATH: /home/nextjs/.kube/config
       NEXT_PUBLIC_API_BASE_URL: ""
       PAAS_STRICT_INTEGRATIONS: "false"
       JENKINS_BUILD_JOB_NAME: paas-deploy
