@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
+import { rollUpClusterFromProjects } from "@/lib/cluster-project-rollup";
 import type { Project } from "@/types";
 function formatTimestamp(value: string) {
     if (!value) {
@@ -60,39 +61,6 @@ function PodHealthPill({ health }: {
                 ? "warning"
                 : "neutral";
     return <StatusPill label={health || "Unknown"} tone={tone}/>;
-}
-function rollUpClusterFromProjects(projects: Project[]): {
-    runningPods: number;
-    unhealthyPods: number;
-    services: number;
-    deployments: number;
-    healthyDeployments: number;
-} {
-    const runningPods = projects.filter((p) => {
-        const d = (p.lastDeploymentStatus || "").toUpperCase();
-        if (d === "DEPLOYED" || d === "SUCCESS") {
-            return true;
-        }
-        return /\d+\s*running/i.test(p.podStatus || "") || /\brunning\b/i.test(p.podStatus || "");
-    }).length;
-    const unhealthyPods = projects.filter((p) => {
-        if ((p.lastDeploymentStatus || "").toUpperCase() === "FAILED") {
-            return true;
-        }
-        const ps = (p.podStatus || "").toUpperCase();
-        return ps.includes("FAIL") || ps.includes("ERROR") || ps.includes("CRASH") || ps === "UNKNOWN";
-    }).length;
-    const healthyDeployments = projects.filter((p) => {
-        const d = (p.lastDeploymentStatus || "").toUpperCase();
-        return d === "DEPLOYED" || d === "SUCCESS";
-    }).length;
-    return {
-        runningPods,
-        unhealthyPods,
-        services: projects.filter((p) => Boolean(p.url?.trim())).length,
-        deployments: projects.length,
-        healthyDeployments
-    };
 }
 function RecordStatusPill({ status }: {
     status: string;

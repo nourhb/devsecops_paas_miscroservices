@@ -198,7 +198,7 @@ export default function CreateProjectPage() {
                 <Label htmlFor="gitCredentialsId">Git credentials (Jenkins)</Label>
                 <Input id="gitCredentialsId" name="gitCredentialsId" value={gitCredentialsId} onChange={(event) => setGitCredentialsId(event.target.value)} placeholder="Optional: Jenkins credentialsId for private repos"/>
                 <p className="text-xs text-muted">
-                  If your repository is private, set a Jenkins credential and paste its <code className="rounded bg-muted px-1">credentialsId</code> here.
+                  If your repository is private, set a Jenkins credential and paste its <code className="inline-code">credentialsId</code> here.
                 </p>
               </div>
               <div className="space-y-2 md:col-span-2">
@@ -254,7 +254,7 @@ export default function CreateProjectPage() {
                 </div>
                 <p className="text-xs text-muted">
                   This is not stored in the project. Set the same value on the server as{" "}
-                  <code className="rounded bg-muted px-1">GITHUB_WEBHOOK_SECRET</code>.
+                  <code className="inline-code">GITHUB_WEBHOOK_SECRET</code>.
                 </p>
               </div>
             </div>
@@ -271,7 +271,7 @@ export default function CreateProjectPage() {
               <Textarea id="dockerfileDraft" value={dockerfileDraft} onChange={(e) => setDockerfileDraft(e.target.value)} className="min-h-[220px] font-mono text-xs" spellCheck={false}/>
               <label className="flex items-start gap-3 text-sm">
                 <Checkbox checked={dockerfileAcknowledged} onChange={(event) => setDockerfileAcknowledged(event.target.checked)} className="mt-0.5"/>
-                <span>I will add this file to the repository root as <code className="rounded bg-muted px-1">Dockerfile</code> before running a build or deploy.</span>
+                <span>I will add this file to the repository root as <code className="inline-code">Dockerfile</code> before running a build or deploy.</span>
               </label>
             </div> : null}
 
