@@ -129,7 +129,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL")),
-                    notes: "From Docker Compose, the server may need INGRESS_NGINX_PROBE_URL (e.g. http://host.docker.internal:31504) if NEXT_PUBLIC_* uses localhost or is only reachable from the browser."
+                    notes: "From Docker Compose, the server may need INGRESS_NGINX_PROBE_URL (e.g. http://host.docker.internal:31504) if NEXT_PUBLIC_* uses localhost. For many unreachable lab URLs at once, set INTEGRATIONS_PROBE_HOST_REMAP=oldHost=newHost (see docker-compose.env.example)."
                 },
                 {
                     id: "cert-manager",

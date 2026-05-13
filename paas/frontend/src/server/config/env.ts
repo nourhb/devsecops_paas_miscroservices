@@ -152,6 +152,8 @@ const envSchema = z.object({
     KUBE_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     /** When set, Platform hub probes this URL for Ingress NGINX instead of NEXT_PUBLIC_INGRESS_NGINX_URL (use from Docker for host/LAN reachability while the public URL stays browser-friendly). */
     INGRESS_NGINX_PROBE_URL: z.string().default(""),
+    /** Optional host rewrite for server-side probes only, format oldHost=newHost (e.g. 192.168.56.129=host.docker.internal when the UI runs in Docker but URLs use a VirtualBox/lab VM IP). */
+    INTEGRATIONS_PROBE_HOST_REMAP: z.string().default(""),
     INTEGRATIONS_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     APPS_PUBLIC_URL_SCHEME: z.string().default("https"),
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
@@ -362,6 +364,7 @@ const parsed = envSchema.safeParse({
     KUBE_CONFIG_PATH: process.env.KUBE_CONFIG_PATH,
     KUBE_TLS_SKIP_VERIFY: process.env.KUBE_TLS_SKIP_VERIFY,
     INGRESS_NGINX_PROBE_URL: process.env.INGRESS_NGINX_PROBE_URL,
+    INTEGRATIONS_PROBE_HOST_REMAP: process.env.INTEGRATIONS_PROBE_HOST_REMAP,
     INTEGRATIONS_TLS_SKIP_VERIFY: process.env.INTEGRATIONS_TLS_SKIP_VERIFY,
     APPS_PUBLIC_URL_SCHEME: process.env.APPS_PUBLIC_URL_SCHEME,
     APPS_PUBLIC_BASE_DOMAIN: process.env.APPS_PUBLIC_BASE_DOMAIN,

@@ -1,6 +1,7 @@
-import { Agent, fetch as undiciFetch } from "undici";
-import { env } from "@/server/config/env";
 import { INTEGRATION_HTTP_TIMEOUT_MS } from "@/server/constants/deploy";
+import { env } from "@/server/config/env";
+import { remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
+import { Agent, fetch as undiciFetch } from "undici";
 const argoInsecureAgent = new Agent({
     connect: {
         rejectUnauthorized: false
@@ -10,6 +11,7 @@ function withTimeoutSignal(init: RequestInit, controller: AbortController): Requ
     return { ...init, signal: controller.signal };
 }
 export async function argocdIntegrationFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const resolvedUrl = remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = INTEGRATION_HTTP_TIMEOUT_MS;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`Integration request timed out after ${ms}ms`)), ms);
@@ -25,17 +27,20 @@ export async function argocdIntegrationFetch(url: string, init: RequestInit = {}
             parent.addEventListener("abort", onParentAbort, { once: true });
         }
     }
-    const skipTls = env.ARGOCD_TLS_SKIP_VERIFY === "true" || env.INTEGRATIONS_TLS_SKIP_VERIFY === "true";
+    const skipTls =
+        env.ARGOCD_TLS_SKIP_VERIFY === "true" ||
+        env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" ||
+        env.KUBE_TLS_SKIP_VERIFY === "true";
     try {
         const nextInit = withTimeoutSignal(init, controller);
         if (skipTls) {
-            const res = await undiciFetch(url, {
+            const res = await undiciFetch(resolvedUrl, {
                 ...nextInit,
                 dispatcher: argoInsecureAgent
             } as Parameters<typeof undiciFetch>[1]);
             return res as unknown as Response;
         }
-        return await fetch(url, nextInit);
+        return await fetch(resolvedUrl, nextInit);
     }
     finally {
         clearTimeout(timer);
