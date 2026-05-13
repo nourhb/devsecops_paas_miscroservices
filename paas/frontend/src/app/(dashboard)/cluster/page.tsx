@@ -6,7 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Hint } from "@/components/hint";
 import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { rollUpClusterFromProjects } from "@/lib/cluster-project-rollup";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
@@ -298,7 +300,10 @@ export default function ClusterPage() {
       <section className="flex flex-col gap-4 rounded-3xl border border-border/80 bg-card/85 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.12)] backdrop-blur lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted">Cluster status</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Kubernetes Control View</h2>
+          <h2 className="mt-2 flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight text-foreground">
+            Kubernetes Control View
+            <Hint side="bottom">{hints.cluster.header}</Hint>
+          </h2>
           <p className="mt-2 max-w-3xl text-sm text-muted">
             {useControlPlaneFallback
             ? "Kubernetes is not connected. Workload counts and rows here reflect projects registered in this app and pipeline status. Connect a Kubernetes API to list live pods, services, and deployments from the cluster."

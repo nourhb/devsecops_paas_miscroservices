@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Hint } from "@/components/hint";
 import { projectApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import type { Project } from "@/types";
 export default function ProjectsPage() {
     const queryClient = useQueryClient();
@@ -29,7 +31,10 @@ export default function ProjectsPage() {
     return (<div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Projects</h2>
+          <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
+            Projects
+            <Hint side="bottom">{hints.projects.list}</Hint>
+          </h2>
           <p className="text-sm text-muted">Git-backed services with CI/CD, security scans, and deployments.</p>
         </div>
         <Button asChild>
@@ -39,7 +44,10 @@ export default function ProjectsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All projects</CardTitle>
+          <CardTitle className="flex items-center gap-1.5">
+            All projects
+            <Hint>{hints.projects.list}</Hint>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {projectsQuery.isLoading ? (<div className="space-y-2">

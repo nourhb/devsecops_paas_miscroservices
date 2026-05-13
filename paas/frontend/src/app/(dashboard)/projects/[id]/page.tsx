@@ -10,9 +10,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
+import { Hint } from "@/components/hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -254,7 +256,10 @@ export default function ProjectDetailsPage() {
             <FolderGit2 className="h-8 w-8 shrink-0" aria-hidden/>
             <span className="text-xs font-semibold uppercase tracking-wider">Project</span>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">{project.projectName}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight">
+            {project.projectName}
+            <Hint side="bottom">{hints.projects.detailHeader}</Hint>
+          </h1>
           <a href={project.gitRepositoryUrl} target="_blank" rel="noopener noreferrer" className="flex max-w-full items-start gap-2 font-mono text-sm text-primary hover:underline">
             <span className="min-w-0 break-all">{project.gitRepositoryUrl}</span>
             <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80"/>
@@ -298,9 +303,10 @@ export default function ProjectDetailsPage() {
       
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
             <Play className="h-5 w-5 text-primary"/>
             Operations
+            <Hint>{hints.projects.operations}</Hint>
           </CardTitle>
           <CardDescription>
             Build and deploy use the selected platform backend while keeping the same project workflow and live status view.
@@ -352,9 +358,10 @@ export default function ProjectDetailsPage() {
       
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
             <History className="h-5 w-5 text-primary"/>
             Deployments
+            <Hint>{hints.projects.deployments}</Hint>
           </CardTitle>
           <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>Deploy history for this project (auto-refresh every 5s). <span className="font-medium text-foreground">View</span> opens live logs.</span>
@@ -420,7 +427,10 @@ export default function ProjectDetailsPage() {
       
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Argo CD</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+            Argo CD
+            <Hint>{hints.projects.argoCard}</Hint>
+          </CardTitle>
           <CardDescription>Application health and sync status when Argo API is configured.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -445,7 +455,10 @@ export default function ProjectDetailsPage() {
       <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Repository</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Repository
+              <Hint>{hints.projects.repositoryCard}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div>
@@ -475,7 +488,10 @@ export default function ProjectDetailsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Runtime</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Runtime
+              <Hint>{hints.projects.runtimeCard}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div>
@@ -495,7 +511,10 @@ export default function ProjectDetailsPage() {
 
         <Card className="md:col-span-2 lg:col-span-1">
           <CardHeader>
-            <CardTitle className="text-base">Scaffolding</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Scaffolding
+              <Hint>{hints.projects.scaffoldingCard}</Hint>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted">
             <p>
@@ -513,7 +532,10 @@ export default function ProjectDetailsPage() {
 
       
       <section>
-        <h2 className="mb-4 text-lg font-semibold">Platform areas</h2>
+        <h2 className="mb-4 flex flex-wrap items-center gap-2 text-lg font-semibold">
+          Platform areas
+          <Hint>{hints.projects.platformAreas}</Hint>
+        </h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {navTiles.map((tile) => {
             const Icon = tile.icon;
@@ -545,7 +567,10 @@ export default function ProjectDetailsPage() {
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Build logs</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Build logs
+              <Hint>{hints.projects.buildLogsCard}</Hint>
+            </CardTitle>
             <CardDescription>{project.buildProvider} build stage output</CardDescription>
           </CardHeader>
           <CardContent>
@@ -557,7 +582,10 @@ export default function ProjectDetailsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Deployment logs</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Deployment logs
+              <Hint>{hints.projects.deploymentLogsCard}</Hint>
+            </CardTitle>
             <CardDescription>GitOps, registry, policy gates, and Argo CD</CardDescription>
           </CardHeader>
           <CardContent>

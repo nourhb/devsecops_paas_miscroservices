@@ -12,7 +12,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Hint } from "@/components/hint";
 import { argocdApi, kubernetesApi, monitoringApi, pipelineApi } from "@/lib/api";
+import { hints } from "@/lib/app-hints";
 import type { MonitoringKubernetesPod } from "@/types";
 import { cn } from "@/lib/utils";
 const chartCpu = "#0ea5e9";
@@ -154,7 +156,10 @@ export default function MonitoringPage() {
         <div className="min-w-0 space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Observability</p>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Monitoring
+            <span className="flex flex-wrap items-center gap-2">
+              Monitoring
+              <Hint side="bottom">{hints.monitoring.pageHeading}</Hint>
+            </span>
             {snap ? (<span className="mt-1 block text-base font-normal text-muted">
                 {snap.project.projectName}
               </span>) : null}
@@ -183,9 +188,10 @@ export default function MonitoringPage() {
 
       {snapshotQuery.isError ? (<Card className="border-danger/30 bg-danger/5">
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
               <AlertCircle className="h-5 w-5"/>
               Could not load monitoring snapshot
+              <Hint side="left">{hints.monitoring.snapshotError}</Hint>
             </CardTitle>
             <CardDescription className="space-y-1">
               <span className="block">Check permissions, Prometheus, or Kubernetes settings, then retry.</span>
@@ -200,7 +206,10 @@ export default function MonitoringPage() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted">CPU (instant)</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
+                  CPU (instant)
+                  <Hint>{hints.monitoring.cpuInstant}</Hint>
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-2xl font-semibold tabular-nums">
                 {snap.runtime.cpuUsagePercent}%
@@ -211,14 +220,20 @@ export default function MonitoringPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted">Memory (instant)</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
+                  Memory (instant)
+                  <Hint>{hints.monitoring.memInstant}</Hint>
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-2xl font-semibold tabular-nums">{snap.runtime.memoryUsagePercent}%</CardContent>
               <CardDescription className="px-6 pb-4 text-xs">Same PromQL window as the CPU card.</CardDescription>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted">Deploy / build</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
+                  Deploy / build
+                  <Hint>{hints.monitoring.deployBuildStrip}</Hint>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -230,7 +245,10 @@ export default function MonitoringPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted">Namespace &amp; image</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
+                  Namespace &amp; image
+                  <Hint>{hints.monitoring.namespaceImage}</Hint>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
                 <p className="font-mono text-xs text-foreground">{snap.project.namespace}</p>
@@ -242,7 +260,10 @@ export default function MonitoringPage() {
           <section className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Cluster CPU — last hour</CardTitle>
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                  Cluster CPU — last hour
+                  <Hint>{hints.monitoring.cpuTrend}</Hint>
+                </CardTitle>
                 <CardDescription>
                   Prometheus <span className="font-mono text-xs">query_range</span> using <span className="font-mono text-xs">PROMETHEUS_QUERY_CPU</span> (or default node CPU idle).
                 </CardDescription>
@@ -263,7 +284,10 @@ export default function MonitoringPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Cluster memory — last hour</CardTitle>
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                  Cluster memory — last hour
+                  <Hint>{hints.monitoring.memTrend}</Hint>
+                </CardTitle>
                 <CardDescription>
                   Uses <span className="font-mono text-xs">PROMETHEUS_QUERY_MEMORY</span> (or default MemAvailable / MemTotal).
                 </CardDescription>
@@ -287,9 +311,10 @@ export default function MonitoringPage() {
           <section className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-1">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Boxes className="h-5 w-5 text-primary"/>
                   Pods in namespace
+                  <Hint>{hints.monitoring.podsByPhase}</Hint>
                 </CardTitle>
                 <CardDescription>
                   <span className="font-mono text-xs">{snap.project.namespace}</span>
@@ -312,9 +337,10 @@ export default function MonitoringPage() {
             </Card>
             <Card className="xl:col-span-2">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Server className="h-5 w-5 text-primary"/>
                   Workloads &amp; pod logs
+                  <Hint>{hints.monitoring.workloadsLogs}</Hint>
                 </CardTitle>
                 <CardDescription>
                   Open logs for a container; uses the same Kubernetes log API as Cluster and Dashboard. Pod status from {snap.project.namespace}.
@@ -361,9 +387,10 @@ export default function MonitoringPage() {
           <section className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Activity className="h-5 w-5 text-primary"/>
                   GitOps (Argo CD)
+                  <Hint>{hints.monitoring.gitopsSnapshot}</Hint>
                 </CardTitle>
                 <CardDescription>Application sync and health for this project.</CardDescription>
               </CardHeader>
@@ -380,7 +407,10 @@ export default function MonitoringPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Workspace supply chain rollups</CardTitle>
+                <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                  Workspace supply chain rollups
+                  <Hint>{hints.monitoring.supplyChainRollups}</Hint>
+                </CardTitle>
                 <CardDescription>Derived from all non-deleted projects (Cosign/Trivy-style rollups in metrics service), not only this app.</CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-3 text-sm">
@@ -406,7 +436,10 @@ export default function MonitoringPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Logs</CardTitle>
+              <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                Logs
+                <Hint>{hints.monitoring.logTabs}</Hint>
+              </CardTitle>
               <CardDescription>
                 Build and deployment buffers from the platform; pod log is live from Kubernetes when configured.
               </CardDescription>
@@ -445,7 +478,10 @@ export default function MonitoringPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Grafana</CardTitle>
+              <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                Grafana
+                <Hint>{hints.monitoring.grafanaJump}</Hint>
+              </CardTitle>
               <CardDescription>
                 Charts above use your configured Prometheus. Grafana remains the place for advanced dashboards and ad-hoc PromQL.
               </CardDescription>

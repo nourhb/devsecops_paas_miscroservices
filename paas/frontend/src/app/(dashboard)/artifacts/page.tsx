@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Hint } from "@/components/hint";
+import { hints } from "@/lib/app-hints";
 function formatDate(value: string): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "\u2014" : date.toLocaleString();
@@ -46,7 +48,10 @@ export default function ArtifactsPage() {
             <header className="flex flex-col gap-4 border-b border-border/60 pb-8 sm:flex-row sm:items-end sm:justify-between">
                 <div className="space-y-1">
                     <p className="text-xs font-medium text-muted">Build Outputs</p>
-                    <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Image artifacts</h1>
+                    <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+                        Image artifacts
+                        <Hint side="bottom">{hints.artifacts.header}</Hint>
+                    </h1>
                 </div>
                 <Button variant="outline" onClick={() => void loadArtifacts(true)} disabled={refreshing || loading}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`}/>
@@ -57,9 +62,10 @@ export default function ArtifactsPage() {
             <section className="grid gap-4 md:grid-cols-2">
                 <Card>
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-base">
+                        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                             <Package className="h-5 w-5 text-primary"/>
                             Latest image
+                            <Hint>{hints.artifacts.latestImage}</Hint>
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3 text-sm">
@@ -80,7 +86,10 @@ export default function ArtifactsPage() {
 
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-base">Registry summary</CardTitle>
+                        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                            Registry summary
+                            <Hint>{hints.artifacts.registrySummary}</Hint>
+                        </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3 text-sm">
                         <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
@@ -101,7 +110,10 @@ export default function ArtifactsPage() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-base">Image artifacts</CardTitle>
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                        Image artifacts
+                        <Hint>{hints.artifacts.table}</Hint>
+                    </CardTitle>
                 </CardHeader>
                 <CardContent className="px-0 pb-0">
                     {loading ? (<p className="px-6 pb-6 text-sm text-muted">Loading artifacts...</p>) : error ? (<p className="px-6 pb-6 text-sm text-danger">{error}</p>) : artifacts.length === 0 ? (<p className="px-6 pb-6 text-sm text-muted">No image artifacts found yet. Run a build or deploy first.</p>) : (<Table>

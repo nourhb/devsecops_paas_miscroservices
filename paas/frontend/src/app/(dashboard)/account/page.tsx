@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Hint } from "@/components/hint";
 import { useAuth } from "@/hooks/use-auth";
+import { hints } from "@/lib/app-hints";
 export default function AccountSettingsPage() {
     const { user, refreshUser, updateProfile } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -86,9 +88,10 @@ export default function AccountSettingsPage() {
     return (<div className="mx-auto max-w-xl space-y-6">
       <div>
         <p className="text-xs uppercase tracking-wide text-muted">Account</p>
-        <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight">
+        <h1 className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
           <UserRound className="h-7 w-7 text-primary"/>
           Profile & security
+          <Hint side="bottom">{hints.account.pageHeading}</Hint>
         </h1>
         <p className="mt-2 text-sm text-muted">
           Update your name{isKeycloak ? "" : ", sign-in email, and password"}.

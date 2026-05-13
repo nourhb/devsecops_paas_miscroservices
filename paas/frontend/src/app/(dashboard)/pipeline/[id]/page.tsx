@@ -10,12 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
+import { Hint } from "@/components/hint";
 import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
+import { hints } from "@/lib/app-hints";
 import { cn } from "@/lib/utils";
 const STAGES = [
     { key: "build", label: "Build", description: "Jenkins compile & image" },
@@ -229,7 +231,10 @@ export default function PipelinePage() {
             <Workflow className="h-8 w-8 shrink-0"/>
             <span className="text-xs font-semibold uppercase tracking-wider">CI/CD</span>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Pipeline</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight">
+            Pipeline
+            <Hint side="bottom">{hints.pipeline.pageHeading}</Hint>
+          </h1>
           <p className="text-sm text-muted">
             <span className="font-medium text-foreground">{project.projectName}</span>
             <span className="mx-2 text-border">·</span>
@@ -258,7 +263,10 @@ export default function PipelinePage() {
       
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Delivery path</CardTitle>
+          <CardTitle className="text-base flex flex-wrap items-center gap-2">
+            Delivery path
+            <Hint>{hints.pipeline.deliveryPath}</Hint>
+          </CardTitle>
           <CardDescription>
             High-level phases below. The Jenkins inline job (<span className="font-mono text-xs">Jenkinsfile.paas-deploy</span>) runs{" "}
             <strong className="font-medium text-foreground">{PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length}</strong> numbered stages; search the build
@@ -285,7 +293,10 @@ export default function PipelinePage() {
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1">
-              <CardTitle className="text-base">Jenkins pipeline — 12 deploy steps</CardTitle>
+              <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                Jenkins pipeline — 12 deploy steps
+                <Hint>{hints.pipeline.jenkinsSteps}</Hint>
+              </CardTitle>
               <CardDescription>
                 All <strong className="font-medium text-foreground">{PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length}</strong> steps from{" "}
                 <span className="font-mono text-xs">Jenkinsfile.paas-deploy</span> are listed below. When{" "}
@@ -388,9 +399,10 @@ export default function PipelinePage() {
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <GitBranch className="h-5 w-5 text-primary"/>
               Jenkins
+              <Hint>{hints.pipeline.jenkinsActions}</Hint>
             </CardTitle>
             <CardDescription>
               Parameterized builds against your controller. Set{" "}
@@ -417,9 +429,10 @@ export default function PipelinePage() {
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <Server className="h-5 w-5 text-primary"/>
               Argo CD
+              <Hint>{hints.pipeline.argoPanel}</Hint>
             </CardTitle>
             <CardDescription>
               Application health and sync state. Full deploy runs sync after gates and GitOps update.
@@ -456,9 +469,10 @@ export default function PipelinePage() {
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <Shield className="h-5 w-5 text-primary"/>
               Security Analysis
+              <Hint>{hints.pipeline.pipelineSecurity}</Hint>
             </CardTitle>
             <CardDescription>
               Dependency-Track metrics linked to the pipeline outcome so the dashboard shows build plus security, not just build alone.
@@ -492,7 +506,10 @@ export default function PipelinePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Build + Security</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Build + Security
+              <Hint>{hints.pipeline.buildSecuritySummary}</Hint>
+            </CardTitle>
             <CardDescription>Rough status for whoever is on-call.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -567,7 +584,10 @@ export default function PipelinePage() {
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Build console</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Build console
+              <Hint>{hints.pipeline.buildConsole}</Hint>
+            </CardTitle>
             <CardDescription>Jenkins and compile output</CardDescription>
           </CardHeader>
           <CardContent>
@@ -579,7 +599,10 @@ export default function PipelinePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Deployment &amp; GitOps</CardTitle>
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              Deployment &amp; GitOps
+              <Hint>{hints.pipeline.deploymentConsole}</Hint>
+            </CardTitle>
             <CardDescription>Registry, policy gates, Helm, and Argo CD trail</CardDescription>
           </CardHeader>
           <CardContent>

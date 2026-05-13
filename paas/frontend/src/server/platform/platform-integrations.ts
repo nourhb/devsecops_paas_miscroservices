@@ -59,6 +59,9 @@ function dockerHubProfileUrl(username: string): string {
 function publicEnv(name: string): string {
     return trimUrl(realValueOrEmpty(process.env[name]));
 }
+function artifactoryPublicOrServer(): string {
+    return firstNonEmpty(publicEnv("NEXT_PUBLIC_ARTIFACTORY_URL"), trimUrl(realValueOrEmpty(env.ARTIFACTORY_URL)));
+}
 function kubeApiServerFromConfig(): string {
     const raw = trimUrl(process.env.KUBE_API_SERVER);
     if (raw) {
@@ -109,6 +112,15 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     internalPath: "/cluster",
                     configured: env.KUBERNETES_ENABLED === "true" && Boolean(trimUrl(env.KUBE_CONFIG_PATH)),
                     notes: "Requires server-side cluster access to list pods and resources."
+                },
+                {
+                    id: "portainer",
+                    name: "Portainer",
+                    description: "Docker/Kubernetes UI for clusters and edge agents.",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_PORTAINER_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_PORTAINER_URL")),
+                    notes: "Often installed in namespace portainer; deep link the UI here."
                 },
                 {
                     id: "ingress-nginx",
@@ -227,6 +239,23 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     configured: Boolean(publicEnv("NEXT_PUBLIC_ALERTMANAGER_URL"))
                 },
                 {
+                    id: "pushgateway",
+                    name: "Pushgateway",
+                    description: "Accept metrics pushed from batch jobs for Prometheus.",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"))
+                },
+                {
+                    id: "kube-state-metrics",
+                    name: "kube-state-metrics",
+                    description: "Kubernetes object metrics consumed by Prometheus / Grafana dashboards.",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_KUBE_STATE_METRICS_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KUBE_STATE_METRICS_URL")),
+                    notes: "Usually scraped without a browser UI; set a metrics or docs URL if you expose one."
+                },
+                {
                     id: "node-exporter",
                     name: "Node exporter",
                     description: "Host hardware and OS metrics for Prometheus.",
@@ -234,6 +263,22 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: publicEnv("NEXT_PUBLIC_NODE_EXPORTER_UI_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_NODE_EXPORTER_UI_URL")),
                     notes: "Typically scraped by Prometheus without a browser UI; link targets or docs if you expose one."
+                },
+                {
+                    id: "kibana",
+                    name: "Kibana",
+                    description: "Elastic Stack dashboards and Discover.",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_KIBANA_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KIBANA_URL"))
+                },
+                {
+                    id: "elasticsearch",
+                    name: "Elasticsearch",
+                    description: "Search and analytics engine (logs, APM, security).",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL"))
                 }
             ]
         },
@@ -242,14 +287,6 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
             title: "CI / CD",
             description: "Build, GitOps, and source control.",
             items: [
-                {
-                    id: "pushgateway",
-                    name: "Pushgateway",
-                    description: "Accept metrics pushed from batch jobs for Prometheus.",
-                    kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"))
-                },
                 {
                     id: "jenkins",
                     name: "Jenkins",
@@ -302,8 +339,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
             items: [
                 {
                     id: "harbor-dockerhub",
-                    name: "Primary registry (Harbor / Docker Hub)",
-                    description: "Image push target configured for deploy pipelines.",
+                    name: "Harbor (primary OCI registry)",
+                    description: "Harbor, or Docker Hub when HARBOR_BASE_URL targets docker.io / hub.",
                     kind: "external",
                     href: trimUrl(realValueOrEmpty(env.HARBOR_BASE_URL)) || null,
                     configured: harborConfigured
@@ -329,8 +366,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "JFrog Artifactory",
                     description: "Universal artifact repository.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_ARTIFACTORY_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_ARTIFACTORY_URL"))
+                    href: artifactoryPublicOrServer() || null,
+                    configured: Boolean(artifactoryPublicOrServer())
                 },
                 {
                     id: "artifacts-spring",
@@ -364,6 +401,14 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL"))
+                },
+                {
+                    id: "owasp-dependency-check",
+                    name: "OWASP Dependency-Check",
+                    description: "SCA for vulnerable dependencies (NVD-backed); often run in Jenkins with HTML reports.",
+                    kind: "external",
+                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_DEPENDENCY_CHECK_URL"), publicEnv("NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL")) || null,
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_DEPENDENCY_CHECK_URL"), publicEnv("NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL")))
                 },
                 {
                     id: "dockle",
@@ -423,6 +468,14 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_HAPROXY_STATS_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_HAPROXY_STATS_URL"))
+                },
+                {
+                    id: "edge-iot",
+                    name: "Edge / Raspberry Pi",
+                    description: "Optional link to edge gateway, Pi fleet, or industrial dashboards outside the primary cluster.",
+                    kind: "external",
+                    href: publicEnv("NEXT_PUBLIC_EDGE_IOT_URL") || null,
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_EDGE_IOT_URL"))
                 },
                 {
                     id: "consul",
