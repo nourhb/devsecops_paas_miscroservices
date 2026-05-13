@@ -308,7 +308,7 @@ export default function PipelinePage() {
               </Button>) : null}
           </div>
           {wfStages ? (<div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
-              <code className="rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground/90">
+              <code className="inline-code px-2 py-1 text-[11px]">
                 {wfStages.displayJobName || wfStages.jobUrlPath || "—"}
               </code>
               {typeof wfStages.buildNumber === "number" ? <Badge variant="outline">#{wfStages.buildNumber}</Badge> : null}
@@ -382,7 +382,7 @@ export default function PipelinePage() {
             </CardTitle>
             <CardDescription>
               Parameterized builds against your controller. Set{" "}
-              <code className="rounded bg-muted/60 px-1">JENKINS_*</code> env vars for live integration.
+              <code className="inline-code">JENKINS_*</code> env vars for live integration.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -417,7 +417,7 @@ export default function PipelinePage() {
             {argoQuery.isLoading ? (<Skeleton className="h-20 w-full"/>) : (<>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm text-muted">Application</span>
-                  <code className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">
+                  <code className="inline-code px-2 py-1">
                     {argoQuery.data?.appName ?? "\u2014"}
                   </code>
                 </div>

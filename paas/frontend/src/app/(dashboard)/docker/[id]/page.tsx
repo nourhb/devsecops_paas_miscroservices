@@ -95,9 +95,9 @@ export default function DockerPage() {
       </Card>
 
       <p className="text-xs text-muted">
-        Set <code className="rounded bg-muted/50 px-1">DOCKERHUB_USERNAME</code>,{" "}
-        <code className="rounded bg-muted/50 px-1">DOCKERHUB_TOKEN</code>, and{" "}
-        <code className="rounded bg-muted/50 px-1">DOCKERHUB_NAMESPACE</code> to verify registry credentials. Without
+        Set <code className="inline-code">DOCKERHUB_USERNAME</code>,{" "}
+        <code className="inline-code">DOCKERHUB_TOKEN</code>, and{" "}
+        <code className="inline-code">DOCKERHUB_NAMESPACE</code> to verify registry credentials. Without
         them, pushes are simulated and still written to history for auditing.
       </p>
     </div>);

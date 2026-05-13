@@ -357,7 +357,7 @@ export default function IntegrationsPage() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Integration catalog</h2>
             <p className="mt-1 text-sm text-muted">
-              Everything we can link or open from configuration. Items without a URL need env vars on the Next.js server (see project <code className="rounded bg-muted px-1 py-0.5 text-xs">docker-compose.env</code> / <code className="rounded bg-muted px-1 py-0.5 text-xs">.env</code>).
+              Everything we can link or open from configuration. Items without a URL need env vars on the Next.js server (see project <code className="inline-code">docker-compose.env</code> / <code className="inline-code">.env</code>).
             </p>
           </div>
           <div className="space-y-6">

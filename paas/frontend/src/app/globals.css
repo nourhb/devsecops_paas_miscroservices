@@ -54,3 +54,10 @@ body {
   background-color: hsl(var(--border));
   border-radius: 999px;
 }
+
+@layer components {
+  /* Use inside prose / text-muted: avoids same-color fg+bg as raw bg-muted + inherited text-muted */
+  .inline-code {
+    @apply box-decoration-clone rounded-md border border-border bg-foreground/[0.07] px-1.5 py-0.5 font-mono text-[0.8125rem] font-medium leading-snug text-foreground dark:bg-foreground/[0.12];
+  }
+}
