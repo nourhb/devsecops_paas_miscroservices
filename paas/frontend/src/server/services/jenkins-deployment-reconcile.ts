@@ -6,6 +6,7 @@ import { getBuildBackend } from "@/server/build-backend";
 import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 import { promoteDeploymentAfterJenkinsSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { updateProject } from "@/server/projects/project-service";
 function jenkinsConfigured(): boolean {
     return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
@@ -81,9 +82,7 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
         await promoteDeploymentAfterJenkinsSuccess(deploymentId, projectId, projectName, buildNum, logTail);
         return;
     }
-    const msg = meta.result === "ABORTED"
-        ? "Jenkins pipeline was cancelled or aborted."
-        : `Build backend finished with result: ${meta.result ?? "UNKNOWN"}`;
+    const msg = jenkinsResultUserMessage(meta.result, logTail);
     await recordDeploymentFailure(deploymentId, projectId, {
         reason: DeploymentFailureReason.JENKINS,
         message: msg,

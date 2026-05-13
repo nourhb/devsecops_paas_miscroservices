@@ -9,6 +9,7 @@ import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { IntegrationError } from "@/server/http/errors";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { jenkinsClient, resolveJenkinsJobNameForProject } from "@/server/integrations/devsecops-clients";
+import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
@@ -242,7 +243,7 @@ export class JenkinsBuildBackend implements BuildBackend {
                         }
                         return;
                     }
-                    const backendMsg = `Build backend finished with result: ${meta.result ?? "UNKNOWN"}`;
+                    const backendMsg = jenkinsResultUserMessage(meta.result, logTail);
                     await recordDeploymentFailure(args.deploymentId, projectId, {
                         reason: DeploymentFailureReason.JENKINS,
                         message: backendMsg,

@@ -15,7 +15,7 @@ const primaryNav = [
 ] as const;
 export function SideNav() {
     const pathname = usePathname();
-    return (<aside className="hidden min-h-screen w-64 shrink-0 border-r border-border bg-card p-4 lg:block">
+    return (<aside className="hidden w-64 shrink-0 border-r border-border bg-card p-4 lg:sticky lg:top-0 lg:block lg:h-screen lg:max-h-screen lg:overflow-y-auto lg:self-start">
       <div className="mb-8">
         <p className="text-xs uppercase tracking-widest text-muted">DevSecOps PaaS</p>
         <h1 className="text-2xl font-semibold">Control Plane</h1>

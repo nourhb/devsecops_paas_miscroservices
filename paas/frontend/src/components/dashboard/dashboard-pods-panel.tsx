@@ -136,7 +136,7 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Filter by namespace" value={nsFilter} onChange={(event) => setNsFilter(event.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30">
-            <option value="all">All namespaces</option>
+            <option value="all">Cluster-wide</option>
             {namespaces.map((n) => <option key={n} value={n}>
                 {n}
               </option>)}
