@@ -162,14 +162,15 @@ function IntegrationItemRow({ item }: {
             if (item.internalPath || !item.configured || canOpenExternal) {
                 return null;
             }
-            if (item.kind === "cli") {
-                return <span className="text-xs text-muted">No web URL (CLI / config)</span>;
+            const id = (item.id ?? "").toLowerCase();
+            if (id === "cosign" || item.name === "Cosign") {
+                return <span className="text-xs text-muted">CLI / keys (no web URL)</span>;
             }
-            if (item.id === "kyverno" || item.id === "opa-gatekeeper") {
+            if (id === "kyverno" || id === "opa-gatekeeper") {
                 return <span className="text-xs text-muted">Optional dashboard URL</span>;
             }
-            if (item.id === "cosign") {
-                return <span className="text-xs text-muted">CLI / keys (no web URL)</span>;
+            if (item.kind === "cli") {
+                return <span className="text-xs text-muted">No web URL (CLI / config)</span>;
             }
             return <span className="text-xs text-muted">No URL in env</span>;
         })()}

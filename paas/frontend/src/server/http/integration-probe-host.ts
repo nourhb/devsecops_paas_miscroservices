@@ -34,3 +34,34 @@ export function remapIntegrationProbeHost(url: string, remapSpec: string): strin
     }
     return out;
 }
+
+/**
+ * True when the URL host matches any left-hand side of INTEGRATIONS_PROBE_HOST_REMAP.
+ * In that case remapping often sends lab NodePorts to host.docker.internal / 172.17.0.1 (wrong for k3s on a VM);
+ * callers can skip remap so the original host is probed.
+ */
+export function probeHostIsRemapSource(url: string, remapSpec: string): boolean {
+    const raw = remapSpec.trim();
+    if (!raw) {
+        return false;
+    }
+    let host: string;
+    try {
+        host = new URL(url).hostname.toLowerCase();
+    }
+    catch {
+        return false;
+    }
+    for (const part of raw.split(/[,;]/)) {
+        const spec = part.trim();
+        const eq = spec.indexOf("=");
+        if (eq <= 0) {
+            continue;
+        }
+        const fromHost = spec.slice(0, eq).trim().toLowerCase();
+        if (fromHost && host === fromHost) {
+            return true;
+        }
+    }
+    return false;
+}
