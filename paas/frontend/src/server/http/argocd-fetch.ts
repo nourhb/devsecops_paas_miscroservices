@@ -1,6 +1,6 @@
 import { INTEGRATION_HTTP_TIMEOUT_MS } from "@/server/constants/deploy";
 import { env } from "@/server/config/env";
-import { remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
+import { probeHostIsRemapSource, remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
 import { Agent, fetch as undiciFetch } from "undici";
 const argoInsecureAgent = new Agent({
     connect: {
@@ -11,7 +11,8 @@ function withTimeoutSignal(init: RequestInit, controller: AbortController): Requ
     return { ...init, signal: controller.signal };
 }
 export async function argocdIntegrationFetch(url: string, init: RequestInit = {}): Promise<Response> {
-    const resolvedUrl = remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+    const skipRemap = probeHostIsRemapSource(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+    const resolvedUrl = skipRemap ? url : remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = INTEGRATION_HTTP_TIMEOUT_MS;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`Integration request timed out after ${ms}ms`)), ms);
