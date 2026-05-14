@@ -5,7 +5,6 @@ import { appendUnreachableProbeHint } from "@/server/http/integration-probe-hint
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
 import type { PlatformIntegrationItem, PlatformIntegrationReachability, PlatformIntegrationsResponse } from "@/types";
-const PROBE_TIMEOUT_MS = 4500;
 const CONCURRENCY = 12;
 function joinUrl(base: string, suffix: string): string {
     const b = base.replace(/\/+$/, "");
@@ -28,12 +27,13 @@ type HttpProbeCtx = {
 };
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const t0 = Date.now();
+    const timeoutMs = env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS;
     try {
         const res = await integrationFetch(url, {
             method: "GET",
             redirect: "follow",
             ...init
-        }, PROBE_TIMEOUT_MS);
+        }, timeoutMs);
         const ms = Date.now() - t0;
         if (res.ok || res.status === 301 || res.status === 302 || res.status === 401 || res.status === 403) {
             return {
@@ -136,6 +136,20 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         };
     }
     if (!item.href) {
+        if (item.id === "kyverno" && env.POLICY_ENGINE === "kyverno") {
+            return {
+                state: "reachable",
+                latencyMs: 0,
+                message: "POLICY_ENGINE=kyverno — admission policies in-cluster (optional NEXT_PUBLIC_KYVERNO_UI_URL)."
+            };
+        }
+        if (item.id === "opa-gatekeeper" && env.POLICY_ENGINE === "gatekeeper") {
+            return {
+                state: "reachable",
+                latencyMs: 0,
+                message: "POLICY_ENGINE=gatekeeper — Gatekeeper admission (optional dashboard URL)."
+            };
+        }
         return {
             state: "skipped",
             message: "No URL configured"
@@ -206,8 +220,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
-            const base = env.JENKINS_BASE_URL.replace(/\/+$/, "");
-            return httpProbe(`${base}/api/json`, {
+            const probeBase = realValueOrEmpty(env.JENKINS_PROBE_URL).replace(/\/+$/, "") || env.JENKINS_BASE_URL.replace(/\/+$/, "");
+            return httpProbe(`${probeBase}/api/json`, {
                 headers: {
                     Authorization: jenkinsAuthHeader()
                 }
@@ -262,7 +276,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
         }
         case "pushgateway": {
-            return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
+            const base = realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            return httpProbe(joinUrl(base, "/-/healthy"), {}, { itemId: item.id });
         }
         case "grafana": {
             return httpProbe(joinUrl(href, "/api/health"), {}, { itemId: item.id });
@@ -285,11 +300,12 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }, { itemId: item.id });
         }
         case "trivy-policy": {
-            const h = await httpProbe(joinUrl(href, "/healthz"), {}, { itemId: item.id });
+            const trivyBase = realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const h = await httpProbe(joinUrl(trivyBase, "/healthz"), {}, { itemId: item.id });
             if (h.state === "reachable") {
                 return h;
             }
-            return httpProbe(joinUrl(href, "/"), {}, { itemId: item.id });
+            return httpProbe(joinUrl(trivyBase, "/"), {}, { itemId: item.id });
         }
         case "harbor-dockerhub": {
             const headers: Record<string, string> = {};

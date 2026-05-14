@@ -64,6 +64,8 @@ const envSchema = z.object({
     GITHUB_WEBHOOK_SECRET: z.string().default(""),
     GITHUB_WEBHOOK_BUILD_MODE: z.enum(["prompt", "auto"]).default("prompt"),
     JENKINS_BASE_URL: z.string().default(""),
+    /** Optional base URL used only for Platform hub /api/json reachability probes (when JENKINS_BASE_URL is slow or unroutable from the server). */
+    JENKINS_PROBE_URL: z.string().default(""),
     JENKINS_USERNAME: z.string().default(""),
     JENKINS_API_TOKEN: z.string().default(""),
     JENKINS_JOB_FOLDER: z.string().default(""),
@@ -129,6 +131,8 @@ const envSchema = z.object({
     PROMETHEUS_QUERY_CPU: z.string().default(""),
     PROMETHEUS_QUERY_MEMORY: z.string().default(""),
     TRIVY_BASE_URL: z.string().default(""),
+    /** Optional Trivy base URL for server-side probes only (fixes Docker vs VM IP without changing browser-facing TRIVY_BASE_URL). */
+    TRIVY_PROBE_URL: z.string().default(""),
     TRIVY_AUTH_TOKEN: z.string().default(""),
     ZAP_TARGET_URL: z.string().default(""),
     COSIGN_ENFORCE_SIGNED: z.enum(["true", "false"]).default("true"),
@@ -152,6 +156,14 @@ const envSchema = z.object({
     KUBE_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     /** When set, Platform hub probes this URL for Ingress NGINX instead of NEXT_PUBLIC_INGRESS_NGINX_URL (use from Docker for host/LAN reachability while the public URL stays browser-friendly). */
     INGRESS_NGINX_PROBE_URL: z.string().default(""),
+    /** Optional Pushgateway base URL for server-side probes only (omit public URL until NodePort exists; use this for probes from Docker). */
+    PUSHGATEWAY_PROBE_URL: z.string().default(""),
+    /** Optional Vault HTTP base (e.g. http://192.168.56.129:30820) for catalog + probes when NEXT_PUBLIC_VAULT_UI_URL is unset. */
+    VAULT_ADDR: z.string().default(""),
+    /** Optional cert-manager / ACME UI or doc URL for catalog + probes (server-only alternative to NEXT_PUBLIC_CERT_MANAGER_UI_URL). */
+    CERT_MANAGER_PROBE_URL: z.string().default(""),
+    /** Max time for Platform hub integration HTTP probes (Jenkins, registries, etc.). */
+    PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120000).default(12000),
     /** Optional host rewrite for server-side probes only, format oldHost=newHost (e.g. 192.168.56.129=host.docker.internal when the UI runs in Docker but URLs use a VirtualBox/lab VM IP). */
     INTEGRATIONS_PROBE_HOST_REMAP: z.string().default(""),
     INTEGRATIONS_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
@@ -277,6 +289,7 @@ const parsed = envSchema.safeParse({
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
     GITHUB_WEBHOOK_BUILD_MODE: process.env.GITHUB_WEBHOOK_BUILD_MODE,
     JENKINS_BASE_URL: firstNonEmpty(process.env.JENKINS_BASE_URL, process.env.JENKINS_URL),
+    JENKINS_PROBE_URL: process.env.JENKINS_PROBE_URL,
     JENKINS_USERNAME: firstNonEmpty(process.env.JENKINS_USERNAME, process.env.JENKINS_USER),
     JENKINS_API_TOKEN: firstNonEmpty(process.env.JENKINS_API_TOKEN, process.env.JENKINS_TOKEN),
     JENKINS_JOB_FOLDER: process.env.JENKINS_JOB_FOLDER,
@@ -342,6 +355,7 @@ const parsed = envSchema.safeParse({
     PROMETHEUS_QUERY_CPU: process.env.PROMETHEUS_QUERY_CPU,
     PROMETHEUS_QUERY_MEMORY: process.env.PROMETHEUS_QUERY_MEMORY,
     TRIVY_BASE_URL: process.env.TRIVY_BASE_URL,
+    TRIVY_PROBE_URL: process.env.TRIVY_PROBE_URL,
     TRIVY_AUTH_TOKEN: process.env.TRIVY_AUTH_TOKEN,
     ZAP_TARGET_URL: process.env.ZAP_TARGET_URL,
     COSIGN_ENFORCE_SIGNED: process.env.COSIGN_ENFORCE_SIGNED,
@@ -364,6 +378,10 @@ const parsed = envSchema.safeParse({
     KUBE_CONFIG_PATH: process.env.KUBE_CONFIG_PATH,
     KUBE_TLS_SKIP_VERIFY: process.env.KUBE_TLS_SKIP_VERIFY,
     INGRESS_NGINX_PROBE_URL: process.env.INGRESS_NGINX_PROBE_URL,
+    PUSHGATEWAY_PROBE_URL: process.env.PUSHGATEWAY_PROBE_URL,
+    VAULT_ADDR: firstNonEmpty(process.env.VAULT_ADDR, process.env.VAULT_UI_URL),
+    CERT_MANAGER_PROBE_URL: process.env.CERT_MANAGER_PROBE_URL,
+    PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: process.env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS,
     INTEGRATIONS_PROBE_HOST_REMAP: process.env.INTEGRATIONS_PROBE_HOST_REMAP,
     INTEGRATIONS_TLS_SKIP_VERIFY: process.env.INTEGRATIONS_TLS_SKIP_VERIFY,
     APPS_PUBLIC_URL_SCHEME: process.env.APPS_PUBLIC_URL_SCHEME,

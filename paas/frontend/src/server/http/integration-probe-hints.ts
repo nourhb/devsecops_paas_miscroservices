@@ -15,7 +15,15 @@ export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl
         tips.push("Many k3s+Traefik labs use HTTP NodePort 30659 (not 31504). Update NEXT_PUBLIC_INGRESS_NGINX_URL or INGRESS_NGINX_PROBE_URL (see docker-compose.env.example).");
     }
     if (itemId === "trivy-policy" && /:30954(\/|$|\?|:)/.test(u)) {
-        tips.push("Port 30954 is often correct; refusal from this host usually means the Next.js process cannot reach the node IP (e.g. Docker on a laptop) — set INTEGRATIONS_PROBE_HOST_REMAP=192.168.56.129=host.docker.internal, or run the app on the same LAN as the cluster.");
+        if (/172\.17\.0\.1/.test(u)) {
+            tips.push("Probe hit Docker bridge gateway 172.17.0.1 (host.docker.internal / host-gateway): NodePorts on a **separate** k3s VM are not listening on the Docker host. Remove INTEGRATIONS_PROBE_HOST_REMAP for that VM IP, or set TRIVY_PROBE_URL to a base URL this container can reach (often the same VM IP as kubectl from your workstation).");
+        }
+        else {
+            tips.push("Port 30954 is often correct; refusal usually means this process cannot reach the node IP from Docker — set TRIVY_PROBE_URL, INTEGRATIONS_PROBE_HOST_REMAP=oldHost=newHost (comma-separated allowed), or run the app where the cluster IP routes.");
+        }
+    }
+    if ((itemId === "pushgateway" || itemId === "jenkins") && /172\.17\.0\.1/.test(u)) {
+        tips.push("Same as Trivy: 172.17.0.1 is the Docker host, not your k3s VM — remove remap for VM-only labs or set PUSHGATEWAY_PROBE_URL / JENKINS_PROBE_URL to a reachable base URL.");
     }
     if (/:30092(\/|$|\?|:)/.test(u)) {
         tips.push("Harbor aggregate NodePort is often 30002 (not 30092) — `kubectl get svc -n harbor harbor`. Align HARBOR_BASE_URL.");
@@ -36,7 +44,12 @@ export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl
         tips.push("Nothing is listening on OPA_EVAL_URL from this server — deploy OPA, port-forward, or fix the URL/port.");
     }
     if (tips.length === 0) {
-        tips.push("Confirm NodePorts with kubectl, pods Running, and from Docker try INTEGRATIONS_PROBE_HOST_REMAP=192.168.56.129=host.docker.internal when the node IP is unreachable from the container.");
+        if (/172\.17\.0\.1/.test(u)) {
+            tips.push("172.17.0.1 is Docker host-gateway; if k3s runs on another VM, remap to host.docker.internal is wrong — use direct VM IP from this container or dedicated *_PROBE_URL vars (see docker-compose.env.example).");
+        }
+        else {
+            tips.push("Confirm NodePorts with kubectl and pods Running; from Docker, INTEGRATIONS_PROBE_HOST_REMAP or *_PROBE_URL can fix reachability when the VM IP differs from what the server can route to.");
+        }
     }
     return `${message} — ${tips.join(" ")}`;
 }

@@ -127,17 +127,17 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Ingress (Traefik / NGINX)",
                     description: "HTTP/S ingress controller (Traefik on k3s, or NGINX Ingress).",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL")),
-                    notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint (k3s+Traefik is often http://<node>:30659). From Docker, add INGRESS_NGINX_PROBE_URL or INTEGRATIONS_PROBE_HOST_REMAP (see docker-compose.env.example)."
+                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL))) || null,
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL)))),
+                    notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint (k3s+Traefik is often http://<node>:30659). From Docker, INGRESS_NGINX_PROBE_URL alone can wire the catalog when NEXT_PUBLIC is unset at build time; INTEGRATIONS_PROBE_HOST_REMAP supports comma-separated rules (see docker-compose.env.example)."
                 },
                 {
                     id: "cert-manager",
                     name: "cert-manager",
                     description: "TLS certificates via ACME / CA issuers.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL")),
+                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL))) || null,
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL)))),
                     notes: "Often observed via kubectl or Argo CD; set a URL if you expose a UI or doc portal."
                 },
                 {
@@ -162,7 +162,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Kubernetes policy via Gatekeeper CRDs and OPA.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL")),
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL")) || env.POLICY_ENGINE === "gatekeeper",
                     notes: env.POLICY_ENGINE === "gatekeeper" ? "POLICY_ENGINE is set to gatekeeper." : undefined
                 },
                 {
@@ -180,7 +180,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Kubernetes-native policies (validate, mutate, generate).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KYVERNO_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_KYVERNO_UI_URL")),
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KYVERNO_UI_URL")) || env.POLICY_ENGINE === "kyverno",
                     notes: env.POLICY_ENGINE === "kyverno" ? "POLICY_ENGINE is set to kyverno." : undefined
                 },
                 {
@@ -244,8 +244,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Pushgateway",
                     description: "Accept metrics pushed from batch jobs for Prometheus.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"))
+                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))) || null,
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))))
                 },
                 {
                     id: "kube-state-metrics",
@@ -459,8 +459,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "HashiCorp Vault",
                     description: "Secrets, PKI, and dynamic credentials.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_VAULT_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"))
+                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR))) || null,
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR))))
                 },
                 {
                     id: "haproxy",
