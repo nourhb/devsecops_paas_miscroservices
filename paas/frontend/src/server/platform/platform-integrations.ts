@@ -124,12 +124,12 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                 },
                 {
                     id: "ingress-nginx",
-                    name: "Ingress NGINX",
-                    description: "HTTP/S ingress controller for cluster services.",
+                    name: "Ingress (Traefik / NGINX)",
+                    description: "HTTP/S ingress controller (Traefik on k3s, or NGINX Ingress).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL")),
-                    notes: "From Docker Compose, the server may need INGRESS_NGINX_PROBE_URL (e.g. http://host.docker.internal:31504) if NEXT_PUBLIC_* uses localhost. For many unreachable lab URLs at once, set INTEGRATIONS_PROBE_HOST_REMAP=oldHost=newHost (see docker-compose.env.example)."
+                    notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint (k3s+Traefik is often http://<node>:30659). From Docker, add INGRESS_NGINX_PROBE_URL or INTEGRATIONS_PROBE_HOST_REMAP (see docker-compose.env.example)."
                 },
                 {
                     id: "cert-manager",
