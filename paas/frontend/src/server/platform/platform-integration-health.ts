@@ -323,14 +323,11 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }, { itemId: item.id });
         }
         case "trivy-policy": {
-            const useProbeUrl = Boolean(realValueOrEmpty(env.TRIVY_PROBE_URL));
             const trivyBase = realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
             const healthUrl = joinUrl(trivyBase, "/healthz");
-            const bypassTrivy =
-                useProbeUrl || probeHostIsRemapSource(healthUrl, env.INTEGRATIONS_PROBE_HOST_REMAP);
             const probeCtx = {
                 itemId: item.id,
-                bypassHostRemap: bypassTrivy
+                bypassHostRemap: true
             } as const;
             const h = await httpProbe(healthUrl, {}, probeCtx);
             if (h.state === "reachable") {

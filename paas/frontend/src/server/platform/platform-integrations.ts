@@ -86,6 +86,10 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
     const springBackend = trimUrl(realValueOrEmpty(process.env.SPRING_BACKEND_BASE_URL));
     const harborConfigured = isRealConfigured(env.HARBOR_BASE_URL);
     const kubeApiServer = kubeApiServerFromConfig();
+    const policyKyverno = env.POLICY_ENGINE === "kyverno";
+    const policyGatekeeper = env.POLICY_ENGINE === "gatekeeper";
+    const policyOpa = env.POLICY_ENGINE === "opa";
+    const jenkinsBuild = env.BUILD_BACKEND === "jenkins";
     const categories: PlatformIntegrationCategory[] = [
         {
             id: "control-infra",
@@ -99,6 +103,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer)),
+                    optional: true,
                     notes: kubeApiServer
                         ? `API server: ${kubeApiServer}. When KUBERNETES_ENABLED=true, reachability uses the kubeconfig client (not a browser GET to this URL).`
                         : "Optional: Lens / k9s / dashboard URL. The Cluster page lists workloads when the API is connected."
@@ -120,6 +125,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_PORTAINER_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_PORTAINER_URL")),
+                    optional: true,
                     notes: "Often installed in namespace portainer; deep link the UI here."
                 },
                 {
@@ -129,6 +135,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL))) || null,
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL)))),
+                    optional: true,
                     notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint (k3s+Traefik is often http://<node>:30659). From Docker, INGRESS_NGINX_PROBE_URL alone can wire the catalog when NEXT_PUBLIC is unset at build time; INTEGRATIONS_PROBE_HOST_REMAP supports comma-separated rules (see docker-compose.env.example)."
                 },
                 {
@@ -138,6 +145,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL))) || null,
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL)))),
+                    optional: true,
                     notes: "Often observed via kubectl or Argo CD; set a URL if you expose a UI or doc portal."
                 },
                 {
@@ -147,6 +155,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_CALICO_OR_TIGERA_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_CALICO_OR_TIGERA_URL")),
+                    optional: true,
                     notes: "Calico itself has no single dashboard; Tigera / Calico Cloud optional."
                 }
             ]
@@ -163,6 +172,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL")) || env.POLICY_ENGINE === "gatekeeper",
+                    optional: !policyGatekeeper,
                     notes: env.POLICY_ENGINE === "gatekeeper" ? "POLICY_ENGINE is set to gatekeeper." : undefined
                 },
                 {
@@ -172,6 +182,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: trimUrl(realValueOrEmpty(env.OPA_EVAL_URL)) || null,
                     configured: isRealConfigured(env.OPA_EVAL_URL),
+                    optional: !policyOpa,
                     notes: env.POLICY_ENGINE === "opa" ? "POLICY_ENGINE is set to opa." : undefined
                 },
                 {
@@ -181,6 +192,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KYVERNO_UI_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_KYVERNO_UI_URL")) || env.POLICY_ENGINE === "kyverno",
+                    optional: !policyKyverno,
                     notes: env.POLICY_ENGINE === "kyverno" ? "POLICY_ENGINE is set to kyverno." : undefined
                 },
                 {
@@ -189,7 +201,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Policy-as-code with WebAssembly policies (Kyverno migration path).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL")),
+                    optional: true
                 },
                 {
                     id: "cosign",
@@ -198,6 +211,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "cli",
                     href: null,
                     configured: Boolean(trimUrl(realValueOrEmpty(env.COSIGN_PUBLIC_KEY)) || trimUrl(realValueOrEmpty(env.COSIGN_PRIVATE_KEY))),
+                    optional: true,
                     notes: `Binary: ${env.COSIGN_BINARY_PATH || "cosign"}. Enforcement: COSIGN_ENFORCE_SIGNED=${env.COSIGN_ENFORCE_SIGNED}.`
                 },
                 {
@@ -254,6 +268,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KUBE_STATE_METRICS_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_KUBE_STATE_METRICS_URL")),
+                    optional: true,
                     notes: "Usually scraped without a browser UI; set a metrics or docs URL if you expose one."
                 },
                 {
@@ -263,6 +278,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_NODE_EXPORTER_UI_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_NODE_EXPORTER_UI_URL")),
+                    optional: true,
                     notes: "Typically scraped by Prometheus without a browser UI; link targets or docs if you expose one."
                 },
                 {
@@ -271,7 +287,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Elastic Stack dashboards and Discover.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KIBANA_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_KIBANA_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KIBANA_URL")),
+                    optional: true
                 },
                 {
                     id: "elasticsearch",
@@ -279,7 +296,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Search and analytics engine (logs, APM, security).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL")),
+                    optional: true
                 }
             ]
         },
@@ -303,6 +321,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_TEKTON_DASHBOARD_URL") || null,
                     configured: env.BUILD_BACKEND === "tekton" || Boolean(publicEnv("NEXT_PUBLIC_TEKTON_DASHBOARD_URL")),
+                    optional: jenkinsBuild,
                     notes: env.BUILD_BACKEND === "tekton" ? `Namespace ${env.TEKTON_NAMESPACE}` : "Switch BUILD_BACKEND=tekton to use Tekton builds."
                 },
                 {
@@ -360,7 +379,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Maven/npm/Docker repository manager.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_NEXUS_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_NEXUS_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_NEXUS_URL")),
+                    optional: true
                 },
                 {
                     id: "artifactory",
@@ -368,7 +388,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Universal artifact repository.",
                     kind: "external",
                     href: artifactoryPublicOrServer() || null,
-                    configured: Boolean(artifactoryPublicOrServer())
+                    configured: Boolean(artifactoryPublicOrServer()),
+                    optional: true
                 },
                 {
                     id: "artifacts-spring",
@@ -378,6 +399,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: null,
                     internalPath: "/artifacts",
                     configured: Boolean(springBackend),
+                    optional: !Boolean(springBackend),
                     notes: springBackend ? `Proxy: ${springBackend}` : "Set SPRING_BACKEND_BASE_URL to enable /artifacts."
                 }
             ]
@@ -401,7 +423,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Dynamic application security testing.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL")),
+                    optional: true
                 },
                 {
                     id: "owasp-dependency-check",
@@ -409,7 +432,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "SCA for vulnerable dependencies (NVD-backed); often run in Jenkins with HTML reports.",
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_DEPENDENCY_CHECK_URL"), publicEnv("NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL")) || null,
-                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_DEPENDENCY_CHECK_URL"), publicEnv("NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL")))
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_DEPENDENCY_CHECK_URL"), publicEnv("NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL"))),
+                    optional: true
                 },
                 {
                     id: "dockle",
@@ -418,6 +442,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_DOCKLE_REPORT_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_DOCKLE_REPORT_URL")),
+                    optional: true,
                     notes: "Also available as CLI in Jenkins stages."
                 },
                 {
@@ -426,7 +451,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Component analysis and vulnerability tracking.",
                     kind: "external",
                     href: trimUrl(realValueOrEmpty(env.DEPENDENCY_TRACK_BASE_URL)) || null,
-                    configured: isRealConfigured(env.DEPENDENCY_TRACK_BASE_URL)
+                    configured: isRealConfigured(env.DEPENDENCY_TRACK_BASE_URL),
+                    optional: true
                 },
                 {
                     id: "project-security",
@@ -452,6 +478,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_TERRAFORM_CLOUD_URL") || null,
                     configured: Boolean(publicEnv("NEXT_PUBLIC_TERRAFORM_CLOUD_URL")),
+                    optional: true,
                     notes: "CLI runs outside this UI; link HCP Terraform / Enterprise if used."
                 },
                 {
@@ -460,7 +487,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Secrets, PKI, and dynamic credentials.",
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR))) || null,
-                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR))))
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR)))),
+                    optional: true
                 },
                 {
                     id: "haproxy",
@@ -468,7 +496,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Load balancing and TLS termination stats.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_HAPROXY_STATS_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_HAPROXY_STATS_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_HAPROXY_STATS_URL")),
+                    optional: true
                 },
                 {
                     id: "edge-iot",
@@ -476,7 +505,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Optional link to edge gateway, Pi fleet, or industrial dashboards outside the primary cluster.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_EDGE_IOT_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_EDGE_IOT_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_EDGE_IOT_URL")),
+                    optional: true
                 },
                 {
                     id: "consul",
@@ -484,7 +514,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Service mesh registry and KV (optional HashiCorp stack).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_CONSUL_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_CONSUL_UI_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_CONSUL_UI_URL")),
+                    optional: true
                 },
                 {
                     id: "nomad",
@@ -492,7 +523,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Workload orchestrator (optional HashiCorp stack).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_NOMAD_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_NOMAD_UI_URL"))
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_NOMAD_UI_URL")),
+                    optional: true
                 }
             ]
         },
@@ -547,6 +579,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_ORACLE_APEX_URL") || publicEnv("NEXT_PUBLIC_DB_ADMIN_URL") || null,
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_ORACLE_APEX_URL"), publicEnv("NEXT_PUBLIC_DB_ADMIN_URL"))),
+                    optional: true,
                     notes: "This app uses PostgreSQL for its own data; point PL/SQL consoles or APEX here if you use Oracle in the cluster."
                 }
             ]

@@ -109,13 +109,16 @@ function ReachabilityBadge({ r }: {
       </Badge>);
 }
 function itemSortRank(item: PlatformIntegrationItem): number {
-    if (!item.configured) {
-        return 2;
-    }
     if (item.reachability?.state === "reachable") {
         return 0;
     }
-    return 1;
+    if (item.configured) {
+        return 1;
+    }
+    if (item.optional) {
+        return 3;
+    }
+    return 2;
 }
 function sortedCategoryItems(items: PlatformIntegrationItem[]): PlatformIntegrationItem[] {
     return [...items].sort((a, b) => itemSortRank(a) - itemSortRank(b) || a.name.localeCompare(b.name));
@@ -130,9 +133,11 @@ function IntegrationItemRow({ item }: {
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-medium text-foreground">{item.name}</p>
-          {!item.configured ? (<Badge variant="outline" className="text-xs text-muted-foreground">
+          {!item.configured ? (item.optional ? (<Badge variant="outline" className="text-xs text-muted-foreground">
+              Optional
+            </Badge>) : (<Badge variant="outline" className="text-xs text-muted-foreground">
               Not configured
-            </Badge>) : item.kind === "internal" ? (<Badge variant="outline" className="border-primary/40 bg-primary/5 text-xs text-foreground">
+            </Badge>)) : item.kind === "internal" ? (<Badge variant="outline" className="border-primary/40 bg-primary/5 text-xs text-foreground">
               In this app
             </Badge>) : null}
           {showReachability ? <ReachabilityBadge r={item.reachability}/> : null}
@@ -159,7 +164,13 @@ function IntegrationItemRow({ item }: {
             </a>
           </Button>) : null}
         {(() => {
-            if (item.internalPath || !item.configured || canOpenExternal) {
+            if (item.internalPath || canOpenExternal) {
+                return null;
+            }
+            if (!item.configured && item.optional) {
+                return <span className="text-xs text-muted">Link when you deploy or need a UI</span>;
+            }
+            if (!item.configured) {
                 return null;
             }
             const id = (item.id ?? "").toLowerCase();
@@ -181,7 +192,7 @@ function CategoryCard({ category }: {
     category: PlatformIntegrationCategory;
 }) {
     const items = sortedCategoryItems(category.items);
-    const ready = items.filter((i) => i.configured).length;
+    const ready = items.filter((i) => i.configured || Boolean(i.optional)).length;
     return (<Card className="rounded-2xl border-border/60 shadow-sm">
       <CardHeader className="border-b border-border/40 pb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
