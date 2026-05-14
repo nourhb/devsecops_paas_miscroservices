@@ -7,8 +7,35 @@ const insecureAgent = new Agent({
         rejectUnauthorized: false
     }
 });
-export async function integrationFetch(url: string, init: RequestInit = {}, timeoutMs: number = INTEGRATION_HTTP_TIMEOUT_MS): Promise<Response> {
-    const resolvedUrl = remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+export type IntegrationFetchOptions = {
+    timeoutMs?: number;
+    /** When true, skip INTEGRATIONS_PROBE_HOST_REMAP so *_PROBE_URL bases reach the host you wrote (e.g. k3s VM IP while remap targets Docker host). */
+    bypassHostRemap?: boolean;
+};
+function resolveIntegrationFetchOptions(third?: number | IntegrationFetchOptions): {
+    timeoutMs: number;
+    bypassHostRemap: boolean;
+} {
+    if (third === undefined || third === null) {
+        return {
+            timeoutMs: INTEGRATION_HTTP_TIMEOUT_MS,
+            bypassHostRemap: false
+        };
+    }
+    if (typeof third === "number") {
+        return {
+            timeoutMs: third,
+            bypassHostRemap: false
+        };
+    }
+    return {
+        timeoutMs: third.timeoutMs ?? INTEGRATION_HTTP_TIMEOUT_MS,
+        bypassHostRemap: Boolean(third.bypassHostRemap)
+    };
+}
+export async function integrationFetch(url: string, init: RequestInit = {}, third?: number | IntegrationFetchOptions): Promise<Response> {
+    const { timeoutMs, bypassHostRemap } = resolveIntegrationFetchOptions(third);
+    const resolvedUrl = bypassHostRemap ? url : remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`Integration request timed out after ${ms}ms`)), ms);

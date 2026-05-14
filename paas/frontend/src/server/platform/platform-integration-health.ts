@@ -24,6 +24,8 @@ function harborAuthHeader(): string | null {
 }
 type HttpProbeCtx = {
     itemId?: string;
+    /** When true, do not apply INTEGRATIONS_PROBE_HOST_REMAP (use for *_PROBE_URL bases). */
+    bypassHostRemap?: boolean;
 };
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const t0 = Date.now();
@@ -33,7 +35,10 @@ async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx
             method: "GET",
             redirect: "follow",
             ...init
-        }, timeoutMs);
+        }, {
+            timeoutMs,
+            bypassHostRemap: Boolean(ctx?.bypassHostRemap)
+        });
         const ms = Date.now() - t0;
         if (res.ok || res.status === 301 || res.status === 302 || res.status === 401 || res.status === 403) {
             return {
@@ -193,14 +198,18 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(href, {}, { itemId: item.id });
         }
         case "ingress-nginx": {
-            const probeUrl = env.INGRESS_NGINX_PROBE_URL.trim() || href;
+            const probeOnly = env.INGRESS_NGINX_PROBE_URL.trim();
+            const probeUrl = probeOnly || href;
             if (!probeUrl) {
                 return {
                     state: "skipped",
                     message: "Not configured"
                 };
             }
-            const r = await httpProbe(probeUrl, {}, { itemId: item.id });
+            const r = await httpProbe(probeUrl, {}, {
+                itemId: item.id,
+                bypassHostRemap: Boolean(probeOnly)
+            });
             if (r.state === "reachable") {
                 return r;
             }
@@ -220,18 +229,25 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
+            const useProbeUrl = Boolean(realValueOrEmpty(env.JENKINS_PROBE_URL));
             const probeBase = realValueOrEmpty(env.JENKINS_PROBE_URL).replace(/\/+$/, "") || env.JENKINS_BASE_URL.replace(/\/+$/, "");
             return httpProbe(`${probeBase}/api/json`, {
                 headers: {
                     Authorization: jenkinsAuthHeader()
                 }
-            }, { itemId: item.id });
+            }, { itemId: item.id, bypassHostRemap: useProbeUrl });
         }
         case "argocd": {
-            if (!realValueOrEmpty(env.ARGOCD_BASE_URL) || !realValueOrEmpty(env.ARGOCD_AUTH_TOKEN)) {
+            if (!realValueOrEmpty(env.ARGOCD_BASE_URL)) {
                 return {
                     state: "skipped",
                     message: "Not configured"
+                };
+            }
+            if (!realValueOrEmpty(env.ARGOCD_AUTH_TOKEN)) {
+                return {
+                    state: "skipped",
+                    message: "Set ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN) to probe the Argo CD API"
                 };
             }
             const base = env.ARGOCD_BASE_URL.replace(/\/+$/, "");
@@ -276,8 +292,9 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
         }
         case "pushgateway": {
+            const useProbeUrl = Boolean(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL));
             const base = realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            return httpProbe(joinUrl(base, "/-/healthy"), {}, { itemId: item.id });
+            return httpProbe(joinUrl(base, "/-/healthy"), {}, { itemId: item.id, bypassHostRemap: useProbeUrl });
         }
         case "grafana": {
             return httpProbe(joinUrl(href, "/api/health"), {}, { itemId: item.id });
@@ -300,12 +317,17 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }, { itemId: item.id });
         }
         case "trivy-policy": {
+            const useProbeUrl = Boolean(realValueOrEmpty(env.TRIVY_PROBE_URL));
             const trivyBase = realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const h = await httpProbe(joinUrl(trivyBase, "/healthz"), {}, { itemId: item.id });
+            const probeCtx = {
+                itemId: item.id,
+                bypassHostRemap: useProbeUrl
+            } as const;
+            const h = await httpProbe(joinUrl(trivyBase, "/healthz"), {}, probeCtx);
             if (h.state === "reachable") {
                 return h;
             }
-            return httpProbe(joinUrl(trivyBase, "/"), {}, { itemId: item.id });
+            return httpProbe(joinUrl(trivyBase, "/"), {}, probeCtx);
         }
         case "harbor-dockerhub": {
             const headers: Record<string, string> = {};
@@ -319,8 +341,21 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }
             return httpProbe(href, { headers }, { itemId: item.id });
         }
+        case "cert-manager": {
+            const cmProbe = realValueOrEmpty(env.CERT_MANAGER_PROBE_URL).replace(/\/+$/, "");
+            const bypass = Boolean(cmProbe) && href.replace(/\/+$/, "") === cmProbe;
+            return httpProbe(href, {}, {
+                itemId: item.id,
+                bypassHostRemap: bypass
+            });
+        }
         case "vault": {
-            return httpProbe(joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200"), {}, { itemId: item.id });
+            const va = realValueOrEmpty(env.VAULT_ADDR).replace(/\/+$/, "");
+            const bypass = Boolean(va) && href.replace(/\/+$/, "") === va;
+            return httpProbe(joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200"), {}, {
+                itemId: item.id,
+                bypassHostRemap: bypass
+            });
         }
         case "consul": {
             return httpProbe(joinUrl(href, "/v1/status/leader"), {}, { itemId: item.id });
