@@ -1,6 +1,7 @@
 import { env } from "@/server/config/env";
 import { isPlaceholderValue, realValueOrEmpty } from "@/server/config/real-values";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
+import { appendUnreachableProbeHint } from "@/server/http/integration-probe-hints";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
 import type { PlatformIntegrationItem, PlatformIntegrationReachability, PlatformIntegrationsResponse } from "@/types";
@@ -22,7 +23,10 @@ function harborAuthHeader(): string | null {
     }
     return `Basic ${Buffer.from(`${u}:${p}`).toString("base64")}`;
 }
-async function httpProbe(url: string, init: RequestInit = {}): Promise<PlatformIntegrationReachability> {
+type HttpProbeCtx = {
+    itemId?: string;
+};
+async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const t0 = Date.now();
     try {
         const res = await integrationFetch(url, {
@@ -38,10 +42,11 @@ async function httpProbe(url: string, init: RequestInit = {}): Promise<PlatformI
                 message: res.ok ? undefined : `HTTP ${res.status}`
             };
         }
+        const raw = typeof res.status === "number" && res.status > 0 ? `HTTP ${res.status}` : "Empty response";
         return {
             state: "unreachable",
             latencyMs: ms,
-            message: typeof res.status === "number" && res.status > 0 ? `HTTP ${res.status}` : "Empty response"
+            message: appendUnreachableProbeHint(ctx?.itemId, url, raw)
         };
     }
     catch (error) {
@@ -50,7 +55,7 @@ async function httpProbe(url: string, init: RequestInit = {}): Promise<PlatformI
         return {
             state: "unreachable",
             latencyMs: ms,
-            message
+            message: appendUnreachableProbeHint(ctx?.itemId, url, message)
         };
     }
 }
@@ -111,7 +116,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "SPRING_BACKEND_BASE_URL not set"
                 };
             }
-            return httpProbe(joinUrl(base, "/artifacts"));
+            return httpProbe(joinUrl(base, "/artifacts"), {}, { itemId: item.id });
         }
         if (item.id === "project-security" || item.id === "nodejs-express" || item.id === "python" || item.id === "java-static") {
             return {
@@ -171,7 +176,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
-            return httpProbe(href);
+            return httpProbe(href, {}, { itemId: item.id });
         }
         case "ingress-nginx": {
             const probeUrl = env.INGRESS_NGINX_PROBE_URL.trim() || href;
@@ -181,7 +186,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
-            const r = await httpProbe(probeUrl);
+            const r = await httpProbe(probeUrl, {}, { itemId: item.id });
             if (r.state === "reachable") {
                 return r;
             }
@@ -206,7 +211,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 headers: {
                     Authorization: jenkinsAuthHeader()
                 }
-            });
+            }, { itemId: item.id });
         }
         case "argocd": {
             if (!realValueOrEmpty(env.ARGOCD_BASE_URL) || !realValueOrEmpty(env.ARGOCD_AUTH_TOKEN)) {
@@ -234,52 +239,57 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 return {
                     state: "unreachable",
                     latencyMs: ms,
-                    message: `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`
+                    message: appendUnreachableProbeHint(
+                        "argocd",
+                        base,
+                        `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`
+                    )
                 };
             }
             catch (error) {
+                const raw = integrationProbeErrorMessage(error);
                 return {
                     state: "unreachable",
                     latencyMs: Date.now() - t0,
-                    message: error instanceof Error ? error.message : String(error)
+                    message: appendUnreachableProbeHint("argocd", base, raw)
                 };
             }
         }
         case "prometheus": {
-            return httpProbe(joinUrl(href, "/-/ready"));
+            return httpProbe(joinUrl(href, "/-/ready"), {}, { itemId: item.id });
         }
         case "alertmanager": {
-            return httpProbe(joinUrl(href, "/-/healthy"));
+            return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
         }
         case "pushgateway": {
-            return httpProbe(joinUrl(href, "/-/healthy"));
+            return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
         }
         case "grafana": {
-            return httpProbe(joinUrl(href, "/api/health"));
+            return httpProbe(joinUrl(href, "/api/health"), {}, { itemId: item.id });
         }
         case "sonarqube": {
             const headers: Record<string, string> = {};
             if (realValueOrEmpty(env.SONAR_TOKEN)) {
                 headers.Authorization = `Basic ${Buffer.from(`${env.SONAR_TOKEN.trim()}:`).toString("base64")}`;
             }
-            return httpProbe(joinUrl(href, "/api/system/status"), { headers });
+            return httpProbe(joinUrl(href, "/api/system/status"), { headers }, { itemId: item.id });
         }
         case "dependency-track": {
             if (!realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY)) {
-                return httpProbe(joinUrl(href, "/api/version"));
+                return httpProbe(joinUrl(href, "/api/version"), {}, { itemId: item.id });
             }
             return httpProbe(joinUrl(href, "/api/version"), {
                 headers: {
                     "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY.trim()
                 }
-            });
+            }, { itemId: item.id });
         }
         case "trivy-policy": {
-            const h = await httpProbe(joinUrl(href, "/healthz"));
+            const h = await httpProbe(joinUrl(href, "/healthz"), {}, { itemId: item.id });
             if (h.state === "reachable") {
                 return h;
             }
-            return httpProbe(joinUrl(href, "/"));
+            return httpProbe(joinUrl(href, "/"), {}, { itemId: item.id });
         }
         case "harbor-dockerhub": {
             const headers: Record<string, string> = {};
@@ -287,20 +297,20 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (hb) {
                 headers.Authorization = hb;
             }
-            const ping = await httpProbe(joinUrl(href, "/api/v2.0/ping"), { headers });
+            const ping = await httpProbe(joinUrl(href, "/api/v2.0/ping"), { headers }, { itemId: item.id });
             if (ping.state === "reachable") {
                 return ping;
             }
-            return httpProbe(href, { headers });
+            return httpProbe(href, { headers }, { itemId: item.id });
         }
         case "vault": {
-            return httpProbe(joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200"));
+            return httpProbe(joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200"), {}, { itemId: item.id });
         }
         case "consul": {
-            return httpProbe(joinUrl(href, "/v1/status/leader"));
+            return httpProbe(joinUrl(href, "/v1/status/leader"), {}, { itemId: item.id });
         }
         case "nomad": {
-            return httpProbe(joinUrl(href, "/v1/status/leader"));
+            return httpProbe(joinUrl(href, "/v1/status/leader"), {}, { itemId: item.id });
         }
         case "github":
         case "gitops-repo": {
@@ -315,11 +325,11 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             try {
                 const u = new URL(repoUrl);
                 if (u.hostname !== "github.com") {
-                    return httpProbe(href);
+                    return httpProbe(href, {}, { itemId: item.id });
                 }
                 const parts = u.pathname.split("/").filter(Boolean);
                 if (parts.length < 2) {
-                    return httpProbe(href);
+                    return httpProbe(href, {}, { itemId: item.id });
                 }
                 const apiPath = `/repos/${parts[0]}/${parts[1]}`;
                 return httpProbe(`https://api.github.com${apiPath}`, {
@@ -327,10 +337,10 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                         Authorization: `Bearer ${token}`,
                         Accept: "application/vnd.github+json"
                     }
-                });
+                }, { itemId: item.id });
             }
             catch {
-                return httpProbe(href);
+                return httpProbe(href, {}, { itemId: item.id });
             }
         }
         case "opa-server": {
@@ -340,10 +350,10 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "OPA_EVAL_URL not set"
                 };
             }
-            return httpProbe(env.OPA_EVAL_URL.trim());
+            return httpProbe(env.OPA_EVAL_URL.trim(), {}, { itemId: item.id });
         }
         default:
-            return httpProbe(href);
+            return httpProbe(href, {}, { itemId: item.id });
     }
 }
 async function runPool<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
