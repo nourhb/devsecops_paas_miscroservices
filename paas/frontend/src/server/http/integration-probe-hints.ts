@@ -19,7 +19,7 @@ export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl
             tips.push("Probe hit Docker bridge gateway 172.17.0.1 (host.docker.internal / host-gateway): NodePorts on a **separate** k3s VM are not listening on the Docker host. Remove INTEGRATIONS_PROBE_HOST_REMAP for that VM IP, or set TRIVY_PROBE_URL to a base URL this container can reach (often the same VM IP as kubectl from your workstation).");
         }
         else {
-            tips.push("Port 30954 is often correct; refusal usually means this process cannot reach the node IP from Docker — set TRIVY_PROBE_URL, INTEGRATIONS_PROBE_HOST_REMAP=oldHost=newHost (comma-separated allowed), or run the app where the cluster IP routes.");
+            tips.push("Port 30954 is often correct; refusal usually means this process cannot reach the node IP from Docker — set TRIVY_PROBE_URL (it bypasses INTEGRATIONS_PROBE_HOST_REMAP), adjust comma-separated remaps, or run the app where the cluster IP routes.");
         }
     }
     if ((itemId === "pushgateway" || itemId === "jenkins") && /172\.17\.0\.1/.test(u)) {

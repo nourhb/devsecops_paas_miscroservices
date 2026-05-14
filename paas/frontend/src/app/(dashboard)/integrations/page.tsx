@@ -97,6 +97,13 @@ function ReachabilityBadge({ r }: {
             Unreachable
           </Badge>);
     }
+    if (r.state === "skipped") {
+        const m = (r.message ?? "").toLowerCase();
+        const label = m.includes("argocd") && m.includes("token") ? "Needs Argo token" : m.includes("token") ? "Needs token" : "Skipped";
+        return (<Badge variant="outline" className="max-w-[14rem] gap-1 truncate text-xs" title={r.message}>
+            {label}
+          </Badge>);
+    }
     return (<Badge variant="outline" className="text-xs">
         Not checked
       </Badge>);
@@ -118,7 +125,7 @@ function IntegrationItemRow({ item }: {
 }) {
     const notes = item.notes?.trim();
     const canOpenExternal = item.kind === "external" && Boolean(item.href?.trim());
-    const showReachability = item.kind === "external" && item.configured && Boolean(item.href);
+    const showReachability = item.kind === "external" && item.configured;
     return (<div className="flex flex-col gap-3 border-b border-border/40 py-4 last:border-b-0 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -135,6 +142,9 @@ function IntegrationItemRow({ item }: {
         {item.reachability?.state === "unreachable" && item.reachability.message ? (<p className="text-xs text-danger">
             {item.reachability.message}
           </p>) : null}
+        {item.reachability?.state === "skipped" && item.reachability.message ? (<p className="text-xs text-muted">
+            {item.reachability.message}
+          </p>) : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
         {item.internalPath ? (<Button variant="default" size="sm" asChild>
@@ -148,7 +158,21 @@ function IntegrationItemRow({ item }: {
               Open tool
             </a>
           </Button>) : null}
-        {!item.internalPath && item.configured && !canOpenExternal ? (<span className="text-xs text-muted">No URL in env</span>) : null}
+        {(() => {
+            if (item.internalPath || !item.configured || canOpenExternal) {
+                return null;
+            }
+            if (item.kind === "cli") {
+                return <span className="text-xs text-muted">No web URL (CLI / config)</span>;
+            }
+            if (item.id === "kyverno" || item.id === "opa-gatekeeper") {
+                return <span className="text-xs text-muted">Optional dashboard URL</span>;
+            }
+            if (item.id === "cosign") {
+                return <span className="text-xs text-muted">CLI / keys (no web URL)</span>;
+            }
+            return <span className="text-xs text-muted">No URL in env</span>;
+        })()}
       </div>
     </div>);
 }
