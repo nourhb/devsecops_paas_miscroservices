@@ -14,6 +14,9 @@ export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl
     if (/:31504(\/|$|\?|:)/.test(u)) {
         tips.push("Many k3s+Traefik labs use HTTP NodePort 30659 (not 31504). Update NEXT_PUBLIC_INGRESS_NGINX_URL or INGRESS_NGINX_PROBE_URL (see docker-compose.env.example).");
     }
+    if (itemId === "trivy-policy" && /:30954(\/|$|\?|:)/.test(u)) {
+        tips.push("Port 30954 is often correct; refusal from this host usually means the Next.js process cannot reach the node IP (e.g. Docker on a laptop) — set INTEGRATIONS_PROBE_HOST_REMAP=192.168.56.129=host.docker.internal, or run the app on the same LAN as the cluster.");
+    }
     if (/:30092(\/|$|\?|:)/.test(u)) {
         tips.push("Harbor aggregate NodePort is often 30002 (not 30092) — `kubectl get svc -n harbor harbor`. Align HARBOR_BASE_URL.");
     }
@@ -23,8 +26,8 @@ export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl
     if (/:30084(\/|$|\?|:)/.test(u)) {
         tips.push("After kube-prometheus-stack upgrades, Alertmanager NodePort may differ (e.g. …:30772) — `kubectl get svc -n monitoring | grep -i alert`.");
     }
-    if (/:30088(\/|$|\?|:)/.test(u)) {
-        tips.push("Pushgateway is often ClusterIP-only until exposed — `kubectl get svc -n monitoring` for pushgateway-*; set NEXT_PUBLIC_PUSHGATEWAY_URL only when reachable.");
+    if (itemId === "pushgateway") {
+        tips.push("Helm pushgateway is often ClusterIP-only (no NodePort) — omit NEXT_PUBLIC_PUSHGATEWAY_URL until `kubectl get svc -n monitoring` shows a reachable URL, or expose the service.");
     }
     if (itemId === "argocd") {
         tips.push("Match ARGOCD_BASE_URL to `kubectl get svc -n argocd argocd-server` NodePorts, set ARGOCD_AUTH_TOKEN, and ARGOCD_TLS_SKIP_VERIFY / KUBE_TLS_SKIP_VERIFY for lab TLS.");

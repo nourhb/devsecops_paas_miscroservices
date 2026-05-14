@@ -230,7 +230,7 @@ export async function getPlatformTooling(): Promise<{
                               : "Enable KUBERNETES_ENABLED and mount kubeconfig for live API telemetry.",
                         k8sClientReady ? "success" : "outline",
                     ),
-                    tool("Ingress (NGINX / Traefik)", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
+                    tool("Ingress (Traefik / NGINX)", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
                     tool("cert-manager", `${certManager.running}/${certManager.total} pods running · ${certs} certificates`, toneFromPods(certManager.running, certManager.total)),
                     tool(
                         "Calico (CNI)",
