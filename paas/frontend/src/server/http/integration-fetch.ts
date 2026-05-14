@@ -1,6 +1,6 @@
 import { INTEGRATION_HTTP_TIMEOUT_MS } from "@/server/constants/deploy";
 import { env } from "@/server/config/env";
-import { remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
+import { probeHostIsRemapSource, remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
 import { Agent, fetch as undiciFetch } from "undici";
 const insecureAgent = new Agent({
     connect: {
@@ -9,7 +9,7 @@ const insecureAgent = new Agent({
 });
 export type IntegrationFetchOptions = {
     timeoutMs?: number;
-    /** When true, skip INTEGRATIONS_PROBE_HOST_REMAP so *_PROBE_URL bases reach the host you wrote (e.g. k3s VM IP while remap targets Docker host). */
+    /** When true, force-skip INTEGRATIONS_PROBE_HOST_REMAP (also skipped automatically when the URL host matches a remap rule’s left-hand side). */
     bypassHostRemap?: boolean;
 };
 function resolveIntegrationFetchOptions(third?: number | IntegrationFetchOptions): {
@@ -35,7 +35,9 @@ function resolveIntegrationFetchOptions(third?: number | IntegrationFetchOptions
 }
 export async function integrationFetch(url: string, init: RequestInit = {}, third?: number | IntegrationFetchOptions): Promise<Response> {
     const { timeoutMs, bypassHostRemap } = resolveIntegrationFetchOptions(third);
-    const resolvedUrl = bypassHostRemap ? url : remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+    const skipRemap =
+        bypassHostRemap || probeHostIsRemapSource(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+    const resolvedUrl = skipRemap ? url : remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`Integration request timed out after ${ms}ms`)), ms);

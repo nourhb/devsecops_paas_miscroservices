@@ -163,7 +163,7 @@ const envSchema = z.object({
     /** Optional cert-manager / ACME UI or doc URL for catalog + probes (server-only alternative to NEXT_PUBLIC_CERT_MANAGER_UI_URL). */
     CERT_MANAGER_PROBE_URL: z.string().default(""),
     /** Max time for Platform hub integration HTTP probes (Jenkins, registries, etc.). */
-    PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120000).default(12000),
+    PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120000).default(20000),
     /** Optional host rewrite for server-side probes only, format oldHost=newHost (e.g. 192.168.56.129=host.docker.internal when the UI runs in Docker but URLs use a VirtualBox/lab VM IP). */
     INTEGRATIONS_PROBE_HOST_REMAP: z.string().default(""),
     INTEGRATIONS_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),

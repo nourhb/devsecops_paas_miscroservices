@@ -27,10 +27,12 @@ type HttpProbeCtx = {
     itemId?: string;
     /** When true, do not apply INTEGRATIONS_PROBE_HOST_REMAP (use for *_PROBE_URL bases). */
     bypassHostRemap?: boolean;
+    /** Override default PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS (e.g. cold SonarQube). */
+    timeoutMs?: number;
 };
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const t0 = Date.now();
-    const timeoutMs = env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS;
+    const timeoutMs = ctx?.timeoutMs ?? env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS;
     try {
         const res = await integrationFetch(url, {
             method: "GET",
@@ -310,7 +312,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (realValueOrEmpty(env.SONAR_TOKEN)) {
                 headers.Authorization = `Basic ${Buffer.from(`${env.SONAR_TOKEN.trim()}:`).toString("base64")}`;
             }
-            return httpProbe(joinUrl(href, "/api/system/status"), { headers }, { itemId: item.id });
+            const sonarTimeout = Math.max(env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS, 45000);
+            return httpProbe(joinUrl(href, "/api/system/status"), { headers }, { itemId: item.id, timeoutMs: sonarTimeout });
         }
         case "dependency-track": {
             if (!realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY)) {

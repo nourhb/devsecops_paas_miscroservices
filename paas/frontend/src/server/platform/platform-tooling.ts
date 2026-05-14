@@ -14,6 +14,22 @@ function toneFromPods(running: number, total: number): ToolTone {
     }
     return "danger";
 }
+/** Large kube-prometheus-stack namespace: allow a couple of pods pending (rollouts) without “degraded”. */
+function toneFromMonitoringNamespace(running: number, total: number): ToolTone {
+    if (total === 0) {
+        return "outline";
+    }
+    if (running === total) {
+        return "success";
+    }
+    if (total >= 8 && running >= total - 2 && running > 0) {
+        return "success";
+    }
+    if (running > 0) {
+        return "warning";
+    }
+    return "danger";
+}
 function configuredUrl(value: string | undefined): boolean {
     return Boolean(value?.trim());
 }
@@ -248,7 +264,19 @@ export async function getPlatformTooling(): Promise<{
                 items: [
                     tool("Kyverno", `${kyvernoPolicies} cluster policies`, kyvernoPolicies > 0 ? "success" : "outline"),
                     tool("OPA/Gatekeeper", `${gatekeeperCrds} CRDs installed`, gatekeeperCrds > 0 ? "success" : "outline"),
-                    tool("Kubewarden", `${kubewarden.running}/${kubewarden.total} pods running`, toneFromPods(kubewarden.running, kubewarden.total)),
+                    tool(
+                        "Kubewarden",
+                        kubewarden.total === 0
+                            ? "0/0 pods running"
+                            : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
+                              ? `${kubewarden.running}/${kubewarden.total} pods — optional when POLICY_ENGINE is ${env.POLICY_ENGINE}`
+                              : `${kubewarden.running}/${kubewarden.total} pods running`,
+                        kubewarden.total === 0
+                            ? "outline"
+                            : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
+                              ? "outline"
+                              : toneFromPods(kubewarden.running, kubewarden.total),
+                    ),
                     tool("Cosign", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "Verification keys configured for image signature checks." : "No signing key configured", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "success" : "outline"),
                     tool("Trivy", env.TRIVY_BASE_URL ? "Scanner endpoint configured for image/security checks." : "No Trivy endpoint configured", env.TRIVY_BASE_URL ? "success" : "outline")
                 ]
@@ -256,7 +284,19 @@ export async function getPlatformTooling(): Promise<{
             {
                 title: "Monitoring",
                 items: [
-                    urlBackedTool("Prometheus stack", monitoring, env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL, "Prometheus URL"),
+                    tool(
+                        "Prometheus stack",
+                        monitoring.total > 0
+                            ? `${monitoring.running}/${monitoring.total} pods running`
+                            : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
+                              ? "Prometheus URL configured; no pods listed in monitoring namespace."
+                              : "No workloads in monitoring namespace — deploy kube-prometheus-stack or set Prometheus URL.",
+                        monitoring.total > 0
+                            ? toneFromMonitoringNamespace(monitoring.running, monitoring.total)
+                            : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
+                              ? "success"
+                              : "outline",
+                    ),
                     tool("Grafana", process.env.NEXT_PUBLIC_GRAFANA_URL ? "Dashboard link available from the app." : "No Grafana URL configured", process.env.NEXT_PUBLIC_GRAFANA_URL ? "success" : "outline"),
                     tool("Alertmanager", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "Alertmanager link configured." : "No Alertmanager URL configured", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "success" : "outline"),
                     tool(
