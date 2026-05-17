@@ -55,8 +55,7 @@ function escapeForComposeLine(value) {
   const needsQuote =
     /[\r\n]/.test(value) ||
     /["\\]/.test(value) ||
-    /^\s/.test(value) ||
-    /\s$/.test(value) ||
+    /\s/.test(value) ||
     /[#]/.test(value) ||
     /\$/.test(value) ||
     value === "";

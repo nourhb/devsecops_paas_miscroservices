@@ -198,7 +198,10 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
-            return httpProbe(href, {}, { itemId: item.id });
+            return httpProbe(href, {}, {
+                itemId: item.id,
+                bypassHostRemap: probeHostIsRemapSource(href, env.INTEGRATIONS_PROBE_HOST_REMAP)
+            });
         }
         case "ingress-nginx": {
             const probeOnly = env.INGRESS_NGINX_PROBE_URL.trim();
@@ -292,10 +295,20 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }
         }
         case "prometheus": {
-            return httpProbe(joinUrl(href, "/-/ready"), {}, { itemId: item.id });
+            const promBase =
+                realValueOrEmpty(env.PROMETHEUS_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass =
+                Boolean(realValueOrEmpty(env.PROMETHEUS_PROBE_URL)) ||
+                probeHostIsRemapSource(promBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            return httpProbe(joinUrl(promBase, "/-/ready"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "alertmanager": {
-            return httpProbe(joinUrl(href, "/-/healthy"), {}, { itemId: item.id });
+            const amBase =
+                realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass =
+                Boolean(realValueOrEmpty(env.ALERTMANAGER_PROBE_URL)) ||
+                probeHostIsRemapSource(amBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            return httpProbe(joinUrl(amBase, "/-/healthy"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "pushgateway": {
             const useProbeUrl = Boolean(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL));
@@ -305,25 +318,44 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(pgUrl, {}, { itemId: item.id, bypassHostRemap: bypassPg });
         }
         case "grafana": {
-            return httpProbe(joinUrl(href, "/api/health"), {}, { itemId: item.id });
+            const gBase =
+                realValueOrEmpty(env.GRAFANA_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass =
+                Boolean(realValueOrEmpty(env.GRAFANA_PROBE_URL)) ||
+                probeHostIsRemapSource(gBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            return httpProbe(joinUrl(gBase, "/api/health"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "sonarqube": {
             const headers: Record<string, string> = {};
             if (realValueOrEmpty(env.SONAR_TOKEN)) {
                 headers.Authorization = `Basic ${Buffer.from(`${env.SONAR_TOKEN.trim()}:`).toString("base64")}`;
             }
+            const sonarBase =
+                realValueOrEmpty(env.SONAR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypassSonar =
+                Boolean(realValueOrEmpty(env.SONAR_PROBE_URL)) ||
+                probeHostIsRemapSource(sonarBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             const sonarTimeout = Math.max(env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS, 45000);
-            return httpProbe(joinUrl(href, "/api/system/status"), { headers }, { itemId: item.id, timeoutMs: sonarTimeout });
+            return httpProbe(joinUrl(sonarBase, "/api/system/status"), { headers }, {
+                itemId: item.id,
+                timeoutMs: sonarTimeout,
+                bypassHostRemap: bypassSonar
+            });
         }
         case "dependency-track": {
-            if (!realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY)) {
-                return httpProbe(joinUrl(href, "/api/version"), {}, { itemId: item.id });
-            }
-            return httpProbe(joinUrl(href, "/api/version"), {
-                headers: {
-                    "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY.trim()
-                }
-            }, { itemId: item.id });
+            const dtBase = href.replace(/\/+$/, "");
+            const bypassDt = probeHostIsRemapSource(dtBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            const probeInit = !realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY)
+                ? {}
+                : {
+                    headers: {
+                        "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY.trim()
+                    }
+                };
+            return httpProbe(joinUrl(dtBase, "/api/version"), probeInit, {
+                itemId: item.id,
+                bypassHostRemap: bypassDt
+            });
         }
         case "trivy-policy": {
             const trivyBase = realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
@@ -344,11 +376,19 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (hb) {
                 headers.Authorization = hb;
             }
-            const ping = await httpProbe(joinUrl(href, "/api/v2.0/ping"), { headers }, { itemId: item.id });
+            const harborBase =
+                realValueOrEmpty(env.HARBOR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypassHarbor =
+                Boolean(realValueOrEmpty(env.HARBOR_PROBE_URL)) ||
+                probeHostIsRemapSource(harborBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            const ping = await httpProbe(joinUrl(harborBase, "/api/v2.0/ping"), { headers }, {
+                itemId: item.id,
+                bypassHostRemap: bypassHarbor
+            });
             if (ping.state === "reachable") {
                 return ping;
             }
-            return httpProbe(href, { headers }, { itemId: item.id });
+            return httpProbe(harborBase, { headers }, { itemId: item.id, bypassHostRemap: bypassHarbor });
         }
         case "cert-manager": {
             const cmProbe = realValueOrEmpty(env.CERT_MANAGER_PROBE_URL).replace(/\/+$/, "");
