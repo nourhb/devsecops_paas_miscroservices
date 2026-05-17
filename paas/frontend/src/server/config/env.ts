@@ -124,10 +124,14 @@ const envSchema = z.object({
     ARGOCD_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     ARGOCD_APP_PREFIX: z.string().default("paas"),
     SONAR_BASE_URL: z.string().default(""),
+    /** Server-side SonarQube probe base (skips INTEGRATIONS_PROBE_HOST_REMAP). */
+    SONAR_PROBE_URL: z.string().default(""),
     SONAR_TOKEN: z.string().default(""),
     DEPENDENCY_TRACK_BASE_URL: z.string().default(""),
     DEPENDENCY_TRACK_API_KEY: z.string().default(""),
     PROMETHEUS_BASE_URL: z.string().default(""),
+    /** Server-side probe base for Prometheus (skips INTEGRATIONS_PROBE_HOST_REMAP). Use VM node IP from Docker. */
+    PROMETHEUS_PROBE_URL: z.string().default(""),
     PROMETHEUS_QUERY_CPU: z.string().default(""),
     PROMETHEUS_QUERY_MEMORY: z.string().default(""),
     TRIVY_BASE_URL: z.string().default(""),
@@ -158,6 +162,12 @@ const envSchema = z.object({
     INGRESS_NGINX_PROBE_URL: z.string().default(""),
     /** Optional Pushgateway base URL for server-side probes only (omit public URL until NodePort exists; use this for probes from Docker). */
     PUSHGATEWAY_PROBE_URL: z.string().default(""),
+    /** Server-side Grafana probe base (skips remap). */
+    GRAFANA_PROBE_URL: z.string().default(""),
+    /** Server-side Alertmanager probe base (skips remap). */
+    ALERTMANAGER_PROBE_URL: z.string().default(""),
+    /** Server-side Harbor probe base (skips remap); defaults to HARBOR_BASE_URL when unset. */
+    HARBOR_PROBE_URL: z.string().default(""),
     /** Optional Vault HTTP base (e.g. http://192.168.56.129:30820) for catalog + probes when NEXT_PUBLIC_VAULT_UI_URL is unset. */
     VAULT_ADDR: z.string().default(""),
     /** Optional cert-manager / ACME UI or doc URL for catalog + probes (server-only alternative to NEXT_PUBLIC_CERT_MANAGER_UI_URL). */
@@ -348,10 +358,12 @@ const parsed = envSchema.safeParse({
     ARGOCD_TLS_SKIP_VERIFY: process.env.ARGOCD_TLS_SKIP_VERIFY,
     ARGOCD_APP_PREFIX: process.env.ARGOCD_APP_PREFIX,
     SONAR_BASE_URL: firstNonEmpty(process.env.SONAR_BASE_URL, process.env.SONAR_URL),
+    SONAR_PROBE_URL: process.env.SONAR_PROBE_URL,
     SONAR_TOKEN: process.env.SONAR_TOKEN,
     DEPENDENCY_TRACK_BASE_URL: process.env.DEPENDENCY_TRACK_BASE_URL,
     DEPENDENCY_TRACK_API_KEY: process.env.DEPENDENCY_TRACK_API_KEY,
     PROMETHEUS_BASE_URL: process.env.PROMETHEUS_BASE_URL,
+    PROMETHEUS_PROBE_URL: process.env.PROMETHEUS_PROBE_URL,
     PROMETHEUS_QUERY_CPU: process.env.PROMETHEUS_QUERY_CPU,
     PROMETHEUS_QUERY_MEMORY: process.env.PROMETHEUS_QUERY_MEMORY,
     TRIVY_BASE_URL: process.env.TRIVY_BASE_URL,
@@ -379,6 +391,9 @@ const parsed = envSchema.safeParse({
     KUBE_TLS_SKIP_VERIFY: process.env.KUBE_TLS_SKIP_VERIFY,
     INGRESS_NGINX_PROBE_URL: process.env.INGRESS_NGINX_PROBE_URL,
     PUSHGATEWAY_PROBE_URL: process.env.PUSHGATEWAY_PROBE_URL,
+    GRAFANA_PROBE_URL: process.env.GRAFANA_PROBE_URL,
+    ALERTMANAGER_PROBE_URL: process.env.ALERTMANAGER_PROBE_URL,
+    HARBOR_PROBE_URL: process.env.HARBOR_PROBE_URL,
     VAULT_ADDR: firstNonEmpty(process.env.VAULT_ADDR, process.env.VAULT_UI_URL),
     CERT_MANAGER_PROBE_URL: process.env.CERT_MANAGER_PROBE_URL,
     PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: process.env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS,
