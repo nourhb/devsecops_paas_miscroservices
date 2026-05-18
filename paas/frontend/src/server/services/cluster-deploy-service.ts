@@ -111,10 +111,12 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const git = await commitHelmValuesGitHub(projectName, artifactRef);
         sections.push(`[gitops] committed ${git.ref}`);
+        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}`);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         sections.push(`[gitops] FAILED: ${msg}`);
+        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=FAIL detail=${msg.slice(0, 400)}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
         return;
     }
@@ -130,6 +132,12 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const argo = await syncArgoApplication(projectName, destNamespace);
         sections.push(argo.logs);
+        if (/Sync accepted|already exists|created/i.test(argo.logs)) {
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd status=OK detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
+        }
+        else if (/WARN/i.test(argo.logs)) {
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd status=WARN detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
+        }
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -137,15 +145,18 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         if (lenientIntegrations) {
             sections.push(`[argocd] WARN: ${msg} — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
                 "GitOps already committed; open Argo CD to sync or fix ARGOCD_* / network.");
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd status=WARN detail=${msg.slice(0, 400)}`);
         }
         else {
             sections.push(`[argocd] FAILED: ${msg}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd status=FAIL detail=${msg.slice(0, 400)}`);
             await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
             return;
         }
     }
-    const okLog = tail(sections.join("\n"));
     const appUrl = buildAppPublicUrl(projectName);
+    sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl}`);
+    const okLog = tail(sections.join("\n"));
     await prisma.deployment.update({
         where: { id: deploymentId },
         data: {

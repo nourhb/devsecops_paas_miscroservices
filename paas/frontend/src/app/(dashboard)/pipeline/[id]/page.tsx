@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { Hint } from "@/components/hint";
 import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
+import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
+import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-parse";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
@@ -167,6 +169,8 @@ export default function PipelinePage() {
     }).length, [displayStages]);
     const jTotal = displayStages.length;
     const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
+    const deployVerifyLogs = `${projectQuery.data?.deploymentLogs ?? ""}\n${projectQuery.data?.buildLogs ?? ""}`;
+    const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
     if (projectQuery.isLoading) {
         return (<div className="space-y-6">
         <Skeleton className="h-4 w-56"/>
@@ -395,6 +399,37 @@ export default function PipelinePage() {
           </details>
         </CardContent>
       </Card>
+
+      <PipelineVerificationPanel
+        jenkinsChecks={wfStages?.jenkinsChecks ?? []}
+        deployChecks={deployChecks}
+        buildComplete={wfStages?.buildComplete ?? null}
+        artifactImage={wfStages?.artifactImage ?? null}
+      />
+
+      <details className="rounded-xl border border-border/60 bg-muted/10 px-4 py-3 text-sm">
+        <summary className="cursor-pointer font-medium text-foreground">How to track that each step really worked</summary>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-muted marker:text-foreground">
+          <li>
+            <strong className="text-foreground">PaaS UI</strong> — checklist above: every step should show <span className="font-mono text-xs">OK</span> or explicit <span className="font-mono text-xs">SKIP</span> (fast pipeline).
+          </li>
+          <li>
+            <strong className="text-foreground">Jenkins console</strong> — open the build → search <span className="font-mono text-xs">PAAS_STEP_OK</span> (12 lines) and <span className="font-mono text-xs">PAAS_BUILD_COMPLETE</span>.
+          </li>
+          <li>
+            <strong className="text-foreground">Harbor</strong> — image tag matches build number: <span className="font-mono text-xs">192.168.56.129:30002/paas/&lt;project&gt;:&lt;#&gt;</span>.
+          </li>
+          <li>
+            <strong className="text-foreground">GitOps</strong> — GitHub <span className="font-mono text-xs">apps/&lt;project&gt;/values.yaml</span> updated; deploy log shows <span className="font-mono text-xs">PAAS_DEPLOY_VERIFY step=gitops status=OK</span>.
+          </li>
+          <li>
+            <strong className="text-foreground">Cluster</strong> — on the master: <span className="font-mono text-xs">bash paas/scripts/verify-deployment-lab.sh &lt;project&gt;</span>.
+          </li>
+          <li>
+            <strong className="text-foreground">App URL</strong> — open the nip.io link from the deployment row (requires ingress in gitops values).
+          </li>
+        </ol>
+      </details>
 
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">

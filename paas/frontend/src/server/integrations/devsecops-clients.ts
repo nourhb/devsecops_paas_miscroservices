@@ -4,6 +4,7 @@ import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syntheticStagesWhenWfapiUnavailable } from "@/lib/paas-deploy-jenkins-stages";
+import { type PipelineStepCheck, parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
 import { getArgoApplicationStatus, getArgoCdApiBase, syncArgoApplication } from "@/server/services/argocd-service";
 import { verifyImageWithCosign } from "@/server/security/cosign-verify";
@@ -48,6 +49,14 @@ export type JenkinsWorkflowDescribeResult = {
     result: string | null;
     runStatus: string | null;
     stages: JenkinsWorkflowStageRow[];
+    jenkinsChecks?: PipelineStepCheck[];
+    buildComplete?: {
+        result: string;
+        image: string;
+        project: string;
+        build: string;
+    } | null;
+    artifactImage?: string | null;
 };
 export interface DockerHubTagInfo {
     name: string;
@@ -1079,6 +1088,21 @@ export class JenkinsClient {
         }
         const runStatus = typeof wf.status === "string" ? wf.status.trim().toUpperCase() : null;
         const stages = flattenWorkflowStages(wf.stages);
+        let jenkinsChecks: PipelineStepCheck[] = [];
+        let buildComplete: JenkinsWorkflowDescribeResult["buildComplete"] = null;
+        let artifactImage: string | null = null;
+        try {
+            const consoleRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/${bn}/consoleText`, { headers });
+            if (consoleRes.ok) {
+                const parsed = parsePipelineVerificationLogs(await consoleRes.text());
+                jenkinsChecks = parsed.jenkinsChecks;
+                buildComplete = parsed.buildComplete;
+                artifactImage = parsed.artifactImage;
+            }
+        }
+        catch {
+            // Console optional for verification panel
+        }
         return withUrl({
             configured: true,
             jobUrlPath: jobPath,
@@ -1087,7 +1111,10 @@ export class JenkinsClient {
             building,
             result,
             runStatus,
-            stages
+            stages,
+            jenkinsChecks,
+            buildComplete,
+            artifactImage
         });
     }
     async getDashboardBuildLogs(jobName: string, buildId: string): Promise<{
