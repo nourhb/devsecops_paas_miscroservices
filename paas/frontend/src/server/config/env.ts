@@ -186,6 +186,10 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_SCHEME: z.string().default("https"),
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
+    /** When set (e.g. 192.168.56.129), app links use nip.io unless APPS_PUBLIC_URL_TEMPLATE is set. */
+    APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
+    /** Optional Traefik/ingress HTTP NodePort appended to lab nip.io URLs (e.g. 30659 on k3s). */
+    APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
     NOTIFY_PIPELINE_FAILURE_EMAILS: z.enum(["true", "false"]).default("true"),
@@ -412,6 +416,8 @@ const parsed = envSchema.safeParse({
     APPS_PUBLIC_URL_SCHEME: process.env.APPS_PUBLIC_URL_SCHEME,
     APPS_PUBLIC_BASE_DOMAIN: process.env.APPS_PUBLIC_BASE_DOMAIN,
     APPS_PUBLIC_URL_TEMPLATE: process.env.APPS_PUBLIC_URL_TEMPLATE,
+    APPS_PUBLIC_LAB_NODE_IP: process.env.APPS_PUBLIC_LAB_NODE_IP,
+    APPS_PUBLIC_INGRESS_HTTP_PORT: process.env.APPS_PUBLIC_INGRESS_HTTP_PORT,
     APPS_REACHABILITY_TIMEOUT_MS: process.env.APPS_REACHABILITY_TIMEOUT_MS,
     AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN,
     NOTIFY_PIPELINE_FAILURE_EMAILS: process.env.NOTIFY_PIPELINE_FAILURE_EMAILS,

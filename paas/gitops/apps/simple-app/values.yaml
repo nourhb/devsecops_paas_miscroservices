@@ -1,0 +1,28 @@
+image:
+  repository: 192.168.56.129:30002/paas/simple-app
+  tag: "latest"
+  digest: ""
+
+imagePullSecrets:
+  - name: harbor-regcred
+
+service:
+  targetPort: 3000
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+env: []
+
+# Must match APPS_PUBLIC_LAB_NODE_IP + APPS_PUBLIC_INGRESS_HTTP_PORT in PaaS env.
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: simple-app.192.168.56.129.nip.io
+  tls: []
