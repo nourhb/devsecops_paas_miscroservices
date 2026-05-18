@@ -158,6 +158,8 @@ const envSchema = z.object({
     /** Optional override for Argo CD source.path (default: parent dir of GITOPS_VALUES_PATH_PATTERN). */
     GITOPS_CHART_PATH_PATTERN: z.string().default(""),
     GITOPS_COMMIT_MESSAGE_TEMPLATE: z.string().default("chore(gitops): bump {{projectName}} to {{imageTag}}"),
+    /** Reference Helm chart in the same GitOps repo (e.g. apps/test-app) copied when apps/{{projectName}} has no Chart.yaml. */
+    GITOPS_BOOTSTRAP_CHART_PATH: z.string().default("apps/test-app"),
     DOCKERHUB_USERNAME: z.string().default(""),
     DOCKERHUB_TOKEN: z.string().default(""),
     DOCKERHUB_NAMESPACE: z.string().default(""),
@@ -397,6 +399,7 @@ const parsed = envSchema.safeParse({
     GITOPS_VALUES_PATH_PATTERN: process.env.GITOPS_VALUES_PATH_PATTERN,
     GITOPS_CHART_PATH_PATTERN: process.env.GITOPS_CHART_PATH_PATTERN,
     GITOPS_COMMIT_MESSAGE_TEMPLATE: process.env.GITOPS_COMMIT_MESSAGE_TEMPLATE,
+    GITOPS_BOOTSTRAP_CHART_PATH: process.env.GITOPS_BOOTSTRAP_CHART_PATH,
     DOCKERHUB_USERNAME: firstNonEmpty(process.env.DOCKERHUB_USERNAME, process.env.HARBOR_USERNAME),
     DOCKERHUB_TOKEN: firstNonEmpty(process.env.DOCKERHUB_TOKEN, process.env.HARBOR_PASSWORD),
     DOCKERHUB_NAMESPACE: firstNonEmpty(process.env.DOCKERHUB_NAMESPACE, process.env.HARBOR_USERNAME),

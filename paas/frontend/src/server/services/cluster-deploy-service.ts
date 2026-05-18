@@ -111,7 +111,8 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const git = await commitHelmValuesGitHub(projectName, artifactRef);
         sections.push(`[gitops] committed ${git.ref}`);
-        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}`);
+        const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/test-app" : "";
+        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}${bootstrapNote}`);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -155,7 +156,13 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         }
     }
     const appUrl = buildAppPublicUrl(projectName);
-    sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl}`);
+    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    if (!labIp && !env.APPS_PUBLIC_URL_TEMPLATE.trim()) {
+        sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} — set APPS_PUBLIC_LAB_NODE_IP=192.168.56.129 and APPS_PUBLIC_INGRESS_HTTP_PORT=30659 in PaaS env, then redeploy frontend`);
+    }
+    else {
+        sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl}`);
+    }
     const okLog = tail(sections.join("\n"));
     await prisma.deployment.update({
         where: { id: deploymentId },

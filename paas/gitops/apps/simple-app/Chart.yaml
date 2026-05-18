@@ -1,0 +1,6 @@
+apiVersion: v2
+name: simple-app
+description: simple-app workload (PaaS / Jenkins deploy)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
