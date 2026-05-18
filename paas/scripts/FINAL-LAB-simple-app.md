@@ -1,13 +1,16 @@
 # Final lab fix — simple-app
 
-## A. PaaS frontend (after `deploy` timeout)
+## A. PaaS frontend (namespace `paas`, deployment name `frontend`)
+
+Wrong label: there is no `app.kubernetes.io/name=frontend` in this lab.
 
 ```bash
-kubectl get pods -n paas -l app.kubernetes.io/name=frontend -o wide
+bash paas/scripts/recover-paas-lab.sh
+# or manually:
+kubectl get deploy,pods -n paas
+kubectl set image deployment/frontend -n paas frontend=192.168.56.129:30002/paas/paas-frontend:latest
+kubectl rollout restart deployment/frontend -n paas
 kubectl rollout status deployment/frontend -n paas --timeout=600s
-# If stuck: force new pod
-kubectl delete pod -n paas -l app.kubernetes.io/name=frontend --force --grace-period=0
-kubectl rollout status deployment/frontend -n paas --timeout=300s
 curl -sS -o /dev/null -w 'PaaS %{http_code}\n' http://192.168.56.129:30100/
 ```
 
