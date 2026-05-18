@@ -161,7 +161,7 @@ export default function PipelinePage() {
         onError: () => toast.error("Rollback failed")
     });
     const wfStages = pipelineStagesQuery.data;
-    const liveStagesList = wfStages?.stages ?? [];
+    const liveStagesList = useMemo(() => wfStages?.stages ?? [], [wfStages?.stages]);
     const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages), [liveStagesList, wfStages]);
     const jStarted = useMemo(() => displayStages.filter((s) => {
         const u = (s.status || "").toUpperCase();
@@ -169,7 +169,10 @@ export default function PipelinePage() {
     }).length, [displayStages]);
     const jTotal = displayStages.length;
     const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
-    const deployVerifyLogs = `${projectQuery.data?.deploymentLogs ?? ""}\n${projectQuery.data?.buildLogs ?? ""}`;
+    const deployVerifyLogs = useMemo(() => {
+        const s = statusQuery.data;
+        return `${s?.deploymentLogs ?? ""}\n${s?.buildLogs ?? ""}`;
+    }, [statusQuery.data]);
     const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
     if (projectQuery.isLoading) {
         return (<div className="space-y-6">
