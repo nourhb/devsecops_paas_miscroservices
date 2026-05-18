@@ -101,6 +101,12 @@ export interface JenkinsPipelineStageRow {
     status: string;
     durationMs: number | null;
 }
+export interface PipelineStepCheckRow {
+    step: number;
+    level: "OK" | "WARN" | "SKIP" | "FAIL";
+    id: string;
+    message: string;
+}
 export interface JenkinsPipelineStagesResponse {
     configured: boolean;
     skipped?: boolean;
@@ -116,6 +122,14 @@ export interface JenkinsPipelineStagesResponse {
     runStatus: string | null;
     stages: JenkinsPipelineStageRow[];
     buildUrl: string | null;
+    jenkinsChecks?: PipelineStepCheckRow[];
+    buildComplete?: {
+        result: string;
+        image: string;
+        project: string;
+        build: string;
+    } | null;
+    artifactImage?: string | null;
 }
 export interface KubernetesNamespaceRecord {
     name: string;

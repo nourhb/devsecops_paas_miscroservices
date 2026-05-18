@@ -20,6 +20,15 @@ def nonFatalStage(String label, Closure body) {
   }
 }
 
+/** Machine-readable checks for PaaS UI (grep PAAS_STEP_OK in console). */
+def paasStepLog(String level, int step, String id, String msg) {
+  def safe = (msg ?: "").replaceAll('[\\r\\n]+', ' ').take(500)
+  println "PAAS_STEP_${level} step=${step} id=${id} msg=${safe}"
+}
+def paasStepOk(int step, String id, String msg) { paasStepLog('OK', step, id, msg) }
+def paasStepWarn(int step, String id, String msg) { paasStepLog('WARN', step, id, msg) }
+def paasStepSkip(int step, String reason) { println "PAAS_STEP_SKIP step=${step} reason=${reason.take(500)}" }
+
 def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
   def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
@@ -455,6 +464,7 @@ node(agentLabel) {
     nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
     imageName = resolveImageNameForHarbor(imageName)
     println "[params] project=${projectId} branch=${branchName} image=${imageName}"
+    paasStepOk(1, 'params', "GIT_URL, BRANCH, IMAGE_NAME, PROJECT_ID validated; image=${imageName}")
     println "*** END : Check Parameters ***"
   }
 
@@ -475,6 +485,8 @@ node(agentLabel) {
       echo "[checkout] top of tree:"
       ls -la | head -25
     '''
+    def head = sh(script: 'git rev-parse --short HEAD 2>/dev/null || echo unknown', returnStdout: true).trim()
+    paasStepOk(2, 'checkout', "branch=${branchName} commit=${head}")
     println "*** END : 2. Checkout du code ***"
   }
 
@@ -697,11 +709,17 @@ node(agentLabel) {
         echo "OUTPUT_DIRS=(workspace sources / pas de répertoire de sortie détecté)" >> paas-artifacts/build-artifact-manifest.txt
       fi
     """
+    def buildProof = 'workspace'
+    if (fileExists('.next/BUILD_ID')) { buildProof = '.next build present' }
+    else if (fileExists('target')) { buildProof = 'target/ present' }
+    else if (fileExists('dist')) { buildProof = 'dist/ present' }
+    paasStepOk(3, 'compile', "${buildProof}; see paas-artifacts/build-artifact-manifest.txt")
     println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
 
   stage("Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)") {
     if (paasFastPipeline) {
+      paasStepSkip(4, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 4 (SCA / Dependency-Check / cdxgen)."
     } else {
       nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
@@ -768,12 +786,18 @@ exit 0
 '''
       }
       uploadBomToDependencyTrack(projectId, branchName)
+      if (fileExists('sca/bom.json')) {
+        paasStepOk(4, 'sca', 'sca/bom.json present (Dependency-Check + CycloneDX)')
+      } else {
+        paasStepWarn(4, 'sca', 'sca/bom.json missing — check Docker and NVD_API_KEY in console')
+      }
     }
     }
   }
 
   stage("Step 5 — Tests SAST (SonarQube)") {
     if (paasFastPipeline) {
+      paasStepSkip(5, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
@@ -833,6 +857,7 @@ docker run --rm \
 exit 0
 '''
       }
+      paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
     }
     }
   }
@@ -921,6 +946,7 @@ exit 0
       mkdir -p paas-artifacts
       echo "PAAS_ARTIFACT_IMAGE=${artifactImage}" >> paas-artifacts/build-artifact-manifest.txt
     """
+    paasStepOk(6, 'image', "artifact=${artifactImage} crane=${imagePublishedViaCrane}")
     println "*** END : 6. Création de l'image Docker ***"
   }
 
@@ -942,11 +968,17 @@ EOF
       } else {
         println "[helm] Pas de Chart.yaml à la racine ou CLI helm absente ; le packaging est délégué au dépôt GitOps du PaaS."
       }
+      if (fileExists('paas-artifacts/release-metadata.txt')) {
+        paasStepOk(7, 'helm_meta', 'paas-artifacts/release-metadata.txt written')
+      } else {
+        paasStepWarn(7, 'helm_meta', 'release-metadata missing')
+      }
     }
   }
 
   stage("Step 8 — Publication des artefacts (Artifactory)") {
     if (paasFastPipeline) {
+      paasStepSkip(8, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 8 (Artifactory bundle upload)."
     } else {
       nonFatalStage("8. Publication Artifactory (aligné Jenkinsfile.paas-deploy.full)") {
@@ -998,6 +1030,7 @@ EOF
       } else {
         println "[artifactory] Définir ARTIFACTORY_CREDENTIALS_ID (Jenkins) ou ACCESS_TOKEN ou USER+PASSWORD — étape ignorée."
       }
+      paasStepOk(8, 'artifactory', 'stage finished (upload optional if ARTIFACTORY_URL set)')
     }
     }
   }
@@ -1057,11 +1090,13 @@ EOF
           '''
         }
       }
+      paasStepOk(9, 'cosign', cosignImageRef ? "sign attempted for ${cosignImageRef}" : 'no image to sign')
     }
   }
 
   stage("Step 10 — DAST (OWASP ZAP baseline)") {
     if (paasFastPipeline) {
+      paasStepSkip(10, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 10 (OWASP ZAP baseline)."
     } else {
       nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
@@ -1087,6 +1122,11 @@ EOF
               -J /zap/wrk/zap-baseline-report.json
           echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
         '''
+      }
+      if (fileExists('paas-artifacts/zap-baseline-report.html')) {
+        paasStepOk(10, 'zap', 'ZAP report in paas-artifacts/')
+      } else {
+        paasStepWarn(10, 'zap', 'ZAP skipped or no report (set ZAP_TARGET_URL)')
       }
     }
     }
@@ -1132,6 +1172,7 @@ EOF
           done
         '''
       }
+      paasStepOk(11, 'helm_oci', 'Helm OCI push stage finished (charts optional)')
     }
   }
 
@@ -1144,6 +1185,9 @@ EOF
     archiveArtifacts artifacts: "sca/**,paas-artifacts/**", allowEmptyArchive: true, onlyIfSuccessful: false
     println "[artifacts] Archives locales (Jenkins) : SCA, ZAP, charts Helm, métadonnées ; Artifactory reste optionnel (Step 8)."
     println "IMAGE_NAME=${imageName} PROJECT_ID=${projectId} BUILD_NUMBER=${env.BUILD_NUMBER}"
+    paasStepOk(12, 'archive', 'Jenkins archived sca/** and paas-artifacts/**; GitOps+Argo sync runs in PaaS after build')
+    def buildResult = currentBuild.currentResult ?: 'SUCCESS'
+    println "PAAS_BUILD_COMPLETE result=${buildResult} image=${artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
 }
