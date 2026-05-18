@@ -18,8 +18,27 @@ function parseGithubRepo(url: string): {
     }
     throw new IntegrationError(`GITOPS_REPO_URL must be a github.com repository URL (HTTPS or git@). Got: ${url.slice(0, 80)}`);
 }
+function applyProjectPathPattern(pattern: string, projectName: string): string {
+    return pattern.replace(/\{\{projectName\}\}/gi, projectName).replace(/\{\{project\}\}/gi, projectName);
+}
 function valuesPathForProject(projectName: string): string {
-    return env.GITOPS_VALUES_PATH_PATTERN.replace(/\{\{projectName\}\}/gi, projectName).replace(/\{\{project\}\}/gi, projectName);
+    return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
+}
+/** Helm chart directory in the GitOps repo (parent of values.yaml unless GITOPS_CHART_PATH_PATTERN is set). */
+export function gitopsHelmChartPathForProject(projectName: string): string {
+    const explicit = env.GITOPS_CHART_PATH_PATTERN.trim();
+    if (explicit) {
+        return applyProjectPathPattern(explicit, projectName);
+    }
+    const valuesPath = applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName).replace(/\\/g, "/");
+    if (valuesPath.endsWith("/values.yaml")) {
+        return valuesPath.slice(0, -"/values.yaml".length);
+    }
+    if (valuesPath.endsWith("values.yaml")) {
+        const slash = valuesPath.lastIndexOf("/");
+        return slash > 0 ? valuesPath.slice(0, slash) : `apps/${projectName}`;
+    }
+    return `apps/${projectName}`;
 }
 function splitImageRef(ref: string): {
     repository: string;

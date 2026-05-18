@@ -119,8 +119,16 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         return;
     }
     sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+    let destNamespace: string | undefined;
     try {
-        const argo = await syncArgoApplication(projectName);
+        const row = await prisma.project.findUnique({ where: { id: projectId }, select: { namespace: true } });
+        destNamespace = row?.namespace ?? undefined;
+    }
+    catch {
+        destNamespace = undefined;
+    }
+    try {
+        const argo = await syncArgoApplication(projectName, destNamespace);
         sections.push(argo.logs);
     }
     catch (e) {
