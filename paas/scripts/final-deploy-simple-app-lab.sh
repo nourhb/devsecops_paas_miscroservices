@@ -14,6 +14,14 @@
 set -euo pipefail
 
 BUILD="${1:-}"
+if [[ -z "$BUILD" ]]; then
+  die "Usage: $0 <jenkins-build-number>
+Example: $0 103
+Get NNN from Jenkins: PAAS_ARTIFACT_IMAGE=192.168.56.129:30002/paas/simple-app:NNN"
+fi
+if ! [[ "$BUILD" =~ ^[0-9]+$ ]]; then
+  die "BUILD must be digits only (got: ${BUILD}). Example: $0 103 — do not type <BUILD_NUMBER>"
+fi
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_PORT="${HARBOR_PORT:-30002}"
 HARBOR_USER="${HARBOR_USER:-admin}"
