@@ -214,13 +214,58 @@ def registryHostFor(String imageRef) {
   return first
 }
 
+def normalizeRegistryHost(String reg) {
+  if (!reg?.trim()) {
+    return ""
+  }
+  return reg.trim().replaceFirst('^https?://', '').replaceAll('/+$', '').split('/')[0]
+}
+
+def isDockerHubStyleImageRef(String imageRef) {
+  def parts = imageRef?.trim()?.tokenize('/') ?: []
+  if (parts.size() != 2) {
+    return false
+  }
+  def host = parts[0]
+  return !host.contains('.') && !host.contains(':') && host != 'localhost'
+}
+
+def resolveImageNameForHarbor(String imageRef) {
+  def harborHost = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
+  if (!harborHost || !env.HARBOR_USERNAME?.trim() || !env.HARBOR_PASSWORD?.trim()) {
+    return imageRef
+  }
+  def normalized = imageRef?.trim() ?: ""
+  if (!normalized) {
+    return imageRef
+  }
+  if (normalized.startsWith("${harborHost}/")) {
+    return normalized
+  }
+  if (!isDockerHubStyleImageRef(normalized)) {
+    return normalized
+  }
+  def harborProject = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: 'paas').trim()
+  def appName = normalized.tokenize('/')[1]
+  def resolved = "${harborHost}/${harborProject}/${appName}"
+  println "[image] Rewrote Docker Hub–style ref ${normalized} → Harbor ${resolved}"
+  return resolved
+}
+
 def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
   def registry = registryHostFor(imageRef)
+  def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
+  def harborHost = normalizeRegistryHost(harborRegistry)
+  def craneInsecure = ""
+  if (harborHost && registry == harborHost) {
+    craneInsecure = "--insecure"
+  } else if (harborRegistry.startsWith('http://') || (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: '').trim().equalsIgnoreCase('true')) {
+    craneInsecure = "--insecure"
+  }
   def dockerhubUser = params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: ""
   def dockerhubToken = params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: ""
   def harborUser = params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: ""
   def harborPassword = params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: ""
-  def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
 
   if (registry == "index.docker.io") {
     if (!dockerhubUser || !dockerhubToken) {
@@ -232,7 +277,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
       '''
     }
-  } else if (harborRegistry && registry == harborRegistry.replaceFirst('^https?://', '').replaceAll('/$', '')) {
+  } else if (harborHost && registry == harborHost) {
     if (!harborUser || !harborPassword) {
       error("Harbor credentials are required for dockerless image push.")
     }
@@ -288,7 +333,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
       echo "[image] crane append: foreground heartbeat every \${_hb}s while crane runs (durable-task friendly)"
-      '${craneBin}' append \\
+      '${craneBin}' ${craneInsecure} append \\
         -b mirror.gcr.io/library/node:20-bookworm-slim \\
         -f paas-artifacts/app-layer.tar \\
         -t '${imageRef}' &
@@ -299,7 +344,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       done
       wait "\${CRANE_APPEND_PID}"
     else
-      '${craneBin}' append \\
+      '${craneBin}' ${craneInsecure} append \\
         -b mirror.gcr.io/library/node:20-bookworm-slim \\
         -f paas-artifacts/app-layer.tar \\
         -t '${imageRef}'
@@ -310,14 +355,14 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     set -eu
     USE_STANDALONE=\$(cat paas-artifacts/_crane_use_standalone)
     if [ "\$USE_STANDALONE" = "1" ]; then
-      '${craneBin}' mutate '${imageRef}' \\
+      '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
         -t '${imageRef}' \\
         --workdir=/app \\
         --entrypoint=/usr/local/bin/node \\
         --cmd=server.js \\
         --exposed-ports=3000/tcp
     else
-      '${craneBin}' mutate '${imageRef}' \\
+      '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
         -t '${imageRef}' \\
         --workdir=/app \\
         --entrypoint=/bin/sh \\
@@ -408,6 +453,7 @@ node(agentLabel) {
     nonEmptyNoSpace(branchName, "BRANCH PARAMS")
     nonEmptyNoSpace(imageName, "IMAGE_NAME PARAMS")
     nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
+    imageName = resolveImageNameForHarbor(imageName)
     println "[params] project=${projectId} branch=${branchName} image=${imageName}"
     println "*** END : Check Parameters ***"
   }
@@ -597,6 +643,15 @@ node(agentLabel) {
                 fi
                 run_with_keepalive npx next build $NB_FLAGS
                 if [ -n "${_next_hb}" ]; then kill "${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
+                if [ -d .next/standalone ]; then
+                  echo "[build] .next/standalone OK — stage 6 will use a small crane layer."
+                else
+                  echo "[build] WARN: .next/standalone missing — stage 6 may tar the full workspace (slow). Add output: 'standalone' in next.config (see paas/frontend/next.config.mjs)."
+                  if [ "${JENKINS_REQUIRE_NEXT_STANDALONE:-false}" = "true" ]; then
+                    echo "[build] JENKINS_REQUIRE_NEXT_STANDALONE=true — failing build."
+                    exit 1
+                  fi
+                fi
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
                 echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
                 run_with_keepalive npm run build

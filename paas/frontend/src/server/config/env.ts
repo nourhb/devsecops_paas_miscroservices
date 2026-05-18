@@ -123,6 +123,10 @@ const envSchema = z.object({
     ARGOCD_AUTH_TOKEN: z.string().default(""),
     ARGOCD_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     ARGOCD_APP_PREFIX: z.string().default("paas"),
+    /** When true, create missing Argo CD Applications via API (project create + before sync). */
+    ARGOCD_AUTO_CREATE_APPLICATION: z.enum(["true", "false"]).default("true"),
+    ARGOCD_DEST_SERVER: z.string().default("https://kubernetes.default.svc"),
+    ARGOCD_APP_PROJECT: z.string().default("default"),
     SONAR_BASE_URL: z.string().default(""),
     /** Server-side SonarQube probe base (skips INTEGRATIONS_PROBE_HOST_REMAP). */
     SONAR_PROBE_URL: z.string().default(""),
@@ -151,6 +155,8 @@ const envSchema = z.object({
     GITOPS_REPO_TOKEN: z.string().default(""),
     GITOPS_DEFAULT_BRANCH: z.string().default("main"),
     GITOPS_VALUES_PATH_PATTERN: z.string().default("apps/{{projectName}}/values.yaml"),
+    /** Optional override for Argo CD source.path (default: parent dir of GITOPS_VALUES_PATH_PATTERN). */
+    GITOPS_CHART_PATH_PATTERN: z.string().default(""),
     GITOPS_COMMIT_MESSAGE_TEMPLATE: z.string().default("chore(gitops): bump {{projectName}} to {{imageTag}}"),
     DOCKERHUB_USERNAME: z.string().default(""),
     DOCKERHUB_TOKEN: z.string().default(""),
@@ -357,6 +363,9 @@ const parsed = envSchema.safeParse({
     ARGOCD_AUTH_TOKEN: firstNonEmpty(process.env.ARGOCD_AUTH_TOKEN, process.env.ARGOCD_TOKEN),
     ARGOCD_TLS_SKIP_VERIFY: process.env.ARGOCD_TLS_SKIP_VERIFY,
     ARGOCD_APP_PREFIX: process.env.ARGOCD_APP_PREFIX,
+    ARGOCD_AUTO_CREATE_APPLICATION: process.env.ARGOCD_AUTO_CREATE_APPLICATION,
+    ARGOCD_DEST_SERVER: process.env.ARGOCD_DEST_SERVER,
+    ARGOCD_APP_PROJECT: process.env.ARGOCD_APP_PROJECT,
     SONAR_BASE_URL: firstNonEmpty(process.env.SONAR_BASE_URL, process.env.SONAR_URL),
     SONAR_PROBE_URL: process.env.SONAR_PROBE_URL,
     SONAR_TOKEN: process.env.SONAR_TOKEN,
@@ -382,6 +391,7 @@ const parsed = envSchema.safeParse({
     GITOPS_REPO_TOKEN: process.env.GITOPS_REPO_TOKEN,
     GITOPS_DEFAULT_BRANCH: process.env.GITOPS_DEFAULT_BRANCH,
     GITOPS_VALUES_PATH_PATTERN: process.env.GITOPS_VALUES_PATH_PATTERN,
+    GITOPS_CHART_PATH_PATTERN: process.env.GITOPS_CHART_PATH_PATTERN,
     GITOPS_COMMIT_MESSAGE_TEMPLATE: process.env.GITOPS_COMMIT_MESSAGE_TEMPLATE,
     DOCKERHUB_USERNAME: firstNonEmpty(process.env.DOCKERHUB_USERNAME, process.env.HARBOR_USERNAME),
     DOCKERHUB_TOKEN: firstNonEmpty(process.env.DOCKERHUB_TOKEN, process.env.HARBOR_PASSWORD),

@@ -15,13 +15,13 @@ export function buildDeployImageRepository(projectName: string): string {
             .replace(/\{\{harborProject\}\}/gi, env.HARBOR_PROJECT);
     }
     const safeName = sanitizeProjectName(projectName);
+    const harborHost = env.HARBOR_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/$/, "").split("/")[0];
+    if (harborHost) {
+        return `${harborHost}/${env.HARBOR_PROJECT}/${safeName}`;
+    }
     const dockerNamespace = env.DOCKERHUB_NAMESPACE.trim() || env.DOCKERHUB_USERNAME.trim();
     if (dockerNamespace) {
         return `${dockerNamespace}/${safeName}`;
-    }
-    const host = env.HARBOR_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/$/, "");
-    if (host) {
-        return `${host}/${env.HARBOR_PROJECT}/${safeName}`;
     }
     throw new IntegrationError("Configure one real image repository source: DEPLOY_IMAGE_NAME_TEMPLATE, or DOCKERHUB_NAMESPACE/DOCKERHUB_USERNAME, or HARBOR_BASE_URL.");
 }

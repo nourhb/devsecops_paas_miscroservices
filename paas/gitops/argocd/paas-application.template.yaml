@@ -1,0 +1,27 @@
+# Reference Application — PaaS auto-creates the same spec via API (ensureArgoCdApplication).
+# Manual equivalent for project "simple-app":
+#   argocd app create paas-simple-app \
+#     --repo https://github.com/nourhb/gitops \
+#     --path apps/simple-app \
+#     --dest-server https://kubernetes.default.svc \
+#     --dest-namespace simple-app
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: paas-{{projectName}}
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nourhb/gitops
+    path: apps/{{projectName}}
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{projectName}}
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
