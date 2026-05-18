@@ -1,8 +1,13 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
+import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
+import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
+
+export { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
+
 function parseGithubRepo(url: string): {
     owner: string;
     repo: string;
@@ -17,28 +22,6 @@ function parseGithubRepo(url: string): {
         return { owner: https[1], repo: https[2] };
     }
     throw new IntegrationError(`GITOPS_REPO_URL must be a github.com repository URL (HTTPS or git@). Got: ${url.slice(0, 80)}`);
-}
-function applyProjectPathPattern(pattern: string, projectName: string): string {
-    return pattern.replace(/\{\{projectName\}\}/gi, projectName).replace(/\{\{project\}\}/gi, projectName);
-}
-function valuesPathForProject(projectName: string): string {
-    return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
-}
-/** Helm chart directory in the GitOps repo (parent of values.yaml unless GITOPS_CHART_PATH_PATTERN is set). */
-export function gitopsHelmChartPathForProject(projectName: string): string {
-    const explicit = env.GITOPS_CHART_PATH_PATTERN.trim();
-    if (explicit) {
-        return applyProjectPathPattern(explicit, projectName);
-    }
-    const valuesPath = applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName).replace(/\\/g, "/");
-    if (valuesPath.endsWith("/values.yaml")) {
-        return valuesPath.slice(0, -"/values.yaml".length);
-    }
-    if (valuesPath.endsWith("values.yaml")) {
-        const slash = valuesPath.lastIndexOf("/");
-        return slash > 0 ? valuesPath.slice(0, slash) : `apps/${projectName}`;
-    }
-    return `apps/${projectName}`;
 }
 function splitImageRef(ref: string): {
     repository: string;
@@ -88,15 +71,17 @@ const githubHeaders = (token: string) => ({
 export async function commitHelmValuesGitHub(projectName: string, imageTag: string): Promise<{
     committed: boolean;
     ref: string;
+    chartBootstrapped: boolean;
 }> {
     if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
         if (allowSimulation()) {
-            return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}` };
+            return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}`, chartBootstrapped: false };
         }
         throw new IntegrationError("GITOPS_REPO_URL and GITOPS_REPO_TOKEN are required to commit GitOps changes.");
     }
     const { owner, repo } = parseGithubRepo(env.GITOPS_REPO_URL);
-    const path = valuesPathForProject(projectName);
+    const bootstrap = await ensureGitOpsHelmChartFromReference(projectName);
+    const path = gitopsValuesPathForProject(projectName);
     const branch = env.GITOPS_DEFAULT_BRANCH;
     const token = env.GITOPS_REPO_TOKEN;
     const pathEnc = path.split("/").map(encodeURIComponent).join("/");
@@ -111,7 +96,8 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         if (allowSimulation()) {
             return {
                 committed: true,
-                ref: `simulated:gitops:get:${branch}:${projectName}:${imageTag} (GitHub unreachable)`
+                ref: `simulated:gitops:get:${branch}:${projectName}:${imageTag} (GitHub unreachable)`,
+                chartBootstrapped: false
             };
         }
         throw new IntegrationError(`GitHub GET ${path} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -127,7 +113,8 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         if (allowSimulation() && (getRes.status === 401 || getRes.status === 403)) {
             return {
                 committed: true,
-                ref: `simulated:gitops:${branch}:${projectName}:${imageTag} (GitHub ${getRes.status} — check GITOPS_REPO_TOKEN or use a real PAT)`
+                ref: `simulated:gitops:${branch}:${projectName}:${imageTag} (GitHub ${getRes.status} — check GITOPS_REPO_TOKEN or use a real PAT)`,
+                chartBootstrapped: false
             };
         }
         throw new IntegrationError(`GitHub GET ${path} failed (${getRes.status}): ${t.slice(0, 600)}`);
@@ -148,9 +135,12 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
             throw new IntegrationError(`Values file ${path} is not a YAML object.`);
         }
         setImageTag(doc, imageTag);
+        applyDeployValuesDefaults(doc, projectName);
         contentYaml = stringifyYaml(doc);
     }
-    const message = env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
+    const message = bootstrap.bootstrapped
+        ? `chore(gitops): bootstrap ${projectName} Helm chart and bump ${imageTag}`
+        : env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
     const body: Record<string, string> = {
         message,
         content: Buffer.from(contentYaml, "utf8").toString("base64"),
@@ -169,7 +159,8 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         if (allowSimulation() && (putRes.status === 401 || putRes.status === 403)) {
             return {
                 committed: true,
-                ref: `simulated:gitops:put:${projectName}:${imageTag} (GitHub ${putRes.status})`
+                ref: `simulated:gitops:put:${projectName}:${imageTag} (GitHub ${putRes.status})`,
+                chartBootstrapped: bootstrap.bootstrapped
             };
         }
         throw new IntegrationError(`GitHub PUT ${path} failed (${putRes.status}): ${t.slice(0, 800)}`);
@@ -181,6 +172,7 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
     };
     return {
         committed: true,
-        ref: result.commit?.sha ?? `${branch}:${path}`
+        ref: result.commit?.sha ?? `${branch}:${path}`,
+        chartBootstrapped: bootstrap.bootstrapped
     };
 }

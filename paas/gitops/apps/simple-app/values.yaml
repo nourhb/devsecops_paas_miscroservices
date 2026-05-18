@@ -1,7 +1,8 @@
 image:
   repository: 192.168.56.129:30002/paas/simple-app
-  tag: "latest"
+  tag: "99"
   digest: ""
+  pullPolicy: IfNotPresent
 
 imagePullSecrets:
   - name: harbor-regcred
@@ -19,7 +20,6 @@ resources:
 
 env: []
 
-# Must match APPS_PUBLIC_LAB_NODE_IP + APPS_PUBLIC_INGRESS_HTTP_PORT in PaaS env.
 ingress:
   enabled: true
   className: traefik
