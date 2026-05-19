@@ -45,7 +45,18 @@ bash paas/scripts/final-deploy-simple-app-lab.sh 103
 
 **Wrong:** `export GITHUB_TOKEN='...'bash paas/scripts/...` (bash error: not a valid identifier)
 
-**ImagePullBackOff:** `bash paas/scripts/fix-simple-app-imagepull-lab.sh 104`
+**ImagePullBackOff / Harbor `short read: unexpected EOF`:** Harbor metadata exists but blobs are corrupt. Build on master and import:
+
+```bash
+LOCAL_BUILD=1 bash paas/scripts/fix-simple-app-imagepull-lab.sh 104
+```
+
+**Git push:** use a real PAT, not the literal text `ghp_NEW_TOKEN`:
+
+```bash
+export GITHUB_TOKEN='ghp_your_real_token_here'
+bash paas/scripts/final-deploy-simple-app-lab.sh 104
+```
 
 **PaaS links show apps.local:** `bash paas/scripts/patch-paas-frontend-lab-urls.sh` then use  
 `http://simple-app.192.168.56.129.nip.io:30659/` in the browser (not apps.local).
