@@ -58,11 +58,10 @@ build_image_locally() {
   trap 'rm -rf "${dir}"' RETURN
   git clone --depth 1 --branch "${GIT_BRANCH}" "${GIT_REPO}" "${dir}"
   cd "${dir}"
-  if [[ -f Dockerfile ]]; then
-    docker build -t "${IMAGE}" .
-  else
-    die "No Dockerfile in ${GIT_REPO}"
-  fi
+  [[ -f Dockerfile ]] || die "No Dockerfile in ${GIT_REPO}"
+  # Repo has no public/ but Dockerfile COPY expects it (Next.js allows empty public)
+  mkdir -p public
+  docker build -t "${IMAGE}" .
   echo "Built ${IMAGE} on master"
   if [[ "${PUSH_TO_HARBOR:-}" == "1" ]]; then
     echo "${HARBOR_PASS}" | docker login "${HARBOR}" -u "${HARBOR_USER}" --password-stdin
