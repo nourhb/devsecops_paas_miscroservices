@@ -24,11 +24,13 @@ curl -sS -o /dev/null -w 'PaaS %{http_code}\n' http://192.168.56.129:30100/
 
 ```bash
 TAG=103   # use your Jenkins NNN, not angle brackets
-curl -sS -o /dev/null -w 'MAN %{http_code}\n' -I -u admin:Harbor12345 \
-  "http://192.168.56.129:30002/v2/paas/simple-app/manifests/${TAG}"
+# OCI index (crane push): need Accept header or use the helper script
+bash paas/scripts/diagnose-harbor-registry-lab.sh paas/simple-app "${TAG}"
+# Or docker pull (best gate):
+docker pull 192.168.56.129:30002/paas/simple-app:${TAG}
 ```
 
-Must be **200**. If **404**, run Jenkins again (registry has no blobs for that tag).
+Must be pullable. Naive `curl -I` without `Accept: application/vnd.oci.image.index.v1+json` often returns **404** even when the image exists.
 
 ## D. Deploy app (replace 103 with your TAG)
 

@@ -33,6 +33,10 @@ APP_URL="http://simple-app.${NODE_IP}.nip.io:30659/"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/harbor-manifest-check.sh
+source "${SCRIPT_DIR}/lib/harbor-manifest-check.sh"
+
 [[ -n "$BUILD" ]] || die "Usage: $0 <jenkins-build-number>   (from PAAS_ARTIFACT_IMAGE in Jenkins console)"
 [[ -n "${GITHUB_TOKEN:-}" ]] || die "Set GITHUB_TOKEN (GitHub PAT with repo write)"
 
@@ -55,16 +59,20 @@ else
   echo "=== [2/7] Skip Harbor purge (set PURGE_HARBOR_REPO=1 to delete ghost tags) ==="
 fi
 
-echo "=== [3/7] Verify image manifest exists (required before GitOps) ==="
-MAN_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -I -u "${HARBOR_USER}:${HARBOR_PASS}" \
-  "http://${NODE_IP}:${HARBOR_PORT}/v2/paas/simple-app/manifests/${BUILD}")"
+echo "=== [3/7] Verify image exists in Harbor (OCI index–aware) ==="
+HARBOR_HOST="${NODE_IP}:${HARBOR_PORT}"
+MAN_CODE="$(harbor_manifest_http_code "${HARBOR_HOST}" "paas/simple-app" "${BUILD}" "${HARBOR_USER}" "${HARBOR_PASS}")"
 echo "MAN tag ${BUILD} → HTTP ${MAN_CODE}"
-if [[ "$MAN_CODE" != "200" ]]; then
-  die "Image ${IMAGE_REPO}:${BUILD} not in registry storage (HTTP ${MAN_CODE}).
+if [[ "$MAN_CODE" != "200" && "$MAN_CODE" != "301" ]]; then
+  if harbor_image_pullable "${IMAGE_REPO}:${BUILD}" "${HARBOR_USER}" "${HARBOR_PASS}"; then
+    echo "docker pull ${IMAGE_REPO}:${BUILD} → OK (registry has image; curl needed OCI Accept)"
+  else
+    die "Image ${IMAGE_REPO}:${BUILD} not pullable (MAN HTTP ${MAN_CODE}).
 Run Jenkins paas-deploy for simple-app first. In the console confirm:
   PAAS_ARTIFACT_IMAGE=${IMAGE_REPO}:${BUILD}
   crane push finished without error
 Then re-run: $0 ${BUILD}"
+  fi
 fi
 
 echo "=== [4/7] Update GitOps values.yaml tag=${BUILD} ==="

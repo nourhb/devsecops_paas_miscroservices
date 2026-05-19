@@ -20,11 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROJECT_ID="${PROJECT_ID:-179dcf7f-ad21-4421-9114-0171f3e9914c}"
 ENV_FILE="${REPO_ROOT}/paas/frontend/docker-compose.env"
+# shellcheck source=lib/harbor-manifest-check.sh
+source "${SCRIPT_DIR}/lib/harbor-manifest-check.sh"
 
 man_tag() {
-  local repo="$1" tag="$2"
-  curl -sS -o /dev/null -w '%{http_code}' -I -u "${HARBOR_USER}:${HARBOR_PASS}" \
-    "http://${HARBOR}/v2/${repo}/manifests/${tag}" 2>/dev/null || echo "000"
+  harbor_manifest_http_code "${HARBOR}" "$1" "$2" "${HARBOR_USER}" "${HARBOR_PASS}"
 }
 
 echo "========== STEP 1: Harbor registry must be Running =========="
