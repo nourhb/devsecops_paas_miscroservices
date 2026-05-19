@@ -16,7 +16,8 @@ HARBOR="${HARBOR:-${NODE_IP}:30002}"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 PAAS_NS="${PAAS_NS:-paas}"
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROJECT_ID="${PROJECT_ID:-179dcf7f-ad21-4421-9114-0171f3e9914c}"
 ENV_FILE="${REPO_ROOT}/paas/frontend/docker-compose.env"
 
@@ -34,20 +35,23 @@ echo "Harbor /v2/ → HTTP ${V2} (expect 401)"
 [[ "$V2" == "401" || "$V2" == "200" ]] || exit 1
 
 echo ""
-echo "========== STEP 2: Remove ghost metadata (optional but recommended) =========="
-for repo in paas/simple-app paas/paas-frontend; do
-  CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -u "${HARBOR_USER}:${HARBOR_PASS}" \
-    "http://${HARBOR}/api/v2.0/projects/paas/repositories/$(basename "$repo")" 2>/dev/null || echo "000")"
-  echo "DELETE ${repo} → HTTP ${CODE}"
-done
-sleep 3
+echo "========== STEP 2: Ghost metadata (skip by default) =========="
+if [[ "${PURGE_HARBOR_REPOS:-}" == "1" ]]; then
+  for repo in paas/simple-app paas/paas-frontend; do
+    CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -u "${HARBOR_USER}:${HARBOR_PASS}" \
+      "http://${HARBOR}/api/v2.0/projects/paas/repositories/$(basename "$repo")" 2>/dev/null || echo "000")"
+    echo "DELETE ${repo} → HTTP ${CODE}"
+  done
+  sleep 3
+else
+  echo "Skipping Harbor repo DELETE (set PURGE_HARBOR_REPOS=1 to purge ghost metadata)"
+fi
 
 echo ""
-echo "========== STEP 3: Push PaaS frontend (real blobs) =========="
+echo "========== STEP 3: PaaS frontend (build + k3s import; Harbor push optional) =========="
 bash "${REPO_ROOT}/paas/scripts/fix-paas-frontend-pull-lab.sh"
 FE_MAN="$(man_tag paas/paas-frontend latest)"
-echo "paas-frontend:latest MAN → HTTP ${FE_MAN}"
-[[ "$FE_MAN" == "200" ]] || { echo "ERROR: fix frontend pull first"; exit 1; }
+echo "paas-frontend:latest MAN (curl) → HTTP ${FE_MAN} (200 = Harbor OK; UI can work with MAN 404 if import succeeded)"
 
 echo ""
 echo "========== STEP 4: k3s HTTP registry on ALL nodes =========="

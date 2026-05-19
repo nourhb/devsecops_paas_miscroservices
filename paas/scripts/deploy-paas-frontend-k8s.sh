@@ -1,27 +1,43 @@
 #!/usr/bin/env bash
-# Build PaaS frontend image, push to Harbor, restart in-cluster deployment.
+# Build PaaS frontend image, push to Harbor, import on master, restart deployment.
 # Run on lab master: bash paas/scripts/deploy-paas-frontend-k8s.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PAAS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${PAAS_DIR}"
 
 HARBOR="${HARBOR_REGISTRY:-192.168.56.129:30002}"
 IMAGE="${HARBOR}/paas/paas-frontend:latest"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
+PAAS_NS="${PAAS_NS:-paas}"
 
 echo "==> Building ${IMAGE}"
 docker build -f docker/frontend.Dockerfile -t "$IMAGE" .
 
 echo "==> Pushing to Harbor"
 echo "$HARBOR_PASS" | docker login "$HARBOR" -u "$HARBOR_USER" --password-stdin
-docker push "$IMAGE"
+docker push "$IMAGE" || echo "WARN: push failed — will still import locally"
+
+echo "==> Import into k3s on master (avoids ImagePullBackOff when Harbor MAN is 404)"
+TMP="/tmp/paas-frontend-deploy-$$.tar"
+docker save "$IMAGE" -o "$TMP"
+sudo k3s ctr images import "$TMP"
+rm -f "$TMP"
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-echo "==> Restarting deployment/frontend in namespace paas"
-kubectl rollout restart deployment/frontend -n paas
-kubectl rollout status deployment/frontend -n paas --timeout=300s
+kubectl set image deployment/frontend -n "${PAAS_NS}" frontend="${IMAGE}"
+kubectl patch deployment frontend -n "${PAAS_NS}" -p \
+  '{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"master"},"containers":[{"name":"frontend","imagePullPolicy":"IfNotPresent"}]}}}}' \
+  2>/dev/null || true
+
+echo "==> Restarting deployment/frontend in namespace ${PAAS_NS}"
+kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=0
+sleep 3
+kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 2>/dev/null || true
+kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=1
+kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
 
 curl -sf "http://127.0.0.1:30100/api/health" | head -c 200 || true
 echo ""
