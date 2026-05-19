@@ -1,0 +1,19 @@
+# Lab PaaS UI: deployment `frontend` (label app=frontend) in namespace `paas`.
+# Apply: kubectl apply -f paas/k8s-manifests/lab/frontend-nodeport-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: paas
+  labels:
+    app: frontend
+spec:
+  type: NodePort
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      nodePort: 30100
+      protocol: TCP
