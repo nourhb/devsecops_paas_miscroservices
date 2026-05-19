@@ -37,9 +37,14 @@ export function buildAppIngressHost(projectName: string): string {
     return `${subdomain}.${domain}`;
 }
 export function resolveAppUrlForClient(projectName: string, storedUrl: string | null | undefined): string {
-    const stored = (storedUrl ?? "").trim();
+    const canonical = buildAppPublicUrl(projectName);
     if (allowSimulation()) {
-        return buildAppPublicUrl(projectName);
+        return canonical;
     }
-    return stored || buildAppPublicUrl(projectName);
+    // Lab k3s: nip.io ingress URL must match GitOps + curl checks (ignore stale apps.local in DB).
+    if (env.APPS_PUBLIC_LAB_NODE_IP.trim()) {
+        return canonical;
+    }
+    const stored = (storedUrl ?? "").trim();
+    return stored || canonical;
 }

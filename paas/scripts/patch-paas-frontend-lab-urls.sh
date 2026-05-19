@@ -12,5 +12,6 @@ kubectl set env deployment/frontend -n "${PAAS_NS}" \
   APPS_PUBLIC_BASE_DOMAIN="apps.local"
 
 kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=300s
-echo "App links should now use: http://<project>.${NODE_IP}.nip.io:30659/"
-echo "Rebuild/redeploy from PaaS UI after this; old deployment rows may still show apps.local."
+echo "Canonical app URL pattern: http://<project>.${NODE_IP}.nip.io:30659/"
+echo "Example simple-app: http://simple-app.${NODE_IP}.nip.io:30659/"
+echo "Run: bash paas/scripts/sync-paas-app-urls-lab.sh  (updates DB + verifies)"
