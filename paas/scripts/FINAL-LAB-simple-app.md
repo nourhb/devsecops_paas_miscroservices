@@ -40,6 +40,16 @@ export GITHUB_TOKEN='ghp_YOUR_PAT'
 bash paas/scripts/final-deploy-simple-app-lab.sh 103
 ```
 
+**Important:** `export` and `bash` must be on one line with `;` or on two lines — not glued together:
+`export GITHUB_TOKEN='...'; bash paas/scripts/final-deploy-simple-app-lab.sh 104`
+
+**Wrong:** `export GITHUB_TOKEN='...'bash paas/scripts/...` (bash error: not a valid identifier)
+
+**ImagePullBackOff:** `bash paas/scripts/fix-simple-app-imagepull-lab.sh 104`
+
+**PaaS links show apps.local:** `bash paas/scripts/patch-paas-frontend-lab-urls.sh` then use  
+`http://simple-app.192.168.56.129.nip.io:30659/` in the browser (not apps.local).
+
 **Wrong:** `bash ... <BUILD_NUMBER>`  
 **Right:** `bash ... 103`
 
