@@ -1,5 +1,15 @@
 # Final lab fix — simple-app
 
+## Argo CD 403 on new projects
+
+PaaS shows `permission denied` when `ARGOCD_AUTH_TOKEN` is expired or scoped to one app only.
+
+```bash
+bash paas/scripts/fix-argocd-token-lab.sh
+```
+
+Project **creation** still succeeds; fix the token so Argo health/sync and auto-create work.
+
 ## A. PaaS frontend (namespace `paas`, deployment name `frontend`)
 
 Wrong label: there is no `app.kubernetes.io/name=frontend` in this lab.
