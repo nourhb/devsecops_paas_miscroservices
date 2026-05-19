@@ -13,6 +13,8 @@
 #   PURGE_HARBOR_REPO=1 bash paas/scripts/final-deploy-simple-app-lab.sh <BUILD_NUMBER>
 set -euo pipefail
 
+die() { echo "ERROR: $*" >&2; exit 1; }
+
 BUILD="${1:-}"
 if [[ -z "$BUILD" ]]; then
   die "Usage: $0 <jenkins-build-number>
@@ -30,8 +32,6 @@ IMAGE_REPO="${IMAGE_REPO:-${NODE_IP}:${HARBOR_PORT}/paas/simple-app}"
 GITOPS_DIR="${GITOPS_DIR:-${HOME}/gitops}"
 NS="simple-app"
 APP_URL="http://simple-app.${NODE_IP}.nip.io:30659/"
-
-die() { echo "ERROR: $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/harbor-manifest-check.sh
@@ -89,18 +89,19 @@ git diff --cached --quiet && echo "GitOps tag already ${BUILD}" || git commit -m
 git push "https://${GITHUB_TOKEN}@github.com/nourhb/gitops.git" main
 
 echo "=== [5/7] Argo CD sync ==="
-argocd app sync paas-simple-app --force
+if command -v argocd >/dev/null; then
+  argocd app sync paas-simple-app --force || true
+else
+  echo "WARN: argocd CLI not found — sync from UI or install argocd"
+fi
 
-echo "=== [6/7] Rollout (single replica) ==="
-kubectl scale deployment -n "$NS" paas-simple-app-simple-app --replicas=0 2>/dev/null || true
-sleep 3
-kubectl delete rs -n "$NS" -l app.kubernetes.io/name=simple-app 2>/dev/null || true
-kubectl scale deployment -n "$NS" paas-simple-app-simple-app --replicas=1
-kubectl rollout status deployment/paas-simple-app-simple-app -n "$NS" --timeout=300s
+echo "=== [6/7] Cluster pull + import (workers often lack HTTP Harbor config) ==="
+bash "${SCRIPT_DIR}/fix-simple-app-imagepull-lab.sh" "${BUILD}"
 
 echo "=== [7/7] Verify ==="
 kubectl get pods -n "$NS" -o wide
-HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 "${APP_URL}" || echo "000")"
+HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 "${APP_URL}" 2>/dev/null || true)"
+HTTP_CODE="${HTTP_CODE:-000}"
 echo "App URL: ${APP_URL}"
 echo "HTTP ${HTTP_CODE}"
 kubectl get pods -n "$NS" | grep -q "1/1.*Running" && [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "304" ]] && \
