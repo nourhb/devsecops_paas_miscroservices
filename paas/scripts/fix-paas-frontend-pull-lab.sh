@@ -121,19 +121,36 @@ EOF
 sudo systemctl restart k3s-agent
 REGDOC
 
-echo "=== [7] Rollout ==="
+echo "=== [7] NodePort Service (30100 → pod :3000) ==="
+kubectl apply -f "${MONOREPO_ROOT}/paas/k8s-manifests/lab/frontend-nodeport-service.yaml"
+# Legacy labs used other service names; keep selector app=frontend
+if kubectl get svc frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
+  kubectl patch svc frontend -n "${PAAS_NS}" --type=merge -p \
+    '{"spec":{"type":"NodePort","selector":{"app":"frontend"},"ports":[{"name":"http","port":80,"targetPort":3000,"nodePort":30100,"protocol":"TCP"}]}}' \
+    2>/dev/null || true
+fi
+
+echo "=== [8] Rollout ==="
 kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=0
 sleep 5
 kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 2>/dev/null || true
 kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=1
 kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s || true
 
-echo "=== [8] Status ==="
-kubectl get pods,svc -n "${PAAS_NS}" -l app=frontend -o wide
-kubectl describe pod -n "${PAAS_NS}" -l app=frontend 2>/dev/null | tail -20 || true
-HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 "http://${NODE_IP}:30100/" 2>/dev/null || echo "000")"
+echo "=== [9] Status ==="
+kubectl get pods,svc,endpoints -n "${PAAS_NS}" -l app=frontend -o wide 2>/dev/null || kubectl get pods,svc,endpoints -n "${PAAS_NS}" | grep -E 'frontend|NAME' || true
+kubectl wait --for=condition=ready pod -n "${PAAS_NS}" -l app=frontend --timeout=120s 2>/dev/null || true
+EP="$(kubectl get endpoints frontend-service -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+if [[ -z "${EP}" ]]; then
+  echo "WARN: frontend-service has no endpoints — check: kubectl get svc,endpoints -n ${PAAS_NS}"
+fi
+
+sleep 2
+HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 "http://${NODE_IP}:30100/" 2>/dev/null || true)"
+HTTP="${HTTP:-000}"
 echo "PaaS http://${NODE_IP}:30100/ → HTTP ${HTTP}"
 if [[ "$HTTP" != "200" && "$HTTP" != "302" && "$HTTP" != "307" ]]; then
-  echo "If still failing: kubectl logs -n ${PAAS_NS} -l app=frontend --tail=40"
+  echo "Try: curl -sS http://127.0.0.1:30100/api/health"
+  echo "Logs: kubectl logs -n ${PAAS_NS} -l app=frontend --tail=40"
   exit 1
 fi
