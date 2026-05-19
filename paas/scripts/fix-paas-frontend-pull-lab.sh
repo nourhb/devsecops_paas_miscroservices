@@ -18,31 +18,17 @@ IMAGE="${HARBOR}/paas/paas-frontend:latest"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MONOREPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_DIR="${MONOREPO_ROOT}/paas"
-
-man_code() {
-  local accept="$1"
-  curl -sS -o /dev/null -w '%{http_code}' -I -u "${HARBOR_USER}:${HARBOR_PASS}" \
-    -H "Accept: ${accept}" \
-    "http://${HARBOR}/v2/paas/paas-frontend/manifests/latest" 2>/dev/null || echo "000"
-}
-
-harbor_manifest_ok() {
-  local c
-  for accept in \
-    "application/vnd.docker.distribution.manifest.v2+json" \
-    "application/vnd.oci.image.manifest.v1+json" \
-    "application/vnd.docker.distribution.manifest.list.v2+json"; do
-    c="$(man_code "${accept}")"
-    [[ "$c" == "200" || "$c" == "301" ]] && return 0
-  done
-  return 1
-}
+# shellcheck source=lib/harbor-manifest-check.sh
+source "${SCRIPT_DIR}/lib/harbor-manifest-check.sh"
 
 echo "=== [1] Harbor manifest paas-frontend:latest ==="
-if harbor_manifest_ok; then
-  echo "MAN → OK (registry serves tag latest)"
+MAN_CODE="$(harbor_manifest_http_code "${HARBOR}" "paas/paas-frontend" "latest" "${HARBOR_USER}" "${HARBOR_PASS}")"
+if [[ "$MAN_CODE" == "200" || "$MAN_CODE" == "301" ]]; then
+  echo "MAN → HTTP ${MAN_CODE} (OCI index / manifest OK)"
+elif harbor_image_pullable "${IMAGE}" "${HARBOR_USER}" "${HARBOR_PASS}"; then
+  echo "MAN → curl without OCI Accept was misleading; docker pull OK"
 else
-  echo "MAN → not 200 (Harbor may have ghost metadata or registry storage issue)"
+  echo "MAN → HTTP ${MAN_CODE} (image may still work via k3s import below)"
 fi
 
 echo "=== [2] Build image (context: ${PAAS_DIR}) ==="
@@ -57,11 +43,11 @@ if [[ "${SKIP_HARBOR_PUSH:-}" != "1" ]]; then
   echo "=== [3] Push to Harbor (optional; may not fix MAN 404) ==="
   echo "${HARBOR_PASS}" | docker login "${HARBOR}" -u "${HARBOR_USER}" --password-stdin
   docker push "${IMAGE}" || echo "WARN: docker push failed — continuing with local import"
-  if harbor_manifest_ok; then
-    echo "MAN after push → OK"
+  MAN_CODE="$(harbor_manifest_http_code "${HARBOR}" "paas/paas-frontend" "latest" "${HARBOR_USER}" "${HARBOR_PASS}")"
+  if [[ "$MAN_CODE" == "200" || "$MAN_CODE" == "301" ]]; then
+    echo "MAN after push → HTTP ${MAN_CODE}"
   else
-    echo "MAN after push → still not 200 (use k3s import below; fix Harbor separately)"
-    echo "  bash paas/scripts/diagnose-harbor-registry-lab.sh"
+    echo "MAN after push → HTTP ${MAN_CODE} (use k3s import below if needed)"
   fi
 else
   echo "=== [3] Skip Harbor push (SKIP_HARBOR_PUSH=1) ==="
