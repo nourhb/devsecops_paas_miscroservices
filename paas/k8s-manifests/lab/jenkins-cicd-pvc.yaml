@@ -2,7 +2,9 @@
 # Use instead of jenkins-cicd-emptydir.yaml once local-path has free space on master.
 #
 # Apply:
+#   kubectl apply -f paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml
 #   kubectl apply -f paas/k8s-manifests/lab/jenkins-cicd-pvc.yaml
+# If createItem returns HTTP 500: bash paas/scripts/install-jenkins-plugins-lab.sh
 #
 # Do NOT delete jenkins-pvc unless you intend to wipe jobs/plugins.
 # recover-k3s-memory-lab.sh deletes this PVC — avoid that if you need to keep data.
@@ -64,10 +66,19 @@ spec:
           volumeMounts:
             - name: jenkins-storage
               mountPath: /var/jenkins_home
+            - name: jenkins-plugins
+              mountPath: /usr/share/jenkins/ref/plugins.txt
+              subPath: plugins.txt
+            - name: jenkins-plugins
+              mountPath: /var/jenkins_ref_plugins/plugins.txt
+              subPath: plugins.txt
       volumes:
         - name: jenkins-storage
           persistentVolumeClaim:
             claimName: jenkins-pvc
+        - name: jenkins-plugins
+          configMap:
+            name: jenkins-plugins
 ---
 apiVersion: v1
 kind: Service

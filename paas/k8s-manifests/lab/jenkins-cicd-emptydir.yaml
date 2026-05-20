@@ -1,5 +1,7 @@
 # Jenkins for cicd namespace — emptyDir on master (no PVC; good when local-path/disk-pressure blocks PVC).
-# Apply when API is healthy: kubectl apply -f paas/k8s-manifests/lab/jenkins-cicd-emptydir.yaml
+# Apply: kubectl apply -f paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml
+#        kubectl apply -f paas/k8s-manifests/lab/jenkins-cicd-emptydir.yaml
+# First boot copies plugins.txt from ref; existing home: bash paas/scripts/install-jenkins-plugins-lab.sh
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,9 +44,18 @@ spec:
           volumeMounts:
             - name: jenkins-storage
               mountPath: /var/jenkins_home
+            - name: jenkins-plugins
+              mountPath: /usr/share/jenkins/ref/plugins.txt
+              subPath: plugins.txt
+            - name: jenkins-plugins
+              mountPath: /var/jenkins_ref_plugins/plugins.txt
+              subPath: plugins.txt
       volumes:
         - name: jenkins-storage
           emptyDir: {}
+        - name: jenkins-plugins
+          configMap:
+            name: jenkins-plugins
 ---
 apiVersion: v1
 kind: Service

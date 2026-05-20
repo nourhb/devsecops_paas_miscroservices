@@ -14,6 +14,7 @@ echo "==> 1. Ensure namespace $NS"
 kubectl create namespace "$NS" 2>/dev/null || true
 
 echo "==> 2. Deploy Jenkins (emptyDir on master, NodePort 30090)"
+kubectl apply -f "$REPO/paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml" 2>/dev/null || true
 if [[ -f "$REPO/paas/k8s-manifests/lab/jenkins-cicd-emptydir.yaml" ]]; then
   kubectl apply -f "$REPO/paas/k8s-manifests/lab/jenkins-cicd-emptydir.yaml"
 else
@@ -93,16 +94,14 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
-echo "==> 4. Wait for Pipeline plugins (fresh emptyDir installs plugins slowly)"
-for i in $(seq 1 90); do
-  if curl -s -m 5 "$JENKINS_URL/pluginManager/api/json?depth=1" 2>/dev/null \
-    | grep -q 'workflow-job'; then
-    echo "workflow-job plugin visible"
-    break
-  fi
-  echo "waiting plugins ($i/90)..."
-  sleep 10
-done
+echo "==> 4. Install Pipeline plugins (fixes createItem HTTP 500)"
+if [[ -f "$REPO/paas/scripts/install-jenkins-plugins-lab.sh" ]]; then
+  bash "$REPO/paas/scripts/install-jenkins-plugins-lab.sh" || {
+    echo "WARN: plugin install script failed — open Jenkins UI → Manage Plugins → install Pipeline" >&2
+  }
+else
+  echo "WARN: install-jenkins-plugins-lab.sh missing — git pull then re-run" >&2
+fi
 
 echo "==> 5. Create paas-deploy job"
 if [[ -f "$REPO/paas/scripts/create_jenkins_paas_deploy_job.py" ]]; then
