@@ -25,9 +25,21 @@ kubectl wait --for=condition=ready pod -l app=jenkins -n "$NS" --timeout=300s
 POD="$(kubectl get pod -n "$NS" -l app=jenkins -o jsonpath='{.items[0].metadata.name}')"
 echo "Pod: $POD"
 
-if kubectl exec -n "$NS" "$POD" -- test -f /var/jenkins_home/plugins/workflow-job.jpi 2>/dev/null; then
-  echo "workflow-job already installed"
+if kubectl exec -n "$NS" "$POD" -- bash -c 'test -d /var/jenkins_home/plugins/workflow-job || test -f /var/jenkins_home/plugins/workflow-job.jpi' 2>/dev/null; then
+  echo "workflow-job already installed in JENKINS_HOME"
   exit 0
+fi
+# Plugins may have been downloaded to ref/ only (PVC already existed).
+if kubectl exec -n "$NS" "$POD" -- bash -c 'ls /usr/share/jenkins/ref/plugins/workflow-job*.jpi 2>/dev/null | head -1' 2>/dev/null | grep -q .; then
+  echo "==> Copy plugins from ref/ into /var/jenkins_home/plugins/"
+  kubectl exec -n "$NS" "$POD" -- bash -c 'mkdir -p /var/jenkins_home/plugins && cp -f /usr/share/jenkins/ref/plugins/*.jpi /var/jenkins_home/plugins/ 2>/dev/null || true'
+  if kubectl exec -n "$NS" "$POD" -- bash -c 'test -d /var/jenkins_home/plugins/workflow-job || ls /var/jenkins_home/plugins/workflow-job*.jpi 2>/dev/null' 2>/dev/null | grep -q .; then
+    echo "workflow-job copied to JENKINS_HOME — restart Jenkins"
+    kubectl rollout restart deployment/jenkins -n "$NS"
+    kubectl rollout status deployment/jenkins -n "$NS" --timeout=600s
+    kubectl wait --for=condition=ready pod -l app=jenkins -n "$NS" --timeout=300s
+    exit 0
+  fi
 fi
 
 echo "==> Install plugins via jenkins-plugin-cli (may take 3–8 min on slow lab network)"
@@ -58,7 +70,9 @@ if [ -z "$CLI" ]; then
   echo "ERROR: no jenkins-plugin-cli or install-plugins.sh in image" >&2
   exit 1
 fi
-$CLI --plugin-file /tmp/plugins.txt --verbose
+export JENKINS_HOME=/var/jenkins_home
+mkdir -p "$JENKINS_HOME/plugins"
+$CLI --plugin-file /tmp/plugins.txt --plugin-download-directory "$JENKINS_HOME/plugins" --verbose
 '
 
 echo "==> Restart Jenkins to load plugins"
@@ -81,7 +95,7 @@ for i in $(seq 1 120); do
       exit 0
     fi
   fi
-  if [[ -n "$POD" ]] && kubectl exec -n "$NS" "$POD" -- test -f /var/jenkins_home/plugins/workflow-job.jpi 2>/dev/null; then
+  if [[ -n "$POD" ]] && kubectl exec -n "$NS" "$POD" -- bash -c 'test -d /var/jenkins_home/plugins/workflow-job || ls /var/jenkins_home/plugins/workflow-job*.jpi 2>/dev/null' 2>/dev/null | grep -q .; then
     echo "workflow-job.jpi on disk (waiting API active $i/120)..."
   else
     echo "waiting plugins ($i/120)..."
