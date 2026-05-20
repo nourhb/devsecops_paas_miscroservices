@@ -9,7 +9,9 @@ ENV_FILE="${ENV_FILE:-$REPO/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_BASE_URL:-http://127.0.0.1:30090}"
 
 kubectl create namespace "$NS" 2>/dev/null || true
-kubectl apply -f "$REPO/paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml"
+if [[ -f "$REPO/paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml" ]]; then
+  kubectl apply -f "$REPO/paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml"
+fi
 
 echo "==> Wait for Jenkins pod"
 kubectl wait --for=condition=ready pod -l app=jenkins -n "$NS" --timeout=300s
@@ -24,7 +26,17 @@ fi
 echo "==> Install plugins via jenkins-plugin-cli (may take 3–8 min on slow lab network)"
 kubectl exec -n "$NS" "$POD" -u root -- bash -c '
 set -euo pipefail
-cp /var/jenkins_ref_plugins/plugins.txt /tmp/plugins.txt
+if [ -f /var/jenkins_ref_plugins/plugins.txt ]; then
+  cp /var/jenkins_ref_plugins/plugins.txt /tmp/plugins.txt
+else
+  cat > /tmp/plugins.txt <<PLUG
+workflow-aggregator
+git
+credentials-binding
+plain-credentials
+ssh-credentials
+PLUG
+fi
 CLI=""
 for c in jenkins-plugin-cli /usr/bin/jenkins-plugin-cli /usr/local/bin/jenkins-plugin-cli; do
   if command -v "$c" >/dev/null 2>&1; then CLI="$c"; break; fi
