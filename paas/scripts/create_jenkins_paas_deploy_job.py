@@ -135,9 +135,27 @@ class JenkinsClient:
         return {j["crumbRequestField"]: j["crumb"]}
 
 
+def lab_jenkins_base_url() -> str:
+    """On the VM host, cluster DNS (jenkins-service.cicd.svc...) does not resolve — use NodePort."""
+    explicit = (
+        os.environ.get("JENKINS_BASE_URL")
+        or os.environ.get("JENKINS_URL")
+        or ""
+    ).strip()
+    if explicit and ".svc.cluster.local" not in explicit:
+        return explicit.rstrip("/")
+    loopback = os.environ.get("JENKINS_LAB_LOOPBACK", "http://127.0.0.1:30090").strip()
+    if explicit and ".svc.cluster.local" in explicit:
+        print(
+            f"Note: host-side script — using {loopback} (not in-cluster {explicit})",
+            file=sys.stderr,
+        )
+    return loopback.rstrip("/")
+
+
 def main() -> int:
     load_env_file(DEFAULT_ENV)
-    base = os.environ.get("JENKINS_BASE_URL") or os.environ.get("JENKINS_URL") or "http://127.0.0.1:30090"
+    base = lab_jenkins_base_url()
     user = os.environ.get("JENKINS_USERNAME") or os.environ.get("JENKINS_USER") or ""
     token = os.environ.get("JENKINS_API_TOKEN") or os.environ.get("JENKINS_TOKEN") or ""
     job = os.environ.get("JOB_NAME", "paas-deploy")
