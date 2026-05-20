@@ -6,7 +6,14 @@ set -euo pipefail
 REPO="${REPO:-$HOME/devsecops_paas_miscroservices}"
 NS="${JENKINS_NS:-cicd}"
 ENV_FILE="${ENV_FILE:-$REPO/paas/frontend/docker-compose.env}"
-JENKINS_URL="${JENKINS_BASE_URL:-http://127.0.0.1:30090}"
+# Host scripts must not use in-cluster JENKINS_BASE_URL from docker-compose.env (DNS fails on VM).
+JENKINS_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
+if [[ -f "$ENV_FILE" ]]; then
+  _b="$(grep -E '^JENKINS_BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r' || true)"
+  if [[ -n "$_b" && "$_b" != *".svc.cluster.local"* ]]; then
+    JENKINS_URL="${_b%/}"
+  fi
+fi
 
 kubectl create namespace "$NS" 2>/dev/null || true
 if [[ -f "$REPO/paas/k8s-manifests/lab/jenkins-plugins-configmap.yaml" ]]; then
@@ -24,7 +31,8 @@ if kubectl exec -n "$NS" "$POD" -- test -f /var/jenkins_home/plugins/workflow-jo
 fi
 
 echo "==> Install plugins via jenkins-plugin-cli (may take 3–8 min on slow lab network)"
-kubectl exec -n "$NS" "$POD" -u root -- bash -c '
+# Older kubectl (e.g. k3s bundled) has no "kubectl exec -u"; run as container default user (jenkins).
+kubectl exec -n "$NS" "$POD" -- bash -c '
 set -euo pipefail
 if [ -f /var/jenkins_ref_plugins/plugins.txt ]; then
   cp /var/jenkins_ref_plugins/plugins.txt /tmp/plugins.txt
@@ -51,7 +59,6 @@ if [ -z "$CLI" ]; then
   exit 1
 fi
 $CLI --plugin-file /tmp/plugins.txt --verbose
-chown -R jenkins:jenkins /var/jenkins_home/plugins 2>/dev/null || true
 '
 
 echo "==> Restart Jenkins to load plugins"
