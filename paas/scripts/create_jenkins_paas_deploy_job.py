@@ -169,6 +169,18 @@ def main() -> int:
     if code != 200:
         return 1
 
+    code, pm_body = client.call("/pluginManager/api/json?depth=1")
+    if code == 200 and "workflow-job" not in pm_body:
+        print(
+            "ERROR: Pipeline plugins not installed (workflow-job missing).",
+            file=sys.stderr,
+        )
+        print(
+            "Run: bash paas/scripts/install-jenkins-plugins-lab.sh",
+            file=sys.stderr,
+        )
+        return 1
+
     job_path = f"/job/{urllib.parse.quote(job)}/api/json"
     code, _ = client.call(job_path)
     if code == 200:
