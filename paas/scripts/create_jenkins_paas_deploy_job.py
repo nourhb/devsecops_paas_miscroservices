@@ -24,7 +24,11 @@ MINIMAL_GROOVY = """node('built-in') {
 """
 
 
-def load_env_file(path: Path) -> None:
+# In-cluster URLs from docker-compose.env break host-side API calls (DNS fails on VM).
+_HOST_ENV_SKIP = frozenset({"JENKINS_BASE_URL", "JENKINS_URL", "JENKINS_PROBE_URL"})
+
+
+def load_env_file(path: Path, *, skip_keys: frozenset[str] = _HOST_ENV_SKIP) -> None:
     if not path.is_file():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -33,8 +37,9 @@ def load_env_file(path: Path) -> None:
             continue
         key, _, val = line.partition("=")
         key = key.strip()
-        if key and key not in os.environ:
-            os.environ[key] = val
+        if key in skip_keys or not key or key in os.environ:
+            continue
+        os.environ[key] = val
 
 
 def esc_xml(t: str) -> str:
@@ -136,21 +141,9 @@ class JenkinsClient:
 
 
 def lab_jenkins_base_url() -> str:
-    """On the VM host, cluster DNS (jenkins-service.cicd.svc...) does not resolve — use NodePort."""
-    explicit = (
-        os.environ.get("JENKINS_BASE_URL")
-        or os.environ.get("JENKINS_URL")
-        or ""
-    ).strip()
-    if explicit and ".svc.cluster.local" not in explicit:
-        return explicit.rstrip("/")
-    loopback = os.environ.get("JENKINS_LAB_LOOPBACK", "http://127.0.0.1:30090").strip()
-    if explicit and ".svc.cluster.local" in explicit:
-        print(
-            f"Note: host-side script — using {loopback} (not in-cluster {explicit})",
-            file=sys.stderr,
-        )
-    return loopback.rstrip("/")
+    """Always NodePort on VM host; never docker-compose in-cluster service URL."""
+    base = os.environ.get("JENKINS_LAB_LOOPBACK", "http://127.0.0.1:30090").strip()
+    return base.rstrip("/")
 
 
 def main() -> int:
