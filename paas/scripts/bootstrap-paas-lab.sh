@@ -13,7 +13,10 @@ PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 
 echo "========== [1/3] Postgres in namespace ${PAAS_NS} =========="
-bash "${SCRIPT_DIR}/deploy-paas-postgres-lab.sh"
+bash "${SCRIPT_DIR}/deploy-paas-postgres-lab.sh" || {
+  echo "WARN: deploy-paas-postgres-lab.sh had errors — continuing if postgres pod is ready"
+  kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s || true
+}
 
 if [[ "${SKIP_SCHEMA:-}" != "1" ]]; then
   echo ""

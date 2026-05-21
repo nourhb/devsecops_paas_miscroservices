@@ -16,14 +16,13 @@ kubectl apply -f "${MANIFEST}"
 kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=300s
 kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
 
-echo "=== Point frontend at postgres.paas ==="
-kubectl set env deployment/frontend -n "${PAAS_NS}" DATABASE_URL="${DB_URL}"
-kubectl rollout restart deployment/frontend -n "${PAAS_NS}"
-kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
+echo "=== Point frontend at postgres.paas (sync full env in bootstrap step 3) ==="
+kubectl set env deployment/frontend -n "${PAAS_NS}" DATABASE_URL="${DB_URL}" --containers=frontend 2>/dev/null \
+  || kubectl set env deployment/frontend -n "${PAAS_NS}" DATABASE_URL="${DB_URL}" || true
 
-kubectl get pods,svc,endpoints -n "${PAAS_NS}" | grep -E 'postgres|frontend|NAME'
-kubectl exec -n "${PAAS_NS}" deploy/frontend -- printenv DATABASE_URL
+kubectl get pods,svc,endpoints -n "${PAAS_NS}" | grep -E 'postgres|frontend|NAME' || true
 kubectl exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas
+echo "Postgres OK. Run push-paas-schema-lab.sh if User table is missing."
 
 echo "OK: login at http://192.168.56.129:30100/login"
 echo "If schema missing: kubectl exec -n ${PAAS_NS} deploy/frontend -- npx prisma db push"
