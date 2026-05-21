@@ -10,15 +10,9 @@ ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
 JOB="paas-deploy"
 
-# Step 3 marker alone is not enough — old jobs also skip SCA. Crane block must include NEXT_MAJOR fix.
-CRANE_FIX_MARKERS=(
-  'fast pipeline skipped Step 3 npm — running npm ci before next build'
-  'NEXT_MAJOR=\$(node -e "try{const v=require'
-  'no --no-lint (removed in Next 16)'
-)
-# Old Step 6 crane path only (build #25); Step 3 in repo may still use the legacy check
-STALE_CRANE_STEP6='node -e "const v=require('\''next/package.json'\'').version.split'
-CRANE_NEXT_MAJOR='NEXT_MAJOR=\$(node -e "try{const v=require'
+CRANE_FIX_MARKER='crane-next16-202605'
+# Old Step 6 only (build #25–26): version.split + --no-lint in crane sh, without crane-next16 marker
+STALE_CRANE_STEP6='version.split('\''.'\'').map(Number);process.exit((v[0]||0)>=16'
 
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -27,18 +21,12 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 jenkinsfile_has_crane_fix() {
-  local f="$1"
-  for m in "${CRANE_FIX_MARKERS[@]}"; do
-    if grep -qF "${m}" "${f}"; then
-      return 0
-    fi
-  done
-  return 1
+  grep -qF "${CRANE_FIX_MARKER}" "$1"
 }
 
 jenkins_job_has_stale_step6() {
   local cfg="$1"
-  echo "${cfg}" | grep -qF "${STALE_CRANE_STEP6}" && ! echo "${cfg}" | grep -qF "${CRANE_NEXT_MAJOR}"
+  echo "${cfg}" | grep -qF "${STALE_CRANE_STEP6}" && ! echo "${cfg}" | grep -qF "${CRANE_FIX_MARKER}"
 }
 
 echo "==> Local Jenkinsfile contains crane-path fix?"
@@ -64,9 +52,9 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 
-if echo "${CFG}" | grep -qF "${STALE_CRANE_MARKER}"; then
-  echo "FAIL: Jenkins still has OLD Step 6 script (uses --no-lint via require next/package.json)"
-  echo "Fix: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force"
+if jenkins_job_has_stale_step6 "${CFG}"; then
+  echo "FAIL: Jenkins still has OLD Step 6 (npx next build --no-lint on Next 16)"
+  echo "Fix: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
   exit 1
 fi
 
@@ -75,10 +63,6 @@ if jenkinsfile_has_crane_fix <(echo "${CFG}"); then
   exit 0
 fi
 
-echo "FAIL: Jenkins missing crane-path fix — run create_jenkins_paas_deploy_job.py --force"
-echo "Fix:"
-echo "  cd ${REPO_ROOT}"
-echo "  git pull origin main"
-echo "  python3 paas/scripts/create_jenkins_paas_deploy_job.py --force"
-echo "  bash paas/scripts/verify-jenkins-paas-deploy-job-lab.sh"
+echo "FAIL: Jenkins missing ${CRANE_FIX_MARKER} — run fix-jenkins-paas-deploy-pipeline-lab.sh"
+echo "Fix: cd ${REPO_ROOT} && git pull origin main && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
 exit 1

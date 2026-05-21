@@ -348,21 +348,12 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
         if [ ! -d node_modules/next ]; then
-          echo "[image] fast pipeline skipped Step 3 npm — running npm ci before next build"
+          echo "[image] crane-next16-202605: npm ci before next build (fast pipeline skips Step 3)"
           if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
         fi
-        echo "[image] Next.js production build missing — running npx next build (crane path does not execute Dockerfile)"
+        echo "[image] crane-next16-202605: Next.js production build (crane path does not run Dockerfile; no --no-lint on Next 16+)"
         NB_FLAGS=""
-        NEXT_MAJOR=\$(node -e "try{const v=require('next/package.json').version;process.stdout.write(String(parseInt(v,10)||0))}catch(e){process.stdout.write('0')}" 2>/dev/null || echo 0)
-        if [ "\$NEXT_MAJOR" -ge 16 ] 2>/dev/null; then
-          echo "[image] Next.js \$NEXT_MAJOR+: no --no-lint (removed in Next 16)"
-          if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
-        elif [ "\$NEXT_MAJOR" -ge 13 ] 2>/dev/null; then
-          NB_FLAGS="--no-lint"
-          if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then NB_FLAGS="\$NB_FLAGS --webpack"; fi
-        else
-          echo "[image] WARN: could not read next version — npx next build with default flags"
-        fi
+        if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
         npx next build \$NB_FLAGS
       fi
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
@@ -523,6 +514,7 @@ node(agentLabel) {
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
+  println "[paas-jenkinsfile] marker=crane-next16-202605 (Step 6 dockerless: npm ci + npx next build without --no-lint)"
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"

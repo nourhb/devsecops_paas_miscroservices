@@ -50,6 +50,8 @@ job = os.environ["JOB_NAME"]
 groovy = Path(os.environ["JENKINSFILE"]).read_text(encoding="utf-8").replace("\r\n", "\n")
 if not re.search(r"marker=steps-1-2-3", groovy):
     sys.exit("Jenkinsfile missing PaaS marker line — wrong file?")
+if "crane-next16-202605" not in groovy:
+    sys.exit("Jenkinsfile missing crane-next16-202605 — git pull then re-run fix-jenkins-paas-deploy-pipeline-lab.sh")
 
 auth = base64.b64encode(f"{user}:{token}".encode()).decode()
 headers = {"Authorization": f"Basic {auth}"}

@@ -39,6 +39,19 @@ kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 2>/
 kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=1
 kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
 
+ENV_FILE="${ENV_FILE:-${PAAS_DIR}/frontend/docker-compose.env}"
+if [[ -f "${ENV_FILE}" ]]; then
+  echo "==> Sync runtime env (SMTP, APP_BASE_URL, integrations) to deployment/frontend"
+  ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+else
+  echo "WARN: ${ENV_FILE} missing — run sync-paas-frontend-env-k8s.sh after creating it (SMTP lives there for k8s)."
+fi
+
+if grep -qF 'crane-next16-202605' "${PAAS_DIR}/jenkins/Jenkinsfile.paas-deploy" 2>/dev/null; then
+  echo "==> Mount current Jenkinsfile into frontend pod (overrides stale image COPY)"
+  bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || true
+fi
+
 curl -sf "http://127.0.0.1:30100/api/health" | head -c 200 || true
 echo ""
 echo "OK: http://192.168.56.129:30100"
