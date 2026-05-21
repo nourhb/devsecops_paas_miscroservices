@@ -13,7 +13,7 @@ What broke in your session and how to avoid it next time.
 | **Jenkins sync ECONNREFUSED 192.168.56.129:30090** | PaaS runs in k8s; NodePort on VM IP not reachable from pod | `JENKINS_BASE_URL=http://jenkins.jenkins.svc.cluster.local:8080` then sync env |
 | simple-app `next start` / no `.next` | Jenkins **crane** image without `next build` | Use fixed Jenkinsfile; or `LOCAL_BUILD=1` for manual deploy |
 | Harbor `502` / connection refused | Registry/nginx down or OOM on master | Check Harbor before push; avoid scaling everything up at once |
-| `kubectl` TLS timeout | Master **RAM** saturated (~87%+) | Bootstrap in order; delete Failed/Succeeded pods |
+| `kubectl` TLS timeout | Master **RAM** saturated or API stuck (CoreDNS crash loop) | `bash paas/scripts/recover-k3s-api-lab.sh` |
 
 ## After cluster restart or new Postgres volume
 
@@ -104,6 +104,16 @@ Required for k8s:
 - `kubectl exec deploy/frontend -- npx prisma db push` — production image has no `prisma/schema.prisma`
 - `npm` on the master host — Node 12 is too old; use Docker `paas-db-push` image
 - `docker compose run db-push` without `-e DATABASE_URL` and `--network host` — hits compose service `postgres:5432`, not cluster DB
+
+## `kubectl`: TLS handshake timeout
+
+Host internet can work while the API is down. Do **not** rely on `fix-jenkins-dns-lab.sh` until `kubectl get nodes` succeeds.
+
+```bash
+bash paas/scripts/recover-k3s-api-lab.sh
+```
+
+This restarts k3s, waits for the API, restarts CoreDNS, patches Jenkins DNS, and runs `push-paas-schema-lab.sh`.
 
 ## Jenkins: `Could not resolve host: github.com`
 
