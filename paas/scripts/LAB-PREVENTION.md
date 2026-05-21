@@ -17,9 +17,34 @@ What broke in your session and how to avoid it next time.
 | **Tekton PipelineRun creation failed** | `BUILD_BACKEND=tekton` but Tekton/RBAC not installed | `BUILD_BACKEND=jenkins` + `bash paas/scripts/fix-paas-build-trigger-lab.sh` |
 | **Open in Jenkins → DNS_PROBE on `*.svc.cluster.local`** | UI link used in-cluster URL | Set `JENKINS_PROBE_URL=http://192.168.56.129:30090`; open Jenkins in browser at NodePort only |
 
+## After **every** `systemctl restart k3s` (prevents login DB errors)
+
+k3s restart stops/reorders pods. The UI then shows:
+
+`Can't reach database server at postgres.paas.svc.cluster.local:5432`
+
+**Always run on the master after k3s restart** (2–5 min):
+
+```bash
+cd ~/devsecops_paas_miscroservices
+bash paas/scripts/recover-paas-after-k3s-restart.sh
+```
+
+Or full bootstrap if Postgres was never deployed:
+
+```bash
+bash paas/scripts/bootstrap-paas-lab.sh
+```
+
+**Before a demo or login**, quick check:
+
+```bash
+bash paas/scripts/check-paas-lab-health.sh
+```
+
 ## After cluster restart or new Postgres volume
 
-Run once on the master:
+Same as above; full bootstrap:
 
 ```bash
 cd ~/devsecops_paas_miscroservices
@@ -142,9 +167,11 @@ curl -sS -o /dev/null -w 'PaaS %{http_code}\n' http://192.168.56.129:30100/login
 
 | Script | When |
 |--------|------|
-| `bootstrap-paas-lab.sh` | Postgres + schema + env (main prevention) |
+| `check-paas-lab-health.sh` | Before login/demo — fails fast if DB/env broken |
+| `recover-paas-after-k3s-restart.sh` | **After k3s restart** — Postgres + env (main prevention) |
+| `bootstrap-paas-lab.sh` | First time / new Postgres volume / full reset |
 | `deploy-paas-postgres-lab.sh` | DB only |
 | `push-paas-schema-lab.sh` | Tables only |
-| `sync-paas-frontend-env-k8s.sh` | Env file → pod |
+| `sync-paas-frontend-env-k8s.sh` | Env file → pod (rejects wrong DATABASE_URL) |
 | `recover-paas-lab.sh` | Frontend image + Jenkins hint |
 | `final-deploy-simple-app-lab.sh` | App deploy after Jenkins build |

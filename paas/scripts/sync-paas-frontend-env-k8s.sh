@@ -41,6 +41,14 @@ awk '
   }
 ' "${ENV_FILE}" > "${FILTERED}"
 
+if ! grep -qE '^DATABASE_URL=.*postgres\.paas\.svc\.cluster\.local' "${FILTERED}"; then
+  echo "ERROR: DATABASE_URL must use postgres.paas.svc.cluster.local for Kubernetes PaaS." >&2
+  echo "       Do not use postgres:5432 (Docker Compose) or localhost." >&2
+  echo "       Fix ${ENV_FILE} then re-run this script." >&2
+  rm -f "${FILTERED}"
+  exit 1
+fi
+
 if ! grep -qE '^SMTP_HOST=' "${FILTERED}"; then
   echo "WARN: SMTP_HOST missing in ${ENV_FILE} — verification mail will use console mode only."
 fi

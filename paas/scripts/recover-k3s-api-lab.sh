@@ -76,8 +76,8 @@ echo "=== Step 7: Jenkins DNS (public resolvers) ==="
 bash "${REPO_ROOT}/paas/scripts/fix-jenkins-dns-lab.sh" || true
 
 echo ""
-echo "=== Step 8: PaaS Postgres schema (login) ==="
-bash "${REPO_ROOT}/paas/scripts/push-paas-schema-lab.sh" || echo "WARN: schema push failed — retry when cluster is stable"
+echo "=== Step 8: PaaS Postgres + login (after k3s restart) ==="
+bash "${REPO_ROOT}/paas/scripts/recover-paas-after-k3s-restart.sh" || echo "WARN: PaaS recovery failed — run bash paas/scripts/bootstrap-paas-lab.sh"
 
 echo ""
 free -h
