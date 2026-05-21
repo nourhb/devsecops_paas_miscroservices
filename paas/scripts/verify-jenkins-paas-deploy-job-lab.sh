@@ -10,7 +10,12 @@ ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
 JOB="paas-deploy"
 
-MARKER='Next.js 16+: no --no-lint'
+# Any of these indicates the Next 16 / crane-path fix is present
+MARKERS=(
+  'fast pipeline skipped Step 3 npm'
+  'Next.js 16+: omitting --no-lint'
+  'no --no-lint (removed in Next 16)'
+)
 
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -18,11 +23,21 @@ if [[ -f "${ENV_FILE}" ]]; then
   JENKINS_URL="${JENKINS_PROBE_URL:-${JENKINS_URL:-http://127.0.0.1:30090}}"
 fi
 
+jenkinsfile_has_fix() {
+  local f="$1"
+  for m in "${MARKERS[@]}"; do
+    if grep -qF "${m}" "${f}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 echo "==> Local Jenkinsfile contains fix?"
-if grep -q "${MARKER}" "${JENKINSFILE}"; then
-  echo "OK: repo has ${MARKER}"
+if jenkinsfile_has_fix "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has Next.js/crane fix markers"
 else
-  echo "FAIL: git pull — missing fix in ${JENKINSFILE}"
+  echo "FAIL: missing fix in ${JENKINSFILE} — git pull origin main"
   exit 1
 fi
 
@@ -41,12 +56,12 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 
-if echo "${CFG}" | grep -q "${MARKER}"; then
-  echo "OK: Jenkins job ${JOB} is up to date"
+if jenkinsfile_has_fix <(echo "${CFG}"); then
+  echo "OK: Jenkins job ${JOB} is up to date ($(wc -c <<< "${CFG}") bytes config)"
   exit 0
 fi
 
-echo "FAIL: Jenkins still has OLD pipeline (no ${MARKER})"
+echo "FAIL: Jenkins still has OLD pipeline (missing Next.js/crane fix markers)"
 echo "Fix:"
 echo "  cd ${REPO_ROOT}"
 echo "  git pull origin main"
