@@ -105,6 +105,17 @@ Required for k8s:
 - `npm` on the master host — Node 12 is too old; use Docker `paas-db-push` image
 - `docker compose run db-push` without `-e DATABASE_URL` and `--network host` — hits compose service `postgres:5432`, not cluster DB
 
+## Jenkins: `Could not resolve host: github.com`
+
+The Jenkins pod cannot reach the internet (broken cluster DNS or no egress).
+
+```bash
+# On master
+bash paas/scripts/fix-jenkins-dns-lab.sh
+```
+
+Also verify from host: `curl -I https://github.com`. If host fails, fix VM networking/DNS first, then `sudo systemctl restart k3s` and restart CoreDNS pods in `kube-system`.
+
 ## Quick health check
 
 ```bash
