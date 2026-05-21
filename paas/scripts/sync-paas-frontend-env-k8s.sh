@@ -27,11 +27,18 @@ if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; th
   exit 1
 fi
 
-# kubectl --from-env-file accepts KEY=VALUE only (no comments / blank lines).
-awk -F= '
+# kubectl --from-env-file accepts KEY=VALUE only (no comments / duplicates).
+awk '
   /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }
-  /^[A-Za-z_][A-Za-z0-9_]*=/ { print }
+  match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) {
+    eq = index($0, "=")
+    key = substr($0, 1, eq - 1)
+    env[key] = substr($0, eq + 1)
+  }
+  END {
+    for (k in env) print k "=" env[k]
+  }
 ' "${ENV_FILE}" > "${FILTERED}"
 
 if ! grep -qE '^SMTP_HOST=' "${FILTERED}"; then
