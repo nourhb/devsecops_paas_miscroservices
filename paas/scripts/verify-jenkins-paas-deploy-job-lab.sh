@@ -16,8 +16,9 @@ CRANE_FIX_MARKERS=(
   'NEXT_MAJOR=\$(node -e "try{const v=require'
   'no --no-lint (removed in Next 16)'
 )
-# Stale crane path (build #25 failure) — must be absent
-STALE_CRANE_MARKER='process.exit((v[0]||0)>=16?0:1)'
+# Old Step 6 crane path only (build #25); Step 3 in repo may still use the legacy check
+STALE_CRANE_STEP6='node -e "const v=require('\''next/package.json'\'').version.split'
+CRANE_NEXT_MAJOR='NEXT_MAJOR=\$(node -e "try{const v=require'
 
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -27,15 +28,17 @@ fi
 
 jenkinsfile_has_crane_fix() {
   local f="$1"
-  if grep -qF "${STALE_CRANE_MARKER}" "${f}"; then
-    return 1
-  fi
   for m in "${CRANE_FIX_MARKERS[@]}"; do
     if grep -qF "${m}" "${f}"; then
       return 0
     fi
   done
   return 1
+}
+
+jenkins_job_has_stale_step6() {
+  local cfg="$1"
+  echo "${cfg}" | grep -qF "${STALE_CRANE_STEP6}" && ! echo "${cfg}" | grep -qF "${CRANE_NEXT_MAJOR}"
 }
 
 echo "==> Local Jenkinsfile contains crane-path fix?"
