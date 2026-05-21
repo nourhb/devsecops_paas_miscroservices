@@ -10,10 +10,11 @@ What broke in your session and how to avoid it next time.
 | `relation "User" does not exist` | New/empty Postgres, schema never applied | Run `push-paas-schema-lab.sh` after any new Postgres volume |
 | `docker-compose.env` edited but UI unchanged | K8s pod uses **Secret/envFrom**, not the file on disk | Run `sync-paas-frontend-env-k8s.sh` after env changes |
 | Cluster page **“Kubernetes API not configured”** | `KUBERNETES_ENABLED` not in frontend pod, or no RBAC | `bash paas/scripts/enable-paas-kubernetes-lab.sh` |
-| **Jenkins sync ECONNREFUSED 192.168.56.129:30090** | PaaS runs in k8s; NodePort on VM IP not reachable from pod | `JENKINS_BASE_URL=http://jenkins.jenkins.svc.cluster.local:8080` then sync env |
+| **Jenkins sync ECONNREFUSED 192.168.56.129:30090** | PaaS runs in k8s; NodePort on VM IP not reachable from pod | `JENKINS_BASE_URL=http://jenkins-service.cicd.svc.cluster.local:8080` then sync env |
 | simple-app `next start` / no `.next` | Jenkins **crane** image without `next build` | Use fixed Jenkinsfile; or `LOCAL_BUILD=1` for manual deploy |
 | Harbor `502` / connection refused | Registry/nginx down or OOM on master | Check Harbor before push; avoid scaling everything up at once |
 | `kubectl` TLS timeout | Master **RAM** saturated or API stuck (CoreDNS crash loop) | `bash paas/scripts/recover-k3s-api-lab.sh` |
+| **Tekton PipelineRun creation failed** | `BUILD_BACKEND=tekton` but Tekton/RBAC not installed | `BUILD_BACKEND=jenkins` + `bash paas/scripts/fix-paas-build-trigger-lab.sh` |
 
 ## After cluster restart or new Postgres volume
 
