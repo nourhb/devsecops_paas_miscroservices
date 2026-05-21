@@ -20,6 +20,7 @@ import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-h
 import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
 import { hints } from "@/lib/app-hints";
+import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
 import { cn } from "@/lib/utils";
 const STAGES = [
     { key: "build", label: "Build", description: "Jenkins compile & image" },
@@ -115,13 +116,14 @@ export default function PipelinePage() {
             const details = queryHttpDetails(e);
             const data = queryHttpData(e);
             const jobUrl = typeof data?.jobUrl === "string" ? data.jobUrl : null;
+            const jenkinsHref = jenkinsUrlForBrowser(jobUrl);
             toast.error(msg, {
                 ...(details ? { description: details.replace(/\s+/g, " ").trim().slice(0, 280) } : {}),
-                ...(jobUrl
+                ...(jenkinsHref
                     ? {
                         action: {
                             label: "Open Jenkins",
-                            onClick: () => window.open(jobUrl, "_blank", "noopener,noreferrer")
+                            onClick: () => window.open(jenkinsHref, "_blank", "noopener,noreferrer")
                         }
                     }
                     : {})
@@ -161,6 +163,7 @@ export default function PipelinePage() {
         onError: () => toast.error("Rollback failed")
     });
     const wfStages = pipelineStagesQuery.data;
+    const jenkinsOpenHref = useMemo(() => jenkinsUrlForBrowser(wfStages?.buildUrl, { buildNumber: wfStages?.buildNumber }), [wfStages?.buildUrl, wfStages?.buildNumber]);
     const liveStagesList = useMemo(() => wfStages?.stages ?? [], [wfStages?.stages]);
     const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages), [liveStagesList, wfStages]);
     const jStarted = useMemo(() => displayStages.filter((s) => {
@@ -313,8 +316,8 @@ export default function PipelinePage() {
                 build runs.
               </CardDescription>
             </div>
-            {wfStages?.buildUrl ? (<Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
-                <a href={wfStages.buildUrl} target="_blank" rel="noopener noreferrer">
+            {jenkinsOpenHref ? (<Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+                <a href={jenkinsOpenHref} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-3.5 w-3.5"/>
                   Open in Jenkins
                 </a>

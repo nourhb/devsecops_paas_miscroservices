@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { jenkinsUi, type JenkinsPipelineStageRow } from "@/lib/api";
+import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
 import { cn } from "@/lib/utils";
 type DeploymentPipelinePreviewProps = {
     projectId: string;
@@ -34,6 +35,9 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
         return null;
     }
     const data = stagesQuery.data;
+    const jenkinsHref = jenkinsUrlForBrowser(data?.buildUrl, {
+        buildNumber: data?.buildNumber ?? buildNumber
+    });
     const stages: JenkinsPipelineStageRow[] = data?.stages ?? [];
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;
@@ -62,8 +66,8 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
                 </Badge> : null}
             </div>) : null}
         </div>
-        {data?.buildUrl ? (<Button variant="outline" size="sm" className="shrink-0" asChild>
-            <a href={data.buildUrl} target="_blank" rel="noopener noreferrer">
+        {jenkinsHref ? (<Button variant="outline" size="sm" className="shrink-0" asChild>
+            <a href={jenkinsHref} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="mr-2 h-4 w-4"/>
               Open in Jenkins
             </a>

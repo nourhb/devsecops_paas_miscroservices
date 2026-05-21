@@ -17,6 +17,7 @@ import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { hints } from "@/lib/app-hints";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
 import type { DeploymentStatus } from "@/types";
+import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
 import { cn } from "@/lib/utils";
 function statusBadgeVariant(status: string | undefined, ok: string[]): "success" | "warning" | "danger" | "outline" {
     const s = (status || "").toUpperCase();
@@ -94,13 +95,14 @@ export default function ProjectDetailsPage() {
             const details = queryHttpDetails(err);
             const data = queryHttpData(err);
             const jobUrl = typeof data?.jobUrl === "string" ? data.jobUrl : null;
+            const jenkinsHref = jenkinsUrlForBrowser(jobUrl);
             toast.error(msg, {
                 ...(details ? { description: details.replace(/\s+/g, " ").trim().slice(0, 280) } : {}),
-                ...(jobUrl
+                ...(jenkinsHref
                     ? {
                         action: {
                             label: "Open build run",
-                            onClick: () => window.open(jobUrl, "_blank", "noopener,noreferrer")
+                            onClick: () => window.open(jenkinsHref, "_blank", "noopener,noreferrer")
                         }
                     }
                     : {})
