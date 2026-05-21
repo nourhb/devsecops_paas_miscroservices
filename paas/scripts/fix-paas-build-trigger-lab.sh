@@ -38,6 +38,8 @@ set_env_key BUILD_BACKEND jenkins
 echo "==> Jenkins in-cluster URL (cicd namespace)"
 set_env_key JENKINS_BASE_URL "${JENKINS_IN_CLUSTER}"
 set_env_key JENKINS_URL "${JENKINS_IN_CLUSTER}"
+NODE_IP="${APPS_PUBLIC_LAB_NODE_IP:-192.168.56.129}"
+set_env_key JENKINS_PROBE_URL "http://${NODE_IP}:30090"
 
 if ! grep -q '^JENKINS_BUILD_JOB_NAME=' "${ENV_FILE}"; then
   set_env_key JENKINS_BUILD_JOB_NAME paas-deploy
