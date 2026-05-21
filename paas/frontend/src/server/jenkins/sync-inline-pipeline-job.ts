@@ -8,6 +8,24 @@ import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-d
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
 const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
+const CRANE_NEXT16_MARKER = "crane-next16-202605";
+const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
+function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath: string): void {
+    if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
+            "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
+            "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation.");
+    }
+    if (!groovy.includes(CRANE_NEXT16_MARKER)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is missing "${CRANE_NEXT16_MARKER}" (Step 6 crane path still uses --no-lint on Next.js 16). ` +
+            "On the lab VM: git pull origin main, then bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh. " +
+            "If using k8s without a repo mount: bash paas/scripts/sync-paas-jenkinsfile-configmap-k8s.sh or rebuild the frontend image.");
+    }
+    if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !groovy.includes("crane-next16-202605: npm ci")) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still contains the obsolete Step 6 next build version check (breaks Next 16 with --no-lint). ` +
+            "Git pull and run bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh — do not sync from an old /app/paas-bundled image.`);
+    }
+}
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
 }
@@ -74,11 +92,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
             "It cannot be pushed to Jenkins. Use a current paas/jenkins/Jenkinsfile.paas-deploy from the repo: " +
             "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file.");
     }
-    if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
-            "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
-            "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation.");
-    }
+    assertPaasDeployJenkinsfileSafeForSync(groovy, jenkinsfilePath);
     try {
         const out = await syncInlinePaasDeployJobToJenkins({
             jobName: trimmedJob,

@@ -16,6 +16,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 DEFAULT_JENKINSFILE = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy"
 
+CRANE_NEXT16_MARKER = "crane-next16-202605"
+STALE_CRANE_RE = "version.split('.').map(Number);process.exit((v[0]||0)>=16"
+
+
+def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
+    if CRANE_NEXT16_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing {CRANE_NEXT16_MARKER} (Step 6 still breaks Next.js 16 with --no-lint).\n"
+            "  git pull origin main\n"
+            "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if STALE_CRANE_RE in groovy and "crane-next16-202605: npm ci" not in groovy:
+        print(
+            f"ERROR: {path} has obsolete Step 6 next build logic.\n"
+            "  git pull origin main",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 MINIMAL_GROOVY = """node('built-in') {
   stage('PaaS placeholder') {
     echo 'paas-deploy created — run full sync or replace script from Jenkinsfile.paas-deploy'
@@ -174,6 +196,7 @@ def main() -> int:
         if not groovy.strip():
             print("ERROR: empty Jenkinsfile", file=sys.stderr)
             return 1
+        assert_jenkinsfile_crane_fix(groovy, jenkinsfile)
 
     client = JenkinsClient(base, user, token)
     code, _ = client.call("/api/json")
