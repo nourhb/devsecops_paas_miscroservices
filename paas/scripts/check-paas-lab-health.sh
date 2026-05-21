@@ -59,14 +59,16 @@ echo ""
 echo "=== DB reachability from frontend pod ==="
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1 && \
    kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
+  sleep 3
   if kubectl exec -n "${PAAS_NS}" deploy/frontend -- sh -c \
-    'command -v pg_isready >/dev/null 2>&1 && pg_isready -h postgres.paas.svc.cluster.local -p 5432 -U postgres -d paas' >/dev/null 2>&1; then
-    ok "frontend → postgres TCP"
-  elif kubectl exec -n "${PAAS_NS}" deploy/frontend -- sh -c \
-    'wget -qO- --timeout=5 postgres.paas.svc.cluster.local:5432 2>&1 | head -1' >/dev/null 2>&1; then
-    ok "frontend → postgres (port open)"
+    'command -v nc >/dev/null && nc -zvw3 postgres.paas.svc.cluster.local 5432' >/dev/null 2>&1; then
+    ok "frontend → postgres:5432 (nc)"
+  elif kubectl exec -n "${PAAS_NS}" deploy/frontend -- node -e \
+    "const n=require('net');const s=n.connect(5432,'postgres.paas.svc.cluster.local',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),8000)" \
+    >/dev/null 2>&1; then
+    ok "frontend → postgres:5432 (node tcp)"
   else
-    fail "frontend cannot reach postgres:5432 — run: bash paas/scripts/recover-paas-after-k3s-restart.sh"
+    fail "frontend cannot reach postgres:5432 — wait 30s and re-run, or: bash paas/scripts/recover-paas-after-k3s-restart.sh"
   fi
 fi
 
@@ -81,11 +83,16 @@ fi
 
 echo ""
 echo "=== PaaS HTTP ==="
-HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 "http://${NODE_IP}:${PAAS_PORT}/login" 2>/dev/null || echo 000)"
+HTTP="000"
+for _ in 1 2 3 4 5; do
+  HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 "http://${NODE_IP}:${PAAS_PORT}/login" 2>/dev/null || echo 000)"
+  [[ "${HTTP}" == "200" || "${HTTP}" == "307" || "${HTTP}" == "308" ]] && break
+  sleep 5
+done
 if [[ "${HTTP}" == "200" || "${HTTP}" == "307" || "${HTTP}" == "308" ]]; then
   ok "PaaS login page HTTP ${HTTP}"
 else
-  fail "PaaS login HTTP ${HTTP} — check frontend pod"
+  fail "PaaS login HTTP ${HTTP} — kubectl logs -n paas deploy/frontend --tail=40"
 fi
 
 echo ""
