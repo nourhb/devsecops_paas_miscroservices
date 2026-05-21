@@ -35,11 +35,14 @@ if command -v kubectl >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || echo "WARN: ConfigMap sync skipped (no cluster?)"
 fi
 
-echo "==> 4. Verify Jenkins job config"
-bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"
+echo "==> 4. Verify Jenkins job config contains crane-next16-202605"
+if ! bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"; then
+  echo "FAIL: Jenkins config still stale — do not trigger builds until this passes" >&2
+  exit 1
+fi
 
 echo ""
-echo "OK — trigger a NEW paas-deploy build. Step 6 console must show:"
+echo "OK — trigger build #27+ (NOT re-running #26). Step 6 console must show:"
 echo "  [image] crane-next16-202605: ..."
 echo "  (must NOT show: npx next build --no-lint)"
 echo ""
