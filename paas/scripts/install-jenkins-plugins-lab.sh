@@ -25,6 +25,13 @@ kubectl wait --for=condition=ready pod -l app=jenkins -n "$NS" --timeout=300s
 POD="$(kubectl get pod -n "$NS" -l app=jenkins -o jsonpath='{.items[0].metadata.name}')"
 echo "Pod: $POD"
 
+echo "==> Diagnose plugin dirs"
+kubectl exec -n "$NS" "$POD" -- bash -c '
+echo -n "ref .jpi count: "; ls /usr/share/jenkins/ref/plugins/*.jpi 2>/dev/null | wc -l
+echo -n "home .jpi count: "; ls /var/jenkins_home/plugins/*.jpi 2>/dev/null | wc -l
+echo -n "home workflow dirs: "; ls -d /var/jenkins_home/plugins/workflow-* 2>/dev/null | wc -l
+' || true
+
 if kubectl exec -n "$NS" "$POD" -- bash -c 'test -d /var/jenkins_home/plugins/workflow-job || test -f /var/jenkins_home/plugins/workflow-job.jpi' 2>/dev/null; then
   echo "workflow-job already installed in JENKINS_HOME"
   exit 0
@@ -90,8 +97,8 @@ for i in $(seq 1 120); do
   POD="$(kubectl get pod -n "$NS" -l app=jenkins -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
   if [[ -n "$TOKEN" ]]; then
     body="$(curl -s -m 10 -u "${USER}:${TOKEN}" "${JENKINS_URL%/}/pluginManager/api/json?depth=1" || true)"
-    if echo "$body" | grep -q '"shortName":"workflow-job"' && echo "$body" | grep -q '"active":true'; then
-      echo "Pipeline plugins ready"
+    if echo "$body" | grep -Eq '"shortName":"(workflow-job|workflow-cps|workflow-aggregator)"'; then
+      echo "Pipeline plugins ready (API)"
       exit 0
     fi
   fi
