@@ -76,30 +76,71 @@ def ensureNodeTool() {
 set -eu
 NODE_VERSION="${ENS_NODE_BOOT_VER}"
 NODE_DIR="${ENS_NODE_BOOT_DIR}"
-mkdir -p "$(dirname "${NODE_DIR}")"
-if [ ! -x "${NODE_DIR}/bin/npm" ]; then
-  TDIR="$(mktemp -d)"
-  trap 'rm -rf "${TDIR}"' EXIT
-  echo "[tooling] downloading Node.js ${NODE_VERSION} tarball…"
-  (
-    _n=0
-    while true; do
-      sleep 20
-      _n=$((_n + 1))
-      echo "[tooling] Node.js download still running (${_n}×20s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    done
-  ) &
-  HB_PID=$!
-  trap 'kill "${HB_PID}" 2>/dev/null || true; rm -rf "${TDIR}"' EXIT
-  curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
-    "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
-    -o "${TDIR}/node.tar.gz"
-  kill "${HB_PID}" 2>/dev/null || true
-  trap 'rm -rf "${TDIR}"' EXIT
-  tar -xzf "${TDIR}/node.tar.gz" -C "${TDIR}"
-  rm -rf "${NODE_DIR}"
-  mv "${TDIR}/node-v${NODE_VERSION}-linux-x64" "${NODE_DIR}"
+CACHE_PARENT="$(dirname "${NODE_DIR}")"
+LOCK_DIR="${CACHE_PARENT}/.node-install.lock"
+mkdir -p "${CACHE_PARENT}"
+
+if [ -x "${NODE_DIR}/bin/npm" ]; then
+  exit 0
 fi
+
+_wait=0
+while [ ! -x "${NODE_DIR}/bin/npm" ]; do
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    break
+  fi
+  _wait=$((_wait + 1))
+  if [ "${_wait}" -gt 360 ]; then
+    echo "[tooling] ERROR: timeout waiting for shared Node.js install lock" >&2
+    exit 1
+  fi
+  echo "[tooling] another build is installing Node.js — waiting (${_wait})…"
+  sleep 5
+done
+
+if [ -x "${NODE_DIR}/bin/npm" ]; then
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+  exit 0
+fi
+
+TDIR="$(mktemp -d)"
+cleanup() {
+  kill "${HB_PID:-}" 2>/dev/null || true
+  rm -rf "${TDIR}" 2>/dev/null || true
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "[tooling] downloading Node.js ${NODE_VERSION} tarball…"
+(
+  _n=0
+  while true; do
+    sleep 20
+    _n=$((_n + 1))
+    echo "[tooling] Node.js download still running (${_n}×20s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  done
+) &
+HB_PID=$!
+
+curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
+  "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
+  -o "${TDIR}/node.tar.gz"
+kill "${HB_PID}" 2>/dev/null || true
+HB_PID=""
+tar -xzf "${TDIR}/node.tar.gz" -C "${TDIR}"
+
+STALE="${NODE_DIR}.stale.$$"
+rm -rf "${STALE}" 2>/dev/null || true
+if [ -e "${NODE_DIR}" ]; then
+  mv "${NODE_DIR}" "${STALE}" 2>/dev/null || true
+  rm -rf "${STALE}" 2>/dev/null || find "${STALE}" -mindepth 1 -delete 2>/dev/null || true
+  if [ -e "${NODE_DIR}" ]; then
+    find "${NODE_DIR}" -mindepth 1 -delete 2>/dev/null || rm -rf "${NODE_DIR}" 2>/dev/null || true
+  fi
+fi
+mv "${TDIR}/node-v${NODE_VERSION}-linux-x64" "${NODE_DIR}"
+rmdir "${LOCK_DIR}" 2>/dev/null || true
+LOCK_DIR=""
 '''
   }
   prependPath("${nodeDir}/bin")
@@ -190,11 +231,13 @@ RUN if [ -f package.json ]; then \\
       npm config set fetch-timeout 1800000 && \\
       npm config set maxsockets 1 && \\
       if [ -f package-lock.json ]; then npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; else npm install --no-audit --no-fund --prefer-offline || npm install --no-audit --no-fund; fi && \\
-      if node -e "const p=require('./package.json'); const s=p.scripts||{}; process.exit(s['build:ci']?0:1)"; then npm run build:ci; \\
+      if node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then npx next build; \\
+      elif node -e "const p=require('./package.json'); const s=p.scripts||{}; process.exit(s['build:ci']?0:1)"; then npm run build:ci; \\
       elif node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.build?0:1)"; then npm run build; fi; \\
     fi
+ENV HOSTNAME=0.0.0.0 PORT=3000
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -f package.json ]; then npm start; else node server.js; fi"]
+CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; elif [ -f package.json ]; then exec npm start; else exec node server.js; fi"]
 '''
     return "Dockerfile"
   }
@@ -302,6 +345,23 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   // "process apparently never started" / exit -2 on some agents (tmpfs, plugin race, abort propagation).
   sh """
     set -eu
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
+        echo "[image] Next.js production build missing — running npx next build (crane path does not execute Dockerfile)"
+        NB_FLAGS=""
+        if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
+          if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
+        else
+          NB_FLAGS="--no-lint"
+          if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then NB_FLAGS="\$NB_FLAGS --webpack"; fi
+        fi
+        npx next build \$NB_FLAGS
+      fi
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
+        echo "[image] ERROR: Next.js build still missing .next/BUILD_ID — cannot ship npm start image"
+        exit 1
+      fi
+    fi
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
@@ -442,7 +502,7 @@ node(agentLabel) {
   env.JENKINS_PAAS_FAST_PIPELINE = paasFastPipeline ? "true" : "false"
   if (paasFastPipeline) {
     env.JENKINS_SKIP_NEXT_BUILD = "true"
-    println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Keeping deps + Docker/Helm/Cosign/GitOps. Next.js app build runs in the image only (no double compile)."
+    println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Next.js production build still runs before crane tar when using dockerless push (Dockerfile is not executed)."
   }
 
   def cranePushTimeoutMin = 240
@@ -501,6 +561,9 @@ node(agentLabel) {
         println "[build] Maven project detected but mvn is not installed; compile skipped."
       }
     } else if (fileExists("package.json")) {
+      if (paasFastPipeline) {
+        println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
+      } else {
       ensureNodeTool()
       if (commandExists("npm")) {
         def npmTimeoutMin = 180
@@ -676,6 +739,7 @@ node(agentLabel) {
       } else {
         println "[build] Node project detected but npm is not installed; compile skipped."
       }
+      }
     } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
       if (commandExists("python3")) {
         sh "python3 -m compileall . || true"
@@ -710,7 +774,9 @@ node(agentLabel) {
       fi
     """
     def buildProof = 'workspace'
-    if (fileExists('.next/BUILD_ID')) { buildProof = '.next build present' }
+    if (paasFastPipeline && fileExists('package.json')) {
+      buildProof = 'fast-pipeline: compile deferred to Step 6 (crane/Docker)'
+    } else if (fileExists('.next/BUILD_ID')) { buildProof = '.next build present' }
     else if (fileExists('target')) { buildProof = 'target/ present' }
     else if (fileExists('dist')) { buildProof = 'dist/ present' }
     paasStepOk(3, 'compile', "${buildProof}; see paas-artifacts/build-artifact-manifest.txt")
