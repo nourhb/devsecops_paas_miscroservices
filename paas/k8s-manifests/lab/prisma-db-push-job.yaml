@@ -1,0 +1,23 @@
+# One-shot Prisma schema apply. Build image first:
+#   cd paas && docker build -f docker/prisma-db-push.Dockerfile -t paas-db-push:local .
+#   docker save paas-db-push:local | sudo k3s ctr images import -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prisma-db-push
+  namespace: paas
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: master
+      restartPolicy: Never
+      containers:
+        - name: db-push
+          image: docker.io/library/paas-db-push:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?options=-c%20lc_messages%3DC"
