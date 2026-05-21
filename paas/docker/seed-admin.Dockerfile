@@ -1,0 +1,9 @@
+# One-shot admin user seed (same deps as prisma-db-push). Context: paas/
+FROM node:20-alpine
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY frontend/package.json frontend/package-lock.json ./
+COPY frontend/prisma ./prisma
+COPY frontend/scripts/seed-admin-user.cjs ./scripts/seed-admin-user.cjs
+RUN npm ci && npx prisma generate
+CMD ["node", "scripts/seed-admin-user.cjs"]

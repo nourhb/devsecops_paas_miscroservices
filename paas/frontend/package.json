@@ -18,6 +18,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "auth:verify-email": "node scripts/verify-user-email.cjs",
     "auth:reset-password": "node scripts/reset-user-password.cjs",
+    "auth:seed-admin": "node scripts/seed-admin-user.cjs",
     "env:compose": "node scripts/flatten-env-for-compose.mjs || python3 scripts/flatten-env-for-compose.py"
   },
   "dependencies": {
