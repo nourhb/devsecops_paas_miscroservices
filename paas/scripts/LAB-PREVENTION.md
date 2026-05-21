@@ -15,6 +15,7 @@ What broke in your session and how to avoid it next time.
 | Harbor `502` / connection refused | Registry/nginx down or OOM on master | Check Harbor before push; avoid scaling everything up at once |
 | `kubectl` TLS timeout | Master **RAM** saturated or API stuck (CoreDNS crash loop) | `bash paas/scripts/recover-k3s-api-lab.sh` |
 | **Tekton PipelineRun creation failed** | `BUILD_BACKEND=tekton` but Tekton/RBAC not installed | `BUILD_BACKEND=jenkins` + `bash paas/scripts/fix-paas-build-trigger-lab.sh` |
+| **Open in Jenkins → DNS_PROBE on `*.svc.cluster.local`** | UI link used in-cluster URL | Set `JENKINS_PROBE_URL=http://192.168.56.129:30090`; open Jenkins in browser at NodePort only |
 
 ## After cluster restart or new Postgres volume
 
