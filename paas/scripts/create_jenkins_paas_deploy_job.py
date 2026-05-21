@@ -181,13 +181,15 @@ def main() -> int:
         return 1
 
     code, pm_body = client.call("/pluginManager/api/json?depth=1")
-    if code == 200 and "workflow-job" not in pm_body:
+    pipeline_markers = ("workflow-job", "workflow-cps", "workflow-aggregator")
+    if code == 200 and not any(m in pm_body for m in pipeline_markers):
         print(
-            "ERROR: Pipeline plugins not installed (workflow-job missing).",
+            "ERROR: Pipeline plugins not installed "
+            f"(need one of: {', '.join(pipeline_markers)}).",
             file=sys.stderr,
         )
         print(
-            "Run: bash paas/scripts/install-jenkins-plugins-lab.sh",
+            "Run: bash paas/scripts/install-jenkins-plugins-lab.sh  (wait for 'Pipeline plugins ready')",
             file=sys.stderr,
         )
         return 1
