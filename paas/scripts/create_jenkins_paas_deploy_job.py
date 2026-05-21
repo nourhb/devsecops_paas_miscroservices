@@ -153,6 +153,7 @@ def main() -> int:
     token = os.environ.get("JENKINS_API_TOKEN") or os.environ.get("JENKINS_TOKEN") or ""
     job = os.environ.get("JOB_NAME", "paas-deploy")
     minimal = "--minimal" in sys.argv
+    force = "--force" in sys.argv
     jenkinsfile = Path(os.environ.get("JENKINSFILE", str(DEFAULT_JENKINSFILE)))
 
     if not user or not token:
@@ -195,12 +196,28 @@ def main() -> int:
         return 1
 
     job_path = f"/job/{urllib.parse.quote(job)}/api/json"
+    job_cfg = f"/job/{urllib.parse.quote(job)}/config.xml"
     code, _ = client.call(job_path)
-    if code == 200:
+    xml = build_xml(groovy, minimal_params=minimal)
+
+    if code == 200 and not force:
         print(f"Job '{job}' already exists: {base}/job/{job}/")
+        print("Re-run with --force to replace Pipeline script from Jenkinsfile.paas-deploy")
         return 0
 
-    xml = build_xml(groovy, minimal_params=minimal)
+    if code == 200 and force:
+        print(f"Updating existing job '{job}' ({len(xml)} bytes)")
+        extra = client.crumb_headers()
+        if extra:
+            print(f"Crumb: {list(extra.keys())[0]}")
+        ucode, ubody = client.call(job_cfg, "POST", xml, extra)
+        print(f"POST config.xml -> {ucode}")
+        if ucode not in (200, 201, 302):
+            print(ubody[:2500])
+            return 1
+        print(f"OK: {base}/job/{job}/")
+        return 0
+
     print(f"POST body size: {len(xml)} bytes")
     extra = client.crumb_headers()
     if extra:
