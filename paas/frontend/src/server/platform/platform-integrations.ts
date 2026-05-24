@@ -59,6 +59,9 @@ function dockerHubProfileUrl(username: string): string {
 function publicEnv(name: string): string {
     return trimUrl(realValueOrEmpty(process.env[name]));
 }
+function labInstalled(flag: string): boolean {
+    return process.env[flag] === "true";
+}
 function artifactoryPublicOrServer(): string {
     return firstNonEmpty(publicEnv("NEXT_PUBLIC_ARTIFACTORY_URL"), trimUrl(realValueOrEmpty(env.ARTIFACTORY_URL)));
 }
@@ -144,7 +147,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "TLS certificates via ACME / CA issuers.",
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL))) || null,
-                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL)))),
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL)))) || labInstalled("CERT_MANAGER_INSTALLED"),
                     optional: true,
                     notes: "Often observed via kubectl or Argo CD; set a URL if you expose a UI or doc portal."
                 },
@@ -154,7 +157,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "CNI / network policy (BGP or VXLAN overlay).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_CALICO_OR_TIGERA_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_CALICO_OR_TIGERA_URL")),
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_CALICO_OR_TIGERA_URL")) || labInstalled("CALICO_INSTALLED"),
                     optional: true,
                     notes: "Calico itself has no single dashboard; Tigera / Calico Cloud optional."
                 }
@@ -171,7 +174,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Kubernetes policy via Gatekeeper CRDs and OPA.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL")) || env.POLICY_ENGINE === "gatekeeper",
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL")) || env.POLICY_ENGINE === "gatekeeper" || labInstalled("GATEKEEPER_INSTALLED"),
                     optional: !policyGatekeeper,
                     notes: env.POLICY_ENGINE === "gatekeeper" ? "POLICY_ENGINE is set to gatekeeper." : undefined
                 },
@@ -201,7 +204,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Policy-as-code with WebAssembly policies (Kyverno migration path).",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL")),
+                    configured: Boolean(publicEnv("NEXT_PUBLIC_KUBEWARDEN_UI_URL")) || labInstalled("KUBEWARDEN_INSTALLED"),
                     optional: true
                 },
                 {
@@ -210,7 +213,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Sign and verify OCI images and artifacts (CLI / keyless).",
                     kind: "cli",
                     href: null,
-                    configured: Boolean(trimUrl(realValueOrEmpty(env.COSIGN_PUBLIC_KEY)) || trimUrl(realValueOrEmpty(env.COSIGN_PRIVATE_KEY))),
+                    configured: Boolean(trimUrl(realValueOrEmpty(env.COSIGN_PUBLIC_KEY)) || trimUrl(realValueOrEmpty(env.COSIGN_PRIVATE_KEY)) || labInstalled("COSIGN_LAB_POLICY") || env.COSIGN_ENFORCE_SIGNED === "true"),
                     optional: true,
                     notes: `Binary: ${env.COSIGN_BINARY_PATH || "cosign"}. Enforcement: COSIGN_ENFORCE_SIGNED=${env.COSIGN_ENFORCE_SIGNED}.`
                 },
@@ -320,7 +323,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Kubernetes-native CI when BUILD_BACKEND=tekton.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_TEKTON_DASHBOARD_URL") || null,
-                    configured: env.BUILD_BACKEND === "tekton" || Boolean(publicEnv("NEXT_PUBLIC_TEKTON_DASHBOARD_URL")),
+                    configured: env.BUILD_BACKEND === "tekton" || Boolean(publicEnv("NEXT_PUBLIC_TEKTON_DASHBOARD_URL")) || labInstalled("TEKTON_INSTALLED"),
                     optional: jenkinsBuild,
                     notes: env.BUILD_BACKEND === "tekton" ? `Namespace ${env.TEKTON_NAMESPACE}` : "Switch BUILD_BACKEND=tekton to use Tekton builds."
                 },
