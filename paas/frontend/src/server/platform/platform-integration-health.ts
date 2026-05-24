@@ -32,6 +32,20 @@ function labNodeBase(): string {
     const ip = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     return ip ? `http://${ip}` : "";
 }
+async function hasRunningPodMatching(namespace: string, namePattern: RegExp): Promise<boolean> {
+    const api = getCoreV1Api();
+    if (!api) {
+        return false;
+    }
+    try {
+        const { body } = await api.listNamespacedPod(namespace);
+        const items = body.items ?? [];
+        return items.some((pod) => namePattern.test(pod.metadata?.name ?? "") && pod.status?.phase === "Running");
+    }
+    catch {
+        return false;
+    }
+}
 async function probeMany(bases: string[], path: string, ctx: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const seen = new Set<string>();
     for (const raw of bases) {
@@ -344,11 +358,22 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         }
         case "elasticsearch": {
             const node = labNodeBase();
-            return probeMany([
-                href,
+            const http = await probeMany([
                 "http://elasticsearch-master.monitoring.svc.cluster.local:9200",
+                href,
                 node ? `${node}:32231` : ""
             ], "/_cluster/health", { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (await hasRunningPodMatching("monitoring", /^elasticsearch-master-/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Elasticsearch pod running (cluster HTTP probe failed — TLS/security may block probes)"
+                };
+            }
+            return http;
         }
         case "nexus": {
             const node = labNodeBase();
@@ -420,7 +445,14 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 "http://trivy-service.security.svc.cluster.local:4954"
             ].filter(Boolean);
             const seen = new Set<string>();
-            const paths = ["/healthz", "/health", "/"];
+            const paths = [
+                "/api/v1/metadata",
+                "/probe/healthy",
+                "/probe/ready",
+                "/healthz",
+                "/health",
+                "/"
+            ];
             for (const base of candidates) {
                 if (seen.has(base)) {
                     continue;
@@ -432,6 +464,13 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                         return r;
                     }
                 }
+            }
+            if (await hasRunningPodMatching("harbor", /trivy/i)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Harbor Trivy scanner pod running (use Harbor image scan; standalone NodePort may be absent)"
+                };
             }
             return {
                 state: "unreachable",
