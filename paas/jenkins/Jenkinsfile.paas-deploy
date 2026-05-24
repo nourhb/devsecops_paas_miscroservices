@@ -149,35 +149,79 @@ def ensureCraneTool() {
   if (commandExists("crane")) {
     return "crane"
   }
-  println "[tooling] crane is missing on Jenkins node; downloading portable crane into workspace."
-  sh '''
-    set -eu
-    mkdir -p .paas-tools/crane
-    CRANE_VERSION="0.20.6"
-    CRANE_BIN="$PWD/.paas-tools/crane/crane"
-    if [ ! -x "$CRANE_BIN" ]; then
-      echo "[tooling] downloading crane v${CRANE_VERSION} tarball…"
-      (
-        _n=0
-        while true; do
-          sleep 15
-          _n=$((_n + 1))
-          echo "[tooling] crane download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        done
-      ) &
-      HB_PID=$!
-      trap 'kill "$HB_PID" 2>/dev/null || true' EXIT
-      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 \
-        "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-        -o .paas-tools/crane.tar.gz
-      kill "$HB_PID" 2>/dev/null || true
-      trap - EXIT
-      echo "[tooling] extracting crane…"
-      tar -xzf .paas-tools/crane.tar.gz -C .paas-tools/crane crane
-      chmod +x "$CRANE_BIN"
-    fi
-  '''
-  return "${pwd()}/.paas-tools/crane/crane"
+  def craneVer = "0.20.6"
+  def cacheRoot = (env.JENKINS_PAAS_CRANE_CACHE ?: "").trim()
+  if (!cacheRoot) {
+    def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
+    cacheRoot = base ? "${base}/.jenkins-paas-cache/crane" : "${pwd()}/.paas-tools/crane"
+  }
+  def craneBin = "${cacheRoot}/crane-v${craneVer}/crane"
+  println "[tooling] crane missing on PATH; using ${craneBin} (cached under JENKINS_HOME — not re-downloaded each checkout)"
+  withEnv(["ENS_CRANE_VER=${craneVer}", "ENS_CRANE_BIN=${craneBin}"]) {
+    sh '''#!/bin/sh
+set -eu
+CRANE_VERSION="${ENS_CRANE_VER}"
+CRANE_BIN="${ENS_CRANE_BIN}"
+CACHE_PARENT="$(dirname "${CRANE_BIN}")"
+LOCK_DIR="${CACHE_PARENT}/.crane-install.lock"
+mkdir -p "${CACHE_PARENT}"
+
+if [ -x "${CRANE_BIN}" ]; then
+  exit 0
+fi
+
+_wait=0
+while [ ! -x "${CRANE_BIN}" ]; do
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    break
+  fi
+  _wait=$((_wait + 1))
+  if [ "${_wait}" -gt 120 ]; then
+    echo "[tooling] ERROR: timeout waiting for shared crane install lock" >&2
+    exit 1
+  fi
+  echo "[tooling] another build is installing crane — waiting (${_wait})…"
+  sleep 5
+done
+
+if [ -x "${CRANE_BIN}" ]; then
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+  exit 0
+fi
+
+TDIR="$(mktemp -d)"
+cleanup() {
+  kill "${HB_PID:-}" 2>/dev/null || true
+  rm -rf "${TDIR}" 2>/dev/null || true
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "[tooling] downloading crane v${CRANE_VERSION} (once per Jenkins home)…"
+(
+  _n=0
+  while true; do
+    sleep 15
+    _n=$((_n + 1))
+    echo "[tooling] crane download still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  done
+) &
+HB_PID=$!
+
+curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 600 \
+  "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+  -o "${TDIR}/crane.tar.gz"
+kill "${HB_PID}" 2>/dev/null || true
+HB_PID=""
+mkdir -p "$(dirname "${CRANE_BIN}")"
+tar -xzf "${TDIR}/crane.tar.gz" -C "$(dirname "${CRANE_BIN}")" crane
+mv "$(dirname "${CRANE_BIN}")/crane" "${CRANE_BIN}"
+chmod +x "${CRANE_BIN}"
+rmdir "${LOCK_DIR}" 2>/dev/null || true
+LOCK_DIR=""
+'''
+  }
+  return craneBin
 }
 
 def ensureCosignTool() {
@@ -335,7 +379,23 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
       sh '''
         set -eu
-        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" || true
+        echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
+        if ! curl -fsS --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" >/dev/null 2>&1; then
+          echo "[image] WARN: Harbor registry not responding (502?). crane login may hang — fix Harbor or use k3s import fallback."
+        fi
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" &
+        _auth_pid=$!
+        _n=0
+        while kill -0 "$_auth_pid" 2>/dev/null; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[image] crane auth login still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+        if ! wait "$_auth_pid"; then
+          echo "[image] WARN: crane auth login failed — push may fail"
+        else
+          echo "[image] crane auth login OK"
+        fi
       '''
     }
   }
@@ -363,7 +423,30 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
           echo "[image] crane-next16-202605: npm ci before next build (fast pipeline skips Step 3)"
           npm config set progress true 2>/dev/null || true
           npm config set fetch-timeout 1800000 2>/dev/null || true
-          if [ -f package-lock.json ]; then run_with_keepalive npm ci --no-audit --no-fund --loglevel info; else run_with_keepalive npm install --no-audit --no-fund --loglevel info; fi
+          NM_SNAP=""
+          if [ "\${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "\${JENKINS_HOME:-}" ] && [ -n "\${PROJECT_ID:-}" ] && [ -f package-lock.json ]; then
+            LOCK_HASH=\$(sha256sum package-lock.json 2>/dev/null | awk '{print \$1}')
+            if [ -n "\$LOCK_HASH" ]; then
+              NM_SNAP="\${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/\${PROJECT_ID}/\${LOCK_HASH}"
+            fi
+          fi
+          if [ -n "\$NM_SNAP" ] && [ -d "\${NM_SNAP}/.new/node_modules" ]; then
+            echo "[image] restore node_modules from snapshot (skip full npm ci when lock unchanged)"
+            rm -rf node_modules
+            cp -a "\${NM_SNAP}/.new/node_modules" node_modules/
+            run_with_keepalive npm install --no-audit --no-fund --prefer-offline --loglevel info || \\
+              { rm -rf node_modules; run_with_keepalive npm ci --no-audit --no-fund --loglevel info; }
+          elif [ -f package-lock.json ]; then
+            run_with_keepalive npm ci --no-audit --no-fund --loglevel info
+          else
+            run_with_keepalive npm install --no-audit --no-fund --loglevel info
+          fi
+          if [ -n "\$NM_SNAP" ] && [ -d node_modules ]; then
+            mkdir -p "\${NM_SNAP}.new"
+            rm -rf "\${NM_SNAP}.new/node_modules"
+            cp -a node_modules "\${NM_SNAP}.new/node_modules"
+            rm -rf "\$NM_SNAP" && mv "\${NM_SNAP}.new" "\$NM_SNAP"
+          fi
         fi
         echo "[image] crane-next16-202605: Next.js production build (crane path does not run Dockerfile; no --no-lint on Next 16+)"
         NB_FLAGS=""
