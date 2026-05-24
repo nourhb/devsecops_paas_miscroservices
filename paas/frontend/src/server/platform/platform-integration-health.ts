@@ -344,17 +344,38 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             });
         }
         case "trivy-policy": {
-            const trivyBase = realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const healthUrl = joinUrl(trivyBase, "/healthz");
             const probeCtx = {
                 itemId: item.id,
                 bypassHostRemap: true
             } as const;
-            const h = await httpProbe(healthUrl, {}, probeCtx);
-            if (h.state === "reachable") {
-                return h;
+            const candidates = [
+                realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, ""),
+                href.replace(/\/+$/, ""),
+                "http://harbor-trivy.harbor.svc.cluster.local:8080",
+                env.APPS_PUBLIC_LAB_NODE_IP.trim()
+                    ? `http://${env.APPS_PUBLIC_LAB_NODE_IP.trim()}:30954`
+                    : ""
+            ].filter(Boolean);
+            const seen = new Set<string>();
+            for (const base of candidates) {
+                if (seen.has(base)) {
+                    continue;
+                }
+                seen.add(base);
+                const healthUrl = joinUrl(base, "/healthz");
+                const h = await httpProbe(healthUrl, {}, probeCtx);
+                if (h.state === "reachable") {
+                    return h;
+                }
+                const root = await httpProbe(joinUrl(base, "/"), {}, probeCtx);
+                if (root.state === "reachable") {
+                    return root;
+                }
             }
-            return httpProbe(joinUrl(trivyBase, "/"), {}, probeCtx);
+            return {
+                state: "unreachable",
+                message: appendUnreachableProbeHint(item.id, candidates[0] ?? "", "Trivy not responding on configured URLs")
+            };
         }
         case "harbor-dockerhub": {
             const headers: Record<string, string> = {};
