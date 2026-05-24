@@ -13,7 +13,14 @@ echo "=== Deploy Postgres in ${PAAS_NS} (PVC postgres-pvc keeps users/projects) 
 kubectl apply -f "${MANIFEST}"
 kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/postgres-pvc -n "${PAAS_NS}" --timeout=120s 2>/dev/null || true
 
-kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=300s
+if ! kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=600s; then
+  echo "=== Postgres rollout failed — diagnostics ==="
+  kubectl get pods -n "${PAAS_NS}" -l app=postgres -o wide || true
+  kubectl describe pod -n "${PAAS_NS}" -l app=postgres | tail -40 || true
+  kubectl logs -n "${PAAS_NS}" -l app=postgres --tail=40 2>/dev/null || true
+  echo "Common fix: PGDATA subdir (lost+found on local-path PVC). Re-run after git pull."
+  exit 1
+fi
 kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
 
 echo "=== Point frontend at postgres.paas (sync full env in bootstrap step 3) ==="
