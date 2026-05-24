@@ -28,6 +28,30 @@ type HttpProbeCtx = {
     bypassHostRemap?: boolean;
     timeoutMs?: number;
 };
+function labNodeBase(): string {
+    const ip = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    return ip ? `http://${ip}` : "";
+}
+async function probeMany(bases: string[], path: string, ctx: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
+    const seen = new Set<string>();
+    for (const raw of bases) {
+        const base = raw.replace(/\/+$/, "");
+        if (!base || seen.has(base)) {
+            continue;
+        }
+        seen.add(base);
+        const r = await httpProbe(joinUrl(base, path), {}, ctx);
+        if (r.state === "reachable") {
+            return r;
+        }
+    }
+    const first = bases.find(Boolean) ?? "";
+    return {
+        state: "unreachable",
+        latencyMs: 0,
+        message: appendUnreachableProbeHint(ctx.itemId, first, "Not reachable — pods may be down; run: bash paas/scripts/diagnose-integration-pods-lab.sh")
+    };
+}
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
     const t0 = Date.now();
     const timeoutMs = ctx?.timeoutMs ?? env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS;
@@ -301,17 +325,55 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(joinUrl(amBase, "/-/healthy"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "pushgateway": {
-            const useProbeUrl = Boolean(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL));
-            const base = realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const pgUrl = joinUrl(base, "/-/healthy");
-            const bypassPg = useProbeUrl || probeHostIsRemapSource(pgUrl, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            return httpProbe(pgUrl, {}, { itemId: item.id, bypassHostRemap: bypassPg });
+            const node = labNodeBase();
+            return probeMany([
+                realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL),
+                href,
+                node ? `${node}:31481` : ""
+            ], "/-/healthy", { itemId: item.id, bypassHostRemap: true });
         }
         case "grafana": {
-            const gBase = realValueOrEmpty(env.GRAFANA_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypass = Boolean(realValueOrEmpty(env.GRAFANA_PROBE_URL)) ||
-                probeHostIsRemapSource(gBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            return httpProbe(joinUrl(gBase, "/api/health"), {}, { itemId: item.id, bypassHostRemap: bypass });
+            const node = labNodeBase();
+            return probeMany([
+                realValueOrEmpty(env.GRAFANA_PROBE_URL),
+                href,
+                node ? `${node}:32383` : "",
+                node ? `${node}:30082` : "",
+                "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80"
+            ], "/api/health", { itemId: item.id, bypassHostRemap: true });
+        }
+        case "elasticsearch": {
+            const node = labNodeBase();
+            return probeMany([
+                href,
+                "http://elasticsearch-master.monitoring.svc.cluster.local:9200",
+                node ? `${node}:32231` : ""
+            ], "/", { itemId: item.id, bypassHostRemap: true });
+        }
+        case "nexus": {
+            const node = labNodeBase();
+            return probeMany([
+                href,
+                "http://nexus-nexus-repository-manager.devtools.svc.cluster.local:8081",
+                node ? `${node}:31566` : ""
+            ], "/", { itemId: item.id, bypassHostRemap: true });
+        }
+        case "artifactory": {
+            const node = labNodeBase();
+            return probeMany([
+                href,
+                realValueOrEmpty(env.ARTIFACTORY_URL),
+                "http://artifactory.devtools.svc.cluster.local:8082",
+                node ? `${node}:31754` : ""
+            ], "/artifactory/api/system/ping", { itemId: item.id, bypassHostRemap: true });
+        }
+        case "owasp-zap": {
+            const node = labNodeBase();
+            return probeMany([
+                href,
+                "http://zap.security.svc.cluster.local:8080",
+                node ? `${node}:32629` : ""
+            ], "/", { itemId: item.id, bypassHostRemap: true });
         }
         case "sonarqube": {
             const headers: Record<string, string> = {};

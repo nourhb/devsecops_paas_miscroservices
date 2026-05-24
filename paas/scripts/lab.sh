@@ -27,8 +27,10 @@ case "$cmd" in
     bash "$DIR/fix-postgres-pvc-schedule-lab.sh" ;;
   integrations)
     bash "$DIR/fix-integrations-lab.sh" ;;
+  integrations-diagnose|diag-integrations)
+    bash "$DIR/diagnose-integration-pods-lab.sh" ;;
   "")
-    echo "usage: lab.sh start|health|bootstrap|deploy <tag>|app pull|jenkins|env|seed|autostart|postgres|integrations"
+    echo "usage: lab.sh start|health|integrations|integrations-diagnose|..."
     exit 1 ;;
   *)
     echo "unknown: $cmd"
