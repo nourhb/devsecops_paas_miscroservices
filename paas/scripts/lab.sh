@@ -27,6 +27,9 @@ case "$cmd" in
     bash "$DIR/fix-postgres-pvc-schedule-lab.sh" ;;
   integrations)
     bash "$DIR/fix-integrations-lab.sh" ;;
+  integrations-wire)
+    bash "$DIR/wire-optional-integrations-lab.sh"
+    ENV_FILE="${ENV_FILE:-$DIR/../frontend/docker-compose.env}" bash "$DIR/sync-paas-frontend-env-k8s.sh" ;;
   integrations-diagnose|diag-integrations)
     bash "$DIR/diagnose-integration-pods-lab.sh" ;;
   integrations-start)

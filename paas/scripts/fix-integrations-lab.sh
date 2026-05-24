@@ -60,6 +60,9 @@ else
   echo "Removed Nexus/Artifactory/ZAP URLs (devtools namespace gone)"
 fi
 
+echo "=== 2b. Optional integrations (Prometheus, Vault, Tekton, …) ==="
+ENV_FILE="${ENV_FILE}" NODE_IP="${NODE_IP}" bash "${SCRIPT_DIR}/wire-optional-integrations-lab.sh" || true
+
 echo "=== 3. Sync + restart frontend ==="
 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
 

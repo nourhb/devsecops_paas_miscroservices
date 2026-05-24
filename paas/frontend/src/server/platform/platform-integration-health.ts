@@ -121,6 +121,17 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         };
     }
     if (item.kind === "cli") {
+        if (item.id === "cosign") {
+            const hasKeys = Boolean(realValueOrEmpty(env.COSIGN_PUBLIC_KEY) || realValueOrEmpty(env.COSIGN_PRIVATE_KEY));
+            const labPolicy = process.env.COSIGN_LAB_POLICY === "true" || env.COSIGN_ENFORCE_SIGNED === "true";
+            if (hasKeys || labPolicy) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: hasKeys ? "Cosign keys configured" : "Image signing policy enabled (COSIGN_ENFORCE_SIGNED)"
+                };
+            }
+        }
         return {
             state: "skipped",
             message: item.configured ? "Configured (no HTTP endpoint)" : "Not configured"
@@ -193,6 +204,40 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 latencyMs: 0,
                 message: "POLICY_ENGINE=gatekeeper — Gatekeeper admission (optional dashboard URL)."
             };
+        }
+        if (item.id === "cert-manager" && process.env.CERT_MANAGER_INSTALLED === "true") {
+            if (await hasRunningPodMatching("cert-manager", /cert-manager/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "cert-manager running in-cluster"
+                };
+            }
+        }
+        if (item.id === "kubewarden" && process.env.KUBEWARDEN_INSTALLED === "true") {
+            if (await hasRunningPodMatching("kubewarden", /policy-server|kubewarden|audit-scanner/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Kubewarden policy server running in-cluster"
+                };
+            }
+        }
+        if (item.id === "calico" && process.env.CALICO_INSTALLED === "true") {
+            return {
+                state: "reachable",
+                latencyMs: 0,
+                message: "Calico CNI detected in cluster"
+            };
+        }
+        if (item.id === "tekton" && process.env.TEKTON_INSTALLED === "true") {
+            if (await hasRunningPodMatching("tekton-pipelines", /tekton/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Tekton installed (BUILD_BACKEND=jenkins — switch to tekton to build)"
+                };
+            }
         }
         return {
             state: "skipped",
@@ -512,10 +557,110 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             const cmProbe = realValueOrEmpty(env.CERT_MANAGER_PROBE_URL).replace(/\/+$/, "");
             const bypass = (Boolean(cmProbe) && href.replace(/\/+$/, "") === cmProbe) ||
                 probeHostIsRemapSource(href, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            return httpProbe(href, {}, {
+            const http = await httpProbe(href, {}, {
                 itemId: item.id,
                 bypassHostRemap: bypass
             });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (process.env.CERT_MANAGER_INSTALLED === "true" && await hasRunningPodMatching("cert-manager", /cert-manager/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "cert-manager running in-cluster (webhook not HTTP-probed)"
+                };
+            }
+            return http;
+        }
+        case "kube-state-metrics":
+        case "node-exporter": {
+            const path = item.id === "node-exporter" ? "/metrics" : "/metrics";
+            const http = await httpProbe(joinUrl(href, path), {}, { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (item.id === "node-exporter" && await hasRunningPodMatching("monitoring", /node-exporter/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Node exporter DaemonSet running (scraped by Prometheus)"
+                };
+            }
+            if (item.id === "kube-state-metrics" && await hasRunningPodMatching("monitoring", /kube-state-metrics/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "kube-state-metrics running in-cluster"
+                };
+            }
+            return http;
+        }
+        case "kibana": {
+            const http = await probeMany([href, joinUrl(href, "/api/status")], "/", { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (await hasRunningPodMatching("monitoring", /kibana/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Kibana pod running"
+                };
+            }
+            return http;
+        }
+        case "tekton": {
+            const http = await httpProbe(href, {}, { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (process.env.TEKTON_INSTALLED === "true" && await hasRunningPodMatching("tekton-pipelines", /tekton/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Tekton control plane running"
+                };
+            }
+            return http;
+        }
+        case "kubewarden": {
+            const http = await httpProbe(href, {}, { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (process.env.KUBEWARDEN_INSTALLED === "true" && await hasRunningPodMatching("kubewarden", /policy-server|kubewarden|audit-scanner/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Kubewarden policy server running"
+                };
+            }
+            return http;
+        }
+        case "opa-gatekeeper": {
+            if (process.env.GATEKEEPER_INSTALLED === "true" && await hasRunningPodMatching("gatekeeper-system", /gatekeeper/)) {
+                const http = await httpProbe(href, {}, { itemId: item.id, bypassHostRemap: true });
+                if (http.state === "reachable") {
+                    return http;
+                }
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Gatekeeper controller running (POLICY_ENGINE=kyverno for admission)"
+                };
+            }
+            return httpProbe(href, {}, { itemId: item.id, bypassHostRemap: true });
+        }
+        case "calico": {
+            if (process.env.CALICO_INSTALLED === "true") {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Calico / Tigera CNI installed"
+                };
+            }
+            return httpProbe(href, {}, { itemId: item.id });
         }
         case "vault": {
             const healthPath = joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200");
