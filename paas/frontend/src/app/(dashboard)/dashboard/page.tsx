@@ -77,7 +77,7 @@ function ChartEmptyState({ title, children }: {
 }) {
     return (<div className="flex h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 px-6 text-center">
       <p className="text-sm font-medium text-foreground">{title}</p>
-      <div className="max-w-md text-sm leading-relaxed text-muted">{children}</div>
+      {children ? <div className="max-w-md text-sm text-muted">{children}</div> : null}
     </div>);
 }
 export default function DashboardPage() {
@@ -158,10 +158,6 @@ export default function DashboardPage() {
             DevSecOps command center
             <Hint side="bottom">{hints.dashboard.hero}</Hint>
           </h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            A single, guided experience for build, deploy, and cluster visibility. Security is layered in over time: static analysis (SAST),
-            vulnerability and SBOM workflows, signed images, and policy on Kubernetes—each appears here and in CI as you connect tools.
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" className="shadow-sm" asChild>

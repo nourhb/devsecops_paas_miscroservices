@@ -331,22 +331,10 @@ export default function ClusterNamespacesPage() {
             Kubernetes namespaces
             <Hint side="bottom">{hints.clusterNamespaces.header}</Hint>
           </h2>
-          <p className="mt-2 max-w-3xl text-sm text-muted">
-            {clusterConnected ? (<>
-                When the cluster API is connected, the namespace list uses{" "}
-                <code className="inline-code">list Namespace</code>
-                {" "}and workload tables use live pod, service, and deployment objects—same data as the control view, scoped by the filter.
-              </>) : (<>
-                <strong className="font-medium text-foreground">Kubernetes is not connected.</strong>{" "}
-                Namespace choices and the metrics cards below are filled from your <strong className="font-medium text-foreground">projects</strong> (deploy target namespace and roll-up status), not from the cluster API.
-                Configure the server for Kubernetes to see real namespace rows and workloads.
-              </>)}
-          </p>
           <p className="mt-3 text-sm">
             <Link href="/cluster" className="font-medium text-primary hover:underline">
-              Open cluster control view
+              Cluster
             </Link>
-            <span className="text-muted"> — same fallback behaviour for disconnected clusters.</span>
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -363,11 +351,6 @@ export default function ClusterNamespacesPage() {
               Refresh
             </Button>
           </div>
-          {!clusterConnected ? <p className="max-w-md text-right text-xs text-muted">
-              {namespaceDropdownNames.length > 0
-                ? "Namespace list: deploy-target namespaces from your projects. Connect Kubernetes to load the real cluster namespace list."
-                : "Add projects with a deploy namespace, or connect Kubernetes so this filter can list namespaces."}
-            </p> : null}
         </div>
       </section>
 
@@ -377,14 +360,6 @@ export default function ClusterNamespacesPage() {
 
       {clusterConnected && namespaceListError ? <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-300">
           Namespace list: {namespaceListError}
-        </div> : null}
-
-      {useRollupStats ? <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Platform rollups active:</strong>{" "}
-          counts and tables below come from your project records. Pod logs and API namespace phases require a connected Kubernetes cluster.
-        </div> : !clusterConnected ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Kubernetes not connected</strong> and no projects were found—add a project or connect the API.
-          Platform CI/CD logs below still work from the database.
         </div> : null}
 
       {projectsQuery.isError ? <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">

@@ -94,10 +94,7 @@ export default function EditProjectPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="gitCredentialsId">Git credentials (Jenkins)</Label>
-              <Input id="gitCredentialsId" name="gitCredentialsId" defaultValue={p.gitCredentialsId || ""} placeholder="Optional: Jenkins credentialsId for private repos"/>
-              <p className="text-xs text-muted">
-                Only needed for private Git repositories. Leave blank for public repos.
-              </p>
+              <Input id="gitCredentialsId" name="gitCredentialsId" defaultValue={p.gitCredentialsId || ""} placeholder="credentialsId"/>
             </div>
             <div className="space-y-3 rounded-md border border-border p-4">
               <label className="flex items-center gap-3 text-sm">

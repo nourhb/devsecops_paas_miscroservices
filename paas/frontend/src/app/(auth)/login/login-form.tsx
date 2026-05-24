@@ -113,7 +113,6 @@ export function LoginForm({ keycloakEnabled, keycloakError, postRegisterEmail, p
       <Card className="w-full max-w-md backdrop-blur">
         <CardHeader>
           <CardTitle>Sign in to DevSecOps PaaS</CardTitle>
-          <CardDescription>Run secure builds and deployments without direct Jenkins access.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>

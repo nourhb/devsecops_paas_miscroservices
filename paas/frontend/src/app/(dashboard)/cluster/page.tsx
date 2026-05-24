@@ -304,20 +304,11 @@ export default function ClusterPage() {
             Kubernetes Control View
             <Hint side="bottom">{hints.cluster.header}</Hint>
           </h2>
-          <p className="mt-2 max-w-3xl text-sm text-muted">
-            {useControlPlaneFallback
-            ? "Kubernetes is not connected. Workload counts and rows here reflect projects registered in this app and pipeline status. Connect a Kubernetes API to list live pods, services, and deployments from the cluster."
-            : "Real cluster data from your Kubernetes API: pods, services, deployments, health states, and live pod logs."}
-          </p>
           <p className="mt-3 text-sm">
             <Link href="/cluster/namespaces" className="font-medium text-primary hover:underline">
-              Kubernetes namespaces (API only)
+              Namespaces
             </Link>
-            <span className="text-muted"> — filter and table use cluster Namespace objects, not project names.</span>
           </p>
-          {useControlPlaneFallback ? <p className="mt-3 max-w-3xl text-xs text-muted">
-              Namespace filter uses each project&apos;s <strong className="font-medium text-foreground">deploy target namespace</strong> field (distinct from the cluster&apos;s full namespace list).
-            </p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {clusterConnected ? <StatusPill label="Connected" tone="success"/> : clusterConfigured ? <StatusPill label="Connection failed" tone="danger"/> : <StatusPill label="Not configured" tone="warning"/>}
@@ -336,14 +327,6 @@ export default function ClusterPage() {
 
       {clusterError ? <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-300">
           {clusterError}
-        </div> : null}
-
-      {useControlPlaneFallback ? <div className="rounded-2xl border border-border/80 bg-muted/15 px-4 py-3 text-sm text-muted">
-          <strong className="font-medium text-foreground">Why counts may stay at zero:</strong> Docker Engine and Docker Swarm are not wired into this screen. Create projects under{" "}
-          <Link href="/projects" className="font-medium text-primary hover:underline">
-            Projects
-          </Link>{" "}
-          and deploy through this platform (status is stored in the database), or connect Kubernetes for live pod and service listings.
         </div> : null}
 
       {projectsQuery.isError ? <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">

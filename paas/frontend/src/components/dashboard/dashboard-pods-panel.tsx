@@ -139,13 +139,6 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
             Cluster pods &amp; logs
             <Hint side="bottom">{hints.podsPanel.header}</Hint>
           </CardTitle>
-          <CardDescription>
-            {useK8sTable
-            ? "Live workloads from the Kubernetes API. Use the namespace filter, then open logs for a container."
-            : useRollupFallback
-                ? "Platform rollups from your projects (deploy target namespace and last known status). Enable Kubernetes on the server for live pod lists and log streaming."
-                : "Live workloads from the Kubernetes API when a cluster is connected. Use the namespace filter, then open logs for a container."}
-          </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Filter by namespace" value={nsFilter} onChange={(event) => setNsFilter(event.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30">
@@ -171,10 +164,7 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
             ? <Skeleton className="h-48 w-full"/>
             : null}
         {podsQuery.isError ? (<p className="text-sm text-danger">Could not reach the Kubernetes API. Check your session and network.</p>) : null}
-        {podsQuery.data && !podsQuery.data.configured && !overviewLoading && !fallbackProjects.length ? (<div className="space-y-3 text-sm text-muted">
-              <p>
-                Kubernetes is not enabled for this server, and there are no projects to roll up yet. Add a project and deploy, or configure cluster access on the server.
-              </p>
+        {podsQuery.data && !podsQuery.data.configured && !overviewLoading && !fallbackProjects.length ? (<div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
                   <Link href="/projects/create">New project</Link>
@@ -187,10 +177,6 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
             </div>) : null}
         {podsQuery.data && !podsQuery.data.configured && overviewLoading ? (<p className="text-sm text-muted">Loading project workload summary\u2026</p>) : null}
         {useRollupFallback ? (<>
-              <p className="text-xs text-muted">
-                Data source: <span className="font-medium text-foreground">{clusterDataSource === "project_rollups" ? "project rollups" : "platform database"}</span>
-                {" "}(not the live cluster). Connect the server to Kubernetes to replace this with real pod rows and log streaming.
-              </p>
               <div className="max-h-[min(24rem,50vh)] overflow-auto rounded-lg border border-border/70">
                 <Table>
                   <TableHeader>

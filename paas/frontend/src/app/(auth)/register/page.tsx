@@ -71,7 +71,6 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md backdrop-blur">
         <CardHeader>
           <CardTitle>Create your account</CardTitle>
-          <CardDescription>You will receive an email to verify your address before you can sign in.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
