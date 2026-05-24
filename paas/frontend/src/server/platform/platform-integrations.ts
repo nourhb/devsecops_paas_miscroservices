@@ -115,8 +115,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     kind: "internal",
                     href: null,
                     internalPath: "/cluster",
-                    configured: env.KUBERNETES_ENABLED === "true" && Boolean(trimUrl(env.KUBE_CONFIG_PATH)),
-                    notes: "Requires server-side cluster access to list pods and resources."
+                    configured: env.KUBERNETES_ENABLED === "true",
+                    notes: "Uses in-cluster API when KUBE_CONFIG_PATH is empty inside the pod."
                 },
                 {
                     id: "portainer",
