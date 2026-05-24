@@ -33,13 +33,14 @@ probe_one() {
 
 probe_one "Grafana" "http://${NODE_IP}:32383/api/health"
 probe_one "Grafana-alt" "http://${NODE_IP}:30082/api/health"
-probe_one "Elasticsearch" "http://${NODE_IP}:32231/"
+probe_one "Elasticsearch (in-cluster)" "http://elasticsearch-master.monitoring.svc.cluster.local:9200/_cluster/health"
+probe_one "Elasticsearch (NodePort)" "http://${NODE_IP}:32231/_cluster/health"
 probe_one "Nexus" "http://${NODE_IP}:31566/"
 probe_one "Artifactory" "http://${NODE_IP}:31754/artifactory/api/system/ping"
 probe_one "ZAP" "http://${NODE_IP}:32629/"
-probe_one "Trivy" "http://${NODE_IP}:30954/healthz"
+probe_one "Trivy (standalone NodePort)" "http://${NODE_IP}:30954/healthz"
 probe_one "Pushgateway" "http://${NODE_IP}:31481/-/healthy"
-probe_one "Harbor-Trivy" "http://harbor-trivy.harbor.svc.cluster.local:8080/healthz"
+probe_one "Harbor-Trivy" "http://harbor-trivy.harbor.svc.cluster.local:8080/api/v1/metadata"
 
 echo ""
 echo "=== Missing workloads (Services without pods) ==="
