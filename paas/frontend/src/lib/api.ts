@@ -1,4 +1,4 @@
-import apiClient from "@/lib/api-client";
+import apiClient, { PIPELINE_TRIGGER_TIMEOUT_MS } from "@/lib/api-client";
 import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot, UpdateProfileRequest, UpdateProfileResponse } from "@/types";
 export interface DashboardMetrics {
     cluster: {
@@ -229,13 +229,16 @@ export const pipelineApi = {
         dismissPendingGitHubPush?: boolean;
     }) => {
         const hasBody = body && Object.keys(body).length > 0;
+        const config = { timeout: PIPELINE_TRIGGER_TIMEOUT_MS };
         const { data } = hasBody
-            ? await apiClient.post<ActionResponse>(`/api/build/${projectId}`, body)
-            : await apiClient.post<ActionResponse>(`/api/build/${projectId}`);
+            ? await apiClient.post<ActionResponse>(`/api/build/${projectId}`, body, config)
+            : await apiClient.post<ActionResponse>(`/api/build/${projectId}`, undefined, config);
         return data;
     },
     deploy: async (projectId: string) => {
-        const { data } = await apiClient.post<ActionResponse>(`/api/deploy/${projectId}`);
+        const { data } = await apiClient.post<ActionResponse>(`/api/deploy/${projectId}`, undefined, {
+            timeout: PIPELINE_TRIGGER_TIMEOUT_MS
+        });
         return data;
     },
     rollback: async (projectId: string) => {
