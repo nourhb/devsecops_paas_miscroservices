@@ -36,7 +36,7 @@ upsert_env INTEGRATIONS_PROBE_HOST_REMAP ""
 upsert_env INTEGRATIONS_TLS_SKIP_VERIFY "true"
 upsert_env APPS_PUBLIC_LAB_NODE_IP "${NODE_IP}"
 
-upsert_env TRIVY_PROBE_URL "http://${NODE_IP}:30954"
+upsert_env TRIVY_PROBE_URL "http://harbor-trivy.harbor.svc.cluster.local:8080"
 upsert_env TRIVY_BASE_URL "http://${NODE_IP}:30954"
 
 upsert_env GRAFANA_PROBE_URL "http://${NODE_IP}:32383"
