@@ -136,7 +136,6 @@ function IntegrationItemRow({ item }: {
               Open tool
             </a>
           </Button>) : null}
-        null
       </div>
     </div>);
 }
