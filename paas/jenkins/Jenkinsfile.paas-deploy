@@ -342,12 +342,9 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
 
   sh """
     set -eu
-    JENKINS_SH_KEEPALIVE_SEC="\${JENKINS_SH_KEEPALIVE_SEC:-60}"
+    JENKINS_SH_KEEPALIVE=true
+    JENKINS_SH_KEEPALIVE_SEC="\${JENKINS_SH_KEEPALIVE_SEC:-45}"
     run_with_keepalive() {
-      if [ "\${JENKINS_SH_KEEPALIVE:-true}" != "true" ]; then
-        "\$@"
-        return \$?
-      fi
       _rwk_sec="\${JENKINS_SH_KEEPALIVE_SEC}"
       "\$@" &
       _rwk_cmdpid=\$!
@@ -364,7 +361,9 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
         if [ ! -d node_modules/next ]; then
           echo "[image] crane-next16-202605: npm ci before next build (fast pipeline skips Step 3)"
-          if [ -f package-lock.json ]; then run_with_keepalive npm ci --no-audit --no-fund; else run_with_keepalive npm install --no-audit --no-fund; fi
+          npm config set progress true 2>/dev/null || true
+          npm config set fetch-timeout 1800000 2>/dev/null || true
+          if [ -f package-lock.json ]; then run_with_keepalive npm ci --no-audit --no-fund --loglevel info; else run_with_keepalive npm install --no-audit --no-fund --loglevel info; fi
         fi
         echo "[image] crane-next16-202605: Next.js production build (crane path does not run Dockerfile; no --no-lint on Next 16+)"
         NB_FLAGS=""
@@ -500,7 +499,7 @@ node(agentLabel) {
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
-  env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "false").trim()
+  env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "true").trim()
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
@@ -635,9 +634,9 @@ node(agentLabel) {
             npm config set fetch-retry-maxtimeout 120000
             npm config set fetch-timeout 1800000
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
-            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-60}"
+            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-45}"
             run_with_keepalive() {
-              if [ "${JENKINS_SH_KEEPALIVE:-false}" != "true" ]; then
+              if [ "${JENKINS_SH_KEEPALIVE:-true}" != "true" ]; then
                 "$@"
                 return $?
               fi
