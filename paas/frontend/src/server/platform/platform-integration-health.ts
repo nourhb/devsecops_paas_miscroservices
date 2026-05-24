@@ -420,24 +420,35 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 "http://trivy-service.security.svc.cluster.local:4954"
             ].filter(Boolean);
             const seen = new Set<string>();
+            const paths = ["/healthz", "/health", "/"];
             for (const base of candidates) {
                 if (seen.has(base)) {
                     continue;
                 }
                 seen.add(base);
-                const healthUrl = joinUrl(base, "/healthz");
-                const h = await httpProbe(healthUrl, {}, probeCtx);
-                if (h.state === "reachable") {
-                    return h;
-                }
-                const root = await httpProbe(joinUrl(base, "/"), {}, probeCtx);
-                if (root.state === "reachable") {
-                    return root;
+                for (const path of paths) {
+                    const r = await httpProbe(joinUrl(base, path), {}, probeCtx);
+                    if (r.state === "reachable") {
+                        return r;
+                    }
                 }
             }
             return {
                 state: "unreachable",
                 message: appendUnreachableProbeHint(item.id, candidates[0] ?? "", "Trivy not responding on configured URLs")
+            };
+        }
+        case "dockerhub": {
+            if (!href) {
+                return { state: "skipped", message: "DOCKERHUB_USERNAME not set" };
+            }
+            const r = await httpProbe(href, {}, { itemId: item.id, timeoutMs: 12000 });
+            if (r.state === "reachable") {
+                return r;
+            }
+            return {
+                state: "skipped",
+                message: "Docker Hub profile not reachable from cluster (optional for lab)"
             };
         }
         case "harbor-dockerhub": {
