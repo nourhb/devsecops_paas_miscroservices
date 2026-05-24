@@ -21,8 +21,10 @@ case "$cmd" in
     bash "$DIR/sync-paas-frontend-env-k8s.sh" ;;
   seed)
     bash "$DIR/seed-admin-user-lab.sh" "$@" ;;
+  autostart)
+    bash "$DIR/install-paas-autostart-lab.sh" ;;
   "")
-    echo "usage: lab.sh start|health|bootstrap|deploy <tag>|app pull|crashloop <tag>|jenkins|env|seed <email> <pass> <name>"
+    echo "usage: lab.sh start|health|bootstrap|deploy <tag>|app pull|crashloop <tag>|jenkins|env|seed|autostart"
     exit 1 ;;
   *)
     echo "unknown: $cmd"

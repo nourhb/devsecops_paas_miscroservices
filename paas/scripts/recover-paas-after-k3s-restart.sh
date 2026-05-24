@@ -37,3 +37,4 @@ fi
 
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
 echo "login: http://${NODE_IP}:30100/login"
+echo "Data is on PVC postgres-pvc — no seed unless this is a brand-new empty database."

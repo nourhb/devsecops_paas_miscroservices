@@ -1,4 +1,16 @@
-# PaaS UI DATABASE_URL: postgres.paas.svc.cluster.local:5432 (user root, db paas)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: paas
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -19,6 +31,8 @@ metadata:
   namespace: paas
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres
@@ -42,6 +56,9 @@ spec:
               value: paas
           ports:
             - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
           resources:
             requests:
               memory: 128Mi
@@ -49,3 +66,7 @@ spec:
             limits:
               memory: 512Mi
               cpu: 500m
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: postgres-pvc

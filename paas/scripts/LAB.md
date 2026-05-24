@@ -1,5 +1,13 @@
 # Lab scripts
 
+Postgres uses PVC `postgres-pvc` in namespace `paas` — users and projects survive pod restarts and reboots.
+
+One-time on the VM (auto recover after boot, no re-seed):
+
+```bash
+sudo bash paas/scripts/install-paas-autostart-lab.sh
+```
+
 Entry point: `bash paas/scripts/lab.sh`
 
 | Command | Action |
