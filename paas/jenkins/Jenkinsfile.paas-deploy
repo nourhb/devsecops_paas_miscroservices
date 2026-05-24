@@ -342,16 +342,42 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
 
   sh """
     set -eu
+    JENKINS_SH_KEEPALIVE_SEC="\${JENKINS_SH_KEEPALIVE_SEC:-60}"
+    run_with_keepalive() {
+      if [ "\${JENKINS_SH_KEEPALIVE:-true}" != "true" ]; then
+        "\$@"
+        return \$?
+      fi
+      _rwk_sec="\${JENKINS_SH_KEEPALIVE_SEC}"
+      "\$@" &
+      _rwk_cmdpid=\$!
+      echo "[image] (keepalive) pid=\${_rwk_cmdpid} started \$(date -u +%Y-%m-%dT%H:%M:%SZ) — heartbeat every \${_rwk_sec}s (JENKINS-48300)"
+      _rwk_n=0
+      while kill -0 "\${_rwk_cmdpid}" 2>/dev/null; do
+        sleep "\${_rwk_sec}"
+        _rwk_n=\$((_rwk_n+1))
+        echo "[image] (keepalive #\${_rwk_n}) pid=\${_rwk_cmdpid} still running \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      done
+      wait "\${_rwk_cmdpid}"
+    }
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
         if [ ! -d node_modules/next ]; then
           echo "[image] crane-next16-202605: npm ci before next build (fast pipeline skips Step 3)"
-          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+          if [ -f package-lock.json ]; then run_with_keepalive npm ci --no-audit --no-fund; else run_with_keepalive npm install --no-audit --no-fund; fi
         fi
         echo "[image] crane-next16-202605: Next.js production build (crane path does not run Dockerfile; no --no-lint on Next 16+)"
         NB_FLAGS=""
         if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
-        npx next build \$NB_FLAGS
+        _next_hb=""
+        if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
+          _hb_sec="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+          ( while true; do echo "[image] (next heartbeat) still building… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb_sec}"; done ) &
+          _next_hb=\$!
+          trap 'kill "\${_next_hb}" 2>/dev/null || true' EXIT
+        fi
+        run_with_keepalive npx next build \$NB_FLAGS
+        if [ -n "\${_next_hb}" ]; then kill "\${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
       fi
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
         echo "[image] ERROR: Next.js build still missing .next/BUILD_ID — cannot ship npm start image"
