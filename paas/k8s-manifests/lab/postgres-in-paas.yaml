@@ -43,6 +43,8 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/hostname: master
+      securityContext:
+        fsGroup: 70
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -54,6 +56,8 @@ spec:
               value: root
             - name: POSTGRES_DB
               value: paas
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           ports:
             - containerPort: 5432
           volumeMounts:
