@@ -3,6 +3,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PAAS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${PAAS_DIR}/.." && pwd)"
+DOCKERFILE="${PAAS_DIR}/frontend/Dockerfile"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+ensure_dockerfile() {
+  if [[ -f "${DOCKERFILE}" ]] && [[ "$(wc -c < "${DOCKERFILE}")" -gt 100 ]]; then
+    return 0
+  fi
+  echo "WARN: ${DOCKERFILE} missing or empty — restoring from git"
+  git -C "${REPO_ROOT}" checkout -- paas/frontend/Dockerfile paas/frontend/Dockerfile.db 2>/dev/null || true
+  if [[ -f "${DOCKERFILE}" ]] && [[ "$(wc -c < "${DOCKERFILE}")" -gt 100 ]]; then
+    return 0
+  fi
+  die "Missing paas/frontend/Dockerfile. From repo root run:
+  git checkout paas/frontend/Dockerfile
+  ls -la paas/frontend/Dockerfile"
+}
+
+ensure_dockerfile
 cd "${PAAS_DIR}"
 
 HARBOR="${HARBOR_REGISTRY:-192.168.56.129:30002}"
@@ -11,7 +31,7 @@ HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 PAAS_NS="${PAAS_NS:-paas}"
 
-echo "==> Building ${IMAGE}"
+echo "==> Building ${IMAGE} (context: ${PAAS_DIR})"
 docker build -f frontend/Dockerfile -t "$IMAGE" .
 
 echo "==> Pushing to Harbor"
