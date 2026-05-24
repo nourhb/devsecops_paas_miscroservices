@@ -23,8 +23,10 @@ case "$cmd" in
     bash "$DIR/seed-admin-user-lab.sh" "$@" ;;
   autostart)
     bash "$DIR/install-paas-autostart-lab.sh" ;;
+  postgres)
+    bash "$DIR/fix-postgres-pvc-schedule-lab.sh" ;;
   "")
-    echo "usage: lab.sh start|health|bootstrap|deploy <tag>|app pull|crashloop <tag>|jenkins|env|seed|autostart"
+    echo "usage: lab.sh start|health|bootstrap|deploy <tag>|app pull|jenkins|env|seed|autostart|postgres"
     exit 1 ;;
   *)
     echo "unknown: $cmd"

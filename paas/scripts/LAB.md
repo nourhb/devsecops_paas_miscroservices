@@ -1,6 +1,8 @@
 # Lab scripts
 
-Postgres uses PVC `postgres-pvc` in namespace `paas` — users and projects survive pod restarts and reboots.
+Postgres uses PVC `postgres-pvc` in namespace `paas` — users and projects survive pod restarts and reboots. The pod is **not** pinned to `hostname=master`; it must run on whichever node holds the volume (local-path).
+
+If Postgres is `Pending` with PV node affinity errors: `bash paas/scripts/lab.sh postgres`
 
 One-time on the VM (auto recover after boot, no re-seed):
 

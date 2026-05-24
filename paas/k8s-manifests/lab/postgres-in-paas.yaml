@@ -41,8 +41,6 @@ spec:
       labels:
         app: postgres
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: master
       securityContext:
         fsGroup: 70
       containers:
