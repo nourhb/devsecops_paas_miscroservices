@@ -33,9 +33,11 @@ if ! kubectl get pods -n devtools --no-headers 2>/dev/null | grep -q .; then
 fi
 
 echo ""
-echo "=== Wait for rollouts (60s) ==="
+echo "=== Wait for rollouts (120s) ==="
 kubectl rollout status deployment/kube-prometheus-stack-grafana -n monitoring --timeout=120s 2>/dev/null || true
 kubectl rollout status deployment/grafana -n monitoring --timeout=120s 2>/dev/null || true
+kubectl rollout status deployment/kube-prometheus-stack-kube-state-metrics -n monitoring --timeout=120s 2>/dev/null || true
+kubectl rollout status deployment/kube-prometheus-stack-operator -n monitoring --timeout=120s 2>/dev/null || true
 
 echo ""
 echo "=== Status ==="

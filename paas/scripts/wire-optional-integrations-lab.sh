@@ -52,6 +52,11 @@ wire_if_url() {
   fi
 }
 
+wire_flag() {
+  upsert_env "$1" "true"
+  echo "  + ${1}=true"
+}
+
 echo "=== Wire optional integrations (discover NodePorts / cluster services) ==="
 
 if ! command -v kubectl >/dev/null 2>&1; then
@@ -74,8 +79,15 @@ if ns_ready monitoring; then
   for svc in kube-prometheus-stack-kube-state-metrics kube-state-metrics; do
     u="$(svc_nodeport_url monitoring "${svc}" 8080)"
     [[ -z "${u}" ]] && u="$(svc_nodeport_url monitoring "${svc}")"
-    [[ -n "${u}" ]] && wire_if_url NEXT_PUBLIC_KUBE_STATE_METRICS_URL "${u}" && break
+    if [[ -n "${u}" ]]; then
+      wire_if_url NEXT_PUBLIC_KUBE_STATE_METRICS_URL "${u}"
+      break
+    fi
   done
+  if ! grep -qE '^NEXT_PUBLIC_KUBE_STATE_METRICS_URL=.+.' "${ENV_FILE}" 2>/dev/null; then
+    wire_if_url NEXT_PUBLIC_KUBE_STATE_METRICS_URL \
+      "http://kube-prometheus-stack-kube-state-metrics.monitoring.svc.cluster.local:8080"
+  fi
   for svc in kube-prometheus-stack-prometheus-node-exporter prometheus-node-exporter node-exporter; do
     u="$(svc_nodeport_url monitoring "${svc}" 9100)"
     [[ -n "${u}" ]] && wire_if_url NEXT_PUBLIC_NODE_EXPORTER_UI_URL "${u}" && break
@@ -105,12 +117,12 @@ if ns_ready kube-system; then
 fi
 
 if ns_ready cert-manager; then
-  upsert_env CERT_MANAGER_INSTALLED "true"
+  wire_flag CERT_MANAGER_INSTALLED
   wire_if_url CERT_MANAGER_PROBE_URL "http://cert-manager-webhook.cert-manager.svc.cluster.local:443"
 fi
 
 if ns_ready kubewarden; then
-  upsert_env KUBEWARDEN_INSTALLED "true"
+  wire_flag KUBEWARDEN_INSTALLED
   for svc in kubewarden-policy-server policy-server; do
     if svc_has_endpoints kubewarden "${svc}"; then
       wire_if_url NEXT_PUBLIC_KUBEWARDEN_UI_URL "https://${svc}.kubewarden.svc.cluster.local"
@@ -120,13 +132,13 @@ if ns_ready kubewarden; then
 fi
 
 if ns_ready gatekeeper-system; then
-  upsert_env GATEKEEPER_INSTALLED "true"
+  wire_flag GATEKEEPER_INSTALLED
   u="$(svc_nodeport_url gatekeeper-system gatekeeper-controller-manager-metrics 8888)"
   [[ -n "${u}" ]] && wire_if_url NEXT_PUBLIC_GATEKEEPER_DASHBOARD_URL "${u}"
 fi
 
 if ns_ready tekton-pipelines; then
-  upsert_env TEKTON_INSTALLED "true"
+  wire_flag TEKTON_INSTALLED
   for svc in tekton-dashboard dashboard; do
     u="$(svc_nodeport_url tekton-pipelines "${svc}" 9097)"
     [[ -z "${u}" ]] && u="$(svc_nodeport_url tekton-pipelines "${svc}")"
@@ -154,10 +166,10 @@ if ns_ready portainer; then
 fi
 
 if ns_ready calico-system || ns_ready tigera-operator; then
-  upsert_env CALICO_INSTALLED "true"
+  wire_flag CALICO_INSTALLED
   wire_if_url NEXT_PUBLIC_CALICO_OR_TIGERA_URL "https://www.tigera.io/project-calico/"
 elif ns_ready kube-system && kubectl get ds -n kube-system calico-node >/dev/null 2>&1; then
-  upsert_env CALICO_INSTALLED "true"
+  wire_flag CALICO_INSTALLED
 fi
 
 if ns_ready security && svc_has_endpoints security zap; then
@@ -185,7 +197,7 @@ fi
 
 grep -q '^COSIGN_PUBLIC_KEY=.*REPLACE' "${ENV_FILE}" 2>/dev/null && remove_env COSIGN_PUBLIC_KEY
 if grep -qE '^COSIGN_ENFORCE_SIGNED=true' "${ENV_FILE}" 2>/dev/null; then
-  upsert_env COSIGN_LAB_POLICY "true"
+  wire_flag COSIGN_LAB_POLICY
 fi
 
 echo "Done. Sync: ENV_FILE=${ENV_FILE} bash paas/scripts/sync-paas-frontend-env-k8s.sh"
