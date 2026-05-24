@@ -10,6 +10,11 @@ kubectl scale deployment -n monitoring -l app.kubernetes.io/name=prometheus-push
   || kubectl scale deployment pushgateway-prometheus-pushgateway -n monitoring --replicas=1 2>/dev/null \
   || true
 
+echo "=== Scale kube-prometheus operator / kube-state-metrics / prometheus if 0 ==="
+kubectl scale deployment kube-prometheus-stack-operator -n monitoring --replicas=1 2>/dev/null || true
+kubectl scale deployment kube-prometheus-stack-kube-state-metrics -n monitoring --replicas=1 2>/dev/null || true
+kubectl scale statefulset prometheus-kube-prometheus-stack-prometheus -n monitoring --replicas=1 2>/dev/null || true
+
 echo "=== ZAP (security) ==="
 if kubectl get deploy zap -n security >/dev/null 2>&1; then
   kubectl scale deployment/zap -n security --replicas=1
