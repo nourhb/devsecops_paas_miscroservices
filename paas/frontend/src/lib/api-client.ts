@@ -19,6 +19,7 @@ const apiClient = axios.create({
         "Content-Type": "application/json"
     }
 });
+export const PIPELINE_TRIGGER_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_PIPELINE_TRIGGER_TIMEOUT_MS || 180000);
 apiClient.interceptors.request.use((config) => {
     const token = authStorage.getToken();
     if (token) {

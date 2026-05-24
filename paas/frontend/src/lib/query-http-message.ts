@@ -19,6 +19,9 @@ export function queryHttpMessage(err: unknown, fallback: string): string {
         return msg;
     }
     if (err instanceof Error && err.message.trim()) {
+        if (/timeout.*exceeded/i.test(err.message) && !body) {
+            return "Request timed out while syncing with Jenkins. The run may still have started — refresh status or open Jenkins.";
+        }
         return err.message;
     }
     return fallback;
