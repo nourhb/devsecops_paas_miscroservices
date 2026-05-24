@@ -104,7 +104,6 @@ function sortedCategoryItems(items: PlatformIntegrationItem[]): PlatformIntegrat
 function IntegrationItemRow({ item }: {
     item: PlatformIntegrationItem;
 }) {
-    const notes = item.notes?.trim();
     const canOpenExternal = item.kind === "external" && Boolean(item.href?.trim());
     const showReachability = item.kind === "external" && item.configured;
     return (<div className="flex flex-col gap-3 border-b border-border/40 py-4 last:border-b-0 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
@@ -120,14 +119,10 @@ function IntegrationItemRow({ item }: {
             </Badge>) : null}
           {showReachability ? <ReachabilityBadge r={item.reachability}/> : null}
         </div>
-        <p className="text-sm leading-snug text-muted">{item.description}</p>
-        {notes ? (<p className="text-xs leading-relaxed text-muted/90">{notes}</p>) : null}
         {item.reachability?.state === "unreachable" && item.reachability.message ? (<p className="text-xs text-danger">
             {item.reachability.message}
           </p>) : null}
-        {item.reachability?.state === "skipped" && item.reachability.message ? (<p className="text-xs text-muted">
-            {item.reachability.message}
-          </p>) : null}
+        {item.reachability?.state === "skipped" && item.reachability.message ? (<p className="text-xs text-danger/80">{item.reachability.message}</p>) : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
         {item.internalPath ? (<Button variant="default" size="sm" asChild>
@@ -141,28 +136,7 @@ function IntegrationItemRow({ item }: {
               Open tool
             </a>
           </Button>) : null}
-        {(() => {
-            if (item.internalPath || canOpenExternal) {
-                return null;
-            }
-            if (!item.configured && item.optional) {
-                return <span className="text-xs text-muted">Link when you deploy or need a UI</span>;
-            }
-            if (!item.configured) {
-                return null;
-            }
-            const id = (item.id ?? "").toLowerCase();
-            if (id === "cosign" || item.name === "Cosign") {
-                return <span className="text-xs text-muted">CLI / keys (no web URL)</span>;
-            }
-            if (id === "kyverno" || id === "opa-gatekeeper") {
-                return <span className="text-xs text-muted">Optional dashboard URL</span>;
-            }
-            if (item.kind === "cli") {
-                return <span className="text-xs text-muted">No web URL (CLI / config)</span>;
-            }
-            return <span className="text-xs text-muted">No URL in env</span>;
-        })()}
+        null
       </div>
     </div>);
 }
@@ -183,7 +157,6 @@ function CategoryCard({ category }: {
                 {category.title}
                 <Hint>{hints.integrations.categoryCard}</Hint>
               </CardTitle>
-              <CardDescription className="max-w-2xl text-sm leading-relaxed">{category.description}</CardDescription>
             </div>
           </div>
           <Badge variant="outline" className="w-fit shrink-0 text-xs font-normal">
@@ -237,7 +210,6 @@ function ToolingGroup({ group }: {
                 {toolingStatusLabel(item.tone)}
               </span>
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-muted">{item.detail}</p>
           </div>))}
       </CardContent>
     </Card>);
@@ -297,7 +269,7 @@ function DeployReadinessSummary({ dr }: {
               {row.ok ? (<span className="flex items-center gap-1 text-xs text-success">
                   <CheckCircle2 className="h-3.5 w-3.5"/>
                   Ready
-                </span>) : (<span className="text-xs text-muted">{row.hint}</span>)}
+                </span>) : (<span className="text-xs text-muted">—</span>)}
             </div>))}
         </div>
         {missing.length > 0 ? (<div className="rounded-xl border border-warning/40 bg-warning/5 p-4">
@@ -361,11 +333,6 @@ export default function IntegrationsPage() {
               Platform hub
               <Hint side="bottom">{hints.integrations.header}</Hint>
             </h1>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted">
-              Connect CI/CD and GitOps first, then add security and observability. Each card groups related tools; use{" "}
-              <strong className="font-medium text-foreground">Open tool</strong> for external UIs and <strong className="font-medium text-foreground">Open</strong> for pages inside this app.
-              Status comes from your server configuration and optional health checks.
-            </p>
             {meta ? <MetaStrip meta={meta}/> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -403,7 +370,6 @@ export default function IntegrationsPage() {
               Runtime signals
               <Hint>{hints.integrations.runtimeSignalsHeading}</Hint>
             </h2>
-              <p className="mt-1 text-sm text-muted">Quick health of controllers, scanners, and registries the platform knows about.</p>
             </div>
           </div>
           <div className="space-y-6">
@@ -417,9 +383,6 @@ export default function IntegrationsPage() {
               Integration catalog
               <Hint>{hints.integrations.catalogHeading}</Hint>
             </h2>
-            <p className="mt-1 text-sm text-muted">
-              Everything we can link or open from configuration. Items without a URL need env vars on the Next.js server (see project <code className="inline-code">docker-compose.env</code> / <code className="inline-code">.env</code>).
-            </p>
           </div>
           <div className="space-y-6">
             {categories.map((category) => <CategoryCard key={category.id} category={category}/>)}

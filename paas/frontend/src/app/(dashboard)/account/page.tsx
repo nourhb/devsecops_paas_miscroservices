@@ -93,13 +93,6 @@ export default function AccountSettingsPage() {
           Profile & security
           <Hint side="bottom">{hints.account.pageHeading}</Hint>
         </h1>
-        <p className="mt-2 text-sm text-muted">
-          Update your name{isKeycloak ? "" : ", sign-in email, and password"}.
-          {" "}
-          {isKeycloak
-            ? "Email and password are managed in Keycloak."
-            : "If you change your email, we send a verification message to the new address."}
-        </p>
       </div>
       <Card className="rounded-2xl border-border/70">
         <CardHeader>
@@ -120,11 +113,9 @@ export default function AccountSettingsPage() {
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={isKeycloak} autoComplete="email" className={isKeycloak ? "opacity-80" : ""}/>
-              {isKeycloak ? <p className="text-xs text-muted">Managed in Keycloak.</p> : null}
             </div>
             {!isKeycloak ? (<div className="space-y-4 rounded-xl border border-border/60 bg-muted/10 p-4">
                 <p className="text-sm font-medium text-foreground">Change password</p>
-                <p className="text-xs text-muted">Leave blank to keep your current password.</p>
                 <div className="space-y-2">
                   <Label htmlFor="currentPassword">Current password</Label>
                   <Input id="currentPassword" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password"/>
