@@ -348,7 +348,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 href,
                 "http://elasticsearch-master.monitoring.svc.cluster.local:9200",
                 node ? `${node}:32231` : ""
-            ], "/", { itemId: item.id, bypassHostRemap: true });
+            ], "/_cluster/health", { itemId: item.id, bypassHostRemap: true });
         }
         case "nexus": {
             const node = labNodeBase();
@@ -411,12 +411,13 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 bypassHostRemap: true
             } as const;
             const candidates = [
+                "http://harbor-trivy.harbor.svc.cluster.local:8080",
                 realValueOrEmpty(env.TRIVY_PROBE_URL).replace(/\/+$/, ""),
                 href.replace(/\/+$/, ""),
-                "http://harbor-trivy.harbor.svc.cluster.local:8080",
                 env.APPS_PUBLIC_LAB_NODE_IP.trim()
                     ? `http://${env.APPS_PUBLIC_LAB_NODE_IP.trim()}:30954`
-                    : ""
+                    : "",
+                "http://trivy-service.security.svc.cluster.local:4954"
             ].filter(Boolean);
             const seen = new Set<string>();
             for (const base of candidates) {

@@ -29,6 +29,8 @@ case "$cmd" in
     bash "$DIR/fix-integrations-lab.sh" ;;
   integrations-diagnose|diag-integrations)
     bash "$DIR/diagnose-integration-pods-lab.sh" ;;
+  integrations-start)
+    bash "$DIR/start-lab-integration-workloads.sh" ;;
   "")
     echo "usage: lab.sh start|health|integrations|integrations-diagnose|..."
     exit 1 ;;
