@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Recover when kubectl fails: "TLS handshake timeout" / API unresponsive.
-# Run on k3s master (no kubectl required for steps 1–3):
-#   bash paas/scripts/recover-k3s-api-lab.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

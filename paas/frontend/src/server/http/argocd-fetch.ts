@@ -28,8 +28,7 @@ export async function argocdIntegrationFetch(url: string, init: RequestInit = {}
             parent.addEventListener("abort", onParentAbort, { once: true });
         }
     }
-    const skipTls =
-        env.ARGOCD_TLS_SKIP_VERIFY === "true" ||
+    const skipTls = env.ARGOCD_TLS_SKIP_VERIFY === "true" ||
         env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" ||
         env.KUBE_TLS_SKIP_VERIFY === "true";
     try {

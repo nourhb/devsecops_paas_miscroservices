@@ -1,16 +1,13 @@
 export type PipelineStepCheckLevel = "OK" | "WARN" | "SKIP" | "FAIL";
-
 export interface PipelineStepCheck {
     step: number;
     level: PipelineStepCheckLevel;
     id: string;
     message: string;
 }
-
 const STEP_LINE = /PAAS_STEP_(OK|WARN|SKIP|FAIL)\s+step=(\d+)\s+(?:id=(\S+)\s+)?(?:msg|reason)=([^\n\r]+)/gi;
 const DEPLOY_LINE = /PAAS_DEPLOY_VERIFY\s+step=(\S+)\s+status=(OK|WARN|FAIL)\s+detail=([^\n\r]+)/gi;
 const BUILD_COMPLETE = /PAAS_BUILD_COMPLETE\s+result=(\S+)\s+image=(\S+)\s+project=(\S+)\s+build=(\S+)/i;
-
 export interface ParsedPipelineVerification {
     jenkinsChecks: PipelineStepCheck[];
     deployChecks: Array<{
@@ -26,7 +23,6 @@ export interface ParsedPipelineVerification {
     } | null;
     artifactImage: string | null;
 }
-
 export function parsePipelineVerificationLogs(logText: string): ParsedPipelineVerification {
     const jenkinsChecks: PipelineStepCheck[] = [];
     const deployChecks: ParsedPipelineVerification["deployChecks"] = [];
@@ -64,11 +60,9 @@ export function parsePipelineVerificationLogs(logText: string): ParsedPipelineVe
     }
     return { jenkinsChecks, deployChecks, buildComplete, artifactImage };
 }
-
 export function checksForStep(checks: PipelineStepCheck[], stepNum: number): PipelineStepCheck[] {
     return checks.filter((c) => c.step === stepNum);
 }
-
 export function stepHasOk(checks: PipelineStepCheck[], stepNum: number): boolean {
     const row = checksForStep(checks, stepNum);
     if (row.length === 0) {

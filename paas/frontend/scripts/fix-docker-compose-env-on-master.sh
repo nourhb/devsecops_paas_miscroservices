@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Quick fix on master when git does not have flatten-env-for-compose.py yet.
 set -euo pipefail
 ENV_FILE="${1:-$(dirname "$0")/../docker-compose.env}"
 cp -a "$ENV_FILE" "${ENV_FILE}.bak.$(date +%s)"
@@ -16,7 +15,6 @@ sed -i \
   -e 's|^ARTIFACTORY_URL=.*|ARTIFACTORY_URL=http://192.168.56.129:31754|' \
   -e 's|^ARGOCD_BASE_URL=.*|ARGOCD_BASE_URL=https://192.168.56.129:30374|' \
   "$ENV_FILE"
-# Probe URLs → host.docker.internal (works from paas-frontend container on same VM)
 for key in GRAFANA_PROBE_URL PROMETHEUS_PROBE_URL ALERTMANAGER_PROBE_URL PUSHGATEWAY_PROBE_URL \
   HARBOR_PROBE_URL TRIVY_PROBE_URL JENKINS_PROBE_URL; do
   sed -i "s|^${key}=http://192.168.56.129:|${key}=http://host.docker.internal:|" "$ENV_FILE" 2>/dev/null || true

@@ -1,9 +1,4 @@
-/**
- * Mark a user's email as verified in the local Postgres DB (same DATABASE_URL as Next.js).
- * Usage (from paas/frontend): node scripts/verify-user-email.cjs you@example.com
- */
 const { PrismaClient } = require("@prisma/client");
-
 async function main() {
     const email = process.argv[2]?.trim().toLowerCase();
     if (!email) {
@@ -26,7 +21,6 @@ async function main() {
         await prisma.$disconnect();
     }
 }
-
 main().catch((e) => {
     console.error(e);
     process.exit(1);

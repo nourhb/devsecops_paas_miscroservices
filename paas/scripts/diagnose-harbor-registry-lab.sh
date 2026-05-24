@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Diagnose Harbor: crane/docker push stores OCI image indexes; naive curl MAN → false 404.
 set -euo pipefail
 
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -10,7 +9,6 @@ REPO="${1:-paas/paas-frontend}"
 TAG="${2:-latest}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lib/harbor-manifest-check.sh
 source "${SCRIPT_DIR}/lib/harbor-manifest-check.sh"
 
 auth=(-u "${HARBOR_USER}:${HARBOR_PASS}")

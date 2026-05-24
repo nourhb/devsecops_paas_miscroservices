@@ -2,11 +2,9 @@
 const fs = require("fs");
 const path = require("path");
 const ts = require("typescript");
-
 const defaultRoots = [path.join(__dirname, "..", "src"), path.join(__dirname, "..", "tests")];
 const cliRoots = process.argv.slice(2).map((r) => path.resolve(process.cwd(), r));
 const roots = (cliRoots.length ? cliRoots : defaultRoots).filter((d) => fs.existsSync(d));
-
 function walkTs(dir, out = []) {
     for (const name of fs.readdirSync(dir)) {
         if (name === "node_modules" || name === ".next") {
@@ -23,12 +21,10 @@ function walkTs(dir, out = []) {
     }
     return out;
 }
-
 const printer = ts.createPrinter({
     newLine: ts.NewLineKind.LineFeed,
     removeComments: true
 });
-
 let n = 0;
 for (const root of roots) {
     for (const file of walkTs(root)) {

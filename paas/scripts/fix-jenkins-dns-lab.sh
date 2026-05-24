@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Fix "Could not resolve host: github.com" from Jenkins (and other pods) on k3s lab.
-# Run on master: bash paas/scripts/fix-jenkins-dns-lab.sh
-# If kubectl times out (TLS handshake timeout), run recover-k3s-api-lab.sh first.
 set -euo pipefail
 
 NS="${JENKINS_NS:-cicd}"

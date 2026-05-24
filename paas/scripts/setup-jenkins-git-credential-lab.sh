@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Optional: add GitHub username+token in Jenkins for private repos or API rate limits.
-# NOT required for public repos (simple-app checkout already works with creds=no).
-#
-# UI: Manage Jenkins → Credentials → System → Global → Add → Username with password
-#   ID: github-paas   Username: <github-user>   Password: <PAT>
-# Then in paas-deploy job or PaaS trigger, set GIT_CREDENTIALS_ID=github-paas
-#
-# Usage:
-#   GITHUB_USER=you GITHUB_PAT=ghp_xxx CREDENTIAL_ID=github-paas \
-#     bash paas/scripts/setup-jenkins-git-credential-lab.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +7,6 @@ ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
 
 if [[ -f "${ENV_FILE}" ]]; then
-  # shellcheck disable=SC1090
   set +u; source "${ENV_FILE}" 2>/dev/null || true; set -u
   JENKINS_URL="${JENKINS_PROBE_URL:-${JENKINS_BASE_URL:-${JENKINS_URL}}}"
   [[ "${JENKINS_URL}" == *".svc.cluster.local"* ]] && JENKINS_URL="http://127.0.0.1:30090"

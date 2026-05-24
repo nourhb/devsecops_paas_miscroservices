@@ -130,7 +130,6 @@ export async function createProject(payload: unknown, userId: string): Promise<P
         await ensureArgoCdApplication(parsed.data.projectName, namespace);
     }
     catch {
-        // Project creation must succeed even if Argo CD is temporarily unreachable.
     }
     return mapProject(created);
 }

@@ -25,9 +25,7 @@ function harborAuthHeader(): string | null {
 }
 type HttpProbeCtx = {
     itemId?: string;
-    /** When true, do not apply INTEGRATIONS_PROBE_HOST_REMAP (use for *_PROBE_URL bases). */
     bypassHostRemap?: boolean;
-    /** Override default PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS (e.g. cold SonarQube). */
     timeoutMs?: number;
 };
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
@@ -278,11 +276,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 return {
                     state: "unreachable",
                     latencyMs: ms,
-                    message: appendUnreachableProbeHint(
-                        "argocd",
-                        base,
-                        `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`
-                    )
+                    message: appendUnreachableProbeHint("argocd", base, `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`)
                 };
             }
             catch (error) {
@@ -295,18 +289,14 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }
         }
         case "prometheus": {
-            const promBase =
-                realValueOrEmpty(env.PROMETHEUS_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypass =
-                Boolean(realValueOrEmpty(env.PROMETHEUS_PROBE_URL)) ||
+            const promBase = realValueOrEmpty(env.PROMETHEUS_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass = Boolean(realValueOrEmpty(env.PROMETHEUS_PROBE_URL)) ||
                 probeHostIsRemapSource(promBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             return httpProbe(joinUrl(promBase, "/-/ready"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "alertmanager": {
-            const amBase =
-                realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypass =
-                Boolean(realValueOrEmpty(env.ALERTMANAGER_PROBE_URL)) ||
+            const amBase = realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass = Boolean(realValueOrEmpty(env.ALERTMANAGER_PROBE_URL)) ||
                 probeHostIsRemapSource(amBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             return httpProbe(joinUrl(amBase, "/-/healthy"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
@@ -318,10 +308,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(pgUrl, {}, { itemId: item.id, bypassHostRemap: bypassPg });
         }
         case "grafana": {
-            const gBase =
-                realValueOrEmpty(env.GRAFANA_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypass =
-                Boolean(realValueOrEmpty(env.GRAFANA_PROBE_URL)) ||
+            const gBase = realValueOrEmpty(env.GRAFANA_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypass = Boolean(realValueOrEmpty(env.GRAFANA_PROBE_URL)) ||
                 probeHostIsRemapSource(gBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             return httpProbe(joinUrl(gBase, "/api/health"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
@@ -330,10 +318,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (realValueOrEmpty(env.SONAR_TOKEN)) {
                 headers.Authorization = `Basic ${Buffer.from(`${env.SONAR_TOKEN.trim()}:`).toString("base64")}`;
             }
-            const sonarBase =
-                realValueOrEmpty(env.SONAR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypassSonar =
-                Boolean(realValueOrEmpty(env.SONAR_PROBE_URL)) ||
+            const sonarBase = realValueOrEmpty(env.SONAR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypassSonar = Boolean(realValueOrEmpty(env.SONAR_PROBE_URL)) ||
                 probeHostIsRemapSource(sonarBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             const sonarTimeout = Math.max(env.PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS, 45000);
             return httpProbe(joinUrl(sonarBase, "/api/system/status"), { headers }, {
@@ -376,10 +362,8 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (hb) {
                 headers.Authorization = hb;
             }
-            const harborBase =
-                realValueOrEmpty(env.HARBOR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypassHarbor =
-                Boolean(realValueOrEmpty(env.HARBOR_PROBE_URL)) ||
+            const harborBase = realValueOrEmpty(env.HARBOR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const bypassHarbor = Boolean(realValueOrEmpty(env.HARBOR_PROBE_URL)) ||
                 probeHostIsRemapSource(harborBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
             const ping = await httpProbe(joinUrl(harborBase, "/api/v2.0/ping"), { headers }, {
                 itemId: item.id,
@@ -392,8 +376,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         }
         case "cert-manager": {
             const cmProbe = realValueOrEmpty(env.CERT_MANAGER_PROBE_URL).replace(/\/+$/, "");
-            const bypass =
-                (Boolean(cmProbe) && href.replace(/\/+$/, "") === cmProbe) ||
+            const bypass = (Boolean(cmProbe) && href.replace(/\/+$/, "") === cmProbe) ||
                 probeHostIsRemapSource(href, env.INTEGRATIONS_PROBE_HOST_REMAP);
             return httpProbe(href, {}, {
                 itemId: item.id,
@@ -403,8 +386,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         case "vault": {
             const healthPath = joinUrl(href, "/v1/sys/health?standbyok=true&drsecondarycode=200");
             const va = realValueOrEmpty(env.VAULT_ADDR).replace(/\/+$/, "");
-            const bypass =
-                (Boolean(va) && href.replace(/\/+$/, "") === va) ||
+            const bypass = (Boolean(va) && href.replace(/\/+$/, "") === va) ||
                 probeHostIsRemapSource(healthPath, env.INTEGRATIONS_PROBE_HOST_REMAP);
             return httpProbe(healthPath, {}, {
                 itemId: item.id,

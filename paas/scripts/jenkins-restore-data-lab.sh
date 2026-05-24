@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Check whether old Jenkins home (cicd/jenkins-pvc) can be restored; optionally switch to PVC deploy.
-# Run on lab master: bash paas/scripts/jenkins-restore-data-lab.sh
 set -euo pipefail
 
 NS=cicd

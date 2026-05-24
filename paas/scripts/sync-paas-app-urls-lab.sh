@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Align PaaS UI links with ingress: http://<project>.192.168.56.129.nip.io:30659/
 set -euo pipefail
 
 NODE_IP="${NODE_IP:-192.168.56.129}"

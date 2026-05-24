@@ -5,7 +5,6 @@ export interface UserProfile {
     email: string;
     fullName: string;
     role: UserRole;
-    /** Present after session refresh: local password accounts vs Keycloak-linked */
     accountKind?: "local" | "keycloak";
 }
 export interface LoginRequest {
@@ -413,7 +412,6 @@ export interface PlatformIntegrationItem {
     href: string | null;
     internalPath?: string;
     configured: boolean;
-    /** When true and not configured, the hub treats this as an add-on (softer "Optional" label, not a core gap). */
     optional?: boolean;
     notes?: string;
     reachability?: PlatformIntegrationReachability;

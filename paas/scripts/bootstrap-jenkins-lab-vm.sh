@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# One-shot lab recovery: start Jenkins (emptyDir) + create paas-deploy job (--minimal).
-# Copy this ONE file to the VM (do not paste large Python/XML into the terminal):
-#   scp paas/scripts/bootstrap-jenkins-lab-vm.sh master@192.168.56.129:~/devsecops_paas_miscroservices/paas/scripts/
-#   ssh master@192.168.56.129 'bash ~/devsecops_paas_miscroservices/paas/scripts/bootstrap-jenkins-lab-vm.sh'
 set -euo pipefail
 
 REPO="${REPO:-$HOME/devsecops_paas_miscroservices}"

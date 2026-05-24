@@ -41,7 +41,6 @@ export function resolveAppUrlForClient(projectName: string, storedUrl: string | 
     if (allowSimulation()) {
         return canonical;
     }
-    // Lab k3s: nip.io ingress URL must match GitOps + curl checks (ignore stale apps.local in DB).
     if (env.APPS_PUBLIC_LAB_NODE_IP.trim()) {
         return canonical;
     }

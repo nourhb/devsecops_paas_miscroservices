@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Install Pipeline plugins on lab Jenkins (required before createItem / paas-deploy).
-# Run on master: bash paas/scripts/install-jenkins-plugins-lab.sh
 set -euo pipefail
 
 REPO="${REPO:-$HOME/devsecops_paas_miscroservices}"
 NS="${JENKINS_NS:-cicd}"
 ENV_FILE="${ENV_FILE:-$REPO/paas/frontend/docker-compose.env}"
-# Host scripts must not use in-cluster JENKINS_BASE_URL from docker-compose.env (DNS fails on VM).
 JENKINS_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
 if [[ -f "$ENV_FILE" ]]; then
   _b="$(grep -E '^JENKINS_BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r' || true)"
@@ -36,7 +33,6 @@ if kubectl exec -n "$NS" "$POD" -- bash -c 'test -d /var/jenkins_home/plugins/wo
   echo "workflow-job already installed in JENKINS_HOME"
   exit 0
 fi
-# Plugins may have been downloaded to ref/ only (PVC already existed).
 if kubectl exec -n "$NS" "$POD" -- bash -c 'ls /usr/share/jenkins/ref/plugins/workflow-job*.jpi 2>/dev/null | head -1' 2>/dev/null | grep -q .; then
   echo "==> Copy plugins from ref/ into /var/jenkins_home/plugins/"
   kubectl exec -n "$NS" "$POD" -- bash -c 'mkdir -p /var/jenkins_home/plugins && cp -f /usr/share/jenkins/ref/plugins/*.jpi /var/jenkins_home/plugins/ 2>/dev/null || true'
@@ -50,7 +46,6 @@ if kubectl exec -n "$NS" "$POD" -- bash -c 'ls /usr/share/jenkins/ref/plugins/wo
 fi
 
 echo "==> Install plugins via jenkins-plugin-cli (may take 3–8 min on slow lab network)"
-# Older kubectl (e.g. k3s bundled) has no "kubectl exec -u"; run as container default user (jenkins).
 kubectl exec -n "$NS" "$POD" -- bash -c '
 set -euo pipefail
 if [ -f /var/jenkins_ref_plugins/plugins.txt ]; then
@@ -87,7 +82,6 @@ kubectl rollout restart deployment/jenkins -n "$NS"
 kubectl rollout status deployment/jenkins -n "$NS" --timeout=600s
 kubectl wait --for=condition=ready pod -l app=jenkins -n "$NS" --timeout=300s
 
-# shellcheck disable=SC1090
 [[ -f "$ENV_FILE" ]] && set -a && source "$ENV_FILE" && set +a
 USER="${JENKINS_USERNAME:-admin}"
 TOKEN="${JENKINS_API_TOKEN:-}"

@@ -64,7 +64,6 @@ const envSchema = z.object({
     GITHUB_WEBHOOK_SECRET: z.string().default(""),
     GITHUB_WEBHOOK_BUILD_MODE: z.enum(["prompt", "auto"]).default("prompt"),
     JENKINS_BASE_URL: z.string().default(""),
-    /** Optional base URL used only for Platform hub /api/json reachability probes (when JENKINS_BASE_URL is slow or unroutable from the server). */
     JENKINS_PROBE_URL: z.string().default(""),
     JENKINS_USERNAME: z.string().default(""),
     JENKINS_API_TOKEN: z.string().default(""),
@@ -124,23 +123,19 @@ const envSchema = z.object({
     ARGOCD_AUTH_TOKEN: z.string().default(""),
     ARGOCD_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     ARGOCD_APP_PREFIX: z.string().default("paas"),
-    /** When true, create missing Argo CD Applications via API (project create + before sync). */
     ARGOCD_AUTO_CREATE_APPLICATION: z.enum(["true", "false"]).default("true"),
     ARGOCD_DEST_SERVER: z.string().default("https://kubernetes.default.svc"),
     ARGOCD_APP_PROJECT: z.string().default("default"),
     SONAR_BASE_URL: z.string().default(""),
-    /** Server-side SonarQube probe base (skips INTEGRATIONS_PROBE_HOST_REMAP). */
     SONAR_PROBE_URL: z.string().default(""),
     SONAR_TOKEN: z.string().default(""),
     DEPENDENCY_TRACK_BASE_URL: z.string().default(""),
     DEPENDENCY_TRACK_API_KEY: z.string().default(""),
     PROMETHEUS_BASE_URL: z.string().default(""),
-    /** Server-side probe base for Prometheus (skips INTEGRATIONS_PROBE_HOST_REMAP). Use VM node IP from Docker. */
     PROMETHEUS_PROBE_URL: z.string().default(""),
     PROMETHEUS_QUERY_CPU: z.string().default(""),
     PROMETHEUS_QUERY_MEMORY: z.string().default(""),
     TRIVY_BASE_URL: z.string().default(""),
-    /** Optional Trivy base URL for server-side probes only (fixes Docker vs VM IP without changing browser-facing TRIVY_BASE_URL). */
     TRIVY_PROBE_URL: z.string().default(""),
     TRIVY_AUTH_TOKEN: z.string().default(""),
     ZAP_TARGET_URL: z.string().default(""),
@@ -156,10 +151,8 @@ const envSchema = z.object({
     GITOPS_REPO_TOKEN: z.string().default(""),
     GITOPS_DEFAULT_BRANCH: z.string().default("main"),
     GITOPS_VALUES_PATH_PATTERN: z.string().default("apps/{{projectName}}/values.yaml"),
-    /** Optional override for Argo CD source.path (default: parent dir of GITOPS_VALUES_PATH_PATTERN). */
     GITOPS_CHART_PATH_PATTERN: z.string().default(""),
     GITOPS_COMMIT_MESSAGE_TEMPLATE: z.string().default("chore(gitops): bump {{projectName}} to {{imageTag}}"),
-    /** Reference Helm chart in the same GitOps repo (e.g. apps/test-app) copied when apps/{{projectName}} has no Chart.yaml. */
     GITOPS_BOOTSTRAP_CHART_PATH: z.string().default("apps/test-app"),
     DOCKERHUB_USERNAME: z.string().default(""),
     DOCKERHUB_TOKEN: z.string().default(""),
@@ -167,31 +160,20 @@ const envSchema = z.object({
     KUBERNETES_ENABLED: z.enum(["true", "false"]).default("false"),
     KUBE_CONFIG_PATH: z.string().default(""),
     KUBE_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
-    /** When set, Platform hub probes this URL for Ingress NGINX instead of NEXT_PUBLIC_INGRESS_NGINX_URL (use from Docker for host/LAN reachability while the public URL stays browser-friendly). */
     INGRESS_NGINX_PROBE_URL: z.string().default(""),
-    /** Optional Pushgateway base URL for server-side probes only (omit public URL until NodePort exists; use this for probes from Docker). */
     PUSHGATEWAY_PROBE_URL: z.string().default(""),
-    /** Server-side Grafana probe base (skips remap). */
     GRAFANA_PROBE_URL: z.string().default(""),
-    /** Server-side Alertmanager probe base (skips remap). */
     ALERTMANAGER_PROBE_URL: z.string().default(""),
-    /** Server-side Harbor probe base (skips remap); defaults to HARBOR_BASE_URL when unset. */
     HARBOR_PROBE_URL: z.string().default(""),
-    /** Optional Vault HTTP base (e.g. http://192.168.56.129:30820) for catalog + probes when NEXT_PUBLIC_VAULT_UI_URL is unset. */
     VAULT_ADDR: z.string().default(""),
-    /** Optional cert-manager / ACME UI or doc URL for catalog + probes (server-only alternative to NEXT_PUBLIC_CERT_MANAGER_UI_URL). */
     CERT_MANAGER_PROBE_URL: z.string().default(""),
-    /** Max time for Platform hub integration HTTP probes (Jenkins, registries, etc.). */
     PLATFORM_INTEGRATION_PROBE_TIMEOUT_MS: z.coerce.number().int().min(3000).max(120000).default(20000),
-    /** Optional host rewrite for server-side probes only, format oldHost=newHost (e.g. 192.168.56.129=host.docker.internal when the UI runs in Docker but URLs use a VirtualBox/lab VM IP). */
     INTEGRATIONS_PROBE_HOST_REMAP: z.string().default(""),
     INTEGRATIONS_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     APPS_PUBLIC_URL_SCHEME: z.string().default("https"),
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
-    /** When set (e.g. 192.168.56.129), app links use nip.io unless APPS_PUBLIC_URL_TEMPLATE is set. */
     APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
-    /** Optional Traefik/ingress HTTP NodePort appended to lab nip.io URLs (e.g. 30659 on k3s). */
     APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),

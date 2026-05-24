@@ -8,7 +8,6 @@ export function Hint({ children, className, side = "top", delayDuration = 280 }:
     children: ReactNode;
     className?: string;
     side?: HintSide;
-    /** Ms before open — keeps dense UIs from flickering. */
     delayDuration?: number;
 }) {
     return (<Tooltip delayDuration={delayDuration}>

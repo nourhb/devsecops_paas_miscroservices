@@ -15,8 +15,7 @@ export default function LoginPage({ searchParams }: {
     searchParams: Search;
 }) {
     const kcError = firstParam(searchParams.kc_error);
-    const postRegisterEmail =
-        firstParam(searchParams.pendingVerification) === "1" ? firstParam(searchParams.email)?.trim() : undefined;
+    const postRegisterEmail = firstParam(searchParams.pendingVerification) === "1" ? firstParam(searchParams.email)?.trim() : undefined;
     const mailConsole = firstParam(searchParams.mailConsole) === "1";
     return (<LoginForm keycloakEnabled={keycloakSsoConfigured()} keycloakError={kcError} postRegisterEmail={postRegisterEmail} postRegisterMailConsole={mailConsole}/>);
 }

@@ -8,24 +8,33 @@ type MailPayload = {
     text: string;
 };
 let transporterPromise: Promise<nodemailer.Transporter> | null = null;
+function smtpHost() {
+    return (env.SMTP_HOST || "").trim();
+}
+function smtpUser() {
+    return (env.SMTP_USER || "").trim();
+}
 function hasSmtpConfig() {
-    return Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS);
+    return Boolean(smtpHost() && env.SMTP_PORT && smtpUser() && env.SMTP_PASS);
 }
 function resolveSmtpPassword() {
-    const password = env.SMTP_PASS || "";
-    if (env.SMTP_HOST.toLowerCase() === "smtp.gmail.com") {
+    const password = (env.SMTP_PASS || "").trim();
+    if (smtpHost().toLowerCase() === "smtp.gmail.com") {
         return password.replace(/\s+/g, "");
     }
     return password;
 }
 async function getTransporter() {
     if (!transporterPromise) {
+        const port = env.SMTP_PORT;
+        const secure = env.SMTP_SECURE === "true";
         transporterPromise = Promise.resolve(nodemailer.createTransport({
-            host: env.SMTP_HOST,
-            port: env.SMTP_PORT,
-            secure: env.SMTP_SECURE === "true",
+            host: smtpHost(),
+            port,
+            secure,
+            requireTLS: !secure && port === 587,
             auth: {
-                user: env.SMTP_USER,
+                user: smtpUser(),
                 pass: resolveSmtpPassword()
             }
         }));
@@ -49,17 +58,24 @@ export async function sendAuthMail(payload: MailPayload) {
             mode: "console" as const
         };
     }
-    const transporter = await getTransporter();
-    await transporter.sendMail({
-        from,
-        to: payload.to,
-        ...(payload.cc ? { cc: payload.cc } : {}),
-        subject: payload.subject,
-        text: payload.text,
-        html: payload.html
-    });
-    return {
-        delivered: true,
-        mode: "smtp" as const
-    };
+    try {
+        const transporter = await getTransporter();
+        await transporter.sendMail({
+            from,
+            to: payload.to,
+            ...(payload.cc ? { cc: payload.cc } : {}),
+            subject: payload.subject,
+            text: payload.text,
+            html: payload.html
+        });
+        return {
+            delivered: true,
+            mode: "smtp" as const
+        };
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[auth-mail] SMTP send failed", { to: payload.to, host: smtpHost(), message });
+        throw err;
+    }
 }

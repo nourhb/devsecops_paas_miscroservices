@@ -11,14 +11,12 @@ const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\
 const CRANE_NEXT16_MARKER = "crane-next16-202605";
 const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
 const DEFAULT_JENKINSFILE_RAW_URL = "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy";
-
 function jenkinsfileHasCraneFix(groovy: string): boolean {
     return PAAS_JENKINSFILE_MARKER_RE.test(groovy) && groovy.includes(CRANE_NEXT16_MARKER);
 }
-
 async function fetchJenkinsfileFromRawUrl(url: string): Promise<string> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90_000);
+    const timer = setTimeout(() => controller.abort(), 90000);
     try {
         const res = await fetch(url, {
             signal: controller.signal,
@@ -40,7 +38,6 @@ async function fetchJenkinsfileFromRawUrl(url: string): Promise<string> {
         clearTimeout(timer);
     }
 }
-
 async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: string): Promise<{
     groovy: string;
     sourceLabel: string;
@@ -56,21 +53,15 @@ async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: strin
         sourceLabel: `${rawUrl} (replaced stale file at ${localPath})`,
     };
 }
-
 function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath: string): void {
     if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} does not contain the expected PaaS pipeline marker line ` +
-            "(`[paas-jenkinsfile] marker=steps-1-2-3…-202602`). Git pull the monorepo on the host that mounts it. " +
-            "If the file is already current, rebuild/restart the PaaS frontend image so job sync runs the latest validation.");
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is missing the PaaS pipeline marker. Update the repo or remount Jenkinsfile.paas-deploy.`);
     }
     if (!groovy.includes(CRANE_NEXT16_MARKER)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is missing "${CRANE_NEXT16_MARKER}" (Step 6 crane path still uses --no-lint on Next.js 16). ` +
-            "On the lab VM: git pull origin main, then bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh. " +
-            "If using k8s without a repo mount: bash paas/scripts/sync-paas-jenkinsfile-configmap-k8s.sh or rebuild the frontend image.");
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${CRANE_NEXT16_MARKER}). Run fix-jenkins-paas-deploy-pipeline-lab.sh on the lab VM.`);
     }
     if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !groovy.includes("crane-next16-202605: npm ci")) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still contains the obsolete Step 6 next build version check (breaks Next 16 with --no-lint). ` +
-            "Git pull and run bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh — do not sync from an old /app/paas-bundled image.`);
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still has obsolete Step 6 logic. Git pull and refresh the Jenkins job from the current Jenkinsfile.`);
     }
 }
 function jenkinsfileRelativePathExists(root: string): boolean {
@@ -83,9 +74,7 @@ function findMonorepoRoot(): string | null {
         if (jenkinsfileRelativePathExists(abs)) {
             return abs;
         }
-        throw new IntegrationError(`PAAS_MONOREPO_ROOT is set to "${override}" but paas/jenkins/Jenkinsfile.paas-deploy was not found under that path. ` +
-            "Fix the Docker volume in paas/docker-compose.yml (host repo root must be mounted at that path, e.g. ..:/monorepo:ro), " +
-            "or clear PAAS_MONOREPO_ROOT to use only the Jenkinsfile baked into the frontend image (rebuild the image after git pull).");
+        throw new IntegrationError(`PAAS_MONOREPO_ROOT=${override} but Jenkinsfile.paas-deploy not found there.`);
     }
     let dir = process.cwd();
     for (let i = 0; i < 10; i++) {
@@ -127,7 +116,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         return "[jenkins-sync] Skipped: folder-qualified job name (use manual sync for nested jobs).";
     }
     if (!root) {
-        throw new IntegrationError("Cannot find Jenkinsfile.paas-deploy (tried PAAS_MONOREPO_ROOT, cwd parents, and /app/paas-bundled from the frontend image). Rebuild the frontend image or set PAAS_MONOREPO_ROOT to the repo root that contains paas/jenkins/.");
+        throw new IntegrationError("Jenkinsfile.paas-deploy not found (check PAAS_MONOREPO_ROOT or rebuild frontend image).");
     }
     const jenkinsfilePath = path.join(root, ...JENKINSFILE_SEGMENTS);
     if (!fs.existsSync(jenkinsfilePath)) {
@@ -135,9 +124,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     }
     const localGroovy = fs.readFileSync(jenkinsfilePath, "utf-8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
     if (/stage\s*\(\s*["']Step 1 — Validate parameters and checkout["']/m.test(localGroovy)) {
-        throw new IntegrationError("The Jenkinsfile used for sync is an obsolete one-stage stub (merged validate+checkout). " +
-            "It cannot be pushed to Jenkins. Use a current paas/jenkins/Jenkinsfile.paas-deploy from the repo: " +
-            "fix PAAS_MONOREPO_ROOT + volume, or rebuild the frontend image (docker compose build --no-cache frontend) so the COPY step picks up the new file.");
+        throw new IntegrationError("Jenkinsfile.paas-deploy is an obsolete stub; use the current file from the repo.");
     }
     const { groovy, sourceLabel } = await resolveGroovyForJenkinsSync(jenkinsfilePath, localGroovy);
     if (!jenkinsfileHasCraneFix(localGroovy)) {
@@ -157,9 +144,6 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     catch (err: unknown) {
         const detail = formatFetchErrorChain(err);
         const netLike = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|timed out|network|connect/i.test(detail);
-        const hint = netLike
-            ? " If you run the UI in Docker, JENKINS_BASE_URL must be reachable from inside the container (try http://host.docker.internal:<jenkins-port> on Docker Desktop or Linux with host-gateway, or the swarm ingress hostname), not only from your laptop."
-            : "";
-        throw new IntegrationError(`Jenkins job sync failed:\n${detail}${hint}`);
+        throw new IntegrationError(netLike ? `Jenkins sync failed (network): ${detail}` : `Jenkins sync failed: ${detail}`);
     }
 }

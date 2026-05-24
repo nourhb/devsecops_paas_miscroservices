@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Mount current paas/jenkins/Jenkinsfile.paas-deploy into the PaaS frontend pod (overrides stale image COPY).
-# Run on lab master after git pull:
-#   bash paas/scripts/sync-paas-jenkinsfile-configmap-k8s.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

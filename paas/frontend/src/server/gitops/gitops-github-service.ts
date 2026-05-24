@@ -5,9 +5,7 @@ import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/ser
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
-
 export { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
-
 function parseGithubRepo(url: string): {
     owner: string;
     repo: string;

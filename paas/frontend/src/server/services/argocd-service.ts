@@ -72,10 +72,6 @@ async function getArgoApplicationHttpStatus(appName: string): Promise<"missing" 
         return "error";
     }
 }
-/**
- * Ensures an Argo CD Application exists (equivalent to `argocd app create` for the GitOps chart path).
- * Idempotent: no-op when the app already exists or auto-create is disabled.
- */
 export async function ensureArgoCdApplication(projectName: string, destinationNamespace?: string): Promise<{
     logs: string;
     created: boolean;
@@ -118,8 +114,16 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
         throw new IntegrationError(`Argo CD create application failed: ${msg}`);
     }
     if (response.ok || response.status === 409) {
-        const chartPath = (body.spec as { source: { path: string } }).source.path;
-        const repoUrl = (body.spec as { source: { repoURL: string } }).source.repoURL;
+        const chartPath = (body.spec as {
+            source: {
+                path: string;
+            };
+        }).source.path;
+        const repoUrl = (body.spec as {
+            source: {
+                repoURL: string;
+            };
+        }).source.repoURL;
         const action = response.ok ? "created" : "already exists";
         return {
             created: response.ok,

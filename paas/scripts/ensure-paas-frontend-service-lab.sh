@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Ensure NodePort 30100 routes to deployment/frontend (app=frontend) in namespace paas.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

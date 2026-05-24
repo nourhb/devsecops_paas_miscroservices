@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: align Jenkins paas-deploy with repo Jenkinsfile (fixes Next 16 --no-lint on crane path).
-# Run on k3s master after git pull:
-#   bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

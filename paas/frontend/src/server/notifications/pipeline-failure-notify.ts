@@ -2,9 +2,7 @@ import type { DeploymentFailureReason } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { sendAuthMail, getAppBaseUrl } from "@/server/auth/auth-mailer";
 import { humanizeFailureReason } from "@/server/services/deployment-failure-labels";
-
 const LOG_SNIPPET_MAX = 4500;
-
 function howToInvestigate(reason: DeploymentFailureReason | null): string {
     switch (reason) {
         case "JENKINS":
@@ -24,7 +22,6 @@ function howToInvestigate(reason: DeploymentFailureReason | null): string {
             return "Use the deployment detail page for the stored console snippet, then correlate timestamps with cluster events (kubectl describe pod) and integration health on the Platform hub.";
     }
 }
-
 export async function notifyPipelineFailureEmail(input: {
     deploymentId: string;
     projectId: string;
@@ -46,10 +43,9 @@ export async function notifyPipelineFailureEmail(input: {
     const summary = `Pipeline / deployment failed for project "${input.projectName}" (${stage}).`;
     const logTail = input.logs.length <= LOG_SNIPPET_MAX ? input.logs : `${input.logs.slice(-LOG_SNIPPET_MAX)}\n…(truncated)`;
     const investigation = howToInvestigate(input.reason);
-    const cc =
-        input.triggeredByEmail && input.triggeredByEmail.toLowerCase() !== input.ownerEmail.toLowerCase()
-            ? input.triggeredByEmail
-            : undefined;
+    const cc = input.triggeredByEmail && input.triggeredByEmail.toLowerCase() !== input.ownerEmail.toLowerCase()
+        ? input.triggeredByEmail
+        : undefined;
     const text = [
         `alertname: PaasPipelineFailure`,
         `severity: critical`,
@@ -88,7 +84,6 @@ export async function notifyPipelineFailureEmail(input: {
         html,
     });
 }
-
 function escapeHtml(s: string): string {
     return s
         .replace(/&/g, "&amp;")

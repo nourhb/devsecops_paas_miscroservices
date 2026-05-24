@@ -1,14 +1,10 @@
 import { env } from "@/server/config/env";
-
 function applyProjectPathPattern(pattern: string, projectName: string): string {
     return pattern.replace(/\{\{projectName\}\}/gi, projectName).replace(/\{\{project\}\}/gi, projectName);
 }
-
 export function gitopsValuesPathForProject(projectName: string): string {
     return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
 }
-
-/** Helm chart directory in the GitOps repo (parent of values.yaml unless GITOPS_CHART_PATH_PATTERN is set). */
 export function gitopsHelmChartPathForProject(projectName: string): string {
     const explicit = env.GITOPS_CHART_PATH_PATTERN.trim();
     if (explicit) {
