@@ -16,10 +16,18 @@
 
 ## Lab (VM `192.168.56.129`)
 
+Postgres data is stored on a **persistent volume** (`postgres-pvc`). You should **not** re-seed or recreate projects after every reboot.
+
 ```bash
 cd ~/devsecops_paas_miscroservices
 bash paas/scripts/lab.sh start
 bash paas/scripts/lab.sh health
+```
+
+Auto-recover after VM reboot (once):
+
+```bash
+sudo bash paas/scripts/install-paas-autostart-lab.sh
 ```
 
 - UI: http://192.168.56.129:30100/login

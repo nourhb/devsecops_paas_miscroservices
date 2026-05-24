@@ -9,8 +9,9 @@ DB_URL='postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?opt
 echo "=== Remove broken ExternalName / headless postgres Service (if any) ==="
 kubectl delete svc postgres -n "${PAAS_NS}" --ignore-not-found
 
-echo "=== Deploy Postgres in ${PAAS_NS} ==="
+echo "=== Deploy Postgres in ${PAAS_NS} (PVC postgres-pvc keeps users/projects) ==="
 kubectl apply -f "${MANIFEST}"
+kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/postgres-pvc -n "${PAAS_NS}" --timeout=120s 2>/dev/null || true
 
 kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=300s
 kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
