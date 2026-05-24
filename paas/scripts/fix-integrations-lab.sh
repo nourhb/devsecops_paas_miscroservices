@@ -42,19 +42,23 @@ upsert_env TRIVY_BASE_URL "http://${NODE_IP}:30954"
 upsert_env GRAFANA_PROBE_URL "http://${NODE_IP}:32383"
 upsert_env NEXT_PUBLIC_GRAFANA_URL "http://${NODE_IP}:32383"
 
-upsert_env NEXT_PUBLIC_ELASTICSEARCH_URL "http://${NODE_IP}:32231"
+upsert_env NEXT_PUBLIC_ELASTICSEARCH_URL "http://elasticsearch-master.monitoring.svc.cluster.local:9200"
 upsert_env PUSHGATEWAY_PROBE_URL "http://${NODE_IP}:31481"
 upsert_env NEXT_PUBLIC_PUSHGATEWAY_URL "http://${NODE_IP}:31481"
 
-upsert_env NEXT_PUBLIC_NEXUS_URL "http://${NODE_IP}:31566"
-upsert_env NEXT_PUBLIC_ARTIFACTORY_URL "http://${NODE_IP}:31754"
-upsert_env ARTIFACTORY_URL "http://${NODE_IP}:31754"
-
-upsert_env NEXT_PUBLIC_OWASP_ZAP_URL "http://${NODE_IP}:32629"
-
+remove_env NEXT_PUBLIC_NEXUS_URL
+remove_env NEXT_PUBLIC_ARTIFACTORY_URL
+remove_env ARTIFACTORY_URL
+remove_env NEXT_PUBLIC_OWASP_ZAP_URL
 remove_env NEXT_PUBLIC_KIBANA_URL
 remove_env NEXT_PUBLIC_HAPROXY_STATS_URL
 remove_env NEXT_PUBLIC_EDGE_IOT_URL
+
+if kubectl get ns devtools >/dev/null 2>&1; then
+  echo "WARN: devtools namespace still exists — set Nexus/Artifactory URLs manually if needed"
+else
+  echo "Removed Nexus/Artifactory/ZAP URLs (devtools namespace gone)"
+fi
 
 echo "=== 3. Sync + restart frontend ==="
 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
