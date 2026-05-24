@@ -35,8 +35,11 @@ echo "==> Building ${IMAGE} (context: ${PAAS_DIR})"
 docker build -f frontend/Dockerfile -t "$IMAGE" .
 
 echo "==> Pushing to Harbor"
-echo "$HARBOR_PASS" | docker login "$HARBOR" -u "$HARBOR_USER" --password-stdin
-docker push "$IMAGE" || echo "WARN: push failed — will still import locally"
+if echo "$HARBOR_PASS" | docker login "$HARBOR" -u "$HARBOR_USER" --password-stdin 2>/dev/null; then
+  docker push "$IMAGE" || echo "WARN: push failed — will still import locally to k3s"
+else
+  echo "WARN: Harbor login failed (502/registry down?) — skipping push; importing image locally to k3s"
+fi
 
 echo "==> Import into k3s on master (avoids ImagePullBackOff when Harbor MAN is 404)"
 TMP="/tmp/paas-frontend-deploy-$$.tar"
