@@ -148,8 +148,7 @@ export default function ClusterNamespacesPage() {
         refetchInterval: 12000
     });
     const selectedRecentMeta = recentDeploymentsQuery.data?.deployments.find((d) => d.id === effectivePlatformLogId);
-    const isRefreshing =
-        podsQuery.isFetching ||
+    const isRefreshing = podsQuery.isFetching ||
         servicesQuery.isFetching ||
         deploymentsQuery.isFetching ||
         namespacesQuery.isFetching ||
@@ -192,10 +191,7 @@ export default function ClusterNamespacesPage() {
         }
         return rows.filter((r) => r.name === selectedNamespace);
     }, [namespacesQuery.data?.namespaces, selectedNamespace]);
-    const filteredProjects = useMemo(
-        () => projectList.filter((project) => selectedNamespace === "all" || project.namespace === selectedNamespace),
-        [projectList, selectedNamespace]
-    );
+    const filteredProjects = useMemo(() => projectList.filter((project) => selectedNamespace === "all" || project.namespace === selectedNamespace), [projectList, selectedNamespace]);
     const projectRollup = useMemo(() => rollUpClusterFromProjects(filteredProjects), [filteredProjects]);
     const namespaceSummaries = useMemo(() => {
         const map = new Map<string, Project[]>();

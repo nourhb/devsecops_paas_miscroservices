@@ -406,12 +406,7 @@ export default function PipelinePage() {
         </CardContent>
       </Card>
 
-      <PipelineVerificationPanel
-        jenkinsChecks={wfStages?.jenkinsChecks ?? []}
-        deployChecks={deployChecks}
-        buildComplete={wfStages?.buildComplete ?? null}
-        artifactImage={wfStages?.artifactImage ?? null}
-      />
+      <PipelineVerificationPanel jenkinsChecks={wfStages?.jenkinsChecks ?? []} deployChecks={deployChecks} buildComplete={wfStages?.buildComplete ?? null} artifactImage={wfStages?.artifactImage ?? null}/>
 
       <details className="rounded-xl border border-border/60 bg-muted/10 px-4 py-3 text-sm">
         <summary className="cursor-pointer font-medium text-foreground">How to track that each step really worked</summary>

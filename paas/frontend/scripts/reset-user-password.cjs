@@ -1,17 +1,6 @@
-/**
- * Set a new password for an existing user (local Postgres / same DATABASE_URL as Next.js).
- * Also marks the email as verified so login works immediately.
- *
- * Usage (from paas/frontend):
- *   npm run auth:reset-password -- you@example.com "NewSecurePass123!"
- *
- * Do not use in production clusters without strict access control.
- */
 const bcrypt = require("bcryptjs");
 const { PrismaClient } = require("@prisma/client");
-
 const ROUNDS = 12;
-
 async function main() {
     const email = process.argv[2]?.trim().toLowerCase();
     const newPassword = process.argv[3] ?? "";
@@ -41,7 +30,6 @@ async function main() {
         await prisma.$disconnect();
     }
 }
-
 main().catch((e) => {
     console.error(e);
     process.exit(1);

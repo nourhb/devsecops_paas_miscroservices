@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# One-shot lab bootstrap: Postgres in paas + Prisma schema + frontend env sync.
-# Run after fresh Postgres, cluster restart, or "relation User does not exist" / DB connection errors.
-#
-# Usage (on k3s master, from repo root):
-#   bash paas/scripts/bootstrap-paas-lab.sh
-#   SKIP_SCHEMA=1 bash paas/scripts/bootstrap-paas-lab.sh   # postgres + env only
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,4 +36,4 @@ echo ""
 echo "========== OK =========="
 echo "PaaS UI: http://${NODE_IP}:30100/login"
 echo "Register if this is a new Postgres volume."
-echo "Prevention checklist: paas/scripts/LAB-PREVENTION.md"
+echo "Lab notes: paas/scripts/LAB.md"

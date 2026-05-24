@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Restore k3s DevSecOps tools on lab master (192.168.56.129). Run on the VM after fixing frontend/.env.
 set -euo pipefail
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 NODE_IP="${NODE_IP:-192.168.56.129}"

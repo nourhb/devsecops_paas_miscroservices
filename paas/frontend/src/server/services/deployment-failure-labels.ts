@@ -1,5 +1,4 @@
 import type { DeploymentFailureReason } from "@prisma/client";
-
 const labels: Record<DeploymentFailureReason, string> = {
     JENKINS: "Build backend",
     GITOPS: "GitOps",
@@ -9,7 +8,6 @@ const labels: Record<DeploymentFailureReason, string> = {
     TIMEOUT: "Timeout",
     UNKNOWN: "Unknown"
 };
-
 export function humanizeFailureReason(reason: DeploymentFailureReason | null): string {
     if (!reason) {
         return "";

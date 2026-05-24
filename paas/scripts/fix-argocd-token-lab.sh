@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Fix PaaS Argo CD HTTP 403 on new projects (permission denied on GET /api/v1/applications/paas-*).
-# Refreshes ARGOCD_AUTH_TOKEN on deployment/frontend using cluster admin credentials.
-#
-# Run on lab master:
-#   bash paas/scripts/fix-argocd-token-lab.sh
 set -euo pipefail
 
 NODE_IP="${NODE_IP:-192.168.56.129}"

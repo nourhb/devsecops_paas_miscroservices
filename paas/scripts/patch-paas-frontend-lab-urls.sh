@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# PaaS UI shows http://simple-app.apps.local — set nip.io env on in-cluster frontend.
 set -euo pipefail
 
 NODE_IP="${NODE_IP:-192.168.56.129}"

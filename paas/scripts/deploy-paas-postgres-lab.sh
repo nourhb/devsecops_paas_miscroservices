@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Deploy Postgres inside namespace paas (matches DATABASE_URL postgres.paas.svc.cluster.local).
 set -euo pipefail
 
 PAAS_NS="${PAAS_NS:-paas}"

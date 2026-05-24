@@ -1,7 +1,3 @@
-/**
- * Single place for user-visible text when Jenkins marks a run failed.
- * The PaaS reads `/job/.../build/.../api/json` — same source as the classic Status page.
- */
 export function jenkinsResultUserMessage(result: string | null | undefined, logTail: string): string {
     if (result === "ABORTED") {
         return "Jenkins pipeline was cancelled or aborted.";

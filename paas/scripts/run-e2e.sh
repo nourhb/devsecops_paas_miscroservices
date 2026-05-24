@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Manual / smoke reminders for infra + GitOps validation (no duplicated Next service on :4000).
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000}"

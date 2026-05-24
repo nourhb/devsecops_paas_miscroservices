@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Apply Prisma schema to Postgres in namespace paas.
-# Prefers docker → pod IP (works when API is slow). Falls back to in-cluster Job.
 set -euo pipefail
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -15,7 +13,7 @@ kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout
 
 echo "=== Build ${IMAGE} ==="
 cd "${PAAS_DIR}"
-docker build -f docker/prisma-db-push.Dockerfile -t "${IMAGE}" .
+docker build -f frontend/Dockerfile.db -t "${IMAGE}" .
 
 PG_IP=$(kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
 [[ -n "${PG_IP}" ]] || die "No postgres endpoints — run deploy-paas-postgres-lab.sh first"

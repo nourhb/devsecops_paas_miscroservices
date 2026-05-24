@@ -1,6 +1,3 @@
-/**
- * Appends short, actionable hints when integration HTTP probes fail with typical lab misconfigurations.
- */
 export function appendUnreachableProbeHint(itemId: string | undefined, probedUrl: string, message: string): string {
     const m = message.trim();
     if (!/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed/i.test(m)) {

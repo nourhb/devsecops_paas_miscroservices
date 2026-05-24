@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Install Pipeline plugins into /var/jenkins_home/plugins (PVC) and restart Jenkins.
-# Use when ref/ copy failed or create_jenkins_paas_deploy_job.py says plugins missing.
 set -euo pipefail
 
 REPO="${REPO:-$HOME/devsecops_paas_miscroservices}"

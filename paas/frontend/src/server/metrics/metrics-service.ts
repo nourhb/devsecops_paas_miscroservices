@@ -4,8 +4,7 @@ import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
-/** Cosign per image in dashboard/monitoring rollups — keep bounded so HTTP handlers do not hang. */
-const METRICS_COSIGN_TIMEOUT_MS = 12_000;
+const METRICS_COSIGN_TIMEOUT_MS = 12000;
 function summarizePodRecords(items: ClusterPodRecord[]) {
     const summary = {
         running: 0,

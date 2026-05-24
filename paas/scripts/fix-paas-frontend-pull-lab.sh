@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Fix PaaS frontend: build, optional Harbor push, k3s import on master, rollout.
-#
-# Harbor may report "docker push OK" but /v2/.../manifests/latest → 404 (ghost DB / registry PVC).
-# This script still brings the UI up by importing the image into k3s on the master node.
-#
-# Usage (from repo root):
-#   bash paas/scripts/fix-paas-frontend-pull-lab.sh
-#   SKIP_HARBOR_PUSH=1 bash paas/scripts/fix-paas-frontend-pull-lab.sh   # import only
 set -euo pipefail
 
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -18,7 +10,6 @@ IMAGE="${HARBOR}/paas/paas-frontend:latest"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MONOREPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_DIR="${MONOREPO_ROOT}/paas"
-# shellcheck source=lib/harbor-manifest-check.sh
 source "${SCRIPT_DIR}/lib/harbor-manifest-check.sh"
 
 echo "=== [1] Harbor manifest paas-frontend:latest ==="
@@ -32,12 +23,12 @@ else
 fi
 
 echo "=== [2] Build image (context: ${PAAS_DIR}) ==="
-[[ -f "${PAAS_DIR}/docker/frontend.Dockerfile" ]] || {
-  echo "ERROR: missing ${PAAS_DIR}/docker/frontend.Dockerfile"
+[[ -f "${PAAS_DIR}/frontend/Dockerfile" ]] || {
+  echo "ERROR: missing ${PAAS_DIR}/frontend/Dockerfile"
   exit 1
 }
 cd "${PAAS_DIR}"
-docker build -f docker/frontend.Dockerfile -t "${IMAGE}" .
+docker build -f frontend/Dockerfile -t "${IMAGE}" .
 
 if [[ "${SKIP_HARBOR_PUSH:-}" != "1" ]]; then
   echo "=== [3] Push to Harbor (optional; may not fix MAN 404) ==="
@@ -109,7 +100,6 @@ REGDOC
 
 echo "=== [7] NodePort Service (30100 → pod :3000) ==="
 kubectl apply -f "${MONOREPO_ROOT}/paas/k8s-manifests/lab/frontend-nodeport-service.yaml"
-# Legacy labs used other service names; keep selector app=frontend
 if kubectl get svc frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   kubectl patch svc frontend -n "${PAAS_NS}" --type=merge -p \
     '{"spec":{"type":"NodePort","selector":{"app":"frontend"},"ports":[{"name":"http","port":80,"targetPort":3000,"nodePort":30100,"protocol":"TCP"}]}}' \

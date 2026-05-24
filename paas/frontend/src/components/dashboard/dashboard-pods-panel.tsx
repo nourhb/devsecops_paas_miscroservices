@@ -73,8 +73,7 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         refetchInterval: 12000
     });
     const useK8sTable = Boolean(podsQuery.data?.configured && !podsQuery.data.error);
-    const useRollupFallback =
-        Boolean(podsQuery.data && !podsQuery.data.configured) && !overviewLoading && fallbackProjects.length > 0;
+    const useRollupFallback = Boolean(podsQuery.data && !podsQuery.data.configured) && !overviewLoading && fallbackProjects.length > 0;
     const namespaces = useMemo(() => {
         const names = new Set<string>();
         if (useK8sTable) {
@@ -108,10 +107,9 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         return sorted.find((p) => p.namespace === selected.namespace && p.name === selected.name);
     }, [selected, sorted]);
     const sortedRollup = useMemo(() => {
-        const list =
-            nsFilter === "all"
-                ? fallbackProjects
-                : fallbackProjects.filter((p) => p.namespace === nsFilter);
+        const list = nsFilter === "all"
+            ? fallbackProjects
+            : fallbackProjects.filter((p) => p.namespace === nsFilter);
         return [...list].sort((a, b) => a.namespace.localeCompare(b.namespace) || a.projectName.localeCompare(b.projectName));
     }, [fallbackProjects, nsFilter]);
     const podLogsQuery = useQuery({
@@ -239,11 +237,7 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
               </div>
               <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted">Pod logs</p>
-                <Textarea
-              readOnly
-              value={"Live pod logs need a connected Kubernetes API. Open a project to read deployment logs and Jenkins output from the platform."}
-              className="min-h-[120px] font-mono text-xs text-muted"
-            />
+                <Textarea readOnly value={"Live pod logs need a connected Kubernetes API. Open a project to read deployment logs and Jenkins output from the platform."} className="min-h-[120px] font-mono text-xs text-muted"/>
               </div>
             </>) : null}
         {podsQuery.data?.configured && podsQuery.data.error ? (<p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{podsQuery.data.error}</p>) : null}
@@ -293,9 +287,9 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
                         {selected.namespace}/{selected.name}
                       </Badge>
                       {selected.containers.length > 0 ? (<select aria-label="Container" value={selected.container} onChange={(event) => setSelected({
-                            ...selected,
-                            container: event.target.value
-                        })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
+                        ...selected,
+                        container: event.target.value
+                    })} className="h-8 max-w-[12rem] rounded-md border border-border bg-background px-2 text-xs">
                           {selected.containers.map((c) => (<option key={c} value={c}>
                               {c}
                             </option>))}

@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Copy the full Helm chart from this monorepo into nourhb/gitops and push.
-# Run on the lab VM (needs git push access to https://github.com/nourhb/gitops).
-#
-# Usage:
-#   bash paas/scripts/push-simple-app-chart-to-gitops.sh [build-number] [gitops-clone-dir]
-#
-# Example:
-#   bash paas/scripts/push-simple-app-chart-to-gitops.sh 99 ~/gitops
 set -euo pipefail
 
 BUILD_NUM="${1:-99}"
@@ -20,6 +12,16 @@ if [[ ! -f "${CHART_SRC}/Chart.yaml" ]]; then
   exit 1
 fi
 
+NS="simple-app"
+HARBOR_NS="${HARBOR_NS:-paas}"
+echo "=== Namespace ${NS} + Harbor pull secret ==="
+kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
+if kubectl get secret harbor-regcred -n "$HARBOR_NS" >/dev/null 2>&1; then
+  kubectl get secret harbor-regcred -n "$HARBOR_NS" -o yaml \
+    | sed "s/namespace: ${HARBOR_NS}/namespace: ${NS}/" \
+    | kubectl apply -f -
+fi
+
 if [[ ! -d "${GITOPS_DIR}/.git" ]]; then
   echo "=== Cloning nourhb/gitops into ${GITOPS_DIR} ==="
   git clone https://github.com/nourhb/gitops.git "${GITOPS_DIR}"
@@ -31,7 +33,6 @@ rsync -a --delete \
   --exclude '.git' \
   "${CHART_SRC}/" "${DEST}/"
 
-# Ensure Jenkins build tag
 if command -v sed >/dev/null; then
   sed -i "s/^  tag:.*/  tag: \"${BUILD_NUM}\"/" "${DEST}/values.yaml" 2>/dev/null || \
     sed -i '' "s/^  tag:.*/  tag: \"${BUILD_NUM}\"/" "${DEST}/values.yaml"

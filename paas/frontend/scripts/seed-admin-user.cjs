@@ -1,26 +1,13 @@
-/**
- * Create or update a local ADMIN user (bcrypt password, email marked verified).
- * Lab / dev only — do not use weak passwords in production.
- *
- * Usage (from paas/frontend, DATABASE_URL must reach Postgres):
- *   npm run auth:seed-admin
- *   npm run auth:seed-admin -- admin@paas.local "123456789" "Platform Admin"
- *
- * Env overrides: SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_FULL_NAME
- */
 const bcrypt = require("bcryptjs");
 const { PrismaClient } = require("@prisma/client");
-
 const ROUNDS = 12;
 const DEFAULT_EMAIL = "admin@paas.local";
 const DEFAULT_PASSWORD = "123456789";
 const DEFAULT_FULL_NAME = "Platform Admin";
-
 async function main() {
     const email = (process.argv[2] || process.env.SEED_ADMIN_EMAIL || DEFAULT_EMAIL).trim().toLowerCase();
     const password = process.argv[3] || process.env.SEED_ADMIN_PASSWORD || DEFAULT_PASSWORD;
     const fullName = (process.argv[4] || process.env.SEED_ADMIN_FULL_NAME || DEFAULT_FULL_NAME).trim();
-
     if (!email.includes("@")) {
         console.error("Invalid email.");
         process.exit(1);
@@ -29,7 +16,6 @@ async function main() {
         console.error("Password must be at least 8 characters (same rule as the app).");
         process.exit(1);
     }
-
     const prisma = new PrismaClient();
     try {
         const passwordHash = await bcrypt.hash(password, ROUNDS);
@@ -56,11 +42,11 @@ async function main() {
         console.log(`  id:       ${user.id}`);
         console.log(`  verified: ${user.emailVerifiedAt?.toISOString() ?? "no"}`);
         console.log("  password: (as provided — not printed)");
-    } finally {
+    }
+    finally {
         await prisma.$disconnect();
     }
 }
-
 main().catch((e) => {
     console.error(e);
     process.exit(1);

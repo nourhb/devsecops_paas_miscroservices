@@ -20,7 +20,8 @@ spec:
               namespaces:
                 - argocd
                 - devsecops-paas
-                - food-delivery-devsecops
+                - paas
+                - simple-app
                 - harbor
                 - jenkins
                 - kube-system

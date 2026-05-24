@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Confirm Jenkins job paas-deploy has the latest Jenkinsfile (not stale Groovy).
-# Usage: bash paas/scripts/verify-jenkins-paas-deploy-job-lab.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,11 +9,9 @@ JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
 JOB="paas-deploy"
 
 CRANE_FIX_MARKER='crane-next16-202605'
-# Old Step 6 only (build #25–26): version.split + --no-lint in crane sh, without crane-next16 marker
 STALE_CRANE_STEP6='version.split('\''.'\'').map(Number);process.exit((v[0]||0)>=16'
 
 if [[ -f "${ENV_FILE}" ]]; then
-  # shellcheck disable=SC1090
   set +u; source "${ENV_FILE}" 2>/dev/null || true; set -u
   JENKINS_URL="${JENKINS_PROBE_URL:-${JENKINS_URL:-http://127.0.0.1:30090}}"
 fi

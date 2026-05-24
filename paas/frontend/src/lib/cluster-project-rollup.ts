@@ -1,4 +1,3 @@
-/** Roll up coarse workload metrics from PaaS project records when Kubernetes API is unavailable. */
 export function rollUpClusterFromProjects(projects: Array<{
     lastDeploymentStatus: string;
     podStatus: string;

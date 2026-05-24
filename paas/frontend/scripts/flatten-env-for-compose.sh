@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Regenerate docker-compose.env from .env (no npm required).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"

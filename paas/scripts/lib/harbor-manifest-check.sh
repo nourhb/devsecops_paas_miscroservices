@@ -1,6 +1,3 @@
-# shellcheck shell=bash
-# Harbor serves Docker/crane pushes as OCI image indexes. Plain curl -I without Accept → false 404.
-# Source: . "$(dirname "$0")/lib/harbor-manifest-check.sh"  (from paas/scripts/)
 
 harbor_manifest_http_code() {
   local harbor="$1" repo="$2" ref="$3" user="${4:-admin}" pass="${5:-Harbor12345}"

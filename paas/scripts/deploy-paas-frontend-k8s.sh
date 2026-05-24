@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Build PaaS frontend image, push to Harbor, import on master, restart deployment.
-# Run on lab master: bash paas/scripts/deploy-paas-frontend-k8s.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +12,7 @@ HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 PAAS_NS="${PAAS_NS:-paas}"
 
 echo "==> Building ${IMAGE}"
-docker build -f docker/frontend.Dockerfile -t "$IMAGE" .
+docker build -f frontend/Dockerfile -t "$IMAGE" .
 
 echo "==> Pushing to Harbor"
 echo "$HARBOR_PASS" | docker login "$HARBOR" -u "$HARBOR_USER" --password-stdin

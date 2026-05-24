@@ -107,8 +107,8 @@ export default function AccountSettingsPage() {
           <CardDescription>
             Signed in as <span className="font-medium text-foreground">{user?.role ?? "—"}</span>
             {user?.accountKind
-              ? ` · ${user.accountKind === "keycloak" ? "Keycloak" : "Local password"}`
-              : ""}
+            ? ` · ${user.accountKind === "keycloak" ? "Keycloak" : "Local password"}`
+            : ""}
           </CardDescription>
         </CardHeader>
         <CardContent>

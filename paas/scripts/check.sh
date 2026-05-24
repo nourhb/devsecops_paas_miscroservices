@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-#
-# Full cluster check (VM master) + safe auto-heal for lab installs.
-#
-# Goals:
-# - Print a concise status summary + UI URLs for common DevSecOps services.
-# - Detect the exact failure modes you hit (services exist but pods/endpoints missing).
-# - With --fix, apply conservative auto-heal actions:
-#   - restart unhealthy pods (CrashLoop/Error/ImagePull)
-#   - force-delete stuck Terminating pods
-#   - re-apply required Helm values for Dependency-Track + SonarQube
-#   - scale workloads back to 1 when they drift to 0
-#
-# Usage:
-#   bash paas/scripts/check.sh
-#   bash paas/scripts/check.sh --fix
-#
 
 FIX=0
 for arg in "$@"; do
@@ -171,7 +155,6 @@ ensure_sonarqube() {
   local release="sonarqube"
   local sts="sonarqube-sonarqube"
 
-  # Known-good settings for this repo/lab (from troubleshooting):
   local nodeport="30415"
   local passcode="ChangeMe-Strong-12345"
   local img_repo="mirror.gcr.io/sonarqube"
@@ -223,7 +206,6 @@ ensure_sonarqube() {
     return 0
   fi
 
-  # If pod exists but isn't ready, print status. Don't force-restart automatically.
   if [ "$(ready_pods_count "$ns")" -eq 0 ]; then
     warn "sonarqube pod not ready yet (first boot can take 5-15 min)"
     log "status (inside pod):"
@@ -269,21 +251,18 @@ for ns in jenkins sonarqube dependency-track harbor argocd ingress-nginx monitor
 done
 
 print_section "UI URLs"
-# Jenkins UI
 if ns_exists jenkins && kubectl get svc -n jenkins jenkins >/dev/null 2>&1; then
   echo "Jenkins UI            -> $(svc_url jenkins jenkins "$NODE_IP_EFFECTIVE")"
 else
   echo "Jenkins UI            -> (not installed)"
 fi
 
-# SonarQube UI
 if ns_exists sonarqube && kubectl get svc -n sonarqube sonarqube-sonarqube >/dev/null 2>&1; then
   echo "SonarQube UI          -> $(svc_url sonarqube sonarqube-sonarqube "$NODE_IP_EFFECTIVE")"
 else
   echo "SonarQube UI          -> (not installed)"
 fi
 
-# Dependency-Track UI + API
 if ns_exists dependency-track && kubectl get svc -n dependency-track dtrack-dependency-track-frontend >/dev/null 2>&1; then
   echo "Dependency-Track UI   -> $(svc_url dependency-track dtrack-dependency-track-frontend "$NODE_IP_EFFECTIVE")"
 else
@@ -293,7 +272,6 @@ if ns_exists dependency-track && kubectl get svc -n dependency-track dtrack-depe
   echo "Dependency-Track API  -> $(svc_url dependency-track dtrack-dependency-track-api-server "$NODE_IP_EFFECTIVE")"
 fi
 
-# Harbor UI
 if ns_exists harbor; then
   if kubectl get svc -n harbor harbor >/dev/null 2>&1; then
     echo "Harbor UI             -> $(svc_url harbor harbor "$NODE_IP_EFFECTIVE")"
@@ -306,7 +284,6 @@ else
   echo "Harbor UI             -> (not installed)"
 fi
 
-# Argo CD UI
 if ns_exists argocd && kubectl get svc -n argocd argocd-server >/dev/null 2>&1; then
   echo "Argo CD UI            -> $(svc_url argocd argocd-server "$NODE_IP_EFFECTIVE")"
 else

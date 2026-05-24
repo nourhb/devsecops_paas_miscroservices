@@ -9,7 +9,6 @@ const insecureAgent = new Agent({
 });
 export type IntegrationFetchOptions = {
     timeoutMs?: number;
-    /** When true, force-skip INTEGRATIONS_PROBE_HOST_REMAP (also skipped automatically when the URL host matches a remap rule’s left-hand side). */
     bypassHostRemap?: boolean;
 };
 function resolveIntegrationFetchOptions(third?: number | IntegrationFetchOptions): {
@@ -35,8 +34,7 @@ function resolveIntegrationFetchOptions(third?: number | IntegrationFetchOptions
 }
 export async function integrationFetch(url: string, init: RequestInit = {}, third?: number | IntegrationFetchOptions): Promise<Response> {
     const { timeoutMs, bypassHostRemap } = resolveIntegrationFetchOptions(third);
-    const skipRemap =
-        bypassHostRemap || probeHostIsRemapSource(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
+    const skipRemap = bypassHostRemap || probeHostIsRemapSource(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const resolvedUrl = skipRemap ? url : remapIntegrationProbeHost(url, env.INTEGRATIONS_PROBE_HOST_REMAP);
     const ms = timeoutMs;
     const controller = new AbortController();
@@ -54,8 +52,7 @@ export async function integrationFetch(url: string, init: RequestInit = {}, thir
         }
     }
     try {
-        const skipTls =
-            env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" || env.KUBE_TLS_SKIP_VERIFY === "true";
+        const skipTls = env.INTEGRATIONS_TLS_SKIP_VERIFY === "true" || env.KUBE_TLS_SKIP_VERIFY === "true";
         if (skipTls) {
             return await undiciFetch(resolvedUrl, {
                 ...init,

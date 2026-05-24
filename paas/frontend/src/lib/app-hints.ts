@@ -1,6 +1,3 @@
-/**
- * Short, first-person blurbs for tooltips. Written like release notes you’d leave for a teammate.
- */
 export const hints = {
     nav: {
         dashboard: "My home base: I check here first for project count, cluster-ish signals, and whether scanners still talk to us.",

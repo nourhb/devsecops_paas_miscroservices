@@ -14,7 +14,6 @@ function toneFromPods(running: number, total: number): ToolTone {
     }
     return "danger";
 }
-/** Large kube-prometheus-stack namespace: allow a couple of pods pending (rollouts) without “degraded”. */
 function toneFromMonitoringNamespace(running: number, total: number): ToolTone {
     if (total === 0) {
         return "outline";
@@ -84,7 +83,6 @@ async function namespacePods(namespace: string): Promise<{
         return { total: 0, running: 0 };
     }
 }
-/** Pods whose name matches CNI / networking daemons (Calico, Canal, Tigera agents). */
 async function namespacePodsMatchingName(namespace: string, pattern: RegExp): Promise<{
     total: number;
     running: number;
@@ -113,7 +111,6 @@ async function namespacePodsMatchingName(namespace: string, pattern: RegExp): Pr
         return { total: 0, running: 0 };
     }
 }
-/** Prefer ingress-nginx namespace; otherwise Traefik (or similar) in kube-system. */
 async function ingressControllerPods(): Promise<{
     total: number;
     running: number;
@@ -183,16 +180,14 @@ export async function getPlatformTooling(): Promise<{
     ]);
     const policyActive = kyvernoPolicies > 0 || gatekeeperCrds > 0 || kubewarden.running > 0;
     const sonarConfigured = configuredUrl(env.SONAR_BASE_URL) || sonarqube.total > 0;
-    const scaSbomConfigured =
-        configuredUrl(env.DEPENDENCY_TRACK_BASE_URL) ||
+    const scaSbomConfigured = configuredUrl(env.DEPENDENCY_TRACK_BASE_URL) ||
         dependencyTrack.total > 0 ||
         configuredUrl(env.TRIVY_BASE_URL);
     const cosignConfigured = Boolean(env.COSIGN_PUBLIC_KEY?.trim() || env.COSIGN_PRIVATE_KEY?.trim());
     const harborConfigured = configuredUrl(env.HARBOR_BASE_URL);
     const artifactoryConfigured = configuredUrl(process.env.NEXT_PUBLIC_ARTIFACTORY_URL) || configuredUrl(env.ARTIFACTORY_URL);
     const zapUrlConfigured = configuredUrl(process.env.NEXT_PUBLIC_OWASP_ZAP_URL);
-    const dependencyCheckConfigured =
-        configuredUrl(process.env.NEXT_PUBLIC_DEPENDENCY_CHECK_URL) || configuredUrl(process.env.NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL);
+    const dependencyCheckConfigured = configuredUrl(process.env.NEXT_PUBLIC_DEPENDENCY_CHECK_URL) || configuredUrl(process.env.NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL);
     const terraformConfigured = configuredUrl(process.env.NEXT_PUBLIC_TERRAFORM_CLOUD_URL);
     const haproxyConfigured = configuredUrl(process.env.NEXT_PUBLIC_HAPROXY_STATS_URL);
     const kibanaConfigured = configuredUrl(process.env.NEXT_PUBLIC_KIBANA_URL);
@@ -204,59 +199,35 @@ export async function getPlatformTooling(): Promise<{
             {
                 title: "Unified delivery and progressive DevSecOps",
                 items: [
-                    tool(
-                        "Static analysis (SAST)",
-                        sonarConfigured
-                            ? "SonarQube URL or workload detected; pipelines can enforce quality gates."
-                            : "Configure SONAR_* and Jenkins stages to run SAST on every build.",
-                        sonarConfigured ? "success" : "outline",
-                    ),
-                    tool(
-                        "Vulnerabilities and SBOM",
-                        scaSbomConfigured
-                            ? "Dependency-Track or Trivy configured; CI can publish CycloneDX and gate on findings."
-                            : "Add Dependency-Track and/or TRIVY_BASE_URL; enable SCA and SBOM steps in Jenkins.",
-                        scaSbomConfigured ? "success" : "outline",
-                    ),
-                    tool(
-                        "Image signing",
-                        cosignConfigured
-                            ? "Cosign keys configured for signing and verification in CI and on the cluster."
-                            : "Set COSIGN_PUBLIC_KEY (and signing material in CI) to sign and verify release images.",
-                        cosignConfigured ? "success" : "outline",
-                    ),
-                    tool(
-                        "Kubernetes security policy",
-                        policyActive
-                            ? "Kyverno, Gatekeeper CRDs, or Kubewarden pods detected—policy applies at admission."
-                            : "Deploy Kyverno, Gatekeeper, or Kubewarden so guardrails are enforced cluster-wide.",
-                        policyActive ? "success" : "outline",
-                    ),
+                    tool("Static analysis (SAST)", sonarConfigured
+                        ? "SonarQube URL or workload detected; pipelines can enforce quality gates."
+                        : "Configure SONAR_* and Jenkins stages to run SAST on every build.", sonarConfigured ? "success" : "outline"),
+                    tool("Vulnerabilities and SBOM", scaSbomConfigured
+                        ? "Dependency-Track or Trivy configured; CI can publish CycloneDX and gate on findings."
+                        : "Add Dependency-Track and/or TRIVY_BASE_URL; enable SCA and SBOM steps in Jenkins.", scaSbomConfigured ? "success" : "outline"),
+                    tool("Image signing", cosignConfigured
+                        ? "Cosign keys configured for signing and verification in CI and on the cluster."
+                        : "Set COSIGN_PUBLIC_KEY (and signing material in CI) to sign and verify release images.", cosignConfigured ? "success" : "outline"),
+                    tool("Kubernetes security policy", policyActive
+                        ? "Kyverno, Gatekeeper CRDs, or Kubewarden pods detected—policy applies at admission."
+                        : "Deploy Kyverno, Gatekeeper, or Kubewarden so guardrails are enforced cluster-wide.", policyActive ? "success" : "outline"),
                 ],
             },
             {
                 title: "Control & infra",
                 items: [
-                    tool(
-                        "Kubernetes control plane",
-                        k8sClientReady
-                            ? "Kube client active — workloads reflect live API, etcd, scheduler, and controller-manager health at the data plane."
-                            : env.KUBERNETES_ENABLED === "true"
-                              ? "KUBERNETES_ENABLED but kubeconfig missing or invalid — fix KUBE_CONFIG_PATH / API access."
-                              : "Enable KUBERNETES_ENABLED and mount kubeconfig for live API telemetry.",
-                        k8sClientReady ? "success" : "outline",
-                    ),
+                    tool("Kubernetes control plane", k8sClientReady
+                        ? "Kube client active — workloads reflect live API, etcd, scheduler, and controller-manager health at the data plane."
+                        : env.KUBERNETES_ENABLED === "true"
+                            ? "KUBERNETES_ENABLED but kubeconfig missing or invalid — fix KUBE_CONFIG_PATH / API access."
+                            : "Enable KUBERNETES_ENABLED and mount kubeconfig for live API telemetry.", k8sClientReady ? "success" : "outline"),
                     tool("Ingress (Traefik / NGINX)", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
                     tool("cert-manager", `${certManager.running}/${certManager.total} pods running · ${certs} certificates`, toneFromPods(certManager.running, certManager.total)),
-                    tool(
-                        "Calico (CNI)",
-                        calicoWorkload.total > 0
-                            ? `${calicoWorkload.running}/${calicoWorkload.total} networking pods · ${calicoPolicies} Calico NetworkPolicies`
-                            : calicoPolicies > 0
-                              ? `No calico/tigera pods matched in kube-system · ${calicoPolicies} NetworkPolicies (CRD)`
-                              : "No Calico-style pods or policies detected",
-                        calicoWorkload.total > 0 || calicoPolicies > 0 ? "success" : "outline",
-                    ),
+                    tool("Calico (CNI)", calicoWorkload.total > 0
+                        ? `${calicoWorkload.running}/${calicoWorkload.total} networking pods · ${calicoPolicies} Calico NetworkPolicies`
+                        : calicoPolicies > 0
+                            ? `No calico/tigera pods matched in kube-system · ${calicoPolicies} NetworkPolicies (CRD)`
+                            : "No Calico-style pods or policies detected", calicoWorkload.total > 0 || calicoPolicies > 0 ? "success" : "outline"),
                 ],
             },
             {
@@ -264,19 +235,15 @@ export async function getPlatformTooling(): Promise<{
                 items: [
                     tool("Kyverno", `${kyvernoPolicies} cluster policies`, kyvernoPolicies > 0 ? "success" : "outline"),
                     tool("OPA/Gatekeeper", `${gatekeeperCrds} CRDs installed`, gatekeeperCrds > 0 ? "success" : "outline"),
-                    tool(
-                        "Kubewarden",
-                        kubewarden.total === 0
-                            ? "0/0 pods running"
-                            : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
-                              ? `${kubewarden.running}/${kubewarden.total} pods — optional when POLICY_ENGINE is ${env.POLICY_ENGINE}`
-                              : `${kubewarden.running}/${kubewarden.total} pods running`,
-                        kubewarden.total === 0
+                    tool("Kubewarden", kubewarden.total === 0
+                        ? "0/0 pods running"
+                        : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
+                            ? `${kubewarden.running}/${kubewarden.total} pods — optional when POLICY_ENGINE is ${env.POLICY_ENGINE}`
+                            : `${kubewarden.running}/${kubewarden.total} pods running`, kubewarden.total === 0
+                        ? "outline"
+                        : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
                             ? "outline"
-                            : env.POLICY_ENGINE === "kyverno" || env.POLICY_ENGINE === "gatekeeper" || env.POLICY_ENGINE === "opa"
-                              ? "outline"
-                              : toneFromPods(kubewarden.running, kubewarden.total),
-                    ),
+                            : toneFromPods(kubewarden.running, kubewarden.total)),
                     tool("Cosign", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "Verification keys configured for image signature checks." : "No signing key configured", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "success" : "outline"),
                     tool("Trivy", env.TRIVY_BASE_URL ? "Scanner endpoint configured for image/security checks." : "No Trivy endpoint configured", env.TRIVY_BASE_URL ? "success" : "outline")
                 ]
@@ -284,39 +251,27 @@ export async function getPlatformTooling(): Promise<{
             {
                 title: "Monitoring",
                 items: [
-                    tool(
-                        "Prometheus stack",
-                        monitoring.total > 0
-                            ? `${monitoring.running}/${monitoring.total} pods running`
-                            : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
-                              ? "Prometheus URL configured; no pods listed in monitoring namespace."
-                              : "No workloads in monitoring namespace — deploy kube-prometheus-stack or set Prometheus URL.",
-                        monitoring.total > 0
-                            ? toneFromMonitoringNamespace(monitoring.running, monitoring.total)
-                            : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
-                              ? "success"
-                              : "outline",
-                    ),
+                    tool("Prometheus stack", monitoring.total > 0
+                        ? `${monitoring.running}/${monitoring.total} pods running`
+                        : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
+                            ? "Prometheus URL configured; no pods listed in monitoring namespace."
+                            : "No workloads in monitoring namespace — deploy kube-prometheus-stack or set Prometheus URL.", monitoring.total > 0
+                        ? toneFromMonitoringNamespace(monitoring.running, monitoring.total)
+                        : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
+                            ? "success"
+                            : "outline"),
                     tool("Grafana", process.env.NEXT_PUBLIC_GRAFANA_URL ? "Dashboard link available from the app." : "No Grafana URL configured", process.env.NEXT_PUBLIC_GRAFANA_URL ? "success" : "outline"),
                     tool("Alertmanager", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "Alertmanager link configured." : "No Alertmanager URL configured", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "success" : "outline"),
-                    tool(
-                        "Kube-state-metrics",
-                        kubeStateMetrics.total > 0
-                            ? `${kubeStateMetrics.running}/${kubeStateMetrics.total} pods matching kube-state-metrics in monitoring`
-                            : configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL)
-                              ? "Public metrics/docs URL configured; workloads not matched in monitoring namespace."
-                              : "Deploy kube-state-metrics in monitoring or set NEXT_PUBLIC_KUBE_STATE_METRICS_URL.",
-                        kubeStateMetrics.total > 0 || configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL) ? "success" : "outline",
-                    ),
+                    tool("Kube-state-metrics", kubeStateMetrics.total > 0
+                        ? `${kubeStateMetrics.running}/${kubeStateMetrics.total} pods matching kube-state-metrics in monitoring`
+                        : configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL)
+                            ? "Public metrics/docs URL configured; workloads not matched in monitoring namespace."
+                            : "Deploy kube-state-metrics in monitoring or set NEXT_PUBLIC_KUBE_STATE_METRICS_URL.", kubeStateMetrics.total > 0 || configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL) ? "success" : "outline"),
                     tool("Node exporter", monitoring.total > 0 ? "Exporter workloads often live in the monitoring namespace with Prom scrape configs." : "No workloads in monitoring namespace — set Prom scrape or node-exporter NodePort", monitoring.total > 0 ? "success" : "outline"),
                     tool("Pushgateway", process.env.NEXT_PUBLIC_PUSHGATEWAY_URL ? "Pushgateway link configured for build/batch metrics." : "No Pushgateway URL configured", process.env.NEXT_PUBLIC_PUSHGATEWAY_URL ? "success" : "outline"),
-                    tool(
-                        "Elastic Stack",
-                        kibanaConfigured || elasticsearchConfigured
-                            ? `Kibana / Elasticsearch URLs configured (${[kibanaConfigured && "Kibana", elasticsearchConfigured && "Elasticsearch"].filter(Boolean).join(", ")}).`
-                            : "Set NEXT_PUBLIC_KIBANA_URL or NEXT_PUBLIC_ELASTICSEARCH_URL for deep links.",
-                        kibanaConfigured || elasticsearchConfigured ? "success" : "outline",
-                    ),
+                    tool("Elastic Stack", kibanaConfigured || elasticsearchConfigured
+                        ? `Kibana / Elasticsearch URLs configured (${[kibanaConfigured && "Kibana", elasticsearchConfigured && "Elasticsearch"].filter(Boolean).join(", ")}).`
+                        : "Set NEXT_PUBLIC_KIBANA_URL or NEXT_PUBLIC_ELASTICSEARCH_URL for deep links.", kibanaConfigured || elasticsearchConfigured ? "success" : "outline"),
                 ],
             },
             {
@@ -326,17 +281,9 @@ export async function getPlatformTooling(): Promise<{
                     urlBackedTool("Argo CD", argocd, env.ARGOCD_BASE_URL, "Argo CD URL"),
                     tool("GitHub", env.GITOPS_REPO_URL ? "GitOps repository configured." : "No GitOps repository configured", env.GITOPS_REPO_URL ? "success" : "outline"),
                     tool("Docker Hub", env.DOCKERHUB_USERNAME ? `Namespace ${env.DOCKERHUB_NAMESPACE || env.DOCKERHUB_USERNAME}` : "No Docker Hub namespace configured", env.DOCKERHUB_USERNAME ? "success" : "outline"),
-                    tool(
-                        "Harbor",
-                        harborConfigured ? `Registry URL configured (${env.HARBOR_BASE_URL.replace(/\/$/, "")}).` : "Set HARBOR_BASE_URL for image push metadata.",
-                        harborConfigured ? "success" : "outline",
-                    ),
+                    tool("Harbor", harborConfigured ? `Registry URL configured (${env.HARBOR_BASE_URL.replace(/\/$/, "")}).` : "Set HARBOR_BASE_URL for image push metadata.", harborConfigured ? "success" : "outline"),
                     urlBackedTool("Nexus", nexus, process.env.NEXT_PUBLIC_NEXUS_URL, "Nexus URL"),
-                    tool(
-                        "JFrog Artifactory",
-                        artifactoryConfigured ? "Artifactory link or ARTIFACTORY_URL present." : "Set NEXT_PUBLIC_ARTIFACTORY_URL or ARTIFACTORY_URL.",
-                        artifactoryConfigured ? "success" : "outline",
-                    ),
+                    tool("JFrog Artifactory", artifactoryConfigured ? "Artifactory link or ARTIFACTORY_URL present." : "Set NEXT_PUBLIC_ARTIFACTORY_URL or ARTIFACTORY_URL.", artifactoryConfigured ? "success" : "outline"),
                 ],
             },
             {
@@ -344,37 +291,17 @@ export async function getPlatformTooling(): Promise<{
                 items: [
                     urlBackedTool("SonarQube", sonarqube, env.SONAR_BASE_URL, "SonarQube URL"),
                     urlBackedTool("Dependency-Track", dependencyTrack, env.DEPENDENCY_TRACK_BASE_URL, "Dependency-Track URL"),
-                    tool(
-                        "OWASP ZAP",
-                        zapUrlConfigured ? "ZAP UI / proxy URL configured for DAST links." : "Set NEXT_PUBLIC_OWASP_ZAP_URL or run ZAP from Jenkins with reports.",
-                        zapUrlConfigured ? "success" : "outline",
-                    ),
-                    tool(
-                        "OWASP Dependency-Check",
-                        dependencyCheckConfigured
-                            ? "Dependency-Check UI or report portal URL configured."
-                            : "Set NEXT_PUBLIC_DEPENDENCY_CHECK_URL (or NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL) for links.",
-                        dependencyCheckConfigured ? "success" : "outline",
-                    ),
+                    tool("OWASP ZAP", zapUrlConfigured ? "ZAP UI / proxy URL configured for DAST links." : "Set NEXT_PUBLIC_OWASP_ZAP_URL or run ZAP from Jenkins with reports.", zapUrlConfigured ? "success" : "outline"),
+                    tool("OWASP Dependency-Check", dependencyCheckConfigured
+                        ? "Dependency-Check UI or report portal URL configured."
+                        : "Set NEXT_PUBLIC_DEPENDENCY_CHECK_URL (or NEXT_PUBLIC_OWASP_DEPENDENCY_CHECK_URL) for links.", dependencyCheckConfigured ? "success" : "outline"),
                     urlBackedTool("Vault", vault, process.env.NEXT_PUBLIC_VAULT_UI_URL, "Vault URL"),
-                    tool(
-                        "Terraform",
-                        terraformConfigured ? "Terraform Cloud / Enterprise URL configured." : "Set NEXT_PUBLIC_TERRAFORM_CLOUD_URL for IaC portal link.",
-                        terraformConfigured ? "success" : "outline",
-                    ),
-                    tool(
-                        "HAProxy",
-                        haproxyConfigured ? "HAProxy stats or admin URL configured." : "Set NEXT_PUBLIC_HAPROXY_STATS_URL.",
-                        haproxyConfigured ? "success" : "outline",
-                    ),
+                    tool("Terraform", terraformConfigured ? "Terraform Cloud / Enterprise URL configured." : "Set NEXT_PUBLIC_TERRAFORM_CLOUD_URL for IaC portal link.", terraformConfigured ? "success" : "outline"),
+                    tool("HAProxy", haproxyConfigured ? "HAProxy stats or admin URL configured." : "Set NEXT_PUBLIC_HAPROXY_STATS_URL.", haproxyConfigured ? "success" : "outline"),
                     urlBackedTool("Portainer", portainerNs, process.env.NEXT_PUBLIC_PORTAINER_URL, "Portainer URL"),
-                    tool(
-                        "Edge / Raspberry Pi fleet",
-                        edgeIotConfigured
-                            ? "Optional edge or device dashboard URL configured."
-                            : "Set NEXT_PUBLIC_EDGE_IOT_URL for Pi / IoT gateway consoles.",
-                        edgeIotConfigured ? "success" : "outline",
-                    ),
+                    tool("Edge / Raspberry Pi fleet", edgeIotConfigured
+                        ? "Optional edge or device dashboard URL configured."
+                        : "Set NEXT_PUBLIC_EDGE_IOT_URL for Pi / IoT gateway consoles.", edgeIotConfigured ? "success" : "outline"),
                 ],
             },
         ],

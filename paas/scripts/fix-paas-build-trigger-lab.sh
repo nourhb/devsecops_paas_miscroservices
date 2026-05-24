@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Fix PaaS "Tekton PipelineRun creation failed: HTTP request failed" on trigger build.
-# Lab uses Jenkins (paas-deploy), not Tekton.
-#
-# Usage (k3s master):
-#   bash paas/scripts/fix-paas-build-trigger-lab.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

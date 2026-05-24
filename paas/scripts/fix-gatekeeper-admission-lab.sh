@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Fix Argo CD / kubectl failures: gatekeeper-webhook-service has no endpoints.
-# Lab only.
-#   bash paas/scripts/fix-gatekeeper-admission-lab.sh --ignore-webhooks
-#   bash paas/scripts/fix-gatekeeper-admission-lab.sh --delete-webhooks
 set -euo pipefail
 
 IGNORE_WEBHOOKS=false

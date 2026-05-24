@@ -1,22 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import {
-    Activity,
-    AlertCircle,
-    Box,
-    CheckCircle2,
-    Cpu,
-    ExternalLink,
-    GitBranch,
-    Layers,
-    Loader2,
-    Package,
-    RefreshCw,
-    Server,
-    Shield,
-    Wrench
-} from "lucide-react";
+import { Activity, AlertCircle, Box, CheckCircle2, Cpu, ExternalLink, GitBranch, Layers, Loader2, Package, RefreshCw, Server, Shield, Wrench } from "lucide-react";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,14 +10,7 @@ import { Hint } from "@/components/hint";
 import { platformApi } from "@/lib/api";
 import { hints } from "@/lib/app-hints";
 import { cn } from "@/lib/utils";
-import type {
-    PlatformIntegrationsResponse,
-    PlatformIntegrationCategory,
-    PlatformIntegrationItem,
-    PlatformIntegrationReachability,
-    PlatformToolGroup,
-    PlatformToolTone
-} from "@/types";
+import type { PlatformIntegrationsResponse, PlatformIntegrationCategory, PlatformIntegrationItem, PlatformIntegrationReachability, PlatformToolGroup, PlatformToolTone } from "@/types";
 function toolingStatusLabel(tone: PlatformToolTone): string {
     if (tone === "success") {
         return "Live";
@@ -254,8 +232,8 @@ function ToolingGroup({ group }: {
             <div className="flex items-center justify-between gap-3">
               <p className="font-medium leading-snug text-foreground">{item.name}</p>
               <span title={toolingStatusExplanation(item.tone)} role="status" aria-label={toolingStatusExplanation(item.tone)} className={cn(badgeVariants({
-                    variant: toneVariant(item.tone)
-                }), "shrink-0 cursor-help select-none")}>
+                variant: toneVariant(item.tone)
+            }), "shrink-0 cursor-help select-none")}>
                 {toolingStatusLabel(item.tone)}
               </span>
             </div>

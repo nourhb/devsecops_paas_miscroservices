@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Push paas/frontend/docker-compose.env into the Kubernetes frontend pod.
-# Docker Compose reads that file automatically; deployment/frontend does NOT unless you run this.
-#
-# Usage (on lab master, from repo root):
-#   bash paas/scripts/sync-paas-frontend-env-k8s.sh
-#   ENV_FILE=/path/to/docker-compose.env bash paas/scripts/sync-paas-frontend-env-k8s.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -27,7 +21,6 @@ if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; th
   exit 1
 fi
 
-# kubectl --from-env-file accepts KEY=VALUE only (no comments / duplicates).
 awk '
   /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }

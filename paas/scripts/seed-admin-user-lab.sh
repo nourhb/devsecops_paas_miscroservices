@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Seed ADMIN user via Docker (no host Node 20+ required). Works on lab master.
-#
-#   bash paas/scripts/seed-admin-user-lab.sh
-#   bash paas/scripts/seed-admin-user-lab.sh nourelhouda.bouajila@iteam-uiv.tn '123456789' 'Admin'
 set -euo pipefail
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -29,7 +25,7 @@ DB_URL="postgresql://postgres:root@${PG_IP}:5432/paas?options=-c%20lc_messages%3
 
 echo "=== Build ${IMAGE} ==="
 cd "${PAAS_DIR}"
-docker build -f docker/seed-admin.Dockerfile -t "${IMAGE}" .
+docker build -f frontend/Dockerfile.db -t "${IMAGE}" .
 
 echo "=== Seed admin (docker → ${PG_IP}) ==="
 docker run --rm \

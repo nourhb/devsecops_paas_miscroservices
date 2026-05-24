@@ -38,9 +38,7 @@ export type JenkinsWorkflowStageRow = {
 export type JenkinsWorkflowDescribeResult = {
     configured: boolean;
     error?: string;
-    /** True when stages are a coarse fallback (wfapi missing or unreadable); UI should not treat per-step status as authoritative. */
     stagesSynthetic?: boolean;
-    /** Shown as informational copy when wfapi is unavailable (not a hard error). */
     wfapiHint?: string;
     jobUrlPath: string;
     displayJobName: string;
@@ -65,7 +63,6 @@ export interface DockerHubTagInfo {
 function jenkinsBaseUrl(): string {
     return env.JENKINS_BASE_URL.replace(/\/$/, "");
 }
-/** Browser / "Open in Jenkins" links — must not use in-cluster *.svc.cluster.local. */
 function jenkinsBrowserBaseUrl(): string {
     const explicit = (env.JENKINS_PROBE_URL || "").trim().replace(/\/+$/, "");
     if (explicit) {
@@ -331,10 +328,10 @@ async function jenkinsFetchCrumb(base: string, headers: Record<string, string>):
     return null;
 }
 export interface SeverityBreakdown {
-  critical: number;
-  high: number;
-  medium: number;
-  low: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
 }
 export interface DependencyTrackFinding {
     title: string;
@@ -350,29 +347,29 @@ export interface DependencyTrackProjectMetrics {
     findings: DependencyTrackFinding[];
 }
 function hash(input: string): number {
-  return Array.from(input).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return Array.from(input).reduce((acc, char) => acc + char.charCodeAt(0), 0);
 }
 function seeded(input: string, max: number): number {
-  return hash(input) % (max + 1);
+    return hash(input) % (max + 1);
 }
 type IntegrationFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 async function fetchOrFallback<T>(serviceLabel: string, enabled: boolean, url: string, init: RequestInit, fallback: T, parser?: (response: Response) => Promise<T>, fetchImpl: IntegrationFetchFn = integrationFetch): Promise<T> {
-  if (!enabled) {
-    return fallback;
-  }
-  try {
+    if (!enabled) {
+        return fallback;
+    }
+    try {
         const response = await fetchImpl(url, init);
-    if (!response.ok) {
+        if (!response.ok) {
             const errText = await response.text();
             if (!allowSimulation()) {
                 throw new IntegrationError(`${serviceLabel} HTTP ${response.status}: ${errText.slice(0, 800)}`);
             }
-      return fallback;
-    }
-    if (parser) {
-      return parser(response);
-    }
-    return (await response.json()) as T;
+            return fallback;
+        }
+        if (parser) {
+            return parser(response);
+        }
+        return (await response.json()) as T;
     }
     catch (e) {
         if (e instanceof IntegrationError) {
@@ -381,12 +378,12 @@ async function fetchOrFallback<T>(serviceLabel: string, enabled: boolean, url: s
         if (!allowSimulation()) {
             throw new IntegrationError(`${serviceLabel} request failed: ${e instanceof Error ? e.message : String(e)}`);
         }
-    return fallback;
-  }
+        return fallback;
+    }
 }
 export class JenkinsClient {
     private enabled = Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
-  async createPipeline(projectName: string) {
+    async createPipeline(projectName: string) {
         if (!this.enabled) {
             return { created: true as const };
         }
@@ -928,7 +925,7 @@ export class JenkinsClient {
             accepted: true,
             jobName,
             queueId,
-      buildNumber,
+            buildNumber,
             jobUrl: `${base}/${jobPath}`
         };
     }
@@ -1137,7 +1134,6 @@ export class JenkinsClient {
             }
         }
         catch {
-            // Console optional for verification panel
         }
         return withUrl({
             configured: true,
@@ -1186,28 +1182,28 @@ export class JenkinsClient {
     }
 }
 export class SonarQubeClient {
-  private enabled = Boolean(env.SONAR_BASE_URL);
+    private enabled = Boolean(env.SONAR_BASE_URL);
     async qualityGate(projectKey: string): Promise<{
         status: "PASSED" | "FAILED";
     }> {
-    const fallbackStatus = projectKey.toLowerCase().includes("fail-sonar") ? "FAILED" : "PASSED";
+        const fallbackStatus = projectKey.toLowerCase().includes("fail-sonar") ? "FAILED" : "PASSED";
         return fetchOrFallback("SonarQube", this.enabled, `${env.SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64")}`
-        }
+            method: "GET",
+            headers: {
+                Authorization: `Basic ${Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64")}`
+            }
         }, { status: fallbackStatus }, async (response) => {
             const data = (await response.json()) as {
                 projectStatus?: {
                     status?: string;
                 };
             };
-        return { status: data.projectStatus?.status === "OK" ? "PASSED" : "FAILED" };
+            return { status: data.projectStatus?.status === "OK" ? "PASSED" : "FAILED" };
         });
-      }
-  }
+    }
+}
 export class DependencyTrackClient {
-  private enabled = Boolean(env.DEPENDENCY_TRACK_BASE_URL);
+    private enabled = Boolean(env.DEPENDENCY_TRACK_BASE_URL);
     private headers() {
         return {
             "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY
@@ -1280,15 +1276,15 @@ export class DependencyTrackClient {
             return findings.slice(0, 5);
         });
     }
-  async vulnerabilities(projectKey: string): Promise<SeverityBreakdown> {
-    const fallback: SeverityBreakdown = {
-      critical: seeded(projectKey + "-critical", 1),
-      high: seeded(projectKey + "-high", 3),
-      medium: seeded(projectKey + "-medium", 6),
-      low: seeded(projectKey + "-low", 10)
-    };
+    async vulnerabilities(projectKey: string): Promise<SeverityBreakdown> {
+        const fallback: SeverityBreakdown = {
+            critical: seeded(projectKey + "-critical", 1),
+            high: seeded(projectKey + "-high", 3),
+            medium: seeded(projectKey + "-medium", 6),
+            low: seeded(projectKey + "-low", 10)
+        };
         return fetchOrFallback("Dependency-Track", this.enabled, `${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/finding/project/${encodeURIComponent(projectKey)}`, {
-        method: "GET",
+            method: "GET",
             headers: this.headers()
         }, fallback, async (response) => {
             const rows = (await response.json()) as {
@@ -1380,22 +1376,22 @@ export class DependencyTrackClient {
     }
 }
 export class TrivyClient {
-  private enabled = Boolean(env.TRIVY_BASE_URL);
-  async scan(imageRef: string): Promise<SeverityBreakdown> {
-    const critical = imageRef.toLowerCase().includes("critical") ? 1 : 0;
-    const fallback: SeverityBreakdown = {
-      critical,
-      high: seeded(imageRef + "-high", 2),
-      medium: seeded(imageRef + "-medium", 4),
-      low: seeded(imageRef + "-low", 8)
-    };
+    private enabled = Boolean(env.TRIVY_BASE_URL);
+    async scan(imageRef: string): Promise<SeverityBreakdown> {
+        const critical = imageRef.toLowerCase().includes("critical") ? 1 : 0;
+        const fallback: SeverityBreakdown = {
+            critical,
+            high: seeded(imageRef + "-high", 2),
+            medium: seeded(imageRef + "-medium", 4),
+            low: seeded(imageRef + "-low", 8)
+        };
         return fetchOrFallback("Trivy", this.enabled, `${env.TRIVY_BASE_URL}/scan`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
                 ...(env.TRIVY_AUTH_TOKEN ? { Authorization: `Bearer ${env.TRIVY_AUTH_TOKEN}` } : {})
-        },
-        body: JSON.stringify({ image: imageRef })
+            },
+            body: JSON.stringify({ image: imageRef })
         }, fallback, async (response) => {
             const data = (await response.json()) as {
                 Results?: {
@@ -1440,29 +1436,29 @@ export class OpaClient {
     }
 }
 export class HarborClient {
-  private enabled = Boolean(env.HARBOR_BASE_URL);
+    private enabled = Boolean(env.HARBOR_BASE_URL);
     async pushImage(imageRef: string): Promise<{
         pushed: boolean;
         imageRef: string;
     }> {
         return fetchOrFallback("Harbor", this.enabled, `${env.HARBOR_BASE_URL}/api/v2.0/projects/${encodeURIComponent(env.HARBOR_PROJECT)}/repositories`, {
-        method: "GET",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${env.HARBOR_USERNAME}:${env.HARBOR_PASSWORD}`).toString("base64")}`
-        }
+            method: "GET",
+            headers: {
+                Authorization: `Basic ${Buffer.from(`${env.HARBOR_USERNAME}:${env.HARBOR_PASSWORD}`).toString("base64")}`
+            }
         }, { pushed: true, imageRef }, async () => ({ pushed: true, imageRef }));
-  }
+    }
 }
 export class ArgoCdClient {
     async sync(projectName: string): Promise<{
         status: string;
         logs: string;
     }> {
-    const appName = `${env.ARGOCD_APP_PREFIX}-${projectName}`;
-    const fallback = {
-      status: "SYNCED",
-      logs: `[argocd] Synced application ${appName}`
-    };
+        const appName = `${env.ARGOCD_APP_PREFIX}-${projectName}`;
+        const fallback = {
+            status: "SYNCED",
+            logs: `[argocd] Synced application ${appName}`
+        };
         const configured = Boolean(getArgoCdApiBase() && env.ARGOCD_AUTH_TOKEN.trim());
         if (!configured) {
             return fetchOrFallback("Argo CD sync", false, "", {}, fallback, async () => fallback);
@@ -1503,7 +1499,7 @@ export class DockerHubClient {
         }
         try {
             const response = await fetch("https://hub.docker.com/v2/users/login/", {
-        method: "POST",
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     username: env.DOCKERHUB_USERNAME,
@@ -1649,15 +1645,15 @@ function prometheusRangeFirstSeries(payload: unknown): {
     });
 }
 export class PrometheusClient {
-  private enabled = Boolean(env.PROMETHEUS_BASE_URL);
+    private enabled = Boolean(env.PROMETHEUS_BASE_URL);
     async clusterUsage(projectId: string): Promise<{
         cpu: number;
         ram: number;
     }> {
-    const fallback = {
-      cpu: 30 + seeded(projectId + "-cpu", 60),
-      ram: 35 + seeded(projectId + "-ram", 55)
-    };
+        const fallback = {
+            cpu: 30 + seeded(projectId + "-cpu", 60),
+            ram: 35 + seeded(projectId + "-ram", 55)
+        };
         if (!this.enabled) {
             return fallback;
         }
