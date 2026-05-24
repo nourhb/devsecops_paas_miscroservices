@@ -11,8 +11,6 @@ spec:
   backoffLimit: 1
   template:
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: master
       restartPolicy: Never
       containers:
         - name: db-push
