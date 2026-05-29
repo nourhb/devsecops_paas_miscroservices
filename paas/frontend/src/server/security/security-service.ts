@@ -27,6 +27,35 @@ function emptySeverity() {
     return { critical: 0, high: 0, medium: 0, low: 0 };
 }
 
+function degradedMetrics(project: Project, message: string): SecurityMetrics {
+    const imageTag = project.imageTag || project.projectName;
+    const policyEngine = policyEngineLabel();
+    return {
+        qualityGateStatus: "UNKNOWN",
+        dependencyTrack: emptySeverity(),
+        dependencyTrackProjectUuid: null,
+        dependencyTrackProjectName: project.projectName,
+        dependencyTrackFindings: [],
+        securitySummary: message.slice(0, 400),
+        imageSecurity: {
+            imageRef: imageTag,
+            signed: false,
+            verified: false,
+            verifier: "Cosign"
+        },
+        securityEnforcement: {
+            policyEngine,
+            policyValidated: policyEngine === "None",
+            deploymentAllowed: policyEngine === "None",
+            summary: "Security integrations returned an error — values below are incomplete."
+        },
+        trivy: emptySeverity(),
+        cosignSigned: false,
+        opaViolations: 0,
+        securityScore: 0
+    };
+}
+
 function integrationProjectKeys(project: Project): string[] {
     return [...new Set([project.id, project.projectName].filter((k) => k.trim()))];
 }
@@ -36,9 +65,14 @@ async function resolveSonarQualityGate(project: Project): Promise<{
     matchedKey: string | null;
 }> {
     for (const key of integrationProjectKeys(project)) {
-        const result = await sonarQubeClient.qualityGate(key);
-        if (result.status === "PASSED" || result.status === "FAILED") {
-            return { status: result.status, matchedKey: key };
+        try {
+            const result = await sonarQubeClient.qualityGate(key);
+            if (result.status === "PASSED" || result.status === "FAILED") {
+                return { status: result.status, matchedKey: key };
+            }
+        }
+        catch {
+            continue;
         }
     }
     return { status: "UNKNOWN", matchedKey: null };
@@ -171,5 +205,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
 
 export async function getSecurityMetrics(projectId: string): Promise<SecurityMetrics> {
     const project = await getProjectById(projectId);
-    return buildSecurityMetrics(project);
+    try {
+        return await buildSecurityMetrics(project);
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return degradedMetrics(project, msg);
+    }
 }
