@@ -427,6 +427,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
     set -eu
+    export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] && [ ! -d node_modules/next ]; then
@@ -477,6 +478,7 @@ ${paasShellKeepaliveHelper()}
   println "[image] Step 6b — Next.js production build (separate sh)"
   sh """
     set -eu
+    export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
@@ -723,7 +725,7 @@ def runPaasDeploy = {
             set -e
             export CI=true
             export NEXT_TELEMETRY_DISABLED=1
-            export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
+            export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
             export npm_config_maxsockets="${npm_config_maxsockets:-16}"
             NPM_CACHE="${JENKINS_PAAS_NPM_CACHE:-}"
             if [ -z "${NPM_CACHE}" ] && [ -n "${JENKINS_HOME:-}" ]; then
