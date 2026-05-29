@@ -32,7 +32,12 @@ HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 PAAS_NS="${PAAS_NS:-paas}"
 
 echo "==> Building ${IMAGE} (context: ${PAAS_DIR})"
-docker build -f frontend/Dockerfile -t "$IMAGE" .
+BUILD_ARGS=()
+if [[ "${BUILD_NO_CACHE:-}" == "1" || "${BUILD_NO_CACHE:-}" == "true" ]]; then
+  echo "    BUILD_NO_CACHE=${BUILD_NO_CACHE} — forcing fresh npm run build"
+  BUILD_ARGS+=(--no-cache)
+fi
+docker build "${BUILD_ARGS[@]}" -f frontend/Dockerfile -t "$IMAGE" .
 
 echo "==> Pushing to Harbor"
 if echo "$HARBOR_PASS" | docker login "$HARBOR" -u "$HARBOR_USER" --password-stdin 2>/dev/null; then
