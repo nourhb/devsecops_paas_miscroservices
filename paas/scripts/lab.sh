@@ -49,8 +49,12 @@ case "$cmd" in
     bash "$DIR/jenkins-status-lab.sh" ;;
   jenkins-executors|fix-executors)
     bash "$DIR/fix-jenkins-executor-queue-lab.sh" ;;
+  jenkins-abort|abort-zombies)
+    bash "$DIR/abort-jenkins-zombie-builds-lab.sh" ;;
+  fix-all|recover-all)
+    bash "$DIR/fix-all-paas-lab.sh" ;;
   "")
-    echo "usage: lab.sh start|health|jenkins-status|jenkins-executors|jenkins-recover|fix-deployments|..."
+    echo "usage: lab.sh fix-all|jenkins-abort|jenkins-status|start|health|..."
     exit 1 ;;
   *)
     echo "unknown: $cmd"

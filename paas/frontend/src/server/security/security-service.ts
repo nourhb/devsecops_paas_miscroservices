@@ -53,8 +53,10 @@ function degradedMetrics(project: Project, message: string): SecurityMetrics {
 }
 async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> {
     const imageTag = project.imageTag || project.projectName;
-    const qualityGate = await sonarQubeClient.qualityGate(project.projectName);
-    const dependencyTrackProject = await dependencyTrackClient.projectMetrics(project.projectName);
+    // Jenkins uses PROJECT_ID (UUID) as Sonar projectKey and Dependency-Track projectName.
+    const integrationProjectKey = project.id;
+    const qualityGate = await sonarQubeClient.qualityGate(integrationProjectKey);
+    const dependencyTrackProject = await dependencyTrackClient.projectMetrics(integrationProjectKey);
     const dependencyTrack = dependencyTrackProject.metrics;
     const [trivy, cosignSigned, kyvernoPolicies] = await Promise.all([
         trivyClient.scan(imageTag),
