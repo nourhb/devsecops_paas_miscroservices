@@ -1450,37 +1450,26 @@ export class DependencyTrackClient {
         });
     }
     async projectMetrics(projectKey: string): Promise<DependencyTrackProjectMetrics> {
-        const fallbackMetrics = await this.vulnerabilities(projectKey);
-        const fallbackFindings = await this.findProjectFindings(projectKey);
+        const empty: DependencyTrackProjectMetrics = {
+            projectUuid: null,
+            projectName: projectKey,
+            metrics: { critical: 0, high: 0, medium: 0, low: 0 },
+            findings: []
+        };
         if (!this.enabled) {
-            return {
-                projectUuid: null,
-                projectName: projectKey,
-                metrics: fallbackMetrics,
-                findings: fallbackFindings
-            };
+            return empty;
         }
         try {
             const projectUuid = await this.resolveProjectUuid(projectKey);
             if (!projectUuid) {
-                return {
-                    projectUuid: null,
-                    projectName: projectKey,
-                    metrics: { critical: 0, high: 0, medium: 0, low: 0 },
-                    findings: []
-                };
+                return empty;
             }
             const response = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project/${encodeURIComponent(projectUuid)}/metrics`, {
                 method: "GET",
                 headers: this.headers()
             });
             if (!response.ok) {
-                return {
-                    projectUuid,
-                    projectName: projectKey,
-                    metrics: fallbackMetrics,
-                    findings: fallbackFindings
-                };
+                return { ...empty, projectUuid, projectName: projectKey };
             }
             const payload = (await response.json()) as {
                 critical?: number;
@@ -1492,25 +1481,27 @@ export class DependencyTrackClient {
                 findingsMedium?: number;
                 findingsLow?: number;
             };
+            let findings: DependencyTrackFinding[] = [];
+            try {
+                findings = await this.findProjectFindings(projectUuid);
+            }
+            catch {
+                findings = [];
+            }
             return {
                 projectUuid,
                 projectName: projectKey,
                 metrics: {
-                    critical: Number(payload.critical ?? payload.findingsCritical ?? fallbackMetrics.critical),
-                    high: Number(payload.high ?? payload.findingsHigh ?? fallbackMetrics.high),
-                    medium: Number(payload.medium ?? payload.findingsMedium ?? fallbackMetrics.medium),
-                    low: Number(payload.low ?? payload.findingsLow ?? fallbackMetrics.low)
+                    critical: Number(payload.critical ?? payload.findingsCritical ?? 0),
+                    high: Number(payload.high ?? payload.findingsHigh ?? 0),
+                    medium: Number(payload.medium ?? payload.findingsMedium ?? 0),
+                    low: Number(payload.low ?? payload.findingsLow ?? 0)
                 },
-                findings: fallbackFindings
+                findings
             };
         }
         catch {
-            return {
-                projectUuid: null,
-                projectName: projectKey,
-                metrics: fallbackMetrics,
-                findings: fallbackFindings
-            };
+            return empty;
         }
     }
 }
