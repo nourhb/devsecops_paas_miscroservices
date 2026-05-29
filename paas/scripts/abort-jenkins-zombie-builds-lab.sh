@@ -25,10 +25,23 @@ cat > "${WORK}/fix.sh" <<SCRIPT
 #!/bin/sh
 set -eu
 JH="/jenkins_home/jobs/${JOB}/builds"
+CFG="/jenkins_home/config.xml"
+
+echo "==> Force numExecutors=2 in config.xml"
+if [ -f "\$CFG" ]; then
+  if grep -q '<numExecutors>' "\$CFG"; then
+    sed -i 's|<numExecutors>[0-9]*</numExecutors>|<numExecutors>2</numExecutors>|g' "\$CFG"
+  fi
+  echo "numExecutors: \$(grep -o '<numExecutors>[0-9]*</numExecutors>' "\$CFG" || echo missing)"
+else
+  echo "WARN: no \$CFG"
+fi
+
 if [ ! -d "\$JH" ]; then
   echo "WARN: no \$JH — job folder missing"
   exit 0
 fi
+
 fixed=0
 for d in "\$JH"/*/; do
   [ -f "\${d}build.xml" ] || continue
@@ -45,10 +58,19 @@ for d in "\$JH"/*/; do
     rm -rf "\${d}workflow" 2>/dev/null || true
   fi
 done
+
+echo "==> Clear queue, locks, stale @2 workspaces"
 rm -f /jenkins_home/queue.xml
-# Release stale workflow flyweight locks (common after OOM restart)
-find /jenkins_home -maxdepth 3 -name 'program.dat' -path '*/workflow/*' -delete 2>/dev/null || true
-echo "fixed \${fixed} build(s)"
+find /jenkins_home -maxdepth 4 -name 'program.dat' -path '*/workflow/*' -delete 2>/dev/null || true
+rm -rf /jenkins_home/workspace/${JOB}@tmp 2>/dev/null || true
+for ws in /jenkins_home/workspace/${JOB}@*; do
+  [ -d "\$ws" ] || continue
+  case "\$ws" in */${JOB}) continue ;; esac
+  echo "remove workspace \$ws"
+  rm -rf "\$ws" 2>/dev/null || true
+done
+
+echo "fixed \${fixed} zombie build(s)"
 SCRIPT
 chmod +x "${WORK}/fix.sh"
 
