@@ -55,10 +55,10 @@ case "$cmd" in
     bash "$DIR/fix-all-paas-lab.sh" ;;
   ultra|ultra-fix|pipeline-fix)
     bash "$DIR/ultra-fix-paas-pipeline-lab.sh" ;;
-  unblock|unblock-now)
-    bash "$DIR/unblock-paas-deploy-now-lab.sh" ;;
+  unblock|jenkins-unblock)
+    bash "$DIR/jenkins-unblock-lab.sh" ;;
   "")
-    echo "usage: lab.sh unblock|ultra|fix-all|jenkins-abort|..."
+    echo "usage: lab.sh unblock|ultra|fix-all|jenkins-status|..."
     exit 1 ;;
   *)
     echo "unknown: $cmd"
