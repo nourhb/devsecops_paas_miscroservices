@@ -689,6 +689,105 @@ export class JenkinsClient {
             return null;
         }
     }
+    async listRecentBuildSummaries(projectName: string, projectId: string, kind: JenkinsJobKind = "deploy", limit = 25): Promise<Array<{
+        number: number;
+        building: boolean;
+        result: string | null;
+        timestamp: number | null;
+    }>> {
+        if (!this.enabled) {
+            return [];
+        }
+        const base = jenkinsBaseUrl();
+        const jobPath = jenkinsJobUrlPath(projectName, projectId, kind);
+        const headers = { Authorization: jenkinsAuthHeader() };
+        const capped = Math.min(Math.max(limit, 1), 40);
+        try {
+            const res = await jenkinsIntegrationFetch(`${base}/${jobPath}/api/json?tree=builds[number,building,result,timestamp]{0,${capped}}`, { headers });
+            if (!res.ok) {
+                return [];
+            }
+            const j = (await res.json()) as {
+                builds?: Array<{
+                    number?: number;
+                    building?: boolean;
+                    result?: string | null;
+                    timestamp?: number | null;
+                }>;
+            };
+            return (j.builds ?? [])
+                .filter((b): b is {
+                    number: number;
+                    building: boolean;
+                    result: string | null;
+                    timestamp: number | null;
+                } => typeof b.number === "number")
+                .map((b) => ({
+                    number: b.number,
+                    building: Boolean(b.building),
+                    result: b.result ?? null,
+                    timestamp: typeof b.timestamp === "number" ? b.timestamp : null
+                }));
+        }
+        catch {
+            return [];
+        }
+    }
+    async getBuildParameterValue(projectName: string, projectId: string, buildNumber: number, parameterName: string, kind: JenkinsJobKind = "deploy"): Promise<string | null> {
+        if (!this.enabled) {
+            return null;
+        }
+        const base = jenkinsBaseUrl();
+        const jobPath = jenkinsJobUrlPath(projectName, projectId, kind);
+        const headers = { Authorization: jenkinsAuthHeader() };
+        try {
+            const res = await jenkinsIntegrationFetch(`${base}/${jobPath}/${buildNumber}/api/json?tree=actions[parameters[name,value]]`, { headers });
+            if (!res.ok) {
+                return null;
+            }
+            const j = (await res.json()) as {
+                actions?: Array<{
+                    parameters?: Array<{
+                        name?: string;
+                        value?: string | number | boolean | null;
+                    }>;
+                }>;
+            };
+            for (const action of j.actions ?? []) {
+                for (const param of action.parameters ?? []) {
+                    if (param.name === parameterName && param.value != null && String(param.value).trim()) {
+                        return String(param.value).trim();
+                    }
+                }
+            }
+            return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    async findDeployBuildForProject(projectName: string, projectUuid: string, opts: {
+        baseline: number | null;
+        afterMs?: number | null;
+        limit?: number;
+    }): Promise<number | null> {
+        const paramName = env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER;
+        const afterMs = opts.afterMs ?? null;
+        const builds = await this.listRecentBuildSummaries(projectName, projectUuid, "deploy", opts.limit ?? 25);
+        for (const build of builds) {
+            if (opts.baseline != null && build.number <= opts.baseline) {
+                continue;
+            }
+            if (afterMs != null && build.timestamp != null && build.timestamp < afterMs - 120_000) {
+                continue;
+            }
+            const projectParam = await this.getBuildParameterValue(projectName, projectUuid, build.number, paramName, "deploy");
+            if (projectParam === projectUuid) {
+                return build.number;
+            }
+        }
+        return null;
+    }
     async getBuildApiJson(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "build"): Promise<{
         number: number;
         building: boolean;
@@ -968,11 +1067,11 @@ export class JenkinsClient {
             .sort((a, b) => b.number - a.number)
             .slice(0, limit);
     }
-    async getWorkflowStagesForProject(projectName: string, projectId: string, buildNumber?: number | null): Promise<JenkinsWorkflowDescribeResult & {
+    async getWorkflowStagesForProject(projectName: string, projectId: string, buildNumber?: number | null, kind: JenkinsJobKind = "deploy"): Promise<JenkinsWorkflowDescribeResult & {
         buildUrl: string | null;
     }> {
-        const displayJobName = jenkinsJobName(projectName, projectId, "build");
-        const jobPath = jenkinsJobUrlPath(projectName, projectId, "build");
+        const displayJobName = jenkinsJobName(projectName, projectId, kind);
+        const jobPath = jenkinsJobUrlPath(projectName, projectId, kind);
         const base = jenkinsBaseUrl();
         const browserBase = jenkinsBrowserBaseUrl();
         const withUrl = (row: JenkinsWorkflowDescribeResult): JenkinsWorkflowDescribeResult & {
