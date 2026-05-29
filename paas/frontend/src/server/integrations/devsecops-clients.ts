@@ -96,6 +96,33 @@ function remapJenkinsPublicUrl(url: string | null | undefined): string | null {
 function jenkinsAuthHeader(): string {
     return `Basic ${Buffer.from(`${env.JENKINS_USERNAME}:${env.JENKINS_API_TOKEN}`).toString("base64")}`;
 }
+async function fetchJenkinsLastBuildNumber(base: string, jobPath: string, headers: Record<string, string>): Promise<number | null> {
+    try {
+        const res = await jenkinsIntegrationFetch(`${base}/${jobPath}/lastBuild/api/json?tree=number`, { headers });
+        if (!res.ok) {
+            return null;
+        }
+        const json = (await res.json()) as {
+            number?: number;
+        };
+        return typeof json.number === "number" ? json.number : null;
+    }
+    catch {
+        return null;
+    }
+}
+async function waitForJenkinsBuildNumberAfterTrigger(base: string, jobPath: string, headers: Record<string, string>, baseline: number | null): Promise<number | null> {
+    const floor = baseline ?? 0;
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+        const last = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
+        if (last !== null && last > floor) {
+            return last;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+    }
+    return null;
+}
 function appendSharedJobAgentLabel(q: URLSearchParams): void {
     const label = env.JENKINS_AGENT_LABEL.trim();
     if (!label) {
@@ -124,6 +151,8 @@ function appendRegistryParameters(q: URLSearchParams): void {
         ARTIFACTORY_ACCESS_TOKEN: env.ARTIFACTORY_ACCESS_TOKEN,
         ARTIFACTORY_CREDENTIALS_ID: env.ARTIFACTORY_CREDENTIALS_ID,
         COSIGN_CREDENTIALS_ID: env.COSIGN_CREDENTIALS_ID,
+        COSIGN_PRIVATE_KEY: env.COSIGN_PRIVATE_KEY,
+        COSIGN_ALLOW_INSECURE_REGISTRY: process.env.COSIGN_ALLOW_INSECURE_REGISTRY ?? "",
         HELM_OCI_PROJECT: env.HELM_OCI_PROJECT,
         NVD_API_KEY: env.NVD_API_KEY,
         ZAP_TARGET_URL: env.ZAP_TARGET_URL
@@ -142,6 +171,12 @@ function appendRegistryParameters(q: URLSearchParams): void {
     }
     if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
         q.set("JENKINS_PAAS_FAST_PIPELINE", "true");
+    }
+    else if (env.JENKINS_PAAS_FAST_PIPELINE === "false") {
+        q.set("JENKINS_PAAS_FAST_PIPELINE", "false");
+    }
+    if (env.JENKINS_SH_KEEPALIVE === "true") {
+        q.set("JENKINS_SH_KEEPALIVE", "true");
     }
 }
 function redactJenkinsUrl(url: string): string {
@@ -473,6 +508,7 @@ export class JenkinsClient {
                 }
                 return `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
             })();
+            const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
             const triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
             if (!triggerRes.ok) {
                 const errBody = await triggerRes.text();
@@ -486,23 +522,7 @@ export class JenkinsClient {
                     jobUrl: jobUrlFor(null)
                 };
             }
-            await new Promise((r) => setTimeout(r, 1500));
-            let lastNumber: number | null = null;
-            try {
-                const lastRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/lastBuild/api/json?tree=number,result,url`, {
-                    headers
-                });
-                if (lastRes.ok) {
-                    const json = (await lastRes.json()) as {
-                        number?: number;
-                    };
-                    if (typeof json.number === "number") {
-                        lastNumber = json.number;
-                    }
-                }
-            }
-            catch {
-            }
+            const lastNumber = await waitForJenkinsBuildNumberAfterTrigger(base, jobPath, headers, baselineBeforeTrigger);
             let consoleTail = "";
             if (lastNumber != null) {
                 try {
@@ -518,7 +538,10 @@ export class JenkinsClient {
             const log = [
                 `[jenkins] Triggered: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
-                lastNumber != null ? `[jenkins] Last build #${lastNumber}` : "[jenkins] No lastBuild yet",
+                baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
+                lastNumber != null
+                    ? `[jenkins] New run #${lastNumber}`
+                    : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
                 consoleTail ? `\n--- console (tail) ---\n${consoleTail}` : ""
             ].join("\n");
             return {
@@ -579,6 +602,7 @@ export class JenkinsClient {
             appendSharedJobAgentLabel(q);
             appendRegistryParameters(q);
             const triggerUrl = `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
+            const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
             const triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
             if (!triggerRes.ok) {
                 const errBody = await triggerRes.text();
@@ -592,23 +616,7 @@ export class JenkinsClient {
                     jobUrl: jobUrlFor(null)
                 };
             }
-            await new Promise((r) => setTimeout(r, 1500));
-            let lastNumber: number | null = null;
-            try {
-                const lastRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/lastBuild/api/json?tree=number,result,url`, {
-                    headers
-                });
-                if (lastRes.ok) {
-                    const json = (await lastRes.json()) as {
-                        number?: number;
-                    };
-                    if (typeof json.number === "number") {
-                        lastNumber = json.number;
-                    }
-                }
-            }
-            catch {
-            }
+            const lastNumber = await waitForJenkinsBuildNumberAfterTrigger(base, jobPath, headers, baselineBeforeTrigger);
             let consoleTail = "";
             if (lastNumber != null) {
                 try {
@@ -624,7 +632,10 @@ export class JenkinsClient {
             const log = [
                 `[jenkins] Deploy trigger: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
-                lastNumber != null ? `[jenkins] Last build #${lastNumber}` : "[jenkins] No lastBuild yet",
+                baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
+                lastNumber != null
+                    ? `[jenkins] New run #${lastNumber}`
+                    : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
                 consoleTail ? `\n--- console (tail) ---\n${consoleTail}` : ""
             ].join("\n");
             return {

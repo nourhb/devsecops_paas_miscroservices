@@ -175,12 +175,17 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
         });
     }
     const initialLog = build.logs.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
+    const confirmedRunNumber =
+        build.runNumber != null &&
+        (baseline.runNumber == null || build.runNumber > baseline.runNumber)
+            ? build.runNumber
+            : null;
     await prisma.deployment.update({
         where: { id: deployment.id },
         data: {
             status: DeploymentJobStatus.PENDING,
             logs: initialLog,
-            jenkinsBuildNumber: build.runNumber,
+            jenkinsBuildNumber: confirmedRunNumber,
             ...clearDeploymentFailureFields()
         }
     });
@@ -190,7 +195,7 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
         deploymentLogs: initialLog,
         pendingGitHubPush: Prisma.DbNull
     });
-    monitorDeployment(deployment.id, build.runNumber);
+    monitorDeployment(deployment.id, confirmedRunNumber);
     return {
         status: "SUCCESS",
         message: `Deployment queued for ${project.projectName}. Poll GET /api/deployments/${deployment.id} for live status.`,
