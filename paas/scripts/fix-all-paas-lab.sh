@@ -19,7 +19,11 @@ kubectl patch deployment jenkins -n "${JENKINS_NS}" --type=json -p='[
 ]' 2>/dev/null || echo "WARN: Jenkins patch skipped (no deployment?)"
 
 echo "==> 2. Abort zombie builds (#82, #83, …)"
-bash "${SCRIPT_DIR}/abort-jenkins-zombie-builds-lab.sh"
+if ! bash "${SCRIPT_DIR}/abort-jenkins-zombie-builds-lab.sh"; then
+  echo "WARN: zombie abort had errors — ensure Jenkins is up: kubectl get deploy -n ${JENKINS_NS} jenkins"
+  kubectl scale deployment/jenkins -n "${JENKINS_NS}" --replicas=1 2>/dev/null || true
+  kubectl rollout status deployment/jenkins -n "${JENKINS_NS}" --timeout=600s 2>/dev/null || true
+fi
 
 echo "==> 3. Security + full pipeline (Sonar, DT, Cosign, JENKINS_PAAS_FAST_PIPELINE=false)"
 if [[ -x "${SCRIPT_DIR}/setup-security-lab.sh" ]]; then

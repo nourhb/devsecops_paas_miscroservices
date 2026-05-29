@@ -7,57 +7,95 @@ JENKINS_NS="${JENKINS_NS:-cicd}"
 JOB="${JOB_NAME:-paas-deploy}"
 PVC="${JENKINS_PVC:-jenkins-pvc}"
 NODE="${JENKINS_NODE:-master}"
+WORK="${TMPDIR:-/tmp}/jenkins-zombie-fix-$$"
+POD_NAME="jenkins-zombie-fix"
+
+cleanup() {
+  kubectl delete pod "${POD_NAME}" -n "${JENKINS_NS}" --ignore-not-found --wait=false 2>/dev/null || true
+  rm -rf "${WORK}"
+  echo "==> Ensure Jenkins is running"
+  kubectl scale deployment/jenkins -n "${JENKINS_NS}" --replicas=1 2>/dev/null || true
+  kubectl rollout status deployment/jenkins -n "${JENKINS_NS}" --timeout=600s 2>/dev/null || true
+}
+trap cleanup EXIT
+
+mkdir -p "${WORK}"
+
+cat > "${WORK}/fix.sh" <<SCRIPT
+#!/bin/sh
+set -eu
+JH="/jenkins_home/jobs/${JOB}/builds"
+if [ ! -d "\$JH" ]; then
+  echo "WARN: no \$JH — job folder missing"
+  exit 0
+fi
+fixed=0
+for d in "\$JH"/*/; do
+  [ -f "\${d}build.xml" ] || continue
+  if grep -q '<building>true</building>' "\${d}build.xml" 2>/dev/null; then
+    n=\$(basename "\$d")
+    echo "aborting zombie #\${n}"
+    sed -i 's/<building>true<\\/building>/<building>false<\\/building>/g' "\${d}build.xml"
+    if grep -q '<result>' "\${d}build.xml"; then
+      sed -i 's/<result>[^<]*<\\/result>/<result>ABORTED<\\/result>/g' "\${d}build.xml"
+    else
+      sed -i 's/<\\/build>/  <result>ABORTED<\\/result>\\n<\\/build>/' "\${d}build.xml"
+    fi
+    fixed=\$((fixed + 1))
+  fi
+done
+rm -f /jenkins_home/queue.xml
+echo "fixed \${fixed} build(s)"
+SCRIPT
+chmod +x "${WORK}/fix.sh"
+
+cat > "${WORK}/pod.yaml" <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD_NAME}
+  namespace: ${JENKINS_NS}
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: ${NODE}
+  containers:
+    - name: fix
+      image: busybox:1.36
+      command: ["/bin/sh", "/scripts/fix.sh"]
+      volumeMounts:
+        - name: jh
+          mountPath: /jenkins_home
+        - name: scripts
+          mountPath: /scripts
+  volumes:
+    - name: jh
+      persistentVolumeClaim:
+        claimName: ${PVC}
+    - name: scripts
+      configMap:
+        name: ${POD_NAME}-script
+        defaultMode: 0755
+YAML
 
 echo "==> Scale Jenkins down (free RWO PVC)"
 kubectl scale deployment/jenkins -n "${JENKINS_NS}" --replicas=0
 kubectl wait --for=delete pod -l app=jenkins -n "${JENKINS_NS}" --timeout=180s 2>/dev/null || sleep 15
 
 echo "==> Fix builds on ${PVC} (job ${JOB})"
-kubectl run jenkins-zombie-fix --rm -i --restart=Never -n "${JENKINS_NS}" \
-  --image=busybox:1.36 \
-  --overrides="$(cat <<OV
-{
-  "spec": {
-    "nodeSelector": {"kubernetes.io/hostname": "${NODE}"},
-    "containers": [{
-      "name": "fix",
-      "image": "busybox:1.36",
-      "command": ["sh", "-c", "
-        set -e
-        JH=/jenkins_home/jobs/${JOB}/builds
-        if [ ! -d \"\$JH\" ]; then
-          echo \"WARN: no \$JH — job folder missing\"
-          exit 0
-        fi
-        fixed=0
-        for d in \"\$JH\"/*/; do
-          [ -f \"\${d}build.xml\" ] || continue
-          if grep -q '<building>true</building>' \"\${d}build.xml\" 2>/dev/null; then
-            n=\$(basename \"\$d\")
-            echo \"aborting zombie #\${n}\"
-            sed -i 's/<building>true<\\/building>/<building>false<\\/building>/g' \"\${d}build.xml\"
-            if grep -q '<result>' \"\${d}build.xml\"; then
-              sed -i 's/<result>[^<]*<\\/result>/<result>ABORTED<\\/result>/g' \"\${d}build.xml\"
-            else
-              sed -i 's/<\\/build>/  <result>ABORTED<\\/result>\\n<\\/build>/' \"\${d}build.xml\"
-            fi
-            fixed=\$((fixed + 1))
-          fi
-        done
-        rm -f /jenkins_home/queue.xml
-        echo \"fixed \${fixed} build(s)\"
-      "],
-      "volumeMounts": [{"name": "jh", "mountPath": "/jenkins_home"}]
-    }],
-    "volumes": [{"name": "jh", "persistentVolumeClaim": {"claimName": "${PVC}"}}]
-  }
-}
-OV
-)" -- echo done
+kubectl delete configmap "${POD_NAME}-script" -n "${JENKINS_NS}" --ignore-not-found 2>/dev/null || true
+kubectl create configmap "${POD_NAME}-script" -n "${JENKINS_NS}" --from-file=fix.sh="${WORK}/fix.sh"
+kubectl delete pod "${POD_NAME}" -n "${JENKINS_NS}" --ignore-not-found --wait=true 2>/dev/null || true
+kubectl apply -f "${WORK}/pod.yaml"
+if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/"${POD_NAME}" -n "${JENKINS_NS}" --timeout=300s; then
+  echo "ERROR: fix pod did not succeed" >&2
+  kubectl logs pod/"${POD_NAME}" -n "${JENKINS_NS}" 2>/dev/null || true
+  kubectl describe pod/"${POD_NAME}" -n "${JENKINS_NS}" 2>/dev/null | tail -25 || true
+  exit 1
+fi
+kubectl logs pod/"${POD_NAME}" -n "${JENKINS_NS}"
+kubectl delete configmap "${POD_NAME}-script" -n "${JENKINS_NS}" --ignore-not-found 2>/dev/null || true
 
-echo "==> Start Jenkins"
-kubectl scale deployment/jenkins -n "${JENKINS_NS}" --replicas=1
-kubectl rollout status deployment/jenkins -n "${JENKINS_NS}" --timeout=600s
 echo "Wait 60s for Jenkins API…"
 sleep 60
 
