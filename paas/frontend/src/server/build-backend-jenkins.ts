@@ -14,6 +14,7 @@ import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sy
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { extractJenkinsRunFromLogs } from "@/server/services/jenkins-deployment-reconcile";
 function jenkinsConfigured(): boolean {
     return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
 }
@@ -181,9 +182,21 @@ export class JenkinsBuildBackend implements BuildBackend {
         let buildNum = normalizeInitialBuildNumber(args.startedRun.runNumber, baseline);
         try {
             while (buildNum === null && Date.now() < deadline) {
-                const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
-                if (summary && (baseline === null || summary.number > baseline)) {
-                    buildNum = summary.number;
+                const fromLogs = extractJenkinsRunFromLogs(deployment.logs);
+                if (fromLogs != null && (baseline === null || fromLogs > baseline)) {
+                    buildNum = fromLogs;
+                }
+                if (buildNum === null) {
+                    buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
+                        baseline,
+                        afterMs: deployment.createdAt.getTime() - 120_000
+                    });
+                }
+                if (buildNum === null) {
+                    const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
+                    if (summary && (baseline === null || summary.number > baseline)) {
+                        buildNum = summary.number;
+                    }
                 }
                 if (buildNum === null) {
                     await sleep(interval);
