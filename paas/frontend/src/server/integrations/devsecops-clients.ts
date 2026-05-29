@@ -1289,12 +1289,44 @@ export class JenkinsClient {
     }
 }
 export class SonarQubeClient {
-    private enabled = Boolean(env.SONAR_BASE_URL);
+    private enabled = Boolean(env.SONAR_BASE_URL && env.SONAR_TOKEN);
     async qualityGate(projectKey: string): Promise<{
-        status: "PASSED" | "FAILED";
+        status: "PASSED" | "FAILED" | "UNKNOWN";
     }> {
+        if (!this.enabled) {
+            return { status: "UNKNOWN" };
+        }
         const fallbackStatus = projectKey.toLowerCase().includes("fail-sonar") ? "FAILED" : "PASSED";
-        return fetchOrFallback("SonarQube", this.enabled, `${env.SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`, {
+        if (!allowSimulation()) {
+            try {
+                const response = await integrationFetch(`${env.SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`, {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Basic ${Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64")}`
+                    }
+                });
+                if (response.status === 404) {
+                    return { status: "UNKNOWN" };
+                }
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new IntegrationError(`SonarQube HTTP ${response.status}: ${errText.slice(0, 800)}`);
+                }
+                const data = (await response.json()) as {
+                    projectStatus?: {
+                        status?: string;
+                    };
+                };
+                return { status: data.projectStatus?.status === "OK" ? "PASSED" : "FAILED" };
+            }
+            catch (e) {
+                if (e instanceof IntegrationError) {
+                    throw e;
+                }
+                throw new IntegrationError(`SonarQube request failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+        return fetchOrFallback("SonarQube", true, `${env.SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}`, {
             method: "GET",
             headers: {
                 Authorization: `Basic ${Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64")}`
@@ -1434,8 +1466,8 @@ export class DependencyTrackClient {
                 return {
                     projectUuid: null,
                     projectName: projectKey,
-                    metrics: fallbackMetrics,
-                    findings: fallbackFindings
+                    metrics: { critical: 0, high: 0, medium: 0, low: 0 },
+                    findings: []
                 };
             }
             const response = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project/${encodeURIComponent(projectUuid)}/metrics`, {
