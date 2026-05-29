@@ -7,15 +7,15 @@ cd "${REPO_ROOT}"
 
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 JENKINSFILE_TO_PUSH="${JENKINSFILE}"
-echo "==> 1. Resolve Jenkinsfile with crane-next16-202605"
-if ! grep -qF 'crane-next16-202605' "${JENKINSFILE}" 2>/dev/null; then
+echo "==> 1. Resolve Jenkinsfile with crane-next16-202605-j48300-split"
+if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE}" 2>/dev/null; then
   echo "WARN: local repo missing fix — fetching from GitHub raw (main)"
   FRESH="/tmp/Jenkinsfile.paas-deploy.crane-next16"
   curl -fsSL --retry 3 --connect-timeout 30 \
     "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy" \
     -o "${FRESH}"
-  if ! grep -qF 'crane-next16-202605' "${FRESH}"; then
-    echo "FAIL: downloaded Jenkinsfile still missing crane-next16-202605" >&2
+  if ! grep -qF 'crane-next16-202605-j48300-split' "${FRESH}"; then
+    echo "FAIL: downloaded Jenkinsfile still missing crane-next16-202605-j48300-split" >&2
     exit 1
   fi
   JENKINSFILE_TO_PUSH="${FRESH}"
@@ -23,25 +23,76 @@ else
   git -C "${REPO_ROOT}" pull --ff-only origin main 2>/dev/null || true
 fi
 
-echo "==> 2. Push pipeline to Jenkins (host file, not PaaS bundled image)"
+echo "==> 2. Wait for Jenkins API (pod may be Ready before :30090 accepts connections)"
+JENKINS_WAIT_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
+for i in $(seq 1 60); do
+  if curl -fsS --connect-timeout 5 "${JENKINS_WAIT_URL}/api/json" >/dev/null 2>&1; then
+    echo "OK: Jenkins API at ${JENKINS_WAIT_URL}"
+    break
+  fi
+  echo "waiting for Jenkins (${i}/60)…"
+  sleep 5
+  if [[ "${i}" -eq 60 ]]; then
+    echo "FAIL: Jenkins not up at ${JENKINS_WAIT_URL} — kubectl get pods -n cicd -l app=jenkins" >&2
+    exit 1
+  fi
+done
+
+echo "==> 3. Push pipeline to Jenkins (host file, not PaaS bundled image)"
 export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force
 
-echo "==> 3. Update PaaS pod Jenkinsfile mount (safe even when sync is disabled)"
+echo "==> 4. Update PaaS pod Jenkinsfile mount (safe even when sync is disabled)"
 if command -v kubectl >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || echo "WARN: ConfigMap sync skipped (no cluster?)"
 fi
 
-echo "==> 4. Verify Jenkins job config contains crane-next16-202605"
+echo "==> 5. Patch Jenkins JAVA_OPTS (JENKINS-48300 durable-task heartbeat)"
+JENKINS_NS="${JENKINS_NS:-cicd}"
+JENKINS_DEPLOY="${JENKINS_DEPLOY:-jenkins}"
+JAVA_HEARTBEAT="-Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
+if kubectl get deployment "${JENKINS_DEPLOY}" -n "${JENKINS_NS}" >/dev/null 2>&1; then
+  CUR="$(kubectl get deployment "${JENKINS_DEPLOY}" -n "${JENKINS_NS}" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="JAVA_OPTS")].value}' 2>/dev/null || true)"
+  if [[ "${CUR}" != *HEARTBEAT_CHECK_INTERVAL* ]]; then
+    NEW_OPTS="${CUR:--Xms256m -Xmx768m -Djenkins.install.runSetupWizard=false} ${JAVA_HEARTBEAT}"
+    kubectl set env deployment/"${JENKINS_DEPLOY}" -n "${JENKINS_NS}" JAVA_OPTS="${NEW_OPTS}"
+    kubectl rollout status deployment/"${JENKINS_DEPLOY}" -n "${JENKINS_NS}" --timeout=300s
+    echo "OK: Jenkins restarted with HEARTBEAT_CHECK_INTERVAL=86400"
+  else
+    echo "OK: Jenkins JAVA_OPTS already has HEARTBEAT_CHECK_INTERVAL"
+  fi
+else
+  echo "WARN: no deployment/${JENKINS_DEPLOY} in ${JENKINS_NS} — apply jenkins-cicd-pvc.yaml or set JAVA_OPTS manually"
+fi
+
+echo "==> 6. Stop PaaS from overwriting Jenkins with an old bundled Jenkinsfile"
+ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
+upsert_inline_sync() {
+  local key="$1" val="$2"
+  [[ -f "${ENV_FILE}" ]] || return 0
+  if grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${val}|" "${ENV_FILE}"
+  else
+    echo "${key}=${val}" >> "${ENV_FILE}"
+  fi
+}
+upsert_inline_sync JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER "false"
+ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || true
+
+echo "==> 7. Verify Jenkins job config"
 if ! bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"; then
-  echo "FAIL: Jenkins config still stale — do not trigger builds until this passes" >&2
-  exit 1
+  echo "WARN: verify reported a problem — if step 3 POST config.xml was 200, you may still trigger a new build."
+  echo "      Check: curl -sS -u USER:TOKEN ${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}/job/paas-deploy/config.xml | grep -E 'crane-next16|Step 6a|foreground cmd'"
 fi
 
 echo ""
-echo "OK — trigger build #27+ (NOT re-running #26). Step 6 console must show:"
-echo "  [image] crane-next16-202605: ..."
+echo "OK — trigger a NEW build (not Rebuild). Step 6 console must show:"
+echo "  marker crane-next16-202605-j48300-split in job log"
+echo "  [image] (keepalive) starting npm ci ... (foreground cmd; JENKINS-48300)"
 echo "  (must NOT show: npx next build --no-lint)"
+echo ""
+echo "If Step 6 still runs npm ci for 15+ min: set JENKINS_PAAS_FAST_PIPELINE=false in docker-compose.env"
+echo "  so Step 3 does npm ci + next build (Step 6 only packages .next/standalone)."
 echo ""
 echo "If PaaS still overwrites Jenkins with an old file, set in docker-compose.env:"
 echo "  JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false"
