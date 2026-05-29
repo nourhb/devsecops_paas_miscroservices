@@ -14,7 +14,13 @@ export async function GET(request: NextRequest) {
         }
         await assertProjectAccess(projectId, auth.userId, auth.role);
         const project = await getProjectById(projectId);
-        const dependencyTrack = await dependencyTrackClient.projectMetrics(project.projectName);
+        let dependencyTrack = await dependencyTrackClient.projectMetrics(project.id);
+        if (!dependencyTrack.projectUuid && project.projectName !== project.id) {
+            const byName = await dependencyTrackClient.projectMetrics(project.projectName);
+            if (byName.projectUuid) {
+                dependencyTrack = byName;
+            }
+        }
         const metrics = dependencyTrack.metrics;
         const summary = metrics.critical > 0
             ? `Build succeeded, but Dependency-Track reports ${metrics.critical} critical vulnerabilities.`
