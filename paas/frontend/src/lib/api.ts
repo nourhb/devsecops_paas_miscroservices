@@ -292,7 +292,9 @@ export const dashboardMetricsApi = {
 };
 export const dashboardOverviewApi = {
     get: async () => {
-        const { data } = await apiClient.get<DashboardOverviewResponse>("/api/dashboard/overview");
+        const { data } = await apiClient.get<DashboardOverviewResponse>("/api/dashboard/overview", {
+            timeout: 45000
+        });
         return data;
     }
 };
