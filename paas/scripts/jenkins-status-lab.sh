@@ -13,8 +13,8 @@ if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   source "${ENV_FILE}" 2>/dev/null || true
   set -u
-  BASE="${JENKINS_PROBE_URL:-${BASE}}"
 fi
+BASE="${JENKINS_PROBE_URL:-${BASE}}"
 
 [[ -n "${JENKINS_USERNAME:-}" && -n "${JENKINS_API_TOKEN:-}" ]] || {
   echo "ERROR: JENKINS_USERNAME / JENKINS_API_TOKEN in ${ENV_FILE}" >&2
@@ -28,9 +28,17 @@ curl "${AUTH[@]}" "${BASE}/api/json?tree=mode" | python3 -m json.tool 2>/dev/nul
 
 echo ""
 echo "==> Computers (executors)"
-curl "${AUTH[@]}" \
-  "${BASE}/computer/api/json?tree=computer[displayName,numExecutors,idleExecutors,busyExecutors,offline]" \
-  | python3 -m json.tool
+curl "${AUTH[@]}" "${BASE}/computer/api/json?depth=1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for c in d.get('computer',[]):
+    name=c.get('displayName','?')
+    ne=c.get('numExecutors','?')
+    idle=c.get('idleExecutors','?')
+    busy=c.get('busyExecutors','?')
+    off=c.get('offline','?')
+    print(f'  {name}: num={ne} idle={idle} busy={busy} offline={off}')
+"
 
 echo ""
 echo "==> ${JOB} — recent builds"

@@ -43,11 +43,20 @@ if [ ! -d "\$JH" ]; then
 fi
 
 fixed=0
+MIN_ABORT="${MIN_BUILD_TO_ABORT:-80}"
 for d in "\$JH"/*/; do
   [ -f "\${d}build.xml" ] || continue
-  if grep -q '<building>true</building>' "\${d}build.xml" 2>/dev/null; then
-    n=\$(basename "\$d")
-    echo "aborting zombie #\${n}"
+  n=\$(basename "\$d")
+  case "\$n" in *[!0-9]*) continue ;; esac
+  [ "\$n" -lt "\$MIN_ABORT" ] 2>/dev/null && continue
+
+  building=false
+  grep -q '<building>true</building>' "\${d}build.xml" 2>/dev/null && building=true
+  has_result=false
+  grep -qE '<result>(SUCCESS|FAILURE|ABORTED|UNSTABLE)</result>' "\${d}build.xml" 2>/dev/null && has_result=true
+
+  if [ "\$building" = true ] || [ "\$has_result" = false ]; then
+    echo "aborting stale #\${n} (building=\$building has_result=\$has_result)"
     sed -i 's/<building>true<\\/building>/<building>false<\\/building>/g' "\${d}build.xml"
     if grep -q '<result>' "\${d}build.xml"; then
       sed -i 's/<result>[^<]*<\\/result>/<result>ABORTED<\\/result>/g' "\${d}build.xml"
@@ -121,8 +130,10 @@ fi
 kubectl logs pod/"${POD_NAME}" -n "${JENKINS_NS}"
 kubectl delete configmap "${POD_NAME}-script" -n "${JENKINS_NS}" --ignore-not-found 2>/dev/null || true
 
-echo "Wait 60s for Jenkins API…"
-sleep 60
+# shellcheck source=lib/wait-jenkins-api.sh
+source "${SCRIPT_DIR}/lib/wait-jenkins-api.sh"
+echo "==> Wait for Jenkins API (plugins can take 2–3 min after pod start)"
+wait_jenkins_api "http://127.0.0.1:30090" 180 || wait_jenkins_api "${JENKINS_PROBE_URL:-http://192.168.56.129:30090}" 60 || true
 
 if [[ -f "${SCRIPT_DIR}/jenkins-status-lab.sh" ]]; then
   bash "${SCRIPT_DIR}/jenkins-status-lab.sh" | grep -E 'building=True|Still building' || echo "OK: no building=True in recent list"
