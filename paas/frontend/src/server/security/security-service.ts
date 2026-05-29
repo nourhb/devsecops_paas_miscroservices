@@ -91,7 +91,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         partialErrors.push(e instanceof Error ? e.message : String(e));
     }
     try {
-        cosignSigned = await cosignClient.isSigned(imageTag);
+        cosignSigned = await cosignClient.isSigned(imageTag, { timeoutMs: 8000 });
     }
     catch (e) {
         partialErrors.push(e instanceof Error ? e.message : String(e));

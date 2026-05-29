@@ -125,15 +125,27 @@ const emptySeverity: SeverityBreakdown = {
     medium: 0,
     low: 0
 };
-const SECURITY_SAMPLE_LIMIT = 12;
-function sumSeverity(a: SeverityBreakdown, b: SeverityBreakdown): SeverityBreakdown {
-    return {
-        critical: a.critical + b.critical,
-        high: a.high + b.high,
-        medium: a.medium + b.medium,
-        low: a.low + b.low
-    };
+const SECURITY_SAMPLE_LIMIT = 6;
+const SECURITY_METRICS_BUDGET_MS = 12000;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+async function safeSecurityMetrics(projectId: string): Promise<Awaited<ReturnType<typeof getSecurityMetrics>> | null> {
+    try {
+        return await Promise.race([
+            getSecurityMetrics(projectId),
+            sleep(SECURITY_METRICS_BUDGET_MS).then(() => {
+                throw new Error(`security metrics timed out after ${SECURITY_METRICS_BUDGET_MS}ms`);
+            })
+        ]);
+    }
+    catch {
+        return null;
+    }
+}
+
 async function rollupSecurityForDashboard(projectIds: string[]): Promise<DashboardOverview["security"]> {
     if (projectIds.length === 0) {
         return {
@@ -152,7 +164,8 @@ async function rollupSecurityForDashboard(projectIds: string[]): Promise<Dashboa
             sampledProjects: 0
         };
     }
-    const metricsList = await Promise.all(projectIds.map((id) => getSecurityMetrics(id)));
+    const settled = await Promise.all(projectIds.map((id) => safeSecurityMetrics(id)));
+    const metricsList = settled.filter((m): m is NonNullable<typeof m> => m !== null);
     let dtSum = { ...emptySeverity };
     let trivySum = { ...emptySeverity };
     let scoreSum = 0;
@@ -214,6 +227,15 @@ async function rollupSecurityForDashboard(projectIds: string[]): Promise<Dashboa
         },
         kyverno: { projectsWithPolicyGap: kyvernoGap },
         sampledProjects: n
+    };
+}
+
+function sumSeverity(a: SeverityBreakdown, b: SeverityBreakdown): SeverityBreakdown {
+    return {
+        critical: a.critical + b.critical,
+        high: a.high + b.high,
+        medium: a.medium + b.medium,
+        low: a.low + b.low
     };
 }
 export async function getDashboardOverview(userId: string, role: UserRole): Promise<DashboardOverview> {
