@@ -41,8 +41,16 @@ case "$cmd" in
       echo "ERROR: missing $DIR/setup-security-lab.sh — git pull or copy from repo (paas/scripts/setup-security-lab.sh)" >&2
       exit 1
     fi ;;
+  jenkins-recover|recover-jenkins)
+    bash "$DIR/recover-jenkins-stuck-lab.sh" ;;
+  fix-deployments|deployments-reset)
+    bash "$DIR/fix-stuck-paas-deployments-lab.sh" ;;
+  jenkins-status|jenkins-queue)
+    bash "$DIR/jenkins-status-lab.sh" ;;
+  jenkins-executors|fix-executors)
+    bash "$DIR/fix-jenkins-executor-queue-lab.sh" ;;
   "")
-    echo "usage: lab.sh start|health|security|integrations|integrations-diagnose|..."
+    echo "usage: lab.sh start|health|jenkins-status|jenkins-executors|jenkins-recover|fix-deployments|..."
     exit 1 ;;
   *)
     echo "unknown: $cmd"
