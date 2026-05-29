@@ -124,12 +124,9 @@ async function waitForJenkinsBuildNumberAfterTrigger(base: string, jobPath: stri
     return null;
 }
 function appendSharedJobAgentLabel(q: URLSearchParams): void {
-    const label = env.JENKINS_AGENT_LABEL.trim();
-    if (!label) {
-        return;
-    }
     const param = env.JENKINS_AGENT_LABEL_PARAMETER.trim() || "JENKINS_AGENT_LABEL";
-    q.set(param, label);
+    // Always send the param (even empty) so Jenkins job default "built-in" does not win.
+    q.set(param, env.JENKINS_AGENT_LABEL.trim());
 }
 function appendRegistryParameters(q: URLSearchParams): void {
     const values: Record<string, string> = {
