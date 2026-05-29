@@ -42,9 +42,12 @@ for d in "\$JH"/*/; do
       sed -i 's/<\\/build>/  <result>ABORTED<\\/result>\\n<\\/build>/' "\${d}build.xml"
     fi
     fixed=\$((fixed + 1))
+    rm -rf "\${d}workflow" 2>/dev/null || true
   fi
 done
 rm -f /jenkins_home/queue.xml
+# Release stale workflow flyweight locks (common after OOM restart)
+find /jenkins_home -maxdepth 3 -name 'program.dat' -path '*/workflow/*' -delete 2>/dev/null || true
 echo "fixed \${fixed} build(s)"
 SCRIPT
 chmod +x "${WORK}/fix.sh"

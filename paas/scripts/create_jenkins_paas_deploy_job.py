@@ -102,11 +102,11 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
             ("BRANCH", "main"),
             ("IMAGE_NAME", ""),
             ("PROJECT_ID", ""),
-            ("JENKINS_AGENT_LABEL", "built-in"),
+            ("JENKINS_AGENT_LABEL", ""),
         ]
     else:
         params = [
-            ("JENKINS_AGENT_LABEL", "built-in"),
+            ("JENKINS_AGENT_LABEL", ""),
             ("GIT_URL", ""),
             ("BRANCH", "main"),
             ("IMAGE_NAME", ""),
@@ -133,6 +133,9 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
         "  <description>paas-deploy (create_jenkins_paas_deploy_job.py)</description>\n"
         "  <keepDependencies>false</keepDependencies>\n"
         "  <properties>\n"
+        "    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
+        "      <abortPrevious>false</abortPrevious>\n"
+        "    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
         "    <hudson.model.ParametersDefinitionProperty>\n"
         "      <parameterDefinitions>\n"
         f"{pxml}\n"
@@ -220,6 +223,7 @@ def main() -> int:
     job = os.environ.get("JOB_NAME", "paas-deploy")
     minimal = "--minimal" in sys.argv
     force = "--force" in sys.argv
+    force_full = "--force-full" in sys.argv
     jenkinsfile = Path(os.environ.get("JENKINSFILE", str(DEFAULT_JENKINSFILE)))
 
     if not user or not token:
@@ -276,14 +280,18 @@ def main() -> int:
         return 0
 
     if code == 200 and force:
-        cfg_code, existing_cfg = client.call(job_cfg)
-        if cfg_code == 200 and existing_cfg.strip():
-            merged = merge_groovy_into_existing_config_xml(existing_cfg, groovy)
-            xml = merged.encode("utf-8")
-            mode = "merged-cdata"
-        else:
+        if force_full:
             mode = "full-document"
-        print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode})")
+            print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode} — params + no concurrent builds)")
+        else:
+            cfg_code, existing_cfg = client.call(job_cfg)
+            if cfg_code == 200 and existing_cfg.strip():
+                merged = merge_groovy_into_existing_config_xml(existing_cfg, groovy)
+                xml = merged.encode("utf-8")
+                mode = "merged-cdata"
+            else:
+                mode = "full-document"
+            print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode})")
         extra = client.crumb_headers()
         if extra:
             print(f"Crumb: {list(extra.keys())[0]}")

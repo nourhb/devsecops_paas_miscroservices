@@ -6,7 +6,7 @@ type ParamDef = readonly [
     defaultValue: string
 ];
 const PARAMETER_DEFINITIONS: ParamDef[] = [
-    ["JENKINS_AGENT_LABEL", "built-in"],
+    ["JENKINS_AGENT_LABEL", ""],
     ["GIT_URL", ""],
     ["BRANCH", "main"],
     ["IMAGE_NAME", ""],
@@ -32,7 +32,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["NPM_CONFIG_REGISTRY", ""],
     ["JENKINS_PAAS_NODE_CACHE", ""],
     ["JENKINS_PAAS_NPM_CACHE", ""],
-    ["JENKINS_SH_KEEPALIVE", "false"],
+    ["JENKINS_SH_KEEPALIVE", "true"],
     ["JENKINS_PAAS_FAST_PIPELINE", "false"],
     ["JENKINS_NEXT_BUILD_WEBPACK", "false"],
     ["JENKINS_NEXT_PERSIST_CACHE", "true"],
@@ -47,6 +47,8 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["ARTIFACTORY_ACCESS_TOKEN", ""],
     ["ARTIFACTORY_CREDENTIALS_ID", ""],
     ["COSIGN_CREDENTIALS_ID", ""],
+    ["COSIGN_PRIVATE_KEY", ""],
+    ["COSIGN_ALLOW_INSECURE_REGISTRY", "true"],
     ["HELM_OCI_PROJECT", "paas"],
     ["HELM_OCI_INSECURE", "false"],
     ["HELM_OCI_PLAIN_HTTP", "false"]
