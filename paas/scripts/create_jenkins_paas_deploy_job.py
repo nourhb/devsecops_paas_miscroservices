@@ -134,7 +134,7 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
         "  <keepDependencies>false</keepDependencies>\n"
         "  <properties>\n"
         "    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
-        "      <abortPrevious>false</abortPrevious>\n"
+        "      <abortPrevious>true</abortPrevious>\n"
         "    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
         "    <hudson.model.ParametersDefinitionProperty>\n"
         "      <parameterDefinitions>\n"
