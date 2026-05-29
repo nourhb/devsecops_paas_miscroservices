@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import http.cookiejar
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,7 +29,7 @@ println "queue=${j.queue.items.size()}"
 
 j.setNumExecutors(2)
 j.computers.each { c ->
-  if (c.name == "" || c.name == "built-in" || c.displayName?.contains("Built-In")) {
+  if (c.name == "" || c.name == "built-in" || (c.displayName ?: "").contains("Built-In")) {
     c.setNumExecutors(2)
   }
 }
@@ -35,13 +37,6 @@ j.computers.each { c ->
 def job = j.getItemByFullName(""" + f'"{JOB}"' + r""")
 if (job != null) {
   job.setConcurrentBuild(false)
-  def propClass = org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty
-  def prop = job.getProperty(propClass)
-  if (prop == null) {
-    job.addProperty(new propClass())
-    prop = job.getProperty(propClass)
-  }
-  prop.setAbortPrevious(true)
   def stopped = []
   job.builds.findAll { it.isBuilding() }.each { b ->
     try {
@@ -81,6 +76,24 @@ def load_env(path: Path) -> None:
             os.environ[k] = v
 
 
+def wait_api(opener: urllib.request.OpenerDirector, base: str, timeout_sec: int = 180) -> bool:
+    deadline = time.time() + timeout_sec
+    n = 0
+    while time.time() < deadline:
+        n += 1
+        try:
+            req = urllib.request.Request(f"{base}/api/json")
+            with opener.open(req, timeout=10) as resp:
+                if resp.status == 200:
+                    print(f"Jenkins API ready ({n} attempt(s))")
+                    return True
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if n % 15 == 0:
+                print(f"waiting for Jenkins ({n}): {e}")
+        time.sleep(2)
+    return False
+
+
 def main() -> int:
     load_env(DEFAULT_ENV)
     base = os.environ.get("JENKINS_PROBE_URL", os.environ.get("JENKINS_LAB_LOOPBACK", "http://127.0.0.1:30090")).rstrip("/")
@@ -91,20 +104,21 @@ def main() -> int:
         return 1
 
     auth = base64.b64encode(f"{user}:{token}".encode()).decode()
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     headers = {"Authorization": f"Basic {auth}"}
+
+    if not wait_api(opener, base):
+        print(f"ERROR: Jenkins API not ready at {base}", file=sys.stderr)
+        return 1
 
     def get(url: str) -> tuple[int, str]:
         req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with opener.open(req, timeout=120) as resp:
                 return resp.status, resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace")
-
-    code, _ = get(f"{base}/api/json")
-    if code != 200:
-        print(f"ERROR: Jenkins API {code} at {base}", file=sys.stderr)
-        return 1
 
     code, crumb_body = get(f"{base}/crumbIssuer/api/json")
     if code != 200:
@@ -116,7 +130,7 @@ def main() -> int:
     data = urllib.parse.urlencode({"script": GROOVY}).encode()
     req = urllib.request.Request(f"{base}/scriptText", data=data, method="POST", headers=post_headers)
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with opener.open(req, timeout=180) as resp:
             print(resp.read().decode("utf-8", "replace"))
             return 0
     except urllib.error.HTTPError as e:
