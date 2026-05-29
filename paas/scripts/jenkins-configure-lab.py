@@ -35,6 +35,13 @@ j.computers.each { c ->
 def job = j.getItemByFullName(""" + f'"{JOB}"' + r""")
 if (job != null) {
   job.setConcurrentBuild(false)
+  def propClass = org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty
+  def prop = job.getProperty(propClass)
+  if (prop == null) {
+    job.addProperty(new propClass())
+    prop = job.getProperty(propClass)
+  }
+  prop.setAbortPrevious(true)
   def stopped = []
   job.builds.findAll { it.isBuilding() }.each { b ->
     try {
