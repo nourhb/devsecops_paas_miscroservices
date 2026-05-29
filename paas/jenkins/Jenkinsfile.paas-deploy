@@ -1,4 +1,4 @@
-﻿
+
 def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
     error("${label} is required")
@@ -347,6 +347,30 @@ def resolveImageNameForHarbor(String imageRef) {
   return resolved
 }
 
+def paasShellKeepaliveHelper() {
+  return '''    JENKINS_SH_KEEPALIVE=true
+    JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-20}"
+    run_with_keepalive() {
+      if [ "${JENKINS_SH_KEEPALIVE:-true}" != "true" ]; then
+        "$@"
+        return $?
+      fi
+      _rwk_sec="${JENKINS_SH_KEEPALIVE_SEC:-20}"
+      echo "[image] (keepalive) starting $* at $(date -u +%Y-%m-%dT%H:%M:%SZ) — heartbeat every ${_rwk_sec}s (foreground cmd; JENKINS-48300)"
+      ( while true; do
+          sleep "${_rwk_sec}"
+          echo "[image] (keepalive) $* still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done ) &
+      _rwk_hb=$!
+      "$@"
+      _rwk_rc=$?
+      kill "${_rwk_hb}" 2>/dev/null || true
+      wait "${_rwk_hb}" 2>/dev/null || true
+      return "${_rwk_rc}"
+    }
+'''
+}
+
 def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
   def registry = registryHostFor(imageRef)
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
@@ -400,60 +424,68 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     }
   }
 
+  println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
     set -eu
-    JENKINS_SH_KEEPALIVE=true
-    JENKINS_SH_KEEPALIVE_SEC="\${JENKINS_SH_KEEPALIVE_SEC:-45}"
-    run_with_keepalive() {
-      _rwk_sec="\${JENKINS_SH_KEEPALIVE_SEC}"
-      "\$@" &
-      _rwk_cmdpid=\$!
-      echo "[image] (keepalive) pid=\${_rwk_cmdpid} started \$(date -u +%Y-%m-%dT%H:%M:%SZ) — heartbeat every \${_rwk_sec}s (JENKINS-48300)"
-      _rwk_n=0
-      while kill -0 "\${_rwk_cmdpid}" 2>/dev/null; do
-        sleep "\${_rwk_sec}"
-        _rwk_n=\$((_rwk_n+1))
-        echo "[image] (keepalive #\${_rwk_n}) pid=\${_rwk_cmdpid} still running \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      done
-      wait "\${_rwk_cmdpid}"
-    }
+${paasShellKeepaliveHelper()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
-      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
-        if [ ! -d node_modules/next ]; then
-          echo "[image] crane-next16-202605: npm ci before next build (fast pipeline skips Step 3)"
-          npm config set progress true 2>/dev/null || true
-          npm config set fetch-timeout 1800000 2>/dev/null || true
-          NM_SNAP=""
-          if [ "\${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "\${JENKINS_HOME:-}" ] && [ -n "\${PROJECT_ID:-}" ] && [ -f package-lock.json ]; then
-            LOCK_HASH=\$(sha256sum package-lock.json 2>/dev/null | awk '{print \$1}')
-            if [ -n "\$LOCK_HASH" ]; then
-              NM_SNAP="\${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/\${PROJECT_ID}/\${LOCK_HASH}"
-            fi
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] && [ ! -d node_modules/next ]; then
+        echo "[image] crane-next16-202605-j48300: npm ci (prefer Step 3 with JENKINS_PAAS_FAST_PIPELINE=false)"
+        npm config set progress true 2>/dev/null || true
+        npm config set fetch-timeout 1800000 2>/dev/null || true
+        NM_SNAP=""
+        if [ "\${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "\${JENKINS_HOME:-}" ] && [ -n "\${PROJECT_ID:-}" ] && [ -f package-lock.json ]; then
+          LOCK_HASH=\$(sha256sum package-lock.json 2>/dev/null | awk '{print \$1}')
+          if [ -n "\$LOCK_HASH" ]; then
+            NM_SNAP="\${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/\${PROJECT_ID}/\${LOCK_HASH}"
           fi
-          if [ -n "\$NM_SNAP" ] && [ -d "\${NM_SNAP}/.new/node_modules" ]; then
-            echo "[image] restore node_modules from snapshot (skip full npm ci when lock unchanged)"
+        fi
+        _deps_ok=0
+        if [ -n "\$NM_SNAP" ] && [ -d "\$NM_SNAP" ] && [ -n "\$(ls -A "\$NM_SNAP" 2>/dev/null)" ]; then
+          echo "[image] restore node_modules from snapshot"
+          rm -rf node_modules
+          mkdir -p node_modules
+          cp -a "\${NM_SNAP}/." node_modules/
+          if run_with_keepalive npm install --no-audit --no-fund --prefer-offline --loglevel info; then
+            _deps_ok=1
+          else
+            echo "[image] snapshot stale; full npm ci"
             rm -rf node_modules
-            cp -a "\${NM_SNAP}/.new/node_modules" node_modules/
-            run_with_keepalive npm install --no-audit --no-fund --prefer-offline --loglevel info || \\
-              { rm -rf node_modules; run_with_keepalive npm ci --no-audit --no-fund --loglevel info; }
-          elif [ -f package-lock.json ]; then
+          fi
+        fi
+        if [ "\${_deps_ok}" != "1" ]; then
+          if [ -f package-lock.json ]; then
             run_with_keepalive npm ci --no-audit --no-fund --loglevel info
           else
             run_with_keepalive npm install --no-audit --no-fund --loglevel info
           fi
-          if [ -n "\$NM_SNAP" ] && [ -d node_modules ]; then
-            mkdir -p "\${NM_SNAP}.new"
-            rm -rf "\${NM_SNAP}.new/node_modules"
-            cp -a node_modules "\${NM_SNAP}.new/node_modules"
-            rm -rf "\$NM_SNAP" && mv "\${NM_SNAP}.new" "\$NM_SNAP"
-          fi
         fi
-        echo "[image] crane-next16-202605: Next.js production build (crane path does not run Dockerfile; no --no-lint on Next 16+)"
+        if [ -n "\$NM_SNAP" ] && [ -d node_modules ]; then
+          mkdir -p "\$(dirname "\$NM_SNAP")"
+          rm -rf "\${NM_SNAP}.new" "\$NM_SNAP"
+          mkdir -p "\${NM_SNAP}.new"
+          cp -a node_modules/. "\${NM_SNAP}.new/"
+          mv "\${NM_SNAP}.new" "\$NM_SNAP"
+          echo "[image] node_modules snapshot saved → \$NM_SNAP"
+        fi
+      else
+        echo "[image] Step 6a skip — node_modules/next or .next already present"
+      fi
+    fi
+  """
+
+  println "[image] Step 6b — Next.js production build (separate sh)"
+  sh """
+    set -eu
+${paasShellKeepaliveHelper()}
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
+        echo "[image] crane-next16-202605-j48300: npx next build"
         NB_FLAGS=""
         if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
         _next_hb=""
         if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
-          _hb_sec="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+          _hb_sec="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-20}"
           ( while true; do echo "[image] (next heartbeat) still building… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep "\${_hb_sec}"; done ) &
           _next_hb=\$!
           trap 'kill "\${_next_hb}" 2>/dev/null || true' EXIT
@@ -462,10 +494,15 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         if [ -n "\${_next_hb}" ]; then kill "\${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
       fi
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
-        echo "[image] ERROR: Next.js build still missing .next/BUILD_ID — cannot ship npm start image"
+        echo "[image] ERROR: Next.js build still missing .next/BUILD_ID"
         exit 1
       fi
     fi
+  """
+
+  println "[image] Step 6c — layer tar + crane append"
+  sh """
+    set -eu
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
@@ -544,7 +581,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   """
 }
 
-def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: "built-in"
+def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def branchName = params.BRANCH?.trim() ?: "main"
 def gitUrl = params.GIT_URL?.trim() ?: ""
 def imageName = params.IMAGE_NAME?.trim() ?: ""
@@ -556,7 +593,7 @@ def imagePushPending = false
 def imagePublishedViaCrane = false
 def cosignImageRef = ""
 
-node(agentLabel) {
+def runPaasDeploy = {
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
   env.HARBOR_USERNAME = (params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: "").trim()
   env.HARBOR_PASSWORD = (params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: "").trim()
@@ -572,8 +609,10 @@ node(agentLabel) {
   env.ARTIFACTORY_USERNAME = (params.ARTIFACTORY_USERNAME?.trim() ?: env.ARTIFACTORY_USERNAME ?: "").trim()
   env.ARTIFACTORY_PASSWORD = (params.ARTIFACTORY_PASSWORD?.trim() ?: env.ARTIFACTORY_PASSWORD ?: "").trim()
   env.ARTIFACTORY_ACCESS_TOKEN = (params.ARTIFACTORY_ACCESS_TOKEN?.trim() ?: env.ARTIFACTORY_ACCESS_TOKEN ?: "").trim()
+  def cosignPem = (params.COSIGN_PRIVATE_KEY?.trim() ?: env.COSIGN_PRIVATE_KEY ?: "").trim()
+  env.COSIGN_PRIVATE_KEY = cosignPem.contains('\\n') ? cosignPem.replaceAll(/\\n/, '\n') : cosignPem
   env.COSIGN_PASSWORD = env.COSIGN_PASSWORD ?: ""
-  env.COSIGN_ALLOW_INSECURE_REGISTRY = env.COSIGN_ALLOW_INSECURE_REGISTRY ?: ""
+  env.COSIGN_ALLOW_INSECURE_REGISTRY = (params.COSIGN_ALLOW_INSECURE_REGISTRY?.trim() ?: env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim()
   env.HELM_OCI_PROJECT = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: "paas").trim()
   env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "").trim()
   env.HELM_OCI_PLAIN_HTTP = (params.HELM_OCI_PLAIN_HTTP?.trim() ?: env.HELM_OCI_PLAIN_HTTP ?: "").trim()
@@ -583,6 +622,7 @@ node(agentLabel) {
   env.JENKINS_PAAS_NODE_CACHE = (params.JENKINS_PAAS_NODE_CACHE?.trim() ?: env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   env.JENKINS_PAAS_NPM_CACHE = (params.JENKINS_PAAS_NPM_CACHE?.trim() ?: env.JENKINS_PAAS_NPM_CACHE ?: "").trim()
   env.JENKINS_SH_KEEPALIVE = (params.JENKINS_SH_KEEPALIVE?.trim() ?: env.JENKINS_SH_KEEPALIVE ?: "true").trim()
+  env.JENKINS_SH_KEEPALIVE_SEC = (params.JENKINS_SH_KEEPALIVE_SEC?.trim() ?: env.JENKINS_SH_KEEPALIVE_SEC ?: "20").trim()
   env.JENKINS_NEXT_BUILD_WEBPACK = (params.JENKINS_NEXT_BUILD_WEBPACK?.trim() ?: env.JENKINS_NEXT_BUILD_WEBPACK ?: "").trim()
   env.JENKINS_NEXT_PERSIST_CACHE = (params.JENKINS_NEXT_PERSIST_CACHE?.trim() ?: env.JENKINS_NEXT_PERSIST_CACHE ?: "").trim()
   env.JENKINS_NEXT_BUILD_HEARTBEAT = (params.JENKINS_NEXT_BUILD_HEARTBEAT?.trim() ?: env.JENKINS_NEXT_BUILD_HEARTBEAT ?: "true").trim()
@@ -617,7 +657,7 @@ node(agentLabel) {
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
-  println "[paas-jenkinsfile] marker=crane-next16-202605 (Step 6 dockerless: npm ci + npx next build without --no-lint)"
+  println "[paas-jenkinsfile] marker=crane-next16-202605-j48300-split (node{} built-in; Step 6a/6b/6c; foreground cmd JENKINS-48300)"
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -717,23 +757,24 @@ node(agentLabel) {
             npm config set fetch-retry-maxtimeout 120000
             npm config set fetch-timeout 1800000
             echo "[build] node $(node -v) npm $(npm -v) registry=$(npm config get registry) maxsockets=$(npm config get maxsockets)"
-            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-45}"
+            JENKINS_SH_KEEPALIVE_SEC="${JENKINS_SH_KEEPALIVE_SEC:-20}"
             run_with_keepalive() {
               if [ "${JENKINS_SH_KEEPALIVE:-true}" != "true" ]; then
                 "$@"
                 return $?
               fi
-              _rwk_sec="${JENKINS_SH_KEEPALIVE_SEC}"
-              "$@" &
-              _rwk_cmdpid=$!
-              echo "[build] (keepalive) subprocess pid=${_rwk_cmdpid} started $(date -u +%Y-%m-%dT%H:%M:%SZ) — main-shell heartbeat every ${_rwk_sec}s"
-              _rwk_n=0
-              while kill -0 "${_rwk_cmdpid}" 2>/dev/null; do
-                sleep "${_rwk_sec}"
-                _rwk_n=$((_rwk_n+1))
-                echo "[build] (keepalive #${_rwk_n}) pid=${_rwk_cmdpid} still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              done
-              wait "${_rwk_cmdpid}"
+              _rwk_sec="${JENKINS_SH_KEEPALIVE_SEC:-20}"
+              echo "[build] (keepalive) starting $* at $(date -u +%Y-%m-%dT%H:%M:%SZ) — heartbeat every ${_rwk_sec}s (foreground cmd; JENKINS-48300)"
+              ( while true; do
+                  sleep "${_rwk_sec}"
+                  echo "[build] (keepalive) $* still running $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                done ) &
+              _rwk_hb=$!
+              "$@"
+              _rwk_rc=$?
+              kill "${_rwk_hb}" 2>/dev/null || true
+              wait "${_rwk_hb}" 2>/dev/null || true
+              return "${_rwk_rc}"
             }
             LOG_ARG=""
             if [ -n "${JENKINS_NPM_LOGLEVEL:-}" ]; then
@@ -1358,5 +1399,18 @@ EOF
     def buildResult = currentBuild.currentResult ?: 'SUCCESS'
     println "PAAS_BUILD_COMPLETE result=${buildResult} image=${artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
+  }
+}
+
+// built-in label mismatch on Jenkins 2.5xx K8s — empty label uses default Built-In Node
+if (!agentLabel || agentLabel == 'built-in') {
+  println "[paas] node: default Built-In Node (agentLabel=${agentLabel ?: 'empty'})"
+  node {
+    runPaasDeploy()
+  }
+} else {
+  println "[paas] node: agentLabel=${agentLabel}"
+  node(agentLabel) {
+    runPaasDeploy()
   }
 }

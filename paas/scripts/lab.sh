@@ -34,8 +34,15 @@ case "$cmd" in
     bash "$DIR/diagnose-integration-pods-lab.sh" ;;
   integrations-start)
     bash "$DIR/start-lab-integration-workloads.sh" ;;
+  security|sec)
+    if [[ -f "$DIR/setup-security-lab.sh" ]]; then
+      bash "$DIR/setup-security-lab.sh"
+    else
+      echo "ERROR: missing $DIR/setup-security-lab.sh — git pull or copy from repo (paas/scripts/setup-security-lab.sh)" >&2
+      exit 1
+    fi ;;
   "")
-    echo "usage: lab.sh start|health|integrations|integrations-diagnose|..."
+    echo "usage: lab.sh start|health|security|integrations|integrations-diagnose|..."
     exit 1 ;;
   *)
     echo "unknown: $cmd"
