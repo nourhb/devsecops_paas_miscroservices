@@ -131,7 +131,11 @@ else
   fi
 
   if echo "${CONSOLE}" | grep -q "unknown option '--webpack'"; then
-    fail "Step 3 hit --webpack CLI bug — git pull + fix-jenkins-paas-deploy-pipeline-lab.sh"
+    if echo "${CFG}" | grep -qF 'do not pass --webpack'; then
+      warn "build #${BUILD} failed with old --webpack bug — job config is fixed; trigger a NEW deploy from PaaS"
+    else
+      fail "Step 3 --webpack bug still in Jenkins job config — run: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full"
+    fi
   fi
 fi
 
