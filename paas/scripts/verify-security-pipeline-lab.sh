@@ -203,7 +203,8 @@ else
   echo ""
   echo "Security UI is empty because one or more links in the chain above failed."
   echo "Typical lab fix (run on VM):"
-  echo "  AUTO_FIX=1 PROJECT_ID=<uuid> bash paas/scripts/verify-security-pipeline-lab.sh"
-  echo "  # then Deploy from PaaS UI (not Rebuild), wait Jenkins SUCCESS, re-run this script"
+  echo "  git pull"
+  echo "  PROJECT_ID=<uuid> python3 paas/scripts/trigger-paas-deploy-lab.py"
+  echo "  # or Deploy from PaaS UI; wait Jenkins SUCCESS; re-run this script"
   exit 1
 fi
