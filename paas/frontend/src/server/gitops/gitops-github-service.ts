@@ -100,60 +100,114 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         }
         throw new IntegrationError(`GitHub GET ${path} failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    let sha: string | undefined;
-    let contentYaml: string;
-    if (getRes.status === 404) {
-        const parts = splitImageRef(imageTag);
-        contentYaml = stringifyYaml({ image: { repository: parts.repository, tag: parts.tag } });
-    }
-    else if (!getRes.ok) {
-        const t = await getRes.text();
-        if (allowSimulation() && (getRes.status === 401 || getRes.status === 403)) {
+    const message = bootstrap.bootstrapped
+        ? `chore(gitops): bootstrap ${projectName} Helm chart and bump ${imageTag}`
+        : env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
+
+    async function loadExistingValues(): Promise<{
+        sha?: string;
+        contentYaml: string;
+    }> {
+        const res = await integrationFetch(`${base}?ref=${encodeURIComponent(branch)}`, {
+            headers: githubHeaders(token)
+        });
+        if (res.status === 404) {
+            const parts = splitImageRef(imageTag);
             return {
-                committed: true,
-                ref: `simulated:gitops:${branch}:${projectName}:${imageTag} (GitHub ${getRes.status} — check GITOPS_REPO_TOKEN or use a real PAT)`,
-                chartBootstrapped: false
+                contentYaml: stringifyYaml({ image: { repository: parts.repository, tag: parts.tag } })
             };
         }
-        throw new IntegrationError(`GitHub GET ${path} failed (${getRes.status}): ${t.slice(0, 600)}`);
-    }
-    else {
-        const meta = (await getRes.json()) as {
+        if (!res.ok) {
+            const t = await res.text();
+            throw new IntegrationError(`GitHub GET ${path} failed (${res.status}): ${t.slice(0, 600)}`);
+        }
+        const meta = (await res.json()) as {
             sha?: string;
             content?: string;
             encoding?: string;
         };
-        sha = meta.sha;
         if (!meta.content || meta.encoding !== "base64") {
             throw new IntegrationError(`GitHub file ${path} has unexpected payload (missing base64 content).`);
         }
-        contentYaml = Buffer.from(meta.content.replace(/\n/g, ""), "base64").toString("utf8");
-        const doc = parseYaml(contentYaml) as Record<string, unknown>;
+        const yamlText = Buffer.from(meta.content.replace(/\n/g, ""), "base64").toString("utf8");
+        const doc = parseYaml(yamlText) as Record<string, unknown>;
         if (!doc || typeof doc !== "object") {
             throw new IntegrationError(`Values file ${path} is not a YAML object.`);
         }
         setImageTag(doc, imageTag);
         applyDeployValuesDefaults(doc, projectName);
-        contentYaml = stringifyYaml(doc);
+        return { sha: meta.sha, contentYaml: stringifyYaml(doc) };
     }
-    const message = bootstrap.bootstrapped
-        ? `chore(gitops): bootstrap ${projectName} Helm chart and bump ${imageTag}`
-        : env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
-    const body: Record<string, string> = {
-        message,
-        content: Buffer.from(contentYaml, "utf8").toString("base64"),
-        branch
-    };
-    if (sha) {
-        body.sha = sha;
+
+    let contentYaml: string;
+    let sha: string | undefined;
+    try {
+        if (getRes.status === 404) {
+            const loaded = await loadExistingValues();
+            contentYaml = loaded.contentYaml;
+            sha = loaded.sha;
+        }
+        else if (!getRes.ok) {
+            const t = await getRes.text();
+            if (allowSimulation() && (getRes.status === 401 || getRes.status === 403)) {
+                return {
+                    committed: true,
+                    ref: `simulated:gitops:${branch}:${projectName}:${imageTag} (GitHub ${getRes.status} — check GITOPS_REPO_TOKEN or use a real PAT)`,
+                    chartBootstrapped: false
+                };
+            }
+            throw new IntegrationError(`GitHub GET ${path} failed (${getRes.status}): ${t.slice(0, 600)}`);
+        }
+        else {
+            const loaded = await loadExistingValues();
+            contentYaml = loaded.contentYaml;
+            sha = loaded.sha;
+        }
     }
-    const putRes = await integrationFetch(base, {
-        method: "PUT",
-        headers: { ...githubHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-    });
-    if (!putRes.ok) {
+    catch (e) {
+        if (allowSimulation()) {
+            return {
+                committed: true,
+                ref: `simulated:gitops:get:${branch}:${projectName}:${imageTag} (GitHub unreachable)`,
+                chartBootstrapped: false
+            };
+        }
+        throw e;
+    }
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const body: Record<string, string> = {
+            message,
+            content: Buffer.from(contentYaml, "utf8").toString("base64"),
+            branch
+        };
+        if (sha) {
+            body.sha = sha;
+        }
+        const putRes = await integrationFetch(base, {
+            method: "PUT",
+            headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        if (putRes.ok) {
+            const result = (await putRes.json()) as {
+                commit?: {
+                    sha?: string;
+                };
+            };
+            return {
+                committed: true,
+                ref: result.commit?.sha ?? `${branch}:${path}`,
+                chartBootstrapped: bootstrap.bootstrapped
+            };
+        }
         const t = await putRes.text();
+        if (putRes.status === 409 && attempt < 3) {
+            const refreshed = await loadExistingValues();
+            contentYaml = refreshed.contentYaml;
+            sha = refreshed.sha;
+            continue;
+        }
         if (allowSimulation() && (putRes.status === 401 || putRes.status === 403)) {
             return {
                 committed: true,
@@ -163,14 +217,5 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         }
         throw new IntegrationError(`GitHub PUT ${path} failed (${putRes.status}): ${t.slice(0, 800)}`);
     }
-    const result = (await putRes.json()) as {
-        commit?: {
-            sha?: string;
-        };
-    };
-    return {
-        committed: true,
-        ref: result.commit?.sha ?? `${branch}:${path}`,
-        chartBootstrapped: bootstrap.bootstrapped
-    };
+    throw new IntegrationError(`GitHub PUT ${path} failed after retries (409 conflict on ${path}).`);
 }
