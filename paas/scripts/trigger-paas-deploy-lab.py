@@ -42,24 +42,49 @@ def build_image_name(project_name: str) -> str:
     raise SystemExit("ERROR: set HARBOR_BASE_URL or HARBOR_REGISTRY in docker-compose.env")
 
 
+def postgres_creds() -> tuple[str, str, str, str]:
+    """Return (user, password, database, kubectl_target)."""
+    ns = os.environ.get("PAAS_NS", "paas")
+    target = os.environ.get("POSTGRES_KUBE_TARGET", f"deploy/postgres -n {ns}")
+    url = os.environ.get("DATABASE_URL", "").strip()
+    user, password, db = "postgres", "root", "paas"
+    if url.startswith("postgresql://") or url.startswith("postgres://"):
+        parsed = urllib.parse.urlparse(url)
+        if parsed.username:
+            user = urllib.parse.unquote(parsed.username)
+        if parsed.password:
+            password = urllib.parse.unquote(parsed.password)
+        if parsed.path and parsed.path.strip("/"):
+            db = urllib.parse.unquote(parsed.path.lstrip("/").split("?")[0])
+    user = os.environ.get("POSTGRES_USER", user)
+    password = os.environ.get("POSTGRES_PASSWORD", password)
+    db = os.environ.get("POSTGRES_DB", db)
+    return user, password, db, target
+
+
 def fetch_project_from_db(project_id: str) -> tuple[str, str, str]:
     """Return (git_url, branch, project_name) from PaaS Postgres via kubectl."""
+    user, password, db, target = postgres_creds()
+    ns = os.environ.get("PAAS_NS", "paas")
     sql = (
         'SELECT "gitRepositoryUrl", branch, "projectName" FROM "Project" '
         f"WHERE id='{project_id}' LIMIT 1;"
     )
+    # Escape single quotes in project_id (uuid has none)
     cmd = [
         "kubectl",
         "exec",
         "-n",
-        os.environ.get("PAAS_NS", "paas"),
+        ns,
         "deploy/postgres",
         "--",
+        "env",
+        f"PGPASSWORD={password}",
         "psql",
         "-U",
-        os.environ.get("POSTGRES_USER", "paas"),
+        user,
         "-d",
-        os.environ.get("POSTGRES_DB", "paas"),
+        db,
         "-t",
         "-A",
         "-F|",
