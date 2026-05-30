@@ -836,15 +836,13 @@ def runPaasDeploy = {
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS=""
                 if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
-                  echo "[build] Next.js 16+: omitting --no-lint; default bundler is Turbopack (faster, more log output). Set JENKINS_NEXT_BUILD_WEBPACK=true for webpack only if needed."
+                  echo "[build] Next.js 16+: omitting --no-lint (removed in Next 16 CLI); default bundler is Turbopack. Set JENKINS_NEXT_BUILD_WEBPACK=true for webpack only if needed."
                   if [ "${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then
                     NB_FLAGS="--webpack"
                   fi
                 else
+                  echo "[build] Next.js 15: --no-lint only (do not pass --webpack — not supported on next build CLI; see Step 6b crane-next16 fix)."
                   NB_FLAGS="--no-lint"
-                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
-                    NB_FLAGS="$NB_FLAGS --webpack"
-                  fi
                 fi
                 if [ "${JENKINS_NEXT_PERSIST_CACHE:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${PROJECT_ID:-}" ]; then
                   NCROOT="${JENKINS_HOME}/.jenkins-paas-cache/next-cache/${PROJECT_ID}"
@@ -853,7 +851,7 @@ def runPaasDeploy = {
                   ln -sfn "$NCROOT" .next/cache
                   echo "[build] Next.js cache → $NCROOT (disable: JENKINS_NEXT_PERSIST_CACHE=false)"
                 fi
-                echo "[build] npx next build ${NB_FLAGS:-"(default bundler)"} — Next 15: --no-lint + webpack unless JENKINS_NEXT_BUILD_WEBPACK=false"
+                echo "[build] npx next build ${NB_FLAGS:-"(default bundler)"} — Step 3 aligned with Step 6b (no --webpack unless JENKINS_NEXT_BUILD_WEBPACK=true on Next 16+)"
                 _next_hb=""
                 if [ "${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
                   _hb_sec="${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"

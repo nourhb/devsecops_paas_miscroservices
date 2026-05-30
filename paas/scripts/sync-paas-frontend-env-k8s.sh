@@ -88,6 +88,30 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   if [ -n "$SMTP_PASS" ]; then echo "SMTP_PASS=set"; else echo "SMTP_PASS=MISSING"; fi
 ' 2>/dev/null || echo "WARN: could not exec into pod yet — wait for rollout, then re-run check"
 
+echo "==> Security integrations in pod (values hidden)"
+SECURITY_OK=1
+kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
+  for v in SONAR_BASE_URL SONAR_TOKEN DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_API_KEY JENKINS_PAAS_FAST_PIPELINE; do
+    eval "val=\$$v"
+    if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
+  done
+' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
+
+if grep -qE '^SONAR_TOKEN=' "${ENV_FILE}" && grep -qE '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}"; then
+  :
+else
+  echo ""
+  echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN and/or DEPENDENCY_TRACK_API_KEY."
+  echo "      Jenkins Steps 4–5 will skip Sonar/Dependency-Track until these are set."
+  echo "      Run: bash paas/scripts/setup-security-lab.sh"
+  SECURITY_OK=0
+fi
+
 echo ""
-echo "OK. Register again; API should return mailDelivery=smtp."
-echo "If mail still fails, check logs: kubectl logs -n ${PAAS_NS} deploy/${DEPLOY_NAME} --tail=80 | grep -E 'auth-mail|register|SMTP|EAUTH'"
+if [[ "${SECURITY_OK}" -eq 1 ]]; then
+  echo "OK. Trigger a NEW deploy from PaaS; Jenkins console should show SBOM upload + Sonar analysis (not 'non configuré')."
+else
+  echo "Fix security env keys above, re-run this script, then deploy again."
+fi
+echo "Register/mail: API should return mailDelivery=smtp when SMTP_* are set."
+echo "If mail still fails: kubectl logs -n ${PAAS_NS} deploy/${DEPLOY_NAME} --tail=80 | grep -E 'auth-mail|register|SMTP|EAUTH'"
