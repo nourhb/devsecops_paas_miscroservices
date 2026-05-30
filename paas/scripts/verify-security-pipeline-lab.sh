@@ -20,6 +20,9 @@ set +u
 # shellcheck disable=SC1090
 source "${ENV_FILE}" 2>/dev/null || true
 set -u
+# Lab scripts run on VM host — use loopback NodePort, not in-cluster service URL.
+JENKINS_URL="${JENKINS_PROBE_URL:-${JENKINS_LAB_LOOPBACK:-${JENKINS_URL}}}"
+JENKINS_URL="${JENKINS_URL%/}"
 
 if [[ -z "${JENKINS_USERNAME:-}" || -z "${JENKINS_API_TOKEN:-}" ]]; then
   echo "ERROR: JENKINS_USERNAME / JENKINS_API_TOKEN required in ${ENV_FILE}" >&2
@@ -37,24 +40,29 @@ for k in SONAR_BASE_URL SONAR_TOKEN DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_A
 done
 
 if kubectl get deployment frontend -n paas >/dev/null 2>&1; then
-  kubectl exec -n paas deploy/frontend -- sh -c '
-    for v in SONAR_TOKEN DEPENDENCY_TRACK_API_KEY SONAR_BASE_URL DEPENDENCY_TRACK_BASE_URL JENKINS_PAAS_FAST_PIPELINE; do
-      eval "val=\$$v"
-      if [ -n "$val" ]; then echo "'"${v}"'=set"; else echo "'"${v}"'=MISSING"; fi
+  POD_ENV="$(kubectl exec -n paas deploy/frontend -- sh -c '
+    for key in SONAR_TOKEN DEPENDENCY_TRACK_API_KEY SONAR_BASE_URL DEPENDENCY_TRACK_BASE_URL JENKINS_PAAS_FAST_PIPELINE; do
+      eval "val=\$$key"
+      if [ -n "$val" ]; then echo "$key=set"; else echo "$key=MISSING"; fi
     done
-  ' 2>/dev/null | while read -r line; do
-    if [[ "${line}" == *MISSING* ]]; then fail "pod ${line}"; else ok "pod ${line}"; fi
-  done
+  ' 2>/dev/null || true)"
+  if [[ -n "${POD_ENV}" ]]; then
+    while IFS= read -r line; do
+      if [[ "${line}" == *MISSING* ]]; then fail "pod ${line}"; else ok "pod ${line}"; fi
+    done <<< "${POD_ENV}"
+  else
+    warn "could not read env from frontend pod"
+  fi
 else
   warn "paas/frontend pod not found — skip pod check"
 fi
 
 echo ""
 echo "=== 2. Jenkins job must define SONAR_* / DEPENDENCY_TRACK_* parameters ==="
-CFG="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
   "${JENKINS_URL}/job/${JOB}/config.xml" 2>/dev/null || true)"
 if [[ -z "${CFG}" ]]; then
-  fail "cannot fetch Jenkins job config.xml"
+  fail "cannot fetch Jenkins job config.xml from ${JENKINS_URL} (check JENKINS_USERNAME/API_TOKEN)"
 else
   for p in SONAR_HOST_URL SONAR_TOKEN DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_API_KEY; do
     if echo "${CFG}" | grep -q "<name>${p}</name>"; then
@@ -62,10 +70,10 @@ else
     else
       fail "job parameter ${p} NOT in paas-deploy — PaaS trigger values are dropped"
       if [[ "${AUTO_FIX}" == "1" ]]; then
-        echo "     AUTO_FIX: running create_jenkins_paas_deploy_job.py --force-full"
+        echo "     AUTO_FIX: running create_jenkins_paas_deploy_job.py --force --force-full"
         set -a; source "${ENV_FILE}"; set +a
-        python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force-full
-        CFG="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" "${JENKINS_URL}/job/${JOB}/config.xml")"
+        python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+        CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" "${JENKINS_URL}/job/${JOB}/config.xml" 2>/dev/null || true)"
       fi
     fi
   done
@@ -84,7 +92,7 @@ fi
 
 echo ""
 echo "=== 3. Last Jenkins build (must SUCCESS + Steps 4–5 for Security UI data) ==="
-LAST_JSON="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+LAST_JSON="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
   "${JENKINS_URL}/job/${JOB}/lastBuild/api/json" 2>/dev/null || echo '{}')"
 BUILD="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('number') or 0)" 2>/dev/null || echo 0)"
 RESULT="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result') or 'NONE')" 2>/dev/null || echo NONE)"
