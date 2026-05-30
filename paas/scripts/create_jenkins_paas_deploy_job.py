@@ -440,7 +440,12 @@ def main() -> int:
             return 1
         verify_code, verify_cfg = client.call(job_cfg)
         if verify_code == 200:
-            for name in ("SONAR_TOKEN", "DEPENDENCY_TRACK_API_KEY", "SONAR_HOST_URL"):
+            for name in (
+                "SONAR_HOST_URL",
+                "SONAR_TOKEN",
+                "DEPENDENCY_TRACK_BASE_URL",
+                "DEPENDENCY_TRACK_API_KEY",
+            ):
                 if job_defines_string_parameter(verify_cfg, name):
                     print(f"OK: job parameter {name} defined")
                 else:
