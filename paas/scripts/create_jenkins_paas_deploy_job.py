@@ -359,7 +359,7 @@ def main() -> int:
     token = os.environ.get("JENKINS_API_TOKEN") or os.environ.get("JENKINS_TOKEN") or ""
     job = os.environ.get("JOB_NAME", "paas-deploy")
     minimal = "--minimal" in sys.argv
-    force = "--force" in sys.argv
+    force = "--force" in sys.argv or "--force-full" in sys.argv
     force_full = "--force-full" in sys.argv
     jenkinsfile = Path(os.environ.get("JENKINSFILE", str(DEFAULT_JENKINSFILE)))
 

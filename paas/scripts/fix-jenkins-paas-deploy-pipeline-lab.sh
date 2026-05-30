@@ -40,7 +40,7 @@ done
 
 echo "==> 3. Push pipeline + full job parameters (SONAR_*, DEPENDENCY_TRACK_*) to Jenkins"
 export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
-python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force-full
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 
 echo "==> 4. Update PaaS pod Jenkinsfile mount (safe even when sync is disabled)"
 if command -v kubectl >/dev/null 2>&1; then
