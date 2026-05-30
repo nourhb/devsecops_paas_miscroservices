@@ -5,6 +5,38 @@ type ParamDef = readonly [
     name: string,
     defaultValue: string
 ];
+/** Job param names populated from PaaS env when syncing Jenkins (fallback if trigger omits them). */
+const ENV_BACKED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
+    HARBOR_REGISTRY: env.HARBOR_REGISTRY,
+    HARBOR_USERNAME: env.HARBOR_USERNAME,
+    HARBOR_PASSWORD: env.HARBOR_PASSWORD,
+    DOCKERHUB_USERNAME: env.DOCKERHUB_USERNAME,
+    DOCKERHUB_TOKEN: env.DOCKERHUB_TOKEN,
+    SONAR_HOST_URL: env.SONAR_BASE_URL,
+    SONAR_TOKEN: env.SONAR_TOKEN,
+    DEPENDENCY_TRACK_BASE_URL: env.DEPENDENCY_TRACK_BASE_URL,
+    DEPENDENCY_TRACK_API_KEY: env.DEPENDENCY_TRACK_API_KEY,
+    NVD_API_KEY: env.NVD_API_KEY,
+    ZAP_TARGET_URL: env.ZAP_TARGET_URL,
+    BUILD_PACKAGE_PROXY_URL: env.BUILD_PACKAGE_PROXY_URL,
+    NPM_CONFIG_REGISTRY: env.BUILD_NPM_REGISTRY,
+    ARTIFACTORY_URL: env.ARTIFACTORY_URL,
+    ARTIFACTORY_REPOSITORY: env.ARTIFACTORY_REPOSITORY,
+    ARTIFACTORY_USERNAME: env.ARTIFACTORY_USERNAME,
+    ARTIFACTORY_PASSWORD: env.ARTIFACTORY_PASSWORD,
+    ARTIFACTORY_ACCESS_TOKEN: env.ARTIFACTORY_ACCESS_TOKEN,
+    ARTIFACTORY_CREDENTIALS_ID: env.ARTIFACTORY_CREDENTIALS_ID,
+    COSIGN_CREDENTIALS_ID: env.COSIGN_CREDENTIALS_ID,
+    COSIGN_PRIVATE_KEY: env.COSIGN_PRIVATE_KEY,
+    HELM_OCI_PROJECT: env.HELM_OCI_PROJECT
+};
+function resolveParameterDefault(name: string, fallback: string): string {
+    const fromEnv = ENV_BACKED_PARAMETER_DEFAULTS[name]?.trim();
+    return fromEnv || fallback;
+}
+function getParameterDefinitions(): ParamDef[] {
+    return PARAMETER_DEFINITIONS.map(([name, defaultValue]) => [name, resolveParameterDefault(name, defaultValue)]);
+}
 const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_AGENT_LABEL", ""],
     ["GIT_URL", ""],
@@ -67,7 +99,7 @@ function stringParameterDefinitionXml(paramIndent: string, name: string, default
 }
 function parameterPropertyXml(indent: string): string {
     const paramIndent = `${indent}      `;
-    const params = PARAMETER_DEFINITIONS.map(([name, defaultValue]) => stringParameterDefinitionXml(paramIndent, name, defaultValue));
+    const params = getParameterDefinitions().map(([name, defaultValue]) => stringParameterDefinitionXml(paramIndent, name, defaultValue));
     return (`${indent}<hudson.model.ParametersDefinitionProperty>\n` +
         `${indent}  <parameterDefinitions>\n` +
         `${params.join("\n")}\n` +
@@ -87,7 +119,7 @@ function mergeMissingParameterDefinitions(xml: string): string {
         return xml;
     }
     const paramBlockIndent = `${m[1]}  `;
-    const missing = PARAMETER_DEFINITIONS.filter(([n]) => !jobDefinesStringParameter(xml, n));
+    const missing = getParameterDefinitions().filter(([n]) => !jobDefinesStringParameter(xml, n));
     if (!missing.length) {
         return xml;
     }
@@ -95,6 +127,30 @@ function mergeMissingParameterDefinitions(xml: string): string {
         .map(([n, dv]) => stringParameterDefinitionXml(paramBlockIndent, n, dv))
         .join("\n");
     return xml.replace(closeRe, `\n${blocks}\n${m[1]}</parameterDefinitions>`);
+}
+function mergeEnvBackedParameterDefaults(xml: string): string {
+    let out = xml;
+    for (const [name, defaultValue] of getParameterDefinitions()) {
+        if (!defaultValue || !Object.prototype.hasOwnProperty.call(ENV_BACKED_PARAMETER_DEFAULTS, name)) {
+            continue;
+        }
+        const nameToken = `<name>${escapeXmlText(name)}</name>`;
+        const blockRe = new RegExp(`(<hudson\\.model\\.StringParameterDefinition>[\\s\\S]*?${nameToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?<defaultValue>)([\\s\\S]*?)(</defaultValue>)`, "i");
+        const bm = blockRe.exec(out);
+        if (!bm) {
+            continue;
+        }
+        const current = bm[2]
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .trim();
+        if (current) {
+            continue;
+        }
+        out = out.slice(0, bm.index) + bm[1] + escapeXmlText(defaultValue) + bm[3] + out.slice(bm.index + bm[0].length);
+    }
+    return out;
 }
 function ensureParameterizedJobXml(xml: string): string {
     let out = xml;
@@ -110,7 +166,8 @@ function ensureParameterizedJobXml(xml: string): string {
             out = out.replace("<keepDependencies>false</keepDependencies>", `<keepDependencies>false</keepDependencies>\n  <properties>\n${prop}\n  </properties>`);
         }
     }
-    return mergeMissingParameterDefinitions(out);
+    out = mergeMissingParameterDefinitions(out);
+    return mergeEnvBackedParameterDefaults(out);
 }
 function escapeCdata(s: string): string {
     return s.replace(/]]>/g, "]]]]><![CDATA[>");

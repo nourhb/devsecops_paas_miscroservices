@@ -77,6 +77,162 @@ def esc_cdata(t: str) -> str:
     return t.replace("]]>", "]]]]><![CDATA[>")
 
 
+ENV_PARAM_DEFAULTS: dict[str, str] = {
+    "HARBOR_REGISTRY": "HARBOR_REGISTRY",
+    "HARBOR_USERNAME": "HARBOR_USERNAME",
+    "HARBOR_PASSWORD": "HARBOR_PASSWORD",
+    "DOCKERHUB_USERNAME": "DOCKERHUB_USERNAME",
+    "DOCKERHUB_TOKEN": "DOCKERHUB_TOKEN",
+    "SONAR_HOST_URL": "SONAR_BASE_URL",
+    "SONAR_TOKEN": "SONAR_TOKEN",
+    "DEPENDENCY_TRACK_BASE_URL": "DEPENDENCY_TRACK_BASE_URL",
+    "DEPENDENCY_TRACK_API_KEY": "DEPENDENCY_TRACK_API_KEY",
+    "NVD_API_KEY": "NVD_API_KEY",
+    "ZAP_TARGET_URL": "ZAP_TARGET_URL",
+    "BUILD_PACKAGE_PROXY_URL": "BUILD_PACKAGE_PROXY_URL",
+    "NPM_CONFIG_REGISTRY": "BUILD_NPM_REGISTRY",
+    "COSIGN_PRIVATE_KEY": "COSIGN_PRIVATE_KEY",
+    "HELM_OCI_PROJECT": "HELM_OCI_PROJECT",
+}
+
+FULL_PARAMETER_DEFINITIONS: list[tuple[str, str]] = [
+    ("JENKINS_AGENT_LABEL", ""),
+    ("GIT_URL", ""),
+    ("BRANCH", "main"),
+    ("IMAGE_NAME", ""),
+    ("PROJECT_ID", ""),
+    ("GIT_CREDENTIALS_ID", ""),
+    ("KANIKO_IMAGE", "gcr.io/kaniko-project/executor:debug"),
+    ("DOCKER_REGISTRY_CREDENTIALS_ID", "harbor-docker"),
+    ("DOCKERFILE_PATH", "Dockerfile"),
+    ("DOCKER_BUILD_CONTEXT", "."),
+    ("FALLBACK_IMAGE", "nginx:stable-alpine"),
+    ("DOCKERHUB_USERNAME", ""),
+    ("DOCKERHUB_TOKEN", ""),
+    ("HARBOR_REGISTRY", ""),
+    ("HARBOR_USERNAME", ""),
+    ("HARBOR_PASSWORD", ""),
+    ("SONAR_HOST_URL", ""),
+    ("SONAR_TOKEN", ""),
+    ("DEPENDENCY_TRACK_BASE_URL", ""),
+    ("DEPENDENCY_TRACK_API_KEY", ""),
+    ("NVD_API_KEY", ""),
+    ("ZAP_TARGET_URL", ""),
+    ("BUILD_PACKAGE_PROXY_URL", ""),
+    ("NPM_CONFIG_REGISTRY", ""),
+    ("JENKINS_PAAS_NODE_CACHE", ""),
+    ("JENKINS_PAAS_NPM_CACHE", ""),
+    ("JENKINS_SH_KEEPALIVE", "true"),
+    ("JENKINS_PAAS_FAST_PIPELINE", "false"),
+    ("JENKINS_NEXT_BUILD_WEBPACK", "false"),
+    ("JENKINS_NEXT_PERSIST_CACHE", "true"),
+    ("JENKINS_NEXT_BUILD_HEARTBEAT", "true"),
+    ("JENKINS_NEXT_BUILD_HEARTBEAT_SEC", "45"),
+    ("JENKINS_NPM_PRUNE_BEFORE_CRANE", "true"),
+    ("JENKINS_CRANE_STANDALONE_LAYER", "auto"),
+    ("ARTIFACTORY_URL", ""),
+    ("ARTIFACTORY_REPOSITORY", "libs-release-local"),
+    ("ARTIFACTORY_USERNAME", ""),
+    ("ARTIFACTORY_PASSWORD", ""),
+    ("ARTIFACTORY_ACCESS_TOKEN", ""),
+    ("ARTIFACTORY_CREDENTIALS_ID", ""),
+    ("COSIGN_CREDENTIALS_ID", ""),
+    ("COSIGN_PRIVATE_KEY", ""),
+    ("COSIGN_ALLOW_INSECURE_REGISTRY", "true"),
+    ("HELM_OCI_PROJECT", "paas"),
+    ("HELM_OCI_INSECURE", "false"),
+    ("HELM_OCI_PLAIN_HTTP", "false"),
+]
+
+
+def resolve_param_default(name: str, fallback: str) -> str:
+    env_key = ENV_PARAM_DEFAULTS.get(name, name)
+    val = (os.environ.get(env_key) or os.environ.get(name) or "").strip()
+    return val or fallback
+
+
+def param_block_xml(name: str, default_value: str, indent: str = "      ") -> str:
+    return (
+        f"{indent}<hudson.model.StringParameterDefinition>"
+        f"<name>{esc_xml(name)}</name>"
+        f"<description></description>"
+        f"<defaultValue>{esc_xml(default_value)}</defaultValue>"
+        f"<trim>true</trim>"
+        f"</hudson.model.StringParameterDefinition>"
+    )
+
+
+def job_defines_string_parameter(xml: str, name: str) -> bool:
+    token = f"<name>{esc_xml(name)}</name>"
+    return token in xml
+
+
+def merge_missing_parameter_definitions(existing_xml: str) -> str:
+    if "hudson.model.ParametersDefinitionProperty" not in existing_xml:
+        blocks = "\n".join(
+            param_block_xml(n, resolve_param_default(n, d), "        ")
+            for n, d in FULL_PARAMETER_DEFINITIONS
+        )
+        prop = (
+            "    <hudson.model.ParametersDefinitionProperty>\n"
+            "      <parameterDefinitions>\n"
+            f"{blocks}\n"
+            "      </parameterDefinitions>\n"
+            "    </hudson.model.ParametersDefinitionProperty>"
+        )
+        if re.search(r"<properties\s*/>", existing_xml):
+            print(f"Adding ParametersDefinitionProperty with {len(FULL_PARAMETER_DEFINITIONS)} parameter(s)")
+            return re.sub(r"<properties\s*/>", f"<properties>\n{prop}\n  </properties>", existing_xml, count=1)
+        if "</properties>" in existing_xml:
+            print(f"Adding ParametersDefinitionProperty with {len(FULL_PARAMETER_DEFINITIONS)} parameter(s)")
+            return existing_xml.replace("</properties>", f"{prop}\n  </properties>", 1)
+        print("WARN: job config has no <properties> block — cannot inject parameters automatically")
+        return existing_xml
+    close_re = re.compile(r"\n([\t ]*)</parameterDefinitions>")
+    m = close_re.search(existing_xml)
+    if not m:
+        return existing_xml
+    param_indent = f"{m.group(1)}  "
+    missing = [
+        (n, resolve_param_default(n, d))
+        for n, d in FULL_PARAMETER_DEFINITIONS
+        if not job_defines_string_parameter(existing_xml, n)
+    ]
+    if not missing:
+        return existing_xml
+    blocks = "\n".join(param_block_xml(n, d, param_indent) for n, d in missing)
+    print(f"Adding {len(missing)} missing job parameter(s): {', '.join(n for n, _ in missing[:8])}{'…' if len(missing) > 8 else ''}")
+    return existing_xml[: m.start()] + f"\n{blocks}\n{m.group(1)}</parameterDefinitions>" + existing_xml[m.end() :]
+
+
+def ensure_job_parameters(existing_xml: str) -> str:
+    out = merge_missing_parameter_definitions(existing_xml)
+    return merge_env_param_defaults(out)
+
+
+def merge_env_param_defaults(existing_xml: str) -> str:
+    """Fill empty Jenkins job parameter defaults from docker-compose.env (Steps 4–5 need these)."""
+    out = existing_xml
+    for param_name, env_key in ENV_PARAM_DEFAULTS.items():
+        val = (os.environ.get(env_key) or os.environ.get(param_name) or "").strip()
+        if not val:
+            continue
+        name_token = f"<name>{esc_xml(param_name)}</name>"
+        pattern = re.compile(
+            rf"(<hudson\.model\.StringParameterDefinition>[\s\S]*?{re.escape(name_token)}[\s\S]*?"
+            rf"<defaultValue>)([\s\S]*?)(</defaultValue>)",
+            re.IGNORECASE,
+        )
+        m = pattern.search(out)
+        if not m:
+            continue
+        current = m.group(2).strip()
+        if current:
+            continue
+        out = out[: m.start(2)] + esc_xml(val) + out[m.end(2) :]
+    return out
+
+
 CPS_FLOW_DEFINITION = "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"
 CDATA_SCRIPT_BLOCK = re.compile(
     rf'(<definition\b[^>]*class="{re.escape(CPS_FLOW_DEFINITION)}"[^>]*>\s*<script>\s*<!\[CDATA\[)'
@@ -105,27 +261,8 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
             ("JENKINS_AGENT_LABEL", ""),
         ]
     else:
-        params = [
-            ("JENKINS_AGENT_LABEL", ""),
-            ("GIT_URL", ""),
-            ("BRANCH", "main"),
-            ("IMAGE_NAME", ""),
-            ("PROJECT_ID", ""),
-            ("GIT_CREDENTIALS_ID", ""),
-            ("HARBOR_REGISTRY", ""),
-            ("HARBOR_USERNAME", ""),
-            ("HARBOR_PASSWORD", ""),
-            ("JENKINS_PAAS_FAST_PIPELINE", "false"),
-        ]
-    pxml = "\n".join(
-        "      <hudson.model.StringParameterDefinition>"
-        f"<name>{esc_xml(n)}</name>"
-        f"<description></description>"
-        f"<defaultValue>{esc_xml(d)}</defaultValue>"
-        f"<trim>true</trim>"
-        "</hudson.model.StringParameterDefinition>"
-        for n, d in params
-    )
+        params = [(n, resolve_param_default(n, d)) for n, d in FULL_PARAMETER_DEFINITIONS]
+    pxml = "\n".join(param_block_xml(n, d) for n, d in params)
     inner = esc_cdata(groovy)
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -134,7 +271,7 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
         "  <keepDependencies>false</keepDependencies>\n"
         "  <properties>\n"
         "    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
-        "      <abortPrevious>true</abortPrevious>\n"
+        "      <abortPrevious>false</abortPrevious>\n"
         "    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
         "    <hudson.model.ParametersDefinitionProperty>\n"
         "      <parameterDefinitions>\n"
@@ -287,6 +424,7 @@ def main() -> int:
             cfg_code, existing_cfg = client.call(job_cfg)
             if cfg_code == 200 and existing_cfg.strip():
                 merged = merge_groovy_into_existing_config_xml(existing_cfg, groovy)
+                merged = ensure_job_parameters(merged)
                 xml = merged.encode("utf-8")
                 mode = "merged-cdata"
             else:
@@ -300,6 +438,13 @@ def main() -> int:
         if ucode not in (200, 201, 302):
             print(ubody[:2500])
             return 1
+        verify_code, verify_cfg = client.call(job_cfg)
+        if verify_code == 200:
+            for name in ("SONAR_TOKEN", "DEPENDENCY_TRACK_API_KEY", "SONAR_HOST_URL"):
+                if job_defines_string_parameter(verify_cfg, name):
+                    print(f"OK: job parameter {name} defined")
+                else:
+                    print(f"WARN: job parameter {name} still missing — re-run with --force-full", file=sys.stderr)
         print(f"OK: {base}/job/{job}/")
         return 0
 
