@@ -279,7 +279,8 @@ def dockerfileForDetectedProject(String df) {
   if (fileExists(df)) {
     return df
   }
-  if (fileExists("package.json")) {
+  def appRoot = detectAppRoot()
+  if (fileExists("${appRoot}/package.json")) {
     writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/node:20-bookworm-slim
 WORKDIR /app
 COPY . .
@@ -357,6 +358,28 @@ CMD ["nginx", "-g", "daemon off;"]
   return ""
 }
 
+def detectAppRoot() {
+  if (fileExists('package.json')) {
+    return '.'
+  }
+  for (def dir in ['server', 'frontend', 'client', 'app', 'web', 'backend']) {
+    if (fileExists("${dir}/package.json")) {
+      return dir
+    }
+  }
+  return '.'
+}
+
+def normalizeOciImageReference(String imageRef) {
+  return (imageRef ?: '').trim().toLowerCase()
+}
+
+def sanitizeDeployImageName(String name) {
+  def value = (name ?: 'app').toLowerCase().replaceAll(/[^a-z0-9._-]/, '-').replaceAll(/-+/, '-')
+  value = value.replaceAll(/^-|-$/, '')
+  return value ?: 'app'
+}
+
 def registryHostFor(String imageRef) {
   def first = imageRef.tokenize("/")[0]
   if (!first.contains(".") && !first.contains(":") && first != "localhost") {
@@ -396,9 +419,9 @@ def resolveImageNameForHarbor(String imageRef) {
   if (!isDockerHubStyleImageRef(normalized)) {
     return normalized
   }
-  def harborProject = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: 'paas').trim()
-  def appName = normalized.tokenize('/')[1]
-  def resolved = "${harborHost}/${harborProject}/${appName}"
+  def harborProject = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: 'paas').trim().toLowerCase()
+  def appName = normalized.tokenize('/')[1]?.toLowerCase() ?: sanitizeDeployImageName(normalized)
+  def resolved = normalizeOciImageReference("${harborHost}/${harborProject}/${appName}")
   println "[image] Rewrote Docker Hub–style ref ${normalized} → Harbor ${resolved}"
   return resolved
 }
@@ -428,6 +451,9 @@ def paasShellKeepaliveHelper() {
 }
 
 def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
+  def appRoot = detectAppRoot()
+  println "[image] PAAS app root for build layer: ${appRoot}"
+  imageRef = normalizeOciImageReference(imageRef)
   def registry = registryHostFor(imageRef)
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
   def harborHost = normalizeRegistryHost(harborRegistry)
@@ -483,6 +509,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
     set -eu
+    cd '${appRoot}'
     export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
@@ -534,6 +561,7 @@ ${paasShellKeepaliveHelper()}
   println "[image] Step 6b — Next.js production build (separate sh)"
   sh """
     set -eu
+    cd '${appRoot}'
     export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
@@ -561,6 +589,7 @@ ${paasShellKeepaliveHelper()}
   println "[image] Step 6c — layer tar + crane append"
   sh """
     set -eu
+    cd '${appRoot}'
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
@@ -723,7 +752,7 @@ def runPaasDeploy = {
     nonEmptyNoSpace(branchName, "BRANCH PARAMS")
     nonEmptyNoSpace(imageName, "IMAGE_NAME PARAMS")
     nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
-    imageName = resolveImageNameForHarbor(imageName)
+    imageName = normalizeOciImageReference(resolveImageNameForHarbor(imageName))
     println "[params] project=${projectId} branch=${branchName} image=${imageName}"
     paasStepOk(1, 'params', "GIT_URL, BRANCH, IMAGE_NAME, PROJECT_ID validated; image=${imageName}")
     println "*** END : Check Parameters ***"
@@ -1128,10 +1157,10 @@ exit 0
     }
   }
 
-  stage("Step 6 — Création de l'image Docker") {
+    stage("Step 6 — Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker (aligné Jenkinsfile.paas-deploy.full) ***"
     dockerAvailable = commandExists("docker")
-    def dest = "${imageName}:${env.BUILD_NUMBER}"
+    def dest = normalizeOciImageReference("${imageName}:${env.BUILD_NUMBER}")
     def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"
     def ctx = params.DOCKER_BUILD_CONTEXT?.trim() ?: "."
     imagePushPending = false
