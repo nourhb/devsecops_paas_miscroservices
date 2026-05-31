@@ -1,5 +1,17 @@
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 
+/** PAAS_BUILD_COMPLETE is emitted at the end of the log; the 5k progressive tail often drops it. */
+export function pickJenkinsLogForArtifactVerify(progressiveTail: string, fullConsole: string | null | undefined): string {
+    if (/PAAS_BUILD_COMPLETE\s+result=/i.test(progressiveTail)) {
+        return progressiveTail;
+    }
+    const full = fullConsole?.trim();
+    if (full) {
+        return full;
+    }
+    return progressiveTail;
+}
+
 export function resolveVerifiedArtifactImage(log: string, projectId: string, projectName: string, buildNum: number): {
     image: string | null;
     error: string | null;
@@ -40,6 +52,6 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
     }
     return {
         image: null,
-        error: `No PAAS_BUILD_COMPLETE or PAAS_ARTIFACT_IMAGE for this project in Jenkins build #${buildNum} console.`
+        error: `No PAAS_BUILD_COMPLETE or PAAS_ARTIFACT_IMAGE for this project in Jenkins build #${buildNum} console. If Jenkins finished SUCCESS, redeploy the PaaS frontend (log tail fix) or open the Jenkins console and search PAAS_BUILD_COMPLETE.`
     };
 }
