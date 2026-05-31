@@ -111,7 +111,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const git = await commitHelmValuesGitHub(projectName, artifactRef);
         sections.push(`[gitops] committed ${git.ref}`);
-        const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/test-app" : "";
+        const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/simple-app" : "";
         sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}${bootstrapNote}`);
     }
     catch (e) {

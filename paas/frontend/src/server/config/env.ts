@@ -159,7 +159,7 @@ const envSchema = z.object({
     GITOPS_VALUES_PATH_PATTERN: z.string().default("apps/{{projectName}}/values.yaml"),
     GITOPS_CHART_PATH_PATTERN: z.string().default(""),
     GITOPS_COMMIT_MESSAGE_TEMPLATE: z.string().default("chore(gitops): bump {{projectName}} to {{imageTag}}"),
-    GITOPS_BOOTSTRAP_CHART_PATH: z.string().default("apps/test-app"),
+    GITOPS_BOOTSTRAP_CHART_PATH: z.string().default("apps/simple-app"),
     DOCKERHUB_USERNAME: z.string().default(""),
     DOCKERHUB_TOKEN: z.string().default(""),
     DOCKERHUB_NAMESPACE: z.string().default(""),

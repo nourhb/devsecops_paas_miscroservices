@@ -4,7 +4,7 @@ set -euo pipefail
 NODE_IP="${NODE_IP:-192.168.56.129}"
 INGRESS_PORT="${APPS_PUBLIC_INGRESS_HTTP_PORT:-30659}"
 PAAS_NS="${PAAS_NS:-paas}"
-PROJECT_NAME="${PROJECT_NAME:-simple-app}"
+PROJECT_NAME="${1:-${PROJECT_NAME:-simple-app}}"
 CANONICAL_URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:${INGRESS_PORT}"
 
 echo "=== [1] PaaS frontend env (nip.io link generation) ==="

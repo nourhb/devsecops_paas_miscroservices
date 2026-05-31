@@ -111,12 +111,18 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         const res = await integrationFetch(`${base}?ref=${encodeURIComponent(branch)}`, {
             headers: githubHeaders(token)
         });
-        if (res.status === 404) {
-            const parts = splitImageRef(imageTag);
-            return {
-                contentYaml: stringifyYaml({ image: { repository: parts.repository, tag: parts.tag } })
-            };
-        }
+    if (res.status === 404) {
+        const parts = splitImageRef(imageTag);
+        const doc: Record<string, unknown> = {
+            image: {
+                repository: parts.repository,
+                tag: parts.tag,
+                pullPolicy: "IfNotPresent"
+            }
+        };
+        applyDeployValuesDefaults(doc, projectName);
+        return { contentYaml: stringifyYaml(doc) };
+    }
         if (!res.ok) {
             const t = await res.text();
             throw new IntegrationError(`GitHub GET ${path} failed (${res.status}): ${t.slice(0, 600)}`);
