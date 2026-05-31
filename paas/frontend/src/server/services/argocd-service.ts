@@ -2,7 +2,7 @@ import { env } from "@/server/config/env";
 import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-github-service";
 import { argocdFetchWithAuth, resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
-import { refreshArgoApplicationViaK8s, syncArgoApplicationViaK8s } from "@/server/services/argocd-k8s-refresh";
+import { getArgoApplicationStatusViaK8s, refreshArgoApplicationViaK8s, syncArgoApplicationViaK8s } from "@/server/services/argocd-k8s-refresh";
 import { IntegrationError } from "@/server/http/errors";
 import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
@@ -135,8 +135,18 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
     throw new IntegrationError(`Argo CD create application "${appName}" failed (HTTP ${response.status}): ${errBody || "no body"}`);
 }
 export async function getArgoApplicationStatus(projectName: string): Promise<ArgoCdStatus> {
-    const base = getArgoCdApiBase();
     const appName = argoApplicationName(projectName);
+    if (env.KUBERNETES_ENABLED === "true") {
+        const k8s = await getArgoApplicationStatusViaK8s(appName);
+        if (k8s.ok) {
+            return {
+                health: k8s.health,
+                syncStatus: k8s.syncStatus,
+                appName
+            };
+        }
+    }
+    const base = getArgoCdApiBase();
     if (!base || !(await argoAuthConfigured())) {
         return {
             health: "Unknown",
@@ -160,6 +170,16 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
             const errText = (await response.text()).trim().slice(0, 600);
             const lenient = env.PAAS_STRICT_INTEGRATIONS !== "true";
             if ((response.status === 401 || response.status === 403) && lenient) {
+                const k8s = env.KUBERNETES_ENABLED === "true"
+                    ? await getArgoApplicationStatusViaK8s(appName)
+                    : null;
+                if (k8s?.ok) {
+                    return {
+                        health: k8s.health,
+                        syncStatus: k8s.syncStatus,
+                        appName
+                    };
+                }
                 return {
                     health: "Unknown",
                     syncStatus: "Unknown",

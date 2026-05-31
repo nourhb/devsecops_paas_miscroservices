@@ -2,7 +2,7 @@ import type { SecurityMetrics } from "@/types";
 import { DeploymentJobStatus, type Project } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
-import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { cosignClient, dependencyTrackClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { getProjectById } from "@/server/projects/project-service";
@@ -59,7 +59,15 @@ function degradedMetrics(project: Project, message: string): SecurityMetrics {
 }
 
 function integrationProjectKeys(project: Project): string[] {
-    return [...new Set([project.projectName, project.id].filter((k) => k.trim()))];
+    const imageSlug = project.imageTag?.includes("/")
+        ? project.imageTag.split("/").pop()?.split(":")[0]?.trim()
+        : "";
+    return [...new Set([
+        project.id,
+        project.projectName,
+        sanitizeDeployImageName(project.projectName),
+        imageSlug || ""
+    ].filter((k) => k.trim()))];
 }
 
 async function resolveSonarQualityGate(project: Project): Promise<{
@@ -96,11 +104,17 @@ async function resolveDependencyTrackMetrics(project: Project) {
 
 function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null): string {
     const hints: string[] = [];
-    if (sonarStatus === "UNKNOWN") {
-        hints.push("SonarQube: no analysis for this project yet — run a full Jenkins pipeline with SONAR_TOKEN set (JENKINS_PAAS_FAST_PIPELINE=false).");
+    if (!env.SONAR_BASE_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
+        hints.push("PaaS frontend: set SONAR_BASE_URL and SONAR_TOKEN in docker-compose.env, then run sync-paas-frontend-env-k8s.sh.");
     }
-    if (!dtProjectUuid && env.DEPENDENCY_TRACK_BASE_URL) {
-        hints.push("Dependency-Track: no SBOM project — Step 4 must upload bom.json (needs DEPENDENCY_TRACK_API_KEY on Jenkins).");
+    else if (sonarStatus === "UNKNOWN") {
+        hints.push("SonarQube: no analysis for this project yet — run a full Jenkins pipeline (Step 5; JENKINS_PAAS_FAST_PIPELINE=false).");
+    }
+    if (!env.DEPENDENCY_TRACK_BASE_URL?.trim() || !env.DEPENDENCY_TRACK_API_KEY?.trim()) {
+        hints.push("PaaS frontend: set DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY, then sync env to the frontend pod.");
+    }
+    else if (!dtProjectUuid) {
+        hints.push("Dependency-Track: no SBOM project — Step 4 must upload bom.json (Jenkins needs DEPENDENCY_TRACK_API_KEY).");
     }
     if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
         hints.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps.");

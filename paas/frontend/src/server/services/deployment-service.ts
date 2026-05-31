@@ -11,7 +11,7 @@ import { assertProjectAccess, getProjectById, updateProject } from "@/server/pro
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
-import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
+import { effectiveMaxConcurrentJenkinsDeploys, jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import type { ActionResponse, RecentDeploymentListItem, UserRole } from "@/types";
 function effectiveTriggerUserId(jwtUserId: string): string | null {
     const override = env.DEPLOYMENT_TRIGGER_USER_ID.trim();
@@ -126,7 +126,7 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
             }
         });
     }
-    const maxConcurrent = env.PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS;
+    const maxConcurrent = effectiveMaxConcurrentJenkinsDeploys(env.PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS);
     if (maxConcurrent > 0 && getBuildBackend().provider === "jenkins") {
         const activeCount = await prisma.deployment.count({
             where: {
@@ -134,8 +134,11 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
             }
         });
         if (activeCount >= maxConcurrent) {
+            const sharedHint = usesSharedJenkinsDeployJob()
+                ? " Jenkins uses one shared paas-deploy job — deploy projects one at a time or set PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS=0 to disable this limit."
+                : "";
             throw new ApiError(429, "Too many deployments are already running.", {
-                details: `${activeCount} deployment(s) are active. Wait for one to finish or raise PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS (currently ${maxConcurrent}).`
+                details: `${activeCount} deployment(s) are active (limit ${maxConcurrent}). Wait for one to finish.${sharedHint}`
             });
         }
     }

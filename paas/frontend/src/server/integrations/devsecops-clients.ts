@@ -131,6 +131,16 @@ function usesSharedJenkinsBuildJob(): boolean {
     return Boolean(env.JENKINS_BUILD_JOB_NAME.trim());
 }
 export { usesSharedJenkinsDeployJob };
+/** Shared paas-deploy runs one build at a time on the built-in agent — queue parallel UI deploys. */
+export function effectiveMaxConcurrentJenkinsDeploys(configured: number): number {
+    if (configured > 0) {
+        return configured;
+    }
+    if (usesSharedJenkinsDeployJob()) {
+        return 1;
+    }
+    return 0;
+}
 async function waitForBuildNumberFromQueueItem(base: string, headers: Record<string, string>, queueLocation: string | null, timeoutMs = 120_000): Promise<number | null> {
     const queueId = parseQueueItemId(queueLocation);
     if (!queueId) {
@@ -1547,6 +1557,21 @@ export class DependencyTrackClient {
             "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY
         };
     }
+    private pickProjectUuidFromList(payload: Array<{
+        uuid?: string;
+        name?: string;
+        tags?: Array<{ name?: string }>;
+    }>, projectKey: string): string | null {
+        const byTag = payload.find((item) => item.tags?.some((tag) => tag.name?.toLowerCase() === projectKey.toLowerCase()));
+        if (byTag?.uuid) {
+            return byTag.uuid;
+        }
+        const exact = payload.find((item) => item.name?.toLowerCase() === projectKey.toLowerCase());
+        if (exact?.uuid) {
+            return exact.uuid;
+        }
+        return payload[0]?.uuid ?? null;
+    }
     private async resolveProjectUuid(projectKey: string): Promise<string | null> {
         if (!this.enabled) {
             return null;
@@ -1568,6 +1593,25 @@ export class DependencyTrackClient {
             catch {
             }
         }
+        try {
+            const allRes = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project`, {
+                method: "GET",
+                headers: this.headers()
+            });
+            if (allRes.ok) {
+                const all = (await allRes.json()) as Array<{
+                    uuid?: string;
+                    name?: string;
+                    tags?: Array<{ name?: string }>;
+                }>;
+                const fromAll = this.pickProjectUuidFromList(all, projectKey);
+                if (fromAll) {
+                    return fromAll;
+                }
+            }
+        }
+        catch {
+        }
         const response = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project?name=${encodeURIComponent(projectKey)}`, {
             method: "GET",
             headers: this.headers()
@@ -1578,11 +1622,9 @@ export class DependencyTrackClient {
         const payload = (await response.json()) as Array<{
             uuid?: string;
             name?: string;
+            tags?: Array<{ name?: string }>;
         }>;
-        const project = Array.isArray(payload)
-            ? payload.find((item) => item.name?.toLowerCase() === projectKey.toLowerCase()) || payload[0]
-            : null;
-        return project?.uuid ?? null;
+        return this.pickProjectUuidFromList(Array.isArray(payload) ? payload : [], projectKey);
     }
     private async findProjectFindings(projectKey: string): Promise<DependencyTrackFinding[]> {
         const fallback: DependencyTrackFinding[] = projectKey.toLowerCase().includes("log4j")

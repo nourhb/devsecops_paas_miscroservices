@@ -58,6 +58,9 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
 
 def dtProjectNameForUpload(String projId, String imageRef) {
   def slug = (imageRef ?: "").tokenize('/').last()?.trim()
+  if (slug?.contains(':')) {
+    slug = slug.tokenize(':')[0]
+  }
   return slug ?: projId
 }
 
