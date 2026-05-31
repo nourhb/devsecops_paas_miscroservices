@@ -41,6 +41,48 @@ async function patchArgoApplication(appName: string, body: Record<string, unknow
     );
 }
 
+export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
+    ok: boolean;
+    health: string;
+    syncStatus: string;
+    logs: string;
+}> {
+    if (env.KUBERNETES_ENABLED !== "true") {
+        return { ok: false, health: "Unknown", syncStatus: "Unknown", logs: "[argocd-k8s] Kubernetes API disabled." };
+    }
+    const api = getCustomObjectsApi();
+    if (!api) {
+        return { ok: false, health: "Unknown", syncStatus: "Unknown", logs: "[argocd-k8s] Kubernetes client unavailable." };
+    }
+    const namespace = argocdNamespace();
+    try {
+        const body = (await (api as unknown as {
+            getNamespacedCustomObject: (
+                group: string,
+                version: string,
+                ns: string,
+                plural: string,
+                name: string
+            ) => Promise<unknown>;
+        }).getNamespacedCustomObject("argoproj.io", "v1alpha1", namespace, "applications", appName)) as {
+            status?: {
+                health?: { status?: string };
+                sync?: { status?: string };
+            };
+        };
+        return {
+            ok: true,
+            health: body.status?.health?.status ?? "Unknown",
+            syncStatus: body.status?.sync?.status ?? "Unknown",
+            logs: `[argocd-k8s] Read Application "${appName}" status from namespace ${namespace}.`
+        };
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return { ok: false, health: "Unknown", syncStatus: "Unknown", logs: `[argocd-k8s] Could not read Application "${appName}": ${msg}` };
+    }
+}
+
 /** Hard refresh — does not start a sync operation. */
 export async function refreshArgoApplicationViaK8s(appName: string): Promise<{
     ok: boolean;

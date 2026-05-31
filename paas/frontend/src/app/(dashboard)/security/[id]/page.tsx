@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Hint } from "@/components/hint";
-import { securityApi } from "@/lib/api";
+import { projectApi, securityApi } from "@/lib/api";
 import { hints } from "@/lib/app-hints";
 const SEVERITY_ROWS = [
     { key: "critical", label: "Critical", dotClassName: "bg-danger" },
@@ -20,10 +20,15 @@ export default function SecurityPage() {
         id: string;
     }>();
     const projectId = params.id;
+    const projectQuery = useQuery({
+        queryKey: ["project", projectId],
+        queryFn: () => projectApi.getProject(projectId)
+    });
     const securityQuery = useQuery({
         queryKey: ["security", projectId],
         queryFn: () => securityApi.getSecurity(projectId)
     });
+    const displayName = projectQuery.data?.projectName ?? projectId;
     const data = securityQuery.data;
     const severityTotals = data
         ? data.dependencyTrack.critical +
@@ -59,13 +64,31 @@ export default function SecurityPage() {
     return (<div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
-          Security Overview: {projectId}
+          Security Overview: {displayName}
           <Hint side="bottom">{hints.security.overviewTitle}</Hint>
         </h2>
         <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
           Sonar Quality Gate: {data.qualityGateStatus}
         </Badge>
       </div>
+
+      <Card className={severityTotals === 0 && data.qualityGateStatus === "UNKNOWN" ? "border-warning/40 bg-warning/5" : undefined}>
+        <CardHeader>
+          <CardTitle className="text-base">Integration status</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted">
+          <p>{data.securitySummary}</p>
+          <p className="font-mono text-xs break-all">Image: {data.imageSecurity?.imageRef ?? "—"}</p>
+          {data.dependencyTrackProjectUuid ? (
+            <p className="text-xs">Dependency-Track project linked ({data.dependencyTrackProjectName}).</p>
+          ) : (
+            <p className="text-xs">Dependency-Track: run a full Jenkins deploy (Step 4 SCA) with DEPENDENCY_TRACK_API_KEY — not a GitOps-only fix.</p>
+          )}
+          {data.qualityGateStatus === "UNKNOWN" ? (
+            <p className="text-xs">SonarQube: set a valid SONAR_TOKEN and run Step 5 (disable JENKINS_PAAS_FAST_PIPELINE for full pipeline).</p>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
