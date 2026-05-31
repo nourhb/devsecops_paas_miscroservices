@@ -188,10 +188,10 @@ export const projectApi = {
         const { data } = await apiClient.post<CreateProjectResponse>("/api/projects", payload);
         return data;
     },
-    detectLanguage: async (gitRepositoryUrl: string, branch: string) => {
+    detectLanguage: async (gitRepositoryUrl: string, branch?: string) => {
         const { data } = await apiClient.post<RepositoryLanguageDetectionResponse>("/api/projects/detect-language", {
             gitRepositoryUrl,
-            branch
+            ...(branch ? { branch } : {})
         });
         return data;
     },
