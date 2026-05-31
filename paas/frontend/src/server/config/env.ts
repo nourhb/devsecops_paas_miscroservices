@@ -191,6 +191,8 @@ const envSchema = z.object({
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
+    /** Pin app pods to a node hostname (e.g. master). Leave empty to let the scheduler place pods. */
+    APPS_LAB_NODE_SELECTOR: z.preprocess(stripInlineEnvComment, z.string().default("")),
     APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
     APPS_INGRESS_CLASS: z.preprocess(stripInlineEnvComment, z.string().default("traefik")),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
@@ -438,6 +440,7 @@ const parsed = envSchema.safeParse({
     APPS_PUBLIC_BASE_DOMAIN: process.env.APPS_PUBLIC_BASE_DOMAIN,
     APPS_PUBLIC_URL_TEMPLATE: process.env.APPS_PUBLIC_URL_TEMPLATE,
     APPS_PUBLIC_LAB_NODE_IP: process.env.APPS_PUBLIC_LAB_NODE_IP,
+    APPS_LAB_NODE_SELECTOR: process.env.APPS_LAB_NODE_SELECTOR,
     APPS_PUBLIC_INGRESS_HTTP_PORT: process.env.APPS_PUBLIC_INGRESS_HTTP_PORT,
     APPS_INGRESS_CLASS: process.env.APPS_INGRESS_CLASS,
     APPS_REACHABILITY_TIMEOUT_MS: process.env.APPS_REACHABILITY_TIMEOUT_MS,

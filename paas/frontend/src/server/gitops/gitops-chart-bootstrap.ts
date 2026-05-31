@@ -177,8 +177,9 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         doc.env = [];
     }
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
-    if (labIp && !doc.nodeSelector) {
-        doc.nodeSelector = { "kubernetes.io/hostname": "master" };
+    const pinNode = env.APPS_LAB_NODE_SELECTOR.trim();
+    if (pinNode && !doc.nodeSelector) {
+        doc.nodeSelector = { "kubernetes.io/hostname": pinNode };
     }
     if (!labIp) {
         return;

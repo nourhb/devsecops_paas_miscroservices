@@ -54,8 +54,6 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: harbor-regcred
-nodeSelector:
-  kubernetes.io/hostname: master
 service:
   targetPort: 3000
 resources:
