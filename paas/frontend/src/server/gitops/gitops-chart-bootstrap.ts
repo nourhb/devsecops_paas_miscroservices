@@ -68,33 +68,40 @@ async function githubFileExists(owner: string, repo: string, path: string, branc
 }
 async function githubPutText(owner: string, repo: string, path: string, branch: string, token: string, content: string, message: string): Promise<void> {
     const base = contentsUrl(owner, repo, path);
-    let sha: string | undefined;
-    const getRes = await integrationFetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers: githubHeaders(token) });
-    if (getRes.ok) {
-        const meta = (await getRes.json()) as {
-            sha?: string;
+    for (let attempt = 1; attempt <= 6; attempt++) {
+        let sha: string | undefined;
+        const getRes = await integrationFetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers: githubHeaders(token) });
+        if (getRes.ok) {
+            const meta = (await getRes.json()) as {
+                sha?: string;
+            };
+            sha = meta.sha;
+        }
+        else if (getRes.status !== 404) {
+            const t = await getRes.text();
+            throw new IntegrationError(`GitHub GET ${path} failed (${getRes.status}): ${t.slice(0, 400)}`);
+        }
+        const body: Record<string, string> = {
+            message,
+            content: Buffer.from(content, "utf8").toString("base64"),
+            branch
         };
-        sha = meta.sha;
-    }
-    else if (getRes.status !== 404) {
-        const t = await getRes.text();
-        throw new IntegrationError(`GitHub GET ${path} failed (${getRes.status}): ${t.slice(0, 400)}`);
-    }
-    const body: Record<string, string> = {
-        message,
-        content: Buffer.from(content, "utf8").toString("base64"),
-        branch
-    };
-    if (sha) {
-        body.sha = sha;
-    }
-    const putRes = await integrationFetch(base, {
-        method: "PUT",
-        headers: { ...githubHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-    });
-    if (!putRes.ok) {
+        if (sha) {
+            body.sha = sha;
+        }
+        const putRes = await integrationFetch(base, {
+            method: "PUT",
+            headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        if (putRes.ok) {
+            return;
+        }
         const t = await putRes.text();
+        if (putRes.status === 409 && attempt < 6) {
+            await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+            continue;
+        }
         throw new IntegrationError(`GitHub PUT ${path} failed (${putRes.status}): ${t.slice(0, 600)}`);
     }
 }

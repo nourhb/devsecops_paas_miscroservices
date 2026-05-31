@@ -1,9 +1,11 @@
 import type { SecurityMetrics } from "@/types";
+import { DeploymentJobStatus, type Project } from "@prisma/client";
 import { env } from "@/server/config/env";
+import { prisma } from "@/server/db/prisma";
+import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
-import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, dependencyTrackClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
-import type { Project } from "@prisma/client";
+import { getProjectById } from "@/server/projects/project-service";
 
 function score(base: number, penalty: number): number {
     const scored = base - penalty;
@@ -57,7 +59,7 @@ function degradedMetrics(project: Project, message: string): SecurityMetrics {
 }
 
 function integrationProjectKeys(project: Project): string[] {
-    return [...new Set([project.id, project.projectName].filter((k) => k.trim()))];
+    return [...new Set([project.projectName, project.id].filter((k) => k.trim()))];
 }
 
 async function resolveSonarQualityGate(project: Project): Promise<{
@@ -110,8 +112,31 @@ function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectU
 }
 
 async function resolveSecurityImageRef(project: Project): Promise<string> {
+    const stored = project.imageTag?.trim();
+    if (stored && stored.includes("/") && stored.includes(":")) {
+        return stored;
+    }
+    const recent = await prisma.deployment.findFirst({
+        where: {
+            projectId: project.id,
+            jenkinsBuildNumber: { not: null },
+            status: {
+                in: [
+                    DeploymentJobStatus.DEPLOYED,
+                    DeploymentJobStatus.SUCCESS,
+                    DeploymentJobStatus.DEPLOYING,
+                    DeploymentJobStatus.PENDING
+                ]
+            }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { jenkinsBuildNumber: true }
+    });
+    if (recent?.jenkinsBuildNumber != null) {
+        return `${buildDeployImageRepository(project.projectName)}:${recent.jenkinsBuildNumber}`;
+    }
     const latest = await resolveLatestDeployArtifactImage(project.projectName, project.id);
-    return latest?.trim() || project.imageTag?.trim() || project.projectName;
+    return latest?.trim() || stored || `${buildDeployImageRepository(project.projectName)}:latest`;
 }
 
 async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> {

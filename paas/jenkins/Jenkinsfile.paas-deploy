@@ -28,10 +28,11 @@ def paasStepOk(int step, String id, String msg) { paasStepLog('OK', step, id, ms
 def paasStepWarn(int step, String id, String msg) { paasStepLog('WARN', step, id, msg) }
 def paasStepSkip(int step, String reason) { println "PAAS_STEP_SKIP step=${step} reason=${reason.take(500)}" }
 
-def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
+def uploadBomToDependencyTrack(String projId, String dtProjectName, String branchOrVersionLabel) {
   def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
   def ver = "${branchOrVersionLabel}-${env.BUILD_NUMBER}"
+  def dtName = (dtProjectName ?: projId).trim()
   if (!dtBase || !dtKey) {
     println "[sca] Dependency-Track non configuré (DEPENDENCY_TRACK_BASE_URL / API_KEY); pas d'upload SBOM."
     return
@@ -40,18 +41,24 @@ def uploadBomToDependencyTrack(String projId, String branchOrVersionLabel) {
     println "[sca] Pas de sca/bom.json; upload Dependency-Track ignoré."
     return
   }
-  withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${projId}"]) {
+  withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
     sh '''
       set +e
       curl -sS --fail-with-body -X POST "${DT_BASE%/}/api/v1/bom" \
         -H "X-Api-Key: ${DT_KEY}" \
         -F "autoCreate=true" \
         -F "projectName=${DT_PROJECT}" \
+        -F "projectTags=${DT_PROJECT_TAG}" \
         -F "projectVersion=${DT_VERSION}" \
         -F "bom=@sca/bom.json" \
         || echo "[sca] Dependency-Track upload failed (non-fatal)"
     '''
   }
+}
+
+def dtProjectNameForUpload(String projId, String imageRef) {
+  def slug = (imageRef ?: "").tokenize('/').last()?.trim()
+  return slug ?: projId
 }
 
 def prependPath(String path) {
@@ -1033,7 +1040,7 @@ def runPaasDeploy = {
         } else {
           println "[sca] No package.json; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
         }
-        uploadBomToDependencyTrack(projectId, branchName)
+        uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
         return
       }
       def nvdArg = env.NVD_API_KEY?.trim() ? "--nvdApiKey ${env.NVD_API_KEY}" : "--noupdate"
@@ -1080,7 +1087,7 @@ fi
 exit 0
 '''
       }
-      uploadBomToDependencyTrack(projectId, branchName)
+      uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
       if (fileExists('sca/bom.json')) {
         paasStepOk(4, 'sca', 'sca/bom.json present (Dependency-Check + CycloneDX)')
       } else {
