@@ -1,6 +1,12 @@
 import { env } from "@/server/config/env";
+import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
+
+function gitopsProjectSlug(projectName: string): string {
+    return sanitizeDeployImageName(projectName);
+}
 function applyProjectPathPattern(pattern: string, projectName: string): string {
-    return pattern.replace(/\{\{projectName\}\}/gi, projectName).replace(/\{\{project\}\}/gi, projectName);
+    const slug = gitopsProjectSlug(projectName);
+    return pattern.replace(/\{\{projectName\}\}/gi, slug).replace(/\{\{project\}\}/gi, slug);
 }
 export function gitopsValuesPathForProject(projectName: string): string {
     return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
@@ -16,7 +22,7 @@ export function gitopsHelmChartPathForProject(projectName: string): string {
     }
     if (valuesPath.endsWith("values.yaml")) {
         const slash = valuesPath.lastIndexOf("/");
-        return slash > 0 ? valuesPath.slice(0, slash) : `apps/${projectName}`;
+        return slash > 0 ? valuesPath.slice(0, slash) : `apps/${gitopsProjectSlug(projectName)}`;
     }
-    return `apps/${projectName}`;
+    return `apps/${gitopsProjectSlug(projectName)}`;
 }
