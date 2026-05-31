@@ -12,8 +12,8 @@ if [[ ! -f "${JENKINSFILE}" ]]; then
   echo "ERROR: missing ${JENKINSFILE}" >&2
   exit 1
 fi
-if ! grep -qF 'crane-next16-202605' "${JENKINSFILE}"; then
-  echo "ERROR: Jenkinsfile missing crane-next16-202605 — git pull origin main" >&2
+if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE}"; then
+  echo "ERROR: Jenkinsfile missing crane-next16-202605-j48300-split — git pull origin main" >&2
   exit 1
 fi
 
@@ -66,4 +66,4 @@ fi
 
 kubectl rollout restart deployment/"${DEPLOY}" -n "${NS}"
 kubectl rollout status deployment/"${DEPLOY}" -n "${NS}" --timeout=300s
-echo "OK: PaaS inline sync will read Jenkinsfile from ConfigMap (crane-next16-202605)"
+echo "OK: PaaS inline sync will read Jenkinsfile from ConfigMap (crane-next16-202605-j48300-split)"

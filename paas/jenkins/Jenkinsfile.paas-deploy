@@ -224,7 +224,26 @@ LOCK_DIR=""
   return craneBin
 }
 
+def normalizeCosignPrivateKeyPem(String raw) {
+  if (!raw?.trim()) {
+    return ""
+  }
+  def pem = raw.trim()
+  if (pem.startsWith('"') && pem.endsWith('"')) {
+    pem = pem.substring(1, pem.length() - 1)
+  }
+  if (pem.contains('\\n')) {
+    pem = pem.replaceAll(/\\n/, '\n')
+  }
+  pem = pem.replaceAll(/\r\n/, '\n').replaceAll(/\r/, '\n').trim()
+  return pem
+}
+
 def ensureCosignTool() {
+  def labBin = "/var/jenkins_home/bin/cosign"
+  if (new File(labBin).canExecute()) {
+    return labBin
+  }
   if (commandExists("cosign")) {
     return "cosign"
   }
@@ -611,9 +630,9 @@ def runPaasDeploy = {
   env.ARTIFACTORY_USERNAME = (params.ARTIFACTORY_USERNAME?.trim() ?: env.ARTIFACTORY_USERNAME ?: "").trim()
   env.ARTIFACTORY_PASSWORD = (params.ARTIFACTORY_PASSWORD?.trim() ?: env.ARTIFACTORY_PASSWORD ?: "").trim()
   env.ARTIFACTORY_ACCESS_TOKEN = (params.ARTIFACTORY_ACCESS_TOKEN?.trim() ?: env.ARTIFACTORY_ACCESS_TOKEN ?: "").trim()
-  def cosignPem = (params.COSIGN_PRIVATE_KEY?.trim() ?: env.COSIGN_PRIVATE_KEY ?: "").trim()
-  env.COSIGN_PRIVATE_KEY = cosignPem.contains('\\n') ? cosignPem.replaceAll(/\\n/, '\n') : cosignPem
-  env.COSIGN_PASSWORD = env.COSIGN_PASSWORD ?: ""
+  def cosignPem = normalizeCosignPrivateKeyPem(params.COSIGN_PRIVATE_KEY?.trim() ?: env.COSIGN_PRIVATE_KEY ?: "")
+  env.COSIGN_PRIVATE_KEY = cosignPem
+  env.COSIGN_PASSWORD = (params.COSIGN_PASSWORD?.trim() ?: env.COSIGN_PASSWORD ?: "")
   env.COSIGN_ALLOW_INSECURE_REGISTRY = (params.COSIGN_ALLOW_INSECURE_REGISTRY?.trim() ?: env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim()
   env.HELM_OCI_PROJECT = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: "paas").trim()
   env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "").trim()
@@ -1252,9 +1271,10 @@ EOF
         return
       }
       def credId = params.COSIGN_CREDENTIALS_ID?.trim() ?: ""
-      def pemFromEnv = env.COSIGN_PRIVATE_KEY?.trim() ?: ""
-      if (!credId && !pemFromEnv) {
-        println "[cosign] COSIGN_CREDENTIALS_ID (fichier clé Jenkins) ou COSIGN_PRIVATE_KEY (PEM sur l'agent) absent — étape ignorée."
+      def labKeyPath = "/var/jenkins_home/cosign-lab/cosign.key"
+      def pemFromEnv = normalizeCosignPrivateKeyPem(env.COSIGN_PRIVATE_KEY ?: "")
+      if (!credId && !pemFromEnv && !fileExists(labKeyPath)) {
+        println "[cosign] COSIGN_CREDENTIALS_ID, COSIGN_PRIVATE_KEY, or ${labKeyPath} absent — étape ignorée."
         return
       }
       def cosignExe = ensureCosignTool()
@@ -1281,6 +1301,21 @@ EOF
               exit $RC
             '''
           }
+        }
+      } else if (fileExists(labKeyPath)) {
+        println "[cosign] Using lab key file ${labKeyPath}"
+        withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}", "LAB_KEY=${labKeyPath}"]) {
+          sh '''
+            set +e
+            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            if [ -n "${INSEC}" ]; then
+              "${COSIGN_EXE}" sign --yes ${INSEC} --key "${LAB_KEY}" "${COSIGN_IMG}"
+            else
+              "${COSIGN_EXE}" sign --yes --key "${LAB_KEY}" "${COSIGN_IMG}"
+            fi
+            RC=$?
+            exit $RC
+          '''
         }
       } else {
         writeFile file: "paas-cosign-private.key", text: pemFromEnv

@@ -94,13 +94,13 @@ fi
 
 echo "=== 7. Cosign (image signing for UI + Kyverno) ==="
 upsert_env COSIGN_ALLOW_INSECURE_REGISTRY "true"
+upsert_env COSIGN_PASSWORD ""
 KEYDIR="${REPO_ROOT}/paas/.lab-cosign"
 mkdir -p "${KEYDIR}"
-if ! grep -qE '^COSIGN_PUBLIC_KEY=.*BEGIN PUBLIC KEY' "${ENV_FILE}" 2>/dev/null; then
-  if command -v cosign >/dev/null 2>&1; then
-    if [[ ! -f "${KEYDIR}/cosign.key" ]]; then
-      cosign generate-key-pair --output-key-prefix "${KEYDIR}/cosign" 2>/dev/null || true
-    fi
+if command -v cosign >/dev/null 2>&1; then
+  if [[ ! -f "${KEYDIR}/cosign.key" ]]; then
+    echo "Generating Cosign key pair (empty COSIGN_PASSWORD for lab Jenkins Step 9)…"
+    COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix "${KEYDIR}/cosign" 2>/dev/null || true
   fi
 fi
 if [[ -f "${KEYDIR}/cosign.pub" ]]; then
@@ -117,7 +117,7 @@ else:
     text = text.rstrip() + f"\n{key}{quoted}\n"
 pathlib.Path(env_path).write_text(text, encoding="utf-8")
 PY
-  if [[ -f "${KEYDIR}/cosign.key" ]] && ! grep -qE '^COSIGN_PRIVATE_KEY=.*BEGIN' "${ENV_FILE}" 2>/dev/null; then
+  if [[ -f "${KEYDIR}/cosign.key" ]]; then
     python3 - "${KEYDIR}/cosign.key" "${ENV_FILE}" <<'PY'
 import pathlib, re, sys
 key_path, env_path = sys.argv[1], sys.argv[2]

@@ -28,6 +28,7 @@ const ENV_BACKED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
     ARTIFACTORY_CREDENTIALS_ID: env.ARTIFACTORY_CREDENTIALS_ID,
     COSIGN_CREDENTIALS_ID: env.COSIGN_CREDENTIALS_ID,
     COSIGN_PRIVATE_KEY: env.COSIGN_PRIVATE_KEY,
+    COSIGN_PASSWORD: process.env.COSIGN_PASSWORD ?? "",
     HELM_OCI_PROJECT: env.HELM_OCI_PROJECT
 };
 function resolveParameterDefault(name: string, fallback: string): string {
@@ -80,6 +81,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["ARTIFACTORY_CREDENTIALS_ID", ""],
     ["COSIGN_CREDENTIALS_ID", ""],
     ["COSIGN_PRIVATE_KEY", ""],
+    ["COSIGN_PASSWORD", ""],
     ["COSIGN_ALLOW_INSECURE_REGISTRY", "true"],
     ["HELM_OCI_PROJECT", "paas"],
     ["HELM_OCI_INSECURE", "false"],

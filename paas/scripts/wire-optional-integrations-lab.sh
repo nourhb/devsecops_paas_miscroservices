@@ -67,6 +67,32 @@ fi
 upsert_env POLICY_ENGINE "${POLICY_ENGINE:-kyverno}"
 upsert_env BUILD_BACKEND "${BUILD_BACKEND:-jenkins}"
 
+if ns_ready sonarqube; then
+  for svc in sonarqube-sonarqube sonarqube; do
+    u="$(svc_nodeport_url sonarqube "${svc}" 9000)"
+    [[ -n "${u}" ]] && wire_if_url SONAR_BASE_URL "${u}" && wire_if_url SONAR_PROBE_URL "${u}" && break
+  done
+fi
+
+if ns_ready dependency-track; then
+  for svc in dtrack-dependency-track-api-server dependency-track-api-server api-server; do
+    u="$(svc_nodeport_url dependency-track "${svc}" 8080)"
+    [[ -n "${u}" ]] && wire_if_url DEPENDENCY_TRACK_BASE_URL "${u}" && break
+  done
+  for svc in dtrack-dependency-track-frontend dependency-track-frontend frontend; do
+    u="$(svc_nodeport_url dependency-track "${svc}" 8080)"
+    [[ -n "${u}" ]] && wire_if_url DEPENDENCY_TRACK_PROBE_URL "${u}" && break
+  done
+fi
+
+if ns_ready harbor; then
+  if svc_has_endpoints harbor harbor-trivy; then
+    wire_if_url TRIVY_PROBE_URL "http://harbor-trivy.harbor.svc.cluster.local:8080"
+  fi
+  u="$(svc_nodeport_url harbor harbor-trivy 8080)"
+  [[ -n "${u}" ]] && wire_if_url TRIVY_BASE_URL "${u}"
+fi
+
 if ns_ready monitoring; then
   for svc in kube-prometheus-stack-prometheus prometheus-service prometheus-operated; do
     u="$(svc_nodeport_url monitoring "${svc}" 9090)"
