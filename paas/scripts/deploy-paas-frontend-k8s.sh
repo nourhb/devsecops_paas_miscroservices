@@ -73,6 +73,9 @@ else
   echo "WARN: ${ENV_FILE} missing — run sync-paas-frontend-env-k8s.sh after creating it (SMTP lives there for k8s)."
 fi
 
+echo "==> Enable in-cluster Kubernetes + Argo CD sync from PaaS UI (no argocd CLI token required)"
+bash "${SCRIPT_DIR}/enable-paas-kubernetes-lab.sh"
+
 if grep -qF 'crane-next16-202605' "${PAAS_DIR}/jenkins/Jenkinsfile.paas-deploy" 2>/dev/null; then
   echo "==> Mount current Jenkinsfile into frontend pod (overrides stale image COPY)"
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || true

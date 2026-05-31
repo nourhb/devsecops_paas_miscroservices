@@ -15,6 +15,7 @@ fi
 
 echo "==> RBAC + ServiceAccount (in-cluster API; no kubeconfig mount required)"
 kubectl apply -f "${RBAC}"
+kubectl apply -f "${REPO_ROOT}/paas/k8s-manifests/lab/paas-frontend-argocd-rbac.yaml"
 
 echo "==> Use ServiceAccount paas-frontend on deployment/${DEPLOY_NAME}"
 kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH

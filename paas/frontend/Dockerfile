@@ -32,6 +32,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy
+COPY gitops/apps/simple-app /app/paas-bundled/paas/gitops/apps/simple-app
 
 USER nextjs
 EXPOSE 3000

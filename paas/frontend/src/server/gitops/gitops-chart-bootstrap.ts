@@ -5,6 +5,8 @@ import type { BuildProfile } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
+import fs from "node:fs";
+const BUNDLED_SIMPLE_APP_CHART = "/app/paas-bundled/paas/gitops/apps/simple-app";
 const CHART_RELATIVE_FILES = [
     "Chart.yaml",
     "templates/_helpers.tpl",
@@ -116,10 +118,6 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
     const branch = env.GITOPS_DEFAULT_BRANCH;
     const token = env.GITOPS_REPO_TOKEN;
     const chartPath = gitopsHelmChartPathForProject(projectName);
-    const chartYamlPath = `${chartPath}/Chart.yaml`;
-    if (await githubFileExists(owner, repo, chartYamlPath, branch, token)) {
-        return { bootstrapped: false, filesWritten: [] };
-    }
     const refBase = (env.GITOPS_BOOTSTRAP_CHART_PATH.trim() || "apps/simple-app").replace(/\\/g, "/").replace(/\/$/, "");
     const referenceName = refBase.split("/").filter(Boolean).pop() ?? "simple-app";
     const profileSpec = resolveDeployProfileSpec(buildProfile);
@@ -130,7 +128,10 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
             continue;
         }
         const srcPath = `${refBase}/${rel}`;
-        let text = await githubGetText(owner, repo, srcPath, branch, token);
+        let text = readBundledBootstrapChartFile(rel);
+        if (!text) {
+            text = await githubGetText(owner, repo, srcPath, branch, token);
+        }
         if (referenceName !== projectName) {
             text = text.replaceAll(referenceName, projectName);
         }
@@ -140,7 +141,16 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
         await githubPutText(owner, repo, destPath, branch, token, text, `chore(gitops): bootstrap ${projectName} chart from ${refBase}`);
         filesWritten.push(destPath);
     }
-    return { bootstrapped: true, filesWritten };
+    return { bootstrapped: filesWritten.length > 0, filesWritten };
+}
+function readBundledBootstrapChartFile(rel: string): string | null {
+    const filePath = `${BUNDLED_SIMPLE_APP_CHART}/${rel.replace(/\\/g, "/")}`;
+    try {
+        return fs.readFileSync(filePath, "utf8");
+    }
+    catch {
+        return null;
+    }
 }
 export function patchDeploymentForNodeWorkload(yaml: string): string {
     return patchDeploymentForProfile(yaml, resolveDeployProfileSpec("node"));
@@ -176,11 +186,14 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     if (!Array.isArray(doc.env)) {
         doc.env = [];
     }
-    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     const pinNode = env.APPS_LAB_NODE_SELECTOR.trim();
-    if (pinNode && !doc.nodeSelector) {
+    if (pinNode) {
         doc.nodeSelector = { "kubernetes.io/hostname": pinNode };
     }
+    else {
+        delete doc.nodeSelector;
+    }
+    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     if (!labIp) {
         return;
     }
