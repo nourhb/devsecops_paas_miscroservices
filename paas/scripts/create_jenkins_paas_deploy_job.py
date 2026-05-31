@@ -164,6 +164,7 @@ FULL_PARAMETER_DEFINITIONS: list[tuple[str, str]] = [
     ("JENKINS_PAAS_NPM_CACHE", ""),
     ("JENKINS_SH_KEEPALIVE", "true"),
     ("JENKINS_PAAS_FAST_PIPELINE", "false"),
+    ("PROJECT_BUILD_ENV_B64", ""),
     ("JENKINS_NEXT_BUILD_WEBPACK", "false"),
     ("JENKINS_NEXT_PERSIST_CACHE", "true"),
     ("JENKINS_NEXT_BUILD_HEARTBEAT", "true"),

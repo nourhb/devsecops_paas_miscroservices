@@ -1,3 +1,4 @@
+import { encodeBuildEnvForJenkins } from "@/server/projects/project-build-env";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
@@ -510,6 +511,7 @@ export class JenkinsClient {
         gitCredentialsId?: string | null;
         imageName: string;
         projectUuid: string;
+        buildEnv?: Record<string, string> | null;
     }): Promise<JenkinsBuildResult> {
         const simulated: JenkinsBuildResult = {
             ok: true,
@@ -551,6 +553,10 @@ export class JenkinsClient {
                     q.set(env.JENKINS_DEPLOY_GIT_CREDENTIALS_ID_PARAMETER, (buildParams.gitCredentialsId ?? "").trim());
                     appendSharedJobAgentLabel(q);
                     appendRegistryParameters(q);
+                }
+                const buildEnvB64 = encodeBuildEnvForJenkins(buildParams.buildEnv);
+                if (buildEnvB64) {
+                    q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
                 }
                 return `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
             })();
@@ -623,6 +629,7 @@ export class JenkinsClient {
         gitCredentialsId?: string | null;
         imageName: string;
         projectUuid: string;
+        buildEnv?: Record<string, string> | null;
     }): Promise<JenkinsBuildResult> {
         const simulated: JenkinsBuildResult = {
             ok: true,
@@ -656,6 +663,10 @@ export class JenkinsClient {
             q.set(env.JENKINS_DEPLOY_GIT_CREDENTIALS_ID_PARAMETER, (deployParams.gitCredentialsId ?? "").trim());
             appendSharedJobAgentLabel(q);
             appendRegistryParameters(q);
+            const buildEnvB64 = encodeBuildEnvForJenkins(deployParams.buildEnv);
+            if (buildEnvB64) {
+                q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
+            }
             const triggerUrl = `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
             const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
             const triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });

@@ -3,7 +3,7 @@ import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { env } from "@/server/config/env";
 import { parseBuildMetadata } from "@/server/build-metadata";
-import { getBuildBackend } from "@/server/build-backend";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { ApiError, IntegrationError, NotFoundError } from "@/server/http/errors";
@@ -109,6 +109,7 @@ export async function listRecentDeploymentsForUser(userId: string, role: UserRol
 }
 export async function runProjectDeployment(projectId: string, jwtUserId: string): Promise<ActionResponse> {
     const project = await getProjectById(projectId);
+    const buildProject = toBuildProjectRecord(project);
     const activeDeployment = await prisma.deployment.findFirst({
         where: {
             projectId,
@@ -145,7 +146,7 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
     const triggeredById = effectiveTriggerUserId(jwtUserId);
     const plan = resolveBuildPlan(project);
     const backend = getBuildBackend();
-    const baseline = await backend.getDeploymentBaseline(project);
+    const baseline = await backend.getDeploymentBaseline(buildProject);
     const deployment = await prisma.deployment.create({
         data: {
             projectId,
@@ -157,7 +158,7 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
     });
     let build;
     try {
-        build = await backend.triggerDeployment(project, plan);
+        build = await backend.triggerDeployment(buildProject, plan);
     }
     catch (e) {
         const message = e instanceof Error ? e.message : String(e);
