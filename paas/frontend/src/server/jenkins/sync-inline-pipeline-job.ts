@@ -12,7 +12,7 @@ const CRANE_NEXT16_MARKER = "crane-next16-202605";
 const COSIGN_SANDBOX_MARKER = "cosign-sandbox-sh-20260531";
 function jenkinsfileHasCosignSandboxFix(groovy: string): boolean {
     return groovy.includes(COSIGN_SANDBOX_MARKER) ||
-        (groovy.contains("def ensureCosignTool()") && groovy.contains("test -x '${labBin}'"));
+        (groovy.includes("def ensureCosignTool()") && groovy.includes("test -x '${labBin}'"));
 }
 const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
 const DEFAULT_JENKINSFILE_RAW_URL = "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy";
