@@ -48,11 +48,8 @@ echo "==> Verify (host)"
 cosign verify --key "${KEYDIR}/cosign.pub" --allow-insecure-registry "${IMAGE}"
 
 if kubectl get deployment frontend -n paas >/dev/null 2>&1; then
-  echo "==> Verify (frontend pod)"
-  kubectl exec -n paas deploy/frontend -- cosign verify \
-    --key /etc/cosign/cosign.pub --allow-insecure-registry \
-    "${IMAGE}" \
-    || die "Frontend pod cosign verify failed — run: bash paas/scripts/mount-cosign-pub-frontend-lab.sh"
+  echo "==> Verify (frontend pod — Harbor auth + cluster registry)"
+  bash "${SCRIPT_DIR}/cosign-verify-from-frontend-pod-lab.sh" "${IMAGE}"
 fi
 
 echo "OK: signed and verified ${IMAGE}"
