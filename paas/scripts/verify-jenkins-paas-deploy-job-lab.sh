@@ -16,7 +16,7 @@ CRANE_MARKERS=(
   'crane-next16-202605'
 )
 # Pre-fix Step 6 mutate used nested quotes in crane --cmd (always fails parse)
-BROKEN_MUTATE_PATTERN='--cmd=-c'
+BROKEN_MUTATE_PATTERN='cmd=-c'
 MUTATE_FIX_MARKERS=(
   'monorepo-app-root-20260531'
   'entrypoint=/app/start-paas.sh'

@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT/frontend/docker-compose.env}"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
-  val="$(grep -E '^APPS_INGRESS_CLASS=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r"' || true)"
+  val="$(grep -E '^APPS_INGRESS_CLASS=' "$ENV_FILE" | tail -1 | cut -d= -f2- | sed 's/[[:space:]]*#.*//' | tr -d '\r"' | xargs || true)"
   [[ -n "$val" ]] && DESIRED_CLASS="$val"
 fi
 
