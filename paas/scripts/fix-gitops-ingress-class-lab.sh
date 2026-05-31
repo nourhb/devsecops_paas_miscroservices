@@ -87,7 +87,8 @@ apps_root = gitops_root / "apps"
 changed = []
 
 def bootstrap_chart(app_dir: Path, app_name: str) -> None:
-    if (app_dir / "Chart.yaml").exists():
+    needs = not (app_dir / "Chart.yaml").exists() or not (app_dir / "templates" / "deployment.yaml").exists()
+    if not needs:
         return
     app_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / "templates").mkdir(exist_ok=True)
@@ -145,23 +146,27 @@ else
 fi
 popd >/dev/null
 
-echo "==> Argo CD sync all ${ARGOCD_APP_PREFIX}-* applications"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/argo-sync-lab.sh
+source "${SCRIPT_DIR}/lib/argo-sync-lab.sh"
+argo_load_lab_env "${ROOT}"
+
+echo "==> Argo CD sync all ${ARGOCD_APP_PREFIX}-* applications (kubectl — ignores expired argocd CLI token)"
 synced=0
 while IFS= read -r app; do
   [[ -z "${app}" ]] && continue
   echo "  sync ${app}"
-  if command -v argocd >/dev/null 2>&1; then
-    argocd app sync "${app}" --force || true
-  else
-    kubectl patch application "${app}" -n argocd --type merge \
-      -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}},"operation":{"initiatedBy":{"username":"lab-fix"},"sync":{"revision":"HEAD"}}}' \
-      2>/dev/null || true
-  fi
+  argo_sync_app_lab "${app}" || echo "WARN: could not trigger sync for ${app}" >&2
   synced=$((synced + 1))
 done < <(kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep "^${ARGOCD_APP_PREFIX}-" || true)
 
-echo "==> Triggered sync for ${synced} application(s). Waiting 20s for reconciliation…"
-sleep 20
+echo "==> Waiting for apps to reconcile (up to 120s each for sanhome + profit-margin)…"
+for app in paas-sanhome paas-profit-margin-sponsoring-facebook; do
+  if kubectl get application "${app}" -n argocd >/dev/null 2>&1; then
+    argo_wait_app_lab "${app}" 120 || true
+  fi
+done
+sleep 5
 
 echo "==> Ingress classes now:"
 kubectl get ingress -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.ingressClassName' 2>/dev/null | grep -v '^paas' || true

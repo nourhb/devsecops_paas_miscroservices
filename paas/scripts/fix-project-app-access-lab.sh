@@ -34,7 +34,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [[ -d "${GITOPS}/.git" ]] || die "Clone gitops first: git clone https://github.com/nourhb/gitops.git ${GITOPS}"
 
-if [[ ! -f "${CHART_DIR}/Chart.yaml" ]]; then
+if [[ ! -f "${CHART_DIR}/Chart.yaml" ]] || [[ ! -f "${CHART_DIR}/templates/deployment.yaml" ]]; then
   echo "==> Bootstrapping Helm chart from simple-app → apps/${PROJECT_NAME}"
   [[ -d "${REF_CHART}" ]] || die "Missing ${REF_CHART}"
   mkdir -p "${CHART_DIR}/templates"
@@ -105,14 +105,14 @@ git diff --cached --quiet && echo "No gitops changes" || {
 popd >/dev/null
 
 APP_NAME="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
-echo "==> Argo CD sync ${APP_NAME}"
-if command -v argocd >/dev/null 2>&1; then
-  argocd app sync "${APP_NAME}" --force || true
-  argocd app wait "${APP_NAME}" --health --timeout 300 || true
-elif kubectl get application "${APP_NAME}" -n argocd >/dev/null 2>&1; then
-  kubectl patch application "${APP_NAME}" -n argocd --type merge \
-    -p '{"operation":{"initiatedBy":{"username":"lab-fix"},"sync":{"revision":"HEAD"}}}' 2>/dev/null || true
-  sleep 15
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/argo-sync-lab.sh
+source "${SCRIPT_DIR}/lib/argo-sync-lab.sh"
+
+echo "==> Argo CD sync ${APP_NAME} (kubectl — ignores expired argocd CLI token)"
+if kubectl get application "${APP_NAME}" -n argocd >/dev/null 2>&1; then
+  argo_sync_app_lab "${APP_NAME}" || true
+  argo_wait_app_lab "${APP_NAME}" 300 || true
 else
   echo "WARN: Argo application ${APP_NAME} not found — create project in PaaS or check ARGOCD_APP_PREFIX"
 fi
