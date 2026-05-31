@@ -216,9 +216,9 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} (${reachability.error ?? "unreachable"})`);
         }
     }
-    const argoReady = sections.some((line) => line.includes("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK"));
-    if (!urlReachable && !argoReady) {
-        const msg = `Application URL not reachable (${appUrl}) and Argo CD did not report Healthy+Synced. Set ARGOCD_PASSWORD or refresh ARGOCD_AUTH_TOKEN, then redeploy.`;
+    const probeConfigured = Boolean(labIp || env.APPS_PUBLIC_URL_TEMPLATE.trim());
+    if (probeConfigured && !urlReachable) {
+        const msg = `Application URL not reachable (${appUrl}). Check Argo CD sync (ARGOCD_PASSWORD or ARGOCD_AUTH_TOKEN) and Traefik ingress for ${projectName}.`;
         sections.push(`[deploy] FAILED: ${msg}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
         return;

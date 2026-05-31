@@ -2,6 +2,7 @@ import { env } from "@/server/config/env";
 import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-github-service";
 import { argocdFetchWithAuth, resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
+import { refreshArgoApplicationViaK8s } from "@/server/services/argocd-k8s-refresh";
 import { IntegrationError } from "@/server/http/errors";
 import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
@@ -262,9 +263,10 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
         const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
         if ((response.status === 401 || response.status === 403) && lenientIntegrations) {
             const tail = body.trim() ? body.slice(0, 400) : "";
+            const k8sRefresh = await refreshArgoApplicationViaK8s(appName);
             return {
-                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — deployment continues (integrations not strict: PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}). ` +
-                    `GitOps already committed Helm values; sync manually in Argo CD or grant this JWT applications, sync on the AppProject (or use an admin token). ${tail}`
+                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — trying Kubernetes refresh fallback. ${k8sRefresh.logs} ` +
+                    `Set ARGOCD_PASSWORD for API login or grant this token applications/sync on the AppProject. ${tail}`
             };
         }
         if (allowSimulation() && (response.status === 401 || response.status === 403)) {

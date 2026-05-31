@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Workflow } from "lucide-react";
 import { jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle, formatStageDurationMs } from "@/components/jenkins/jenkins-pipeline-stage-ui";
+import { buildPaasDeployDisplayStages } from "@/lib/paas-deploy-jenkins-stages";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,7 +39,8 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
     const jenkinsHref = jenkinsUrlForBrowser(data?.buildUrl, {
         buildNumber: data?.buildNumber ?? buildNumber
     });
-    const stages: JenkinsPipelineStageRow[] = data?.stages ?? [];
+    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined);
+    const stages: JenkinsPipelineStageRow[] = displayStages;
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;
     const progressPct = total > 0 ? Math.min(100, Math.round(started / total * 100)) : 0;
