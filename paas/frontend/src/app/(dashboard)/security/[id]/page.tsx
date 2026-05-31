@@ -25,6 +25,16 @@ export default function SecurityPage() {
         queryFn: () => securityApi.getSecurity(projectId)
     });
     const data = securityQuery.data;
+    const severityTotals = data
+        ? data.dependencyTrack.critical +
+          data.dependencyTrack.high +
+          data.dependencyTrack.medium +
+          data.dependencyTrack.low +
+          data.trivy.critical +
+          data.trivy.high +
+          data.trivy.medium +
+          data.trivy.low
+        : 0;
     if (securityQuery.isLoading) {
         return (<div className="space-y-6">
       <Skeleton className="h-8 w-80"/>
@@ -109,7 +119,9 @@ export default function SecurityPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
+            {severityTotals === 0 ? (<p className="flex h-full items-center justify-center text-sm text-muted">
+                No vulnerabilities reported in Dependency-Track or Trivy (all severities are 0).
+              </p>) : (<ResponsiveContainer width="100%" height="100%">
               <BarChart data={[
             {
                 severity: "Critical",
@@ -140,7 +152,7 @@ export default function SecurityPage() {
                 <Bar dataKey="dt" name="Dependency-Track" fill="#0ea5e9" radius={[6, 6, 0, 0]}/>
                 <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>)}
           </CardContent>
         </Card>
         <Card className="xl:col-span-2">
@@ -155,27 +167,27 @@ export default function SecurityPage() {
               <BarChart layout="vertical" data={[
             {
                 name: "Cosign signed",
-                v: data.cosignSigned ? 1 : 0,
+                v: 1,
                 fill: data.cosignSigned ? "#22c55e" : "#ef4444"
             },
             {
                 name: "Policy validated",
-                v: data.securityEnforcement?.policyValidated ? 1 : 0,
+                v: 1,
                 fill: data.securityEnforcement?.policyValidated ? "#22c55e" : "#eab308"
             },
             {
                 name: "Deploy allowed",
-                v: data.securityEnforcement?.deploymentAllowed ? 1 : 0,
+                v: 1,
                 fill: data.securityEnforcement?.deploymentAllowed ? "#22c55e" : "#ef4444"
             },
             {
                 name: "OPA violations",
-                v: data.opaViolations,
-                fill: "#f97316"
+                v: 1,
+                fill: data.opaViolations > 0 ? "#f97316" : "#64748b"
             }
         ]} margin={{ left: 16, right: 16, top: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
-                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false}/>
+                <XAxis type="number" allowDecimals={false} domain={[0, 1]} tickLine={false} axisLine={false}/>
                 <YAxis type="category" dataKey="name" width={120} tickLine={false} axisLine={false} tick={{ fontSize: 11 }}/>
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                 <Bar dataKey="v" radius={[0, 8, 8, 0]}>

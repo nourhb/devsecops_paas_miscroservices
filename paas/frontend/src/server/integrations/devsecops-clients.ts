@@ -1880,6 +1880,38 @@ export class GitOpsClient {
         return commitHelmValuesGitHub(projectName, imageTag);
     }
 }
+/** Latest PAAS_ARTIFACT_IMAGE from Jenkins deploy job console (falls back to DB tag in callers). */
+export async function resolveLatestDeployArtifactImage(projectName: string, projectId: string): Promise<string | null> {
+    if (!env.JENKINS_BASE_URL || !env.JENKINS_USERNAME || !env.JENKINS_API_TOKEN) {
+        return null;
+    }
+    const base = jenkinsBaseUrl();
+    const jobPath = jenkinsJobUrlPath(projectName, projectId, "deploy");
+    const headers = { Authorization: jenkinsAuthHeader() };
+    try {
+        const lastRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/lastBuild/api/json?tree=number`, { headers });
+        if (!lastRes.ok) {
+            return null;
+        }
+        const last = (await lastRes.json()) as {
+            number?: number;
+        };
+        const buildNumber = last.number;
+        if (!buildNumber) {
+            return null;
+        }
+        const consoleRes = await jenkinsIntegrationFetch(`${base}/${jobPath}/${buildNumber}/consoleText`, { headers });
+        if (!consoleRes.ok) {
+            return null;
+        }
+        const text = await consoleRes.text();
+        const tail = text.length > 64000 ? text.slice(-64000) : text;
+        return parsePipelineVerificationLogs(tail).artifactImage;
+    }
+    catch {
+        return null;
+    }
+}
 export const jenkinsClient = new JenkinsClient();
 export const sonarQubeClient = new SonarQubeClient();
 export const dependencyTrackClient = new DependencyTrackClient();
