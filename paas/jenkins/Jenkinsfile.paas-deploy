@@ -152,6 +152,47 @@ LOCK_DIR=""
   prependPath("${nodeDir}/bin")
 }
 
+def patchNextStandaloneConfigIfNeeded() {
+  if (!fileExists('package.json')) {
+    return
+  }
+  def hasNextConfig = fileExists('next.config.mjs') || fileExists('next.config.js') || fileExists('next.config.ts')
+  if (!hasNextConfig) {
+    return
+  }
+  ensureNodeTool()
+  sh '''
+    set +e
+    if ! command -v node >/dev/null 2>&1; then
+      echo "[build] WARN: node unavailable — skip next.config standalone patch (ensureNodeTool should have installed portable Node.js)"
+      exit 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+for (const f of ['next.config.mjs', 'next.config.js', 'next.config.ts']) {
+  if (!fs.existsSync(f)) continue;
+  const txt = fs.readFileSync(f, 'utf8');
+  if (/output\\s*:\\s*['"]standalone['"]/i.test(txt)) {
+    console.log('[build] ' + f + ' already has output standalone');
+    process.exit(0);
+  }
+  let patched = txt;
+  if (/const\\s+nextConfig(?:\\s*:\\s*\\w+)?\\s*=\\s*\\{/.test(txt)) {
+    patched = txt.replace(/const\\s+nextConfig(?:\\s*:\\s*\\w+)?\\s*=\\s*\\{/, "const nextConfig = {\\n  output: 'standalone',");
+  } else if (/export\\s+default\\s*\\{/.test(txt)) {
+    patched = txt.replace(/export\\s+default\\s*\\{/, "export default {\\n  output: 'standalone',");
+  } else {
+    console.log('[build] skip standalone patch — unrecognized ' + f + ' shape');
+    process.exit(0);
+  }
+  fs.writeFileSync(f, patched);
+  console.log('[build] patched ' + f + " with output: 'standalone'");
+  process.exit(0);
+}
+NODE
+  '''
+}
+
 def ensureCraneTool() {
   if (commandExists("crane")) {
     return "crane"
@@ -752,7 +793,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
   println "[paas-jenkinsfile] marker=crane-next16-202605-j48300-split (node{} built-in; Step 6a/6b/6c; foreground cmd JENKINS-48300)"
-  println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531"
+  println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -792,34 +833,6 @@ def runPaasDeploy = {
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
-    if (fileExists('package.json')) {
-      sh '''
-        set +e
-        node <<'NODE'
-const fs = require('fs');
-for (const f of ['next.config.mjs', 'next.config.js', 'next.config.ts']) {
-  if (!fs.existsSync(f)) continue;
-  const txt = fs.readFileSync(f, 'utf8');
-  if (/output\\s*:\\s*['"]standalone['"]/i.test(txt)) {
-    console.log('[build] ' + f + ' already has output standalone');
-    process.exit(0);
-  }
-  let patched = txt;
-  if (/const\\s+nextConfig(?:\\s*:\\s*\\w+)?\\s*=\\s*\\{/.test(txt)) {
-    patched = txt.replace(/const\\s+nextConfig(?:\\s*:\\s*\\w+)?\\s*=\\s*\\{/, "const nextConfig = {\\n  output: 'standalone',");
-  } else if (/export\\s+default\\s*\\{/.test(txt)) {
-    patched = txt.replace(/export\\s+default\\s*\\{/, "export default {\\n  output: 'standalone',");
-  } else {
-    console.log('[build] skip standalone patch — unrecognized ' + f + ' shape');
-    process.exit(0);
-  }
-  fs.writeFileSync(f, patched);
-  console.log('[build] patched ' + f + " with output: 'standalone'");
-  process.exit(0);
-}
-NODE
-      '''
-    }
     if (fileExists("pom.xml")) {
       if (commandExists("mvn")) {
         sh "mvn -B -DskipTests package"
@@ -827,6 +840,7 @@ NODE
         println "[build] Maven project detected but mvn is not installed; compile skipped."
       }
     } else if (fileExists("package.json")) {
+      patchNextStandaloneConfigIfNeeded()
       if (paasFastPipeline) {
         println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
       } else {
