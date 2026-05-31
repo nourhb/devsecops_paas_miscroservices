@@ -42,7 +42,7 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
         buildNumber: data?.buildNumber ?? buildNumber
     });
     const deployChecks = deploymentLogs ? parsePipelineVerificationLogs(deploymentLogs).deployChecks : [];
-    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined, deployChecks);
+    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined, deployChecks, deploymentStatus);
     const stages: JenkinsPipelineStageRow[] = displayStages;
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;

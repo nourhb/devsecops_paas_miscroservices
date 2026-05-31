@@ -131,18 +131,38 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
         synthetic: true
     }));
 }
+const POST_DEPLOY_VERIFY_STEPS = new Set(["gitops", "argocd_sync", "argocd_ready", "url", "security_gate"]);
+function worstPostDeployStageStatus(deployChecks: Array<{
+    step: string;
+    status: "OK" | "WARN" | "FAIL";
+}>): string {
+    const post = deployChecks.filter((check) => POST_DEPLOY_VERIFY_STEPS.has(check.step));
+    if (post.length === 0) {
+        return "NOT_EXECUTED";
+    }
+    if (post.some((check) => check.status === "FAIL")) {
+        return "FAILURE";
+    }
+    if (post.some((check) => check.status === "WARN" && (check.step === "url" || check.step === "argocd_ready" || check.step === "gitops"))) {
+        return "FAILURE";
+    }
+    if (post.some((check) => check.status === "WARN")) {
+        return "UNSTABLE";
+    }
+    return "SUCCESS";
+}
 export function applyDeployChecksToDisplayStages(stages: PaasDeployDisplayStage[], deployChecks: Array<{
     step: string;
     status: "OK" | "WARN" | "FAIL";
     detail: string;
-}> | undefined): PaasDeployDisplayStage[] {
+}> | undefined, deploymentStatus?: string): PaasDeployDisplayStage[] {
     if (!deployChecks?.length) {
         return stages;
     }
-    const hasFail = deployChecks.some((check) => check.status === "FAIL");
-    const hasWarn = deployChecks.some((check) => check.status === "WARN");
-    const hasOk = deployChecks.some((check) => check.status === "OK");
-    const worst = hasFail ? "FAILURE" : hasWarn && !hasOk ? "UNSTABLE" : hasOk ? "SUCCESS" : "UNSTABLE";
+    let worst = worstPostDeployStageStatus(deployChecks);
+    if (deploymentStatus?.toUpperCase() === "FAILED" && worst === "SUCCESS") {
+        worst = "FAILURE";
+    }
     return stages.map((stage, idx) => {
         if (idx !== PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length - 1) {
             return stage;
@@ -158,7 +178,7 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
     step: string;
     status: "OK" | "WARN" | "FAIL";
     detail: string;
-}>): PaasDeployDisplayStage[] {
+}>, deploymentStatus?: string): PaasDeployDisplayStage[] {
     let stages: PaasDeployDisplayStage[];
     if (!wf?.configured || wf.skipped) {
         stages = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
@@ -182,5 +202,5 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
             synthetic: true
         }));
     }
-    return applyDeployChecksToDisplayStages(applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks), deployChecks);
+    return applyDeployChecksToDisplayStages(applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks), deployChecks, deploymentStatus);
 }

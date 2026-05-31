@@ -181,8 +181,9 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     if (ingress.enabled === undefined || ingress.enabled === false) {
         ingress.enabled = true;
     }
-    if (!ingress.className) {
-        ingress.className = env.APPS_INGRESS_CLASS.trim() || "traefik";
+    const desiredIngressClass = env.APPS_INGRESS_CLASS.trim() || "traefik";
+    if (!ingress.className || String(ingress.className) !== desiredIngressClass) {
+        ingress.className = desiredIngressClass;
     }
     const hosts = ingress.hosts;
     if (!Array.isArray(hosts) || hosts.length === 0) {

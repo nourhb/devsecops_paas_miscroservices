@@ -10,6 +10,13 @@ const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
 const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
 const CRANE_NEXT16_MARKER = "crane-next16-202605";
 const COSIGN_SANDBOX_MARKER = "cosign-sandbox-sh-20260531";
+const MUTATE_CMD_FIX_MARKER = "monorepo-app-root-20260531";
+const BROKEN_CRANE_MUTATE_CMD_RE = /--entrypoint=\/bin\/sh\s*\\?\s*\n?\s*--cmd=-c[\s\S]*require\("\\\.\/package\.json"\)/m;
+function jenkinsfileHasMutateCmdFix(groovy: string): boolean {
+    return groovy.includes(MUTATE_CMD_FIX_MARKER) ||
+        groovy.includes("entrypoint=/app/start-paas.sh") ||
+        groovy.includes("[image] crane mutate OK");
+}
 function jenkinsfileHasCosignSandboxFix(groovy: string): boolean {
     return groovy.includes(COSIGN_SANDBOX_MARKER) ||
         (groovy.includes("def ensureCosignTool()") && groovy.includes("test -x '${labBin}'"));
@@ -53,7 +60,7 @@ async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: strin
     groovy: string;
     sourceLabel: string;
 }> {
-    if (jenkinsfileHasCraneFix(localGroovy)) {
+    if (jenkinsfileHasCraneFix(localGroovy) && jenkinsfileHasMutateCmdFix(localGroovy)) {
         return { groovy: localGroovy, sourceLabel: localPath };
     }
     const rawUrl = env.JENKINSFILE_SYNC_RAW_URL.trim() || DEFAULT_JENKINSFILE_RAW_URL;
@@ -76,6 +83,9 @@ function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath:
     }
     if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !jenkinsfileHasFixedStep6(groovy)) {
         throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still has obsolete Step 6 logic. Git pull and refresh the Jenkins job from the current Jenkinsfile.`);
+    }
+    if (BROKEN_CRANE_MUTATE_CMD_RE.test(groovy) || !jenkinsfileHasMutateCmdFix(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing Step 6 crane mutate fix — need ${MUTATE_CMD_FIX_MARKER}). Run: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh`);
     }
 }
 function jenkinsfileRelativePathExists(root: string): boolean {
@@ -144,7 +154,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         throw new IntegrationError("Jenkinsfile.paas-deploy is an obsolete stub; use the current file from the repo.");
     }
     const { groovy, sourceLabel } = await resolveGroovyForJenkinsSync(jenkinsfilePath, localGroovy);
-    if (!jenkinsfileHasCraneFix(localGroovy)) {
+    if (!jenkinsfileHasCraneFix(localGroovy) || !jenkinsfileHasMutateCmdFix(localGroovy)) {
         assertPaasDeployJenkinsfileSafeForSync(groovy, sourceLabel);
     }
     else {

@@ -9,6 +9,7 @@ import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
 import { updateProject } from "@/server/projects/project-service";
+import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
@@ -106,6 +107,17 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         buildStatus: "PUSHING",
         imageTag: artifactRef
     });
+    if (env.PAAS_ENFORCE_SECURITY_GATE === "true") {
+        const security = await getSecurityMetrics(projectId);
+        if (!security.securityEnforcement.deploymentAllowed) {
+            const gateMsg = security.securityEnforcement.summary || "Security gate did not pass.";
+            sections.push(`[security-gate] BLOCKED: ${gateMsg}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=security_gate status=FAIL detail=${gateMsg.slice(0, 400)}`);
+            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.UNKNOWN, gateMsg);
+            return;
+        }
+        sections.push(`PAAS_DEPLOY_VERIFY step=security_gate status=OK detail=${security.securityEnforcement.summary.slice(0, 300)}`);
+    }
     await prisma.deployment.update({
         where: { id: deploymentId },
         data: { status: DeploymentJobStatus.DEPLOYING, ...clearDeploymentFailureFields() }
@@ -194,6 +206,11 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     let urlReachable = false;
+    const postArgoDelayMs = Math.max(0, Number(process.env.PAAS_DEPLOY_POST_ARGO_PROBE_DELAY_MS ?? "15000") || 0);
+    if (postArgoDelayMs > 0 && (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true")) {
+        sections.push(`[deploy] Waiting ${postArgoDelayMs}ms after Argo CD before HTTP probe…`);
+        await new Promise((r) => setTimeout(r, postArgoDelayMs));
+    }
     if (!labIp && !env.APPS_PUBLIC_URL_TEMPLATE.trim()) {
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} — set APPS_PUBLIC_LAB_NODE_IP and APPS_PUBLIC_INGRESS_HTTP_PORT in PaaS env`);
     }
@@ -201,24 +218,24 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         const maxAttempts = Math.max(1, Math.floor(env.PAAS_DEPLOY_WAIT_HTTP_MS / env.PAAS_DEPLOY_HTTP_POLL_MS));
         const reachability = await probeAppUrlReachability(appUrl, {
             maxAttempts,
-            delayMs: env.PAAS_DEPLOY_HTTP_POLL_MS
+            delayMs: env.PAAS_DEPLOY_HTTP_POLL_MS,
+            namespace: destNamespace,
+            projectName
         });
         urlReachable = reachability.reachable;
         if (reachability.reachable) {
-            sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl} HTTP ${reachability.statusCode ?? "?"}`);
-        }
-        else if (env.PAAS_STRICT_INTEGRATIONS === "true") {
-            sections.push(`PAAS_DEPLOY_VERIFY step=url status=FAIL detail=${appUrl} (${reachability.error ?? "unreachable"})`);
-            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, `Application URL not reachable: ${appUrl}`);
-            return;
+            const viaNote = reachability.via === "in_cluster"
+                ? " (verified via in-cluster Service; public ingress may still propagate)"
+                : "";
+            sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl} HTTP ${reachability.statusCode ?? "?"}${viaNote}`);
         }
         else {
-            sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} (${reachability.error ?? "unreachable"})`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=url status=FAIL detail=${appUrl} (${reachability.error ?? "unreachable"})`);
         }
     }
     const probeConfigured = Boolean(labIp || env.APPS_PUBLIC_URL_TEMPLATE.trim());
     if (probeConfigured && !urlReachable) {
-        const msg = `Application URL not reachable (${appUrl}). Check Argo CD sync (ARGOCD_PASSWORD or ARGOCD_AUTH_TOKEN) and Traefik ingress for ${projectName}.`;
+        const msg = `Application URL not reachable (${appUrl}). Check pod logs (kubectl logs), Argo CD sync, and Traefik ingress for ${projectName}.`;
         sections.push(`[deploy] FAILED: ${msg}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
         return;

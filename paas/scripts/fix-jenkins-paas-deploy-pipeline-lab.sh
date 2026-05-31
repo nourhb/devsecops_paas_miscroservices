@@ -7,20 +7,32 @@ cd "${REPO_ROOT}"
 
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 JENKINSFILE_TO_PUSH="${JENKINSFILE}"
-echo "==> 1. Resolve Jenkinsfile with crane-next16-202605-j48300-split"
-if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE}" 2>/dev/null; then
-  echo "WARN: local repo missing fix — fetching from GitHub raw (main)"
-  FRESH="/tmp/Jenkinsfile.paas-deploy.crane-next16"
+echo "==> 1. Resolve Jenkinsfile with monorepo-app-root-20260531"
+if ! grep -qF 'monorepo-app-root-20260531' "${JENKINSFILE}" 2>/dev/null; then
+  echo "WARN: local repo missing monorepo fix — fetching from GitHub raw (main)"
+  FRESH="/tmp/Jenkinsfile.paas-deploy.monorepo-fix"
   curl -fsSL --retry 3 --connect-timeout 30 \
     "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy" \
     -o "${FRESH}"
-  if ! grep -qF 'crane-next16-202605-j48300-split' "${FRESH}"; then
-    echo "FAIL: downloaded Jenkinsfile still missing crane-next16-202605-j48300-split" >&2
+  if ! grep -qF 'monorepo-app-root-20260531' "${FRESH}"; then
+    echo "FAIL: downloaded Jenkinsfile still missing monorepo-app-root-20260531" >&2
     exit 1
   fi
   JENKINSFILE_TO_PUSH="${FRESH}"
 else
   git -C "${REPO_ROOT}" pull --ff-only origin main 2>/dev/null || true
+fi
+if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing crane-next16-202605-j48300-split" >&2
+  exit 1
+fi
+if grep -qF '--cmd=-c' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile still has broken crane mutate (--cmd=-c). git pull origin main or copy fixed Jenkinsfile from dev machine." >&2
+  exit 1
+fi
+if ! grep -qF 'entrypoint=/app/start-paas.sh' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing start-paas.sh mutate fix (entrypoint=/app/start-paas.sh)" >&2
+  exit 1
 fi
 
 echo "==> 2. Wait for Jenkins API (pod may be Ready before :30090 accepts connections)"
@@ -87,9 +99,9 @@ fi
 
 echo ""
 echo "OK — trigger a NEW build (not Rebuild). Step 6 console must show:"
-echo "  marker crane-next16-202605-j48300-split in job log"
-echo "  [image] (keepalive) starting npm ci ... (foreground cmd; JENKINS-48300)"
-echo "  (must NOT show: npx next build --no-lint)"
+echo "  marker monorepo-app-root-20260531 in job log"
+echo "  [build] Monorepo/subdir layout — app root: server   (for text-to-floorplan-2D)"
+echo "  [image] crane mutate OK"
 echo ""
 echo "If Step 6 still runs npm ci for 15+ min: set JENKINS_PAAS_FAST_PIPELINE=false in docker-compose.env"
 echo "  so Step 3 does npm ci + next build (Step 6 only packages .next/standalone)."
