@@ -4,7 +4,7 @@ import { prisma } from "@/server/db/prisma";
 import { env } from "@/server/config/env";
 import { parseBuildMetadata } from "@/server/build-metadata";
 import { getBuildBackend } from "@/server/build-backend";
-import { jenkinsClient } from "@/server/integrations/devsecops-clients";
+import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { promoteDeploymentAfterJenkinsSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
@@ -63,11 +63,15 @@ async function resolveDeployBuildNumber(deployment: {
     const baseline = deployment.priorJenkinsBuildNumber ?? null;
     const fromColumn = deployment.jenkinsBuildNumber;
     if (fromColumn != null) {
-        return fromColumn;
+        if (await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, fromColumn)) {
+            return fromColumn;
+        }
     }
     const fromLogs = extractJenkinsRunFromLogs(deployment.logs);
     if (fromLogs != null && (baseline == null || fromLogs > baseline)) {
-        return fromLogs;
+        if (await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, fromLogs)) {
+            return fromLogs;
+        }
     }
     const fromScan = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
         baseline,
@@ -75,6 +79,9 @@ async function resolveDeployBuildNumber(deployment: {
     });
     if (fromScan != null) {
         return fromScan;
+    }
+    if (usesSharedJenkinsDeployJob()) {
+        return null;
     }
     const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
     return summary ? normalizeBuildNumber(summary.number, baseline) : null;

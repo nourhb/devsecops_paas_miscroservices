@@ -8,7 +8,7 @@ import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { IntegrationError } from "@/server/http/errors";
 import { allowSimulation } from "@/server/integrations/integration-mode";
-import { jenkinsClient, resolveJenkinsJobNameForProject } from "@/server/integrations/devsecops-clients";
+import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { updateProject } from "@/server/projects/project-service";
@@ -180,11 +180,16 @@ export class JenkinsBuildBackend implements BuildBackend {
             return;
         }
         let buildNum = normalizeInitialBuildNumber(args.startedRun.runNumber, baseline);
+        if (buildNum != null && !(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, buildNum))) {
+            buildNum = null;
+        }
         try {
             while (buildNum === null && Date.now() < deadline) {
                 const fromLogs = extractJenkinsRunFromLogs(deployment.logs);
                 if (fromLogs != null && (baseline === null || fromLogs > baseline)) {
-                    buildNum = fromLogs;
+                    if (await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, fromLogs)) {
+                        buildNum = fromLogs;
+                    }
                 }
                 if (buildNum === null) {
                     buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
@@ -192,7 +197,7 @@ export class JenkinsBuildBackend implements BuildBackend {
                         afterMs: deployment.createdAt.getTime() - 120_000
                     });
                 }
-                if (buildNum === null) {
+                if (buildNum === null && !usesSharedJenkinsDeployJob()) {
                     const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
                     if (summary && (baseline === null || summary.number > baseline)) {
                         buildNum = summary.number;
