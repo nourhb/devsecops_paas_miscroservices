@@ -25,7 +25,6 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # Jenkins-built Node/Next images need a writable root FS and default user (not test-app hardening).
       securityContext:
         runAsNonRoot: false
       containers:
@@ -61,5 +60,15 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+          {{- with .Values.resources }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+          {{- end }}
