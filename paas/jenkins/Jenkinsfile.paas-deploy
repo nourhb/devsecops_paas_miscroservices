@@ -317,6 +317,43 @@ CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.
 '''
     return "Dockerfile"
   }
+  if (fileExists("pom.xml")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml ./
+COPY src ./src
+RUN mvn -q -DskipTests package
+FROM mirror.gcr.io/library/eclipse-temurin:17-jre-jammy
+WORKDIR /app
+COPY --from=build /app/target/*.jar /app/app.jar
+EXPOSE 8080
+CMD ["java", "-jar", "/app/app.jar"]
+'''
+    return "Dockerfile"
+  }
+  if (fileExists("build.gradle") || fileExists("build.gradle.kts")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/eclipse-temurin:17-jdk-jammy AS build
+WORKDIR /app
+COPY . .
+RUN if [ -f gradlew ]; then chmod +x gradlew && ./gradlew build -x test; else gradle build -x test; fi
+FROM mirror.gcr.io/library/eclipse-temurin:17-jre-jammy
+WORKDIR /app
+RUN apt-get update && apt-get install -y findutils && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app /app
+RUN cp "$(find /app -name '*.jar' | grep -v plain | head -1)" /app/app.jar
+EXPOSE 8080
+CMD ["java", "-jar", "/app/app.jar"]
+'''
+    return "Dockerfile"
+  }
+  if (fileExists("index.html")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/nginx:stable-alpine
+COPY . /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+'''
+    return "Dockerfile"
+  }
   return ""
 }
 

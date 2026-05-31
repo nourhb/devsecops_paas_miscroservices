@@ -1,5 +1,7 @@
 import { env } from "@/server/config/env";
 import { buildAppIngressHost } from "@/server/deploy/app-public-url";
+import { resolveDeployProfileSpec, type DeployProfileSpec } from "@/server/deploy/deploy-profile";
+import type { BuildProfile } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
@@ -96,7 +98,7 @@ async function githubPutText(owner: string, repo: string, path: string, branch: 
         throw new IntegrationError(`GitHub PUT ${path} failed (${putRes.status}): ${t.slice(0, 600)}`);
     }
 }
-export async function ensureGitOpsHelmChartFromReference(projectName: string): Promise<{
+export async function ensureGitOpsHelmChartFromReference(projectName: string, buildProfile: BuildProfile = "node"): Promise<{
     bootstrapped: boolean;
     filesWritten: string[];
 }> {
@@ -111,8 +113,9 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string): P
     if (await githubFileExists(owner, repo, chartYamlPath, branch, token)) {
         return { bootstrapped: false, filesWritten: [] };
     }
-    const refBase = (env.GITOPS_BOOTSTRAP_CHART_PATH || "apps/test-app").replace(/\\/g, "/").replace(/\/$/, "");
-    const referenceName = refBase.split("/").filter(Boolean).pop() ?? "test-app";
+    const refBase = (env.GITOPS_BOOTSTRAP_CHART_PATH.trim() || "apps/simple-app").replace(/\\/g, "/").replace(/\/$/, "");
+    const referenceName = refBase.split("/").filter(Boolean).pop() ?? "simple-app";
+    const profileSpec = resolveDeployProfileSpec(buildProfile);
     const filesWritten: string[] = [];
     for (const rel of CHART_RELATIVE_FILES) {
         const srcPath = `${refBase}/${rel}`;
@@ -122,7 +125,7 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string): P
             text = text.replaceAll(referenceName, projectName);
         }
         if (rel === "templates/deployment.yaml") {
-            text = patchDeploymentForNodeWorkload(text);
+            text = patchDeploymentForProfile(text, profileSpec);
         }
         await githubPutText(owner, repo, destPath, branch, token, text, `chore(gitops): bootstrap ${projectName} chart from ${refBase}`);
         filesWritten.push(destPath);
@@ -130,16 +133,22 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string): P
     return { bootstrapped: true, filesWritten };
 }
 export function patchDeploymentForNodeWorkload(yaml: string): string {
+    return patchDeploymentForProfile(yaml, resolveDeployProfileSpec("node"));
+}
+export function patchDeploymentForProfile(yaml: string, profileSpec: DeployProfileSpec): string {
+    const port = profileSpec.containerPort;
     let out = yaml
         .replace(/readOnlyRootFilesystem:\s*true/g, "readOnlyRootFilesystem: false")
-        .replace(/runAsNonRoot:\s*true/g, "runAsNonRoot: false")
-        .replace(/(\s+imagePullPolicy: IfNotPresent\n)/, `$1          ports:\n            - name: http\n              containerPort: 3000\n              protocol: TCP\n`);
-    if (!out.includes("containerPort: 3000") && out.includes("containers:")) {
-        out = out.replace(/(\s+- name: [^\n]+\n\s+image:)/, `          ports:\n            - name: http\n              containerPort: 3000\n              protocol: TCP\n$1`);
+        .replace(/runAsNonRoot:\s*true/g, "runAsNonRoot: false");
+    if (!out.includes("containerPort:") && out.includes("containers:")) {
+        out = out.replace(/(\s+- name: [^\n]+\n\s+image:)/, `          ports:\n            - name: http\n              containerPort: ${port}\n              protocol: TCP\n$1`);
     }
+    out = out.replace(/containerPort:\s*\{\{\s*\.Values\.service\.targetPort[^}]+\}\}/g, `containerPort: {{ .Values.service.targetPort | default ${port} }}`);
+    out = out.replace(/value:\s*\{\{\s*\.Values\.service\.targetPort[^}]+\}\}/g, `value: {{ .Values.service.targetPort | default ${port} | quote }}`);
     return out;
 }
-export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectName: string): void {
+export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectName: string, buildProfile: BuildProfile = "node"): void {
+    const profileSpec = resolveDeployProfileSpec(buildProfile);
     if (!doc.imagePullSecrets) {
         doc.imagePullSecrets = [{ name: "harbor-regcred" }];
     }
@@ -147,9 +156,7 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         ? (doc.service as Record<string, unknown>)
         : {};
     doc.service = service;
-    if (!service.targetPort) {
-        service.targetPort = 3000;
-    }
+    service.targetPort = profileSpec.containerPort;
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     if (labIp && !doc.nodeSelector) {
         doc.nodeSelector = { "kubernetes.io/hostname": "master" };
@@ -165,11 +172,20 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         ingress.enabled = true;
     }
     if (!ingress.className) {
-        ingress.className = "traefik";
+        ingress.className = env.APPS_INGRESS_CLASS.trim() || "traefik";
     }
     const hosts = ingress.hosts;
     if (!Array.isArray(hosts) || hosts.length === 0) {
         ingress.hosts = [{ host: buildAppIngressHost(projectName) }];
+    }
+    else {
+        const expectedHost = buildAppIngressHost(projectName);
+        const hostEntries = hosts as Array<Record<string, unknown>>;
+        const hasExpected = hostEntries.some((entry) => String(entry.host || "").toLowerCase() === expectedHost.toLowerCase());
+        if (!hasExpected) {
+            hostEntries.unshift({ host: expectedHost });
+            ingress.hosts = hostEntries;
+        }
     }
     if (!Array.isArray(ingress.tls)) {
         ingress.tls = [];

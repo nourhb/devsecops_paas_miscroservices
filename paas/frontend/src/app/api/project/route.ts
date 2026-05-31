@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
             message: "Too many project creation attempts. Please retry in a minute."
         });
         const body = await request.json();
-        const project = await createProject(body, auth.userId);
-        const warnings: string[] = [];
+        const { project, warnings: createWarnings } = await createProject(body, auth.userId);
+        const warnings: string[] = [...createWarnings];
         try {
             const backend = getBuildBackend();
             await backend.provisionProjectIntegration(project, resolveBuildPlan(project));
