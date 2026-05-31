@@ -10,7 +10,7 @@ import type { PendingGitHubPush, Project, ProjectRequest, UserRole } from "@/typ
 const createProjectSchema = z.object({
     projectName: z.string().min(2).max(120),
     gitRepositoryUrl: z.string().url(),
-    branch: z.string().min(1).max(120),
+    branch: z.string().trim().max(120).optional().default(""),
     gitCredentialsId: z.string().trim().max(200).optional().default(""),
     language: z.string().trim().max(100).optional().default(""),
     buildProfile: z.enum(["node", "python", "java", "static", "custom"]).optional(),
@@ -111,7 +111,7 @@ export async function createProject(payload: unknown, userId: string): Promise<P
     try {
         detected = await detectRepositoryLanguage({
             gitRepositoryUrl: parsed.data.gitRepositoryUrl,
-            branch: parsed.data.branch
+            branch: parsed.data.branch.trim() || undefined
         });
     }
     catch (error) {
@@ -122,13 +122,13 @@ export async function createProject(payload: unknown, userId: string): Promise<P
         detected = {
             language: manualLanguage,
             buildProfile: parsed.data.buildProfile ?? "custom",
-            branch: parsed.data.branch,
+            branch: parsed.data.branch.trim() || "main",
             hasDockerfile: true,
             detectionReason: "Using manually specified language (repository auto-detection failed)."
         };
     }
     const resolvedLanguage = parsed.data.language.trim() || detected.language;
-    const resolvedBranch = detected.branch || parsed.data.branch;
+    const resolvedBranch = detected.branch || parsed.data.branch.trim() || "main";
     const namespace = toNamespace(parsed.data.projectName);
     const created = await prisma.project.create({
         data: {
