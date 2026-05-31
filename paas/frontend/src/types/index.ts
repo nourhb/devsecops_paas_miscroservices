@@ -76,7 +76,7 @@ export interface PendingGitHubPush {
 export interface ProjectRequest {
     projectName: string;
     gitRepositoryUrl: string;
-    branch: string;
+    branch?: string;
     gitCredentialsId?: string;
     language: string;
     buildProfile?: "node" | "python" | "java" | "static" | "custom";
