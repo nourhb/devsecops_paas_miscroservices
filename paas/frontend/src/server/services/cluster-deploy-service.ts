@@ -193,6 +193,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     }
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    let urlReachable = false;
     if (!labIp && !env.APPS_PUBLIC_URL_TEMPLATE.trim()) {
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} — set APPS_PUBLIC_LAB_NODE_IP and APPS_PUBLIC_INGRESS_HTTP_PORT in PaaS env`);
     }
@@ -202,6 +203,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             maxAttempts,
             delayMs: env.PAAS_DEPLOY_HTTP_POLL_MS
         });
+        urlReachable = reachability.reachable;
         if (reachability.reachable) {
             sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl} HTTP ${reachability.statusCode ?? "?"}`);
         }
@@ -211,8 +213,15 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             return;
         }
         else {
-            sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} (${reachability.error ?? "unreachable"}) — marked DEPLOYED; retry build if app stays down`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} (${reachability.error ?? "unreachable"})`);
         }
+    }
+    const argoReady = sections.some((line) => line.includes("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK"));
+    if (!urlReachable && !argoReady) {
+        const msg = `Application URL not reachable (${appUrl}) and Argo CD did not report Healthy+Synced. Set ARGOCD_PASSWORD or refresh ARGOCD_AUTH_TOKEN, then redeploy.`;
+        sections.push(`[deploy] FAILED: ${msg}`);
+        await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
+        return;
     }
     const okLog = tail(sections.join("\n"));
     await prisma.deployment.update({

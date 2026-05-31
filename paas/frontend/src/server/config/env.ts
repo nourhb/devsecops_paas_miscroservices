@@ -126,6 +126,8 @@ const envSchema = z.object({
     TEKTON_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
     ARGOCD_BASE_URL: z.string().default(""),
     ARGOCD_AUTH_TOKEN: z.string().default(""),
+    ARGOCD_USERNAME: z.string().default("admin"),
+    ARGOCD_PASSWORD: z.string().default(""),
     ARGOCD_TLS_SKIP_VERIFY: z.enum(["true", "false"]).default("false"),
     ARGOCD_APP_PREFIX: z.string().default("paas"),
     ARGOCD_AUTO_CREATE_APPLICATION: z.enum(["true", "false"]).default("true"),
@@ -270,7 +272,7 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
         errors.push("need Jenkins URL + user + token");
     }
     if (parsedEnv.PAAS_STRICT_INTEGRATIONS === "true") {
-        if (!parsedEnv.ARGOCD_BASE_URL || !parsedEnv.ARGOCD_AUTH_TOKEN) {
+        if (!parsedEnv.ARGOCD_BASE_URL || (!parsedEnv.ARGOCD_AUTH_TOKEN && !parsedEnv.ARGOCD_PASSWORD)) {
             errors.push("need Argo URL + token (or set PAAS_STRICT_INTEGRATIONS=false for Jenkins-only prod)");
         }
         if (parsedEnv.ARGOCD_TLS_SKIP_VERIFY === "true") {
@@ -368,6 +370,8 @@ const parsed = envSchema.safeParse({
     TEKTON_POLL_MAX_MS: process.env.TEKTON_POLL_MAX_MS,
     ARGOCD_BASE_URL: firstNonEmpty(process.env.ARGOCD_BASE_URL, process.env.ARGOCD_URL),
     ARGOCD_AUTH_TOKEN: firstNonEmpty(process.env.ARGOCD_AUTH_TOKEN, process.env.ARGOCD_TOKEN),
+    ARGOCD_USERNAME: process.env.ARGOCD_USERNAME,
+    ARGOCD_PASSWORD: process.env.ARGOCD_PASSWORD,
     ARGOCD_TLS_SKIP_VERIFY: process.env.ARGOCD_TLS_SKIP_VERIFY,
     ARGOCD_APP_PREFIX: process.env.ARGOCD_APP_PREFIX,
     ARGOCD_AUTO_CREATE_APPLICATION: process.env.ARGOCD_AUTO_CREATE_APPLICATION,

@@ -1,12 +1,13 @@
 import { env } from "@/server/config/env";
+import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-github-service";
-import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
+import { argocdFetchWithAuth, resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
 import { IntegrationError } from "@/server/http/errors";
 import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import type { ArgoCdStatus } from "@/types";
 export function argoApplicationName(projectName: string): string {
-    return `${env.ARGOCD_APP_PREFIX}-${projectName}`;
+    return `${env.ARGOCD_APP_PREFIX}-${sanitizeDeployImageName(projectName)}`;
 }
 export function getArgoCdApiBase(): string {
     return env.ARGOCD_BASE_URL.trim().replace(/\/+$/, "");
@@ -50,16 +51,12 @@ function buildArgoApplicationBody(projectName: string, destinationNamespace: str
 }
 async function getArgoApplicationHttpStatus(appName: string): Promise<"missing" | "present" | "error"> {
     const base = getArgoCdApiBase();
-    const token = env.ARGOCD_AUTH_TOKEN.trim();
-    if (!base || !token) {
+    if (!base || !(await argoAuthConfigured())) {
         return "error";
     }
     const url = `${base}/api/v1/applications/${encodeURIComponent(appName)}`;
     try {
-        const response = await argocdIntegrationFetch(url, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${token}` }
-        });
+        const response = await argocdFetchWithAuth(url, { method: "GET" });
         if (response.status === 404) {
             return "missing";
         }
@@ -81,12 +78,11 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
         return { logs: `[argocd] Auto-create disabled (ARGOCD_AUTO_CREATE_APPLICATION=false).`, created: false };
     }
     const base = getArgoCdApiBase();
-    const token = env.ARGOCD_AUTH_TOKEN.trim();
-    if (!base || !token) {
+    if (!(await argoAuthConfigured())) {
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated ensure for ${appName} (Argo CD not configured).`, created: false };
         }
-        throw new IntegrationError("Argo CD is not configured: set ARGOCD_BASE_URL and ARGOCD_AUTH_TOKEN to auto-create Applications.");
+        throw new IntegrationError(`Argo CD is not configured: ${argoAuthHint()}`);
     }
     const existing = await getArgoApplicationHttpStatus(appName);
     if (existing === "present") {
@@ -97,12 +93,9 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
     const createUrl = `${base}/api/v1/applications`;
     let response: Response;
     try {
-        response = await argocdIntegrationFetch(createUrl, {
+        response = await argocdFetchWithAuth(createUrl, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
         });
     }
@@ -142,22 +135,18 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
 }
 export async function getArgoApplicationStatus(projectName: string): Promise<ArgoCdStatus> {
     const base = getArgoCdApiBase();
-    const token = env.ARGOCD_AUTH_TOKEN.trim();
     const appName = argoApplicationName(projectName);
-    if (!base || !token) {
+    if (!base || !(await argoAuthConfigured())) {
         return {
             health: "Unknown",
             syncStatus: "Unknown",
             appName,
-            unreachableReason: "Set ARGOCD_BASE_URL (or ARGOCD_URL) and ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN) to query Argo CD."
+            unreachableReason: argoAuthHint()
         };
     }
     const url = `${base}/api/v1/applications/${encodeURIComponent(appName)}`;
     try {
-        const response = await argocdIntegrationFetch(url, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${token}` }
-        });
+        const response = await argocdFetchWithAuth(url, { method: "GET" });
         if (response.status === 404) {
             return {
                 health: "Unknown",
@@ -175,7 +164,7 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
                     syncStatus: "Unknown",
                     appName,
                     unreachableReason: `Argo CD returned HTTP ${response.status} for GET ${url}. ` +
-                        `Regenerate the token or grant applications, get (and sync for deploy) on the AppProject. ${errText}`
+                        `Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (admin login) with sync/get permissions on the AppProject. ${errText}`
                 };
             }
             if (allowSimulation()) {
@@ -227,13 +216,12 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     logs: string;
 }> {
     const base = getArgoCdApiBase();
-    const token = env.ARGOCD_AUTH_TOKEN.trim();
     const appName = argoApplicationName(projectName);
-    if (!base || !token) {
+    if (!base || !(await argoAuthConfigured())) {
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated sync for ${appName} (Argo CD not configured).` };
         }
-        throw new IntegrationError("Argo CD is not configured: set ARGOCD_BASE_URL and ARGOCD_AUTH_TOKEN (or ARGOCD_URL / ARGOCD_TOKEN).");
+        throw new IntegrationError(`Argo CD is not configured: ${argoAuthHint()}`);
     }
     const ensureLogs: string[] = [];
     try {
@@ -250,12 +238,9 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     const url = `${base}/api/v1/applications/${encodeURIComponent(appName)}/sync`;
     let response: Response;
     try {
-        response = await argocdIntegrationFetch(url, {
+        response = await argocdFetchWithAuth(url, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ prune: false, dryRun: false })
         });
     }
@@ -292,7 +277,7 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
         }
         if (response.status === 401) {
             throw new IntegrationError(`Argo CD authentication failed (HTTP 401). ` +
-                `Regenerate a JWT (Argo CD UI: generate token, or run \`python paas/scripts/refresh_argocd_token.py\` with ARGOCD_REFRESH_SSH_PASSWORD) and set ARGOCD_AUTH_TOKEN.`);
+                `Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (admin password) in the PaaS frontend environment.`);
         }
         if (response.status === 403) {
             const hint = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
@@ -308,6 +293,15 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     }
     const syncLine = `[argocd] Sync accepted for ${appName}`;
     return { logs: ensureLogs.length ? `${ensureLogs.join("\n")}\n${syncLine}` : syncLine };
+}
+function argoAuthHint(): string {
+    return "Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (with ARGOCD_BASE_URL) to query Argo CD.";
+}
+async function argoAuthConfigured(): Promise<boolean> {
+    if (!getArgoCdApiBase()) {
+        return false;
+    }
+    return (await resolveArgoCdAuthHeader()) !== null;
 }
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

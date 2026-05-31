@@ -865,6 +865,7 @@ export class JenkinsClient {
         const paramName = env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER;
         const afterMs = opts.afterMs ?? null;
         const builds = await this.listRecentBuildSummaries(projectName, projectUuid, "deploy", opts.limit ?? 25);
+        let best: number | null = null;
         for (const build of builds) {
             if (opts.baseline != null && build.number <= opts.baseline) {
                 continue;
@@ -874,10 +875,12 @@ export class JenkinsClient {
             }
             const projectParam = await this.getBuildParameterValue(projectName, projectUuid, build.number, paramName, "deploy");
             if (projectParam === projectUuid) {
-                return build.number;
+                if (best === null || build.number > best) {
+                    best = build.number;
+                }
             }
         }
-        return null;
+        return best;
     }
     async getBuildApiJson(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "build"): Promise<{
         number: number;
