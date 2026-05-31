@@ -114,6 +114,7 @@ if [[ "${SYNC_FRONTEND}" == "1" ]]; then
   bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}" || true
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
+  bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh"
 fi
 
 if [[ "${SYNC_JENKINS}" == "1" ]]; then

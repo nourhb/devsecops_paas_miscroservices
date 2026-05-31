@@ -17,12 +17,16 @@ REGISTRY_CLUSTER=""
 NGINX_CLUSTER=""
 
 if command -v kubectl >/dev/null 2>&1 && kubectl get ns harbor >/dev/null 2>&1; then
+  if kubectl get svc harbor-nginx -n harbor >/dev/null 2>&1; then
+    NGINX_CLUSTER="harbor-nginx.harbor.svc.cluster.local"
+  elif kubectl get svc nginx -n harbor >/dev/null 2>&1; then
+    NGINX_CLUSTER="nginx.harbor.svc.cluster.local"
+  elif kubectl get svc harbor -n harbor >/dev/null 2>&1; then
+    NGINX_CLUSTER="harbor.harbor.svc.cluster.local"
+  fi
   if kubectl get svc harbor-registry -n harbor >/dev/null 2>&1; then
     PORT="$(kubectl get svc harbor-registry -n harbor -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 5000)"
     REGISTRY_CLUSTER="harbor-registry.harbor.svc.cluster.local:${PORT}"
-  fi
-  if kubectl get svc harbor-nginx -n harbor >/dev/null 2>&1; then
-    NGINX_CLUSTER="harbor-nginx.harbor.svc.cluster.local"
   fi
 fi
 

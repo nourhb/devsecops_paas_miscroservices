@@ -81,6 +81,7 @@ fi
 if [[ -f "${REPO_ROOT}/paas/.lab-cosign/cosign.pub" ]]; then
   echo "==> Mount cosign public key for Security UI verify"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh" || true
+  bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh" || true
 fi
 
 curl -sf "http://127.0.0.1:30100/api/health" | head -c 200 || true
