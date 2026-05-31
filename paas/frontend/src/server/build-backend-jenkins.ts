@@ -10,7 +10,7 @@ import { IntegrationError } from "@/server/http/errors";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
-import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
+import { resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@/server/jenkins/jenkins-build-artifact";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
@@ -33,6 +33,31 @@ function statusFromJenkins(result: string | null, building: boolean): Deployment
 }
 function terminalResult(result: string | null, building: boolean): boolean {
     return !building && result !== null;
+}
+async function drainProgressiveLogTail(projectName: string, projectId: string, buildNum: number, deploymentId: string, existing: string): Promise<string> {
+    let tail = existing;
+    let offset = progressiveLogOffsets.get(deploymentId) ?? 0;
+    for (let i = 0; i < 40; i++) {
+        const chunk = await jenkinsClient.getBuildConsoleProgressiveText(projectName, projectId, buildNum, offset, "deploy");
+        if (!chunk?.text) {
+            break;
+        }
+        offset = chunk.nextStart;
+        progressiveLogOffsets.set(deploymentId, offset);
+        tail = mergeLogTail(tail, chunk.text);
+        if (!chunk.moreData) {
+            break;
+        }
+    }
+    return tail;
+}
+async function jenkinsLogForArtifactVerify(projectName: string, projectId: string, buildNum: number, deploymentId: string, progressiveTail: string): Promise<string> {
+    let tail = await drainProgressiveLogTail(projectName, projectId, buildNum, deploymentId, progressiveTail);
+    if (/PAAS_BUILD_COMPLETE\s+result=/i.test(tail)) {
+        return tail;
+    }
+    const full = await jenkinsClient.getBuildConsoleText(projectName, projectId, buildNum, "deploy");
+    return pickJenkinsLogForArtifactVerify(tail, full);
 }
 function mergeLogTail(existing: string, incoming: string): string {
     const base = existing.trimEnd();
@@ -299,7 +324,12 @@ export class JenkinsBuildBackend implements BuildBackend {
                             });
                             continue;
                         }
-                        const verified = resolveVerifiedArtifactImage(logTail, projectId, projectName, activeBuildNum);
+                        const verifyLog = await jenkinsLogForArtifactVerify(projectName, projectId, activeBuildNum, args.deploymentId, logTail);
+                        const completeLine = verifyLog.match(/PAAS_BUILD_COMPLETE[^\n]*/i)?.[0]?.trim();
+                        if (completeLine) {
+                            logTail = mergeLogTail(logTail, completeLine);
+                        }
+                        const verified = resolveVerifiedArtifactImage(verifyLog, projectId, projectName, activeBuildNum);
                         if (!verified.image) {
                             await markDeploymentFailed(args.deploymentId, projectId, verified.error ?? `Could not verify Jenkins artifact for build #${activeBuildNum}.`, DeploymentFailureReason.JENKINS);
                             return;
