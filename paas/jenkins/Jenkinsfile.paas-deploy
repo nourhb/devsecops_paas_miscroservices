@@ -299,7 +299,7 @@ RUN if [ -f package.json ]; then \\
     fi
 ENV HOSTNAME=0.0.0.0 PORT=3000
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; elif [ -f package.json ]; then exec npm start; else exec node server.js; fi"]
+CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; elif [ -d build ] && [ -f build/index.html ]; then exec npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then exec npm start; else exec node server.js; fi"]
 '''
     return "Dockerfile"
   }
@@ -596,7 +596,7 @@ ${paasShellKeepaliveHelper()}
         --workdir=/app \\
         --entrypoint=/bin/sh \\
         --cmd=-c \\
-        --cmd='if [ -f package.json ]; then npm start; else node server.js; fi' \\
+        --cmd='if [ -f server.js ]; then node server.js; elif [ -d build ] && [ -f build/index.html ]; then npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then npm start; else node server.js; fi' \\
         --exposed-ports=3000/tcp
     fi
   """

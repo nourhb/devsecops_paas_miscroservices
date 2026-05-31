@@ -143,7 +143,17 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     if (!doc.imagePullSecrets) {
         doc.imagePullSecrets = [{ name: "harbor-regcred" }];
     }
+    const service = doc.service && typeof doc.service === "object" && doc.service !== null
+        ? (doc.service as Record<string, unknown>)
+        : {};
+    doc.service = service;
+    if (!service.targetPort) {
+        service.targetPort = 3000;
+    }
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    if (labIp && !doc.nodeSelector) {
+        doc.nodeSelector = { "kubernetes.io/hostname": "master" };
+    }
     if (!labIp) {
         return;
     }
