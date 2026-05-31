@@ -64,18 +64,26 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
             type: "kubernetes.io/dockerconfigjson",
             data: secretData
         };
-        try {
-            await api.createNamespacedSecret(ns, copy);
-            logs.push(`[k8s] Copied ${HARBOR_PULL_SECRET} into namespace ${ns}`);
-        }
-        catch (createError) {
-            const msg = createError instanceof Error ? createError.message : String(createError);
-            if (/already exists|409/i.test(msg)) {
-                await api.replaceNamespacedSecret(HARBOR_PULL_SECRET, ns, copy);
-                logs.push(`[k8s] Updated ${HARBOR_PULL_SECRET} in namespace ${ns}`);
+        let copied = false;
+        for (let attempt = 1; attempt <= 3 && !copied; attempt++) {
+            try {
+                await api.createNamespacedSecret(ns, copy);
+                logs.push(`[k8s] Copied ${HARBOR_PULL_SECRET} into namespace ${ns}`);
+                copied = true;
             }
-            else {
-                warnings.push(`Could not copy ${HARBOR_PULL_SECRET} to ${ns}: ${msg}`);
+            catch (createError) {
+                const msg = createError instanceof Error ? createError.message : String(createError);
+                if (/already exists|409/i.test(msg)) {
+                    await api.replaceNamespacedSecret(HARBOR_PULL_SECRET, ns, copy);
+                    logs.push(`[k8s] Updated ${HARBOR_PULL_SECRET} in namespace ${ns}`);
+                    copied = true;
+                }
+                else if (attempt < 3) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                }
+                else {
+                    warnings.push(`Could not copy ${HARBOR_PULL_SECRET} to ${ns}: ${msg}`);
+                }
             }
         }
     }

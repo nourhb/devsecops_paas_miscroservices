@@ -152,17 +152,19 @@ LOCK_DIR=""
   prependPath("${nodeDir}/bin")
 }
 
-def patchNextStandaloneConfigIfNeeded() {
-  if (!fileExists('package.json')) {
+def patchNextStandaloneConfigIfNeeded(String appRoot = '.') {
+  def prefix = appRoot == '.' ? '' : "${appRoot}/"
+  if (!fileExists("${prefix}package.json")) {
     return
   }
-  def hasNextConfig = fileExists('next.config.mjs') || fileExists('next.config.js') || fileExists('next.config.ts')
+  def hasNextConfig = fileExists("${prefix}next.config.mjs") || fileExists("${prefix}next.config.js") || fileExists("${prefix}next.config.ts")
   if (!hasNextConfig) {
     return
   }
   ensureNodeTool()
-  sh '''
+  sh """
     set +e
+    cd '${appRoot}'
     if ! command -v node >/dev/null 2>&1; then
       echo "[build] WARN: node unavailable — skip next.config standalone patch (ensureNodeTool should have installed portable Node.js)"
       exit 0
@@ -190,7 +192,7 @@ for (const f of ['next.config.mjs', 'next.config.js', 'next.config.ts']) {
   process.exit(0);
 }
 NODE
-  '''
+  """
 }
 
 def ensureCraneTool() {
@@ -643,6 +645,31 @@ ${paasShellKeepaliveHelper()}
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
     fi
     mkdir -p paas-artifacts
+    cat > start-paas.sh <<'PAAS_START'
+#!/bin/sh
+set -eu
+cd /app || exit 1
+export NODE_ENV=\${NODE_ENV:-production}
+export HOSTNAME=\${HOSTNAME:-0.0.0.0}
+export PORT=\${PORT:-3000}
+if [ -f server.js ]; then
+  exec node server.js
+fi
+if [ -d build ] && [ -f build/index.html ]; then
+  exec npx --yes serve@14 -s build -l "\${PORT}"
+fi
+if [ -f .next/standalone/server.js ]; then
+  exec node .next/standalone/server.js
+fi
+if [ -d node_modules/next ] && { [ -d .next ] || [ -f .next/BUILD_ID ]; }; then
+  exec npx next start -H "\${HOSTNAME}" -p "\${PORT}"
+fi
+if [ -f package.json ]; then
+  exec npm start
+fi
+exec node server.js
+PAAS_START
+    chmod +x start-paas.sh
     STL="\${JENKINS_CRANE_STANDALONE_LAYER:-auto}"
     USE_STANDALONE=0
     if [ -d .next/standalone ]; then
@@ -692,11 +719,13 @@ ${paasShellKeepaliveHelper()}
         -f paas-artifacts/app-layer.tar \\
         -t '${imageRef}'
     fi
-    echo "[image] crane append finished; mutate runs as a separate pipeline sh step"
-  """
-  sh """
-    set -eu
-    USE_STANDALONE=\$(cat paas-artifacts/_crane_use_standalone)
+    echo "[image] crane append finished; running crane mutate (same shell as append — monorepo-safe)"
+    USE_STANDALONE=0
+    if [ -f paas-artifacts/_crane_use_standalone ]; then
+      USE_STANDALONE=\$(cat paas-artifacts/_crane_use_standalone)
+    else
+      echo "[image] WARN: paas-artifacts/_crane_use_standalone missing — assuming non-standalone layer"
+    fi
     if [ "\$USE_STANDALONE" = "1" ]; then
       '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
         -t '${imageRef}' \\
@@ -708,11 +737,10 @@ ${paasShellKeepaliveHelper()}
       '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
         -t '${imageRef}' \\
         --workdir=/app \\
-        --entrypoint=/bin/sh \\
-        --cmd=-c \\
-        --cmd='if [ -f package.json ] && node -e "const p=require(\"./package.json\");const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then export NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000; exec npx next start -H 0.0.0.0 -p 3000; elif [ -f server.js ]; then node server.js; elif [ -d build ] && [ -f build/index.html ]; then npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then npm start; else node server.js; fi' \\
+        --entrypoint=/app/start-paas.sh \\
         --exposed-ports=3000/tcp
     fi
+    echo "[image] crane mutate OK"
   """
 }
 
@@ -793,6 +821,9 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
   println "[paas-jenkinsfile] marker=crane-next16-202605-j48300-split (node{} built-in; Step 6a/6b/6c; foreground cmd JENKINS-48300)"
+  println "[paas-jenkinsfile] marker=crane-mutate-cmd-20260531 (start-paas.sh in layer; no nested quotes in --cmd)"
+  println "[paas-jenkinsfile] marker=security-warn-sca-sonar-20260531 (PAAS_STEP_WARN on failed SCA/Sonar; cyclonedx --package-lock-only)"
+  println "[paas-jenkinsfile] marker=monorepo-app-root-20260531 (Step 3/6 mutate use detectAppRoot e.g. server/)"
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
 
   stage("Step 1 — Params validation") {
@@ -833,14 +864,18 @@ def runPaasDeploy = {
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
-    if (fileExists("pom.xml")) {
+    def buildAppRoot = detectAppRoot()
+    if (buildAppRoot != '.') {
+      println "[build] Monorepo/subdir layout — app root: ${buildAppRoot}"
+    }
+    if (fileExists("${buildAppRoot}/pom.xml")) {
       if (commandExists("mvn")) {
-        sh "mvn -B -DskipTests package"
+        sh "cd '${buildAppRoot}' && mvn -B -DskipTests package"
       } else {
         println "[build] Maven project detected but mvn is not installed; compile skipped."
       }
-    } else if (fileExists("package.json")) {
-      patchNextStandaloneConfigIfNeeded()
+    } else if (fileExists("${buildAppRoot}/package.json")) {
+      patchNextStandaloneConfigIfNeeded(buildAppRoot)
       if (paasFastPipeline) {
         println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
       } else {
@@ -858,6 +893,7 @@ def runPaasDeploy = {
         timeout(time: npmTimeoutMin, unit: 'MINUTES') {
           sh '''
             set -e
+            cd ''' + buildAppRoot + '''
             export CI=true
             export NEXT_TELEMETRY_DISABLED=1
             export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
@@ -1019,6 +1055,12 @@ def runPaasDeploy = {
         println "[build] Node project detected but npm is not installed; compile skipped."
       }
       }
+    } else if (fileExists("${buildAppRoot}/requirements.txt") || fileExists("${buildAppRoot}/pyproject.toml")) {
+      if (commandExists("python3")) {
+        sh "cd '${buildAppRoot}' && python3 -m compileall . || true"
+      } else {
+        println "[build] Python project detected but python3 is not installed; compile skipped."
+      }
     } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
       if (commandExists("python3")) {
         sh "python3 -m compileall . || true"
@@ -1031,21 +1073,24 @@ def runPaasDeploy = {
     sh """
       set +e
       mkdir -p paas-artifacts
+      APP_ROOT='${buildAppRoot}'
       STACK=static
-      if [ -f pom.xml ]; then STACK=maven; fi
-      if [ -f package.json ]; then STACK=node; fi
-      if [ -f requirements.txt ] || [ -f pyproject.toml ]; then STACK=python; fi
+      if [ -f "\${APP_ROOT}/pom.xml" ] || [ -f pom.xml ]; then STACK=maven; fi
+      if [ -f "\${APP_ROOT}/package.json" ] || [ -f package.json ]; then STACK=node; fi
+      if [ -f "\${APP_ROOT}/requirements.txt" ] || [ -f requirements.txt ] || [ -f "\${APP_ROOT}/pyproject.toml" ] || [ -f pyproject.toml ]; then STACK=python; fi
       PATHS=""
       for d in target dist build .next out; do
-        if [ -d "\$d" ]; then PATHS="\$PATHS \$d"; fi
+        if [ -d "\${APP_ROOT}/\$d" ]; then PATHS="\$PATHS \${APP_ROOT}/\$d"; fi
+        if [ "\${APP_ROOT}" != "." ] && [ -d "\$d" ]; then PATHS="\$PATHS \$d"; fi
       done
       echo "# 5. Construction — manifeste d'artefacts intermédiaires" > paas-artifacts/build-artifact-manifest.txt
       echo "PROJECT_ID=${projectId}" >> paas-artifacts/build-artifact-manifest.txt
       echo "BRANCH=${branchName}" >> paas-artifacts/build-artifact-manifest.txt
       echo "BUILD_NUMBER=${env.BUILD_NUMBER}" >> paas-artifacts/build-artifact-manifest.txt
+      echo "APP_ROOT=\${APP_ROOT}" >> paas-artifacts/build-artifact-manifest.txt
       echo "STACK=\$STACK" >> paas-artifacts/build-artifact-manifest.txt
-      if [ -f pom.xml ] && ls target/*.jar >/dev/null 2>&1; then
-        echo "PRIMARY_ARTIFACTS=target/*.jar" >> paas-artifacts/build-artifact-manifest.txt
+      if { [ -f "\${APP_ROOT}/pom.xml" ] || [ -f pom.xml ]; } && ls "\${APP_ROOT}"/target/*.jar >/dev/null 2>&1; then
+        echo "PRIMARY_ARTIFACTS=\${APP_ROOT}/target/*.jar" >> paas-artifacts/build-artifact-manifest.txt
       elif [ -n "\$PATHS" ]; then
         echo "OUTPUT_DIRS=\$PATHS" >> paas-artifacts/build-artifact-manifest.txt
       else
@@ -1053,11 +1098,13 @@ def runPaasDeploy = {
       fi
     """
     def buildProof = 'workspace'
-    if (paasFastPipeline && fileExists('package.json')) {
+    if (buildAppRoot != '.') { buildProof = "app root ${buildAppRoot}" }
+    if (paasFastPipeline && fileExists("${buildAppRoot}/package.json")) {
       buildProof = 'fast-pipeline: compile deferred to Step 6 (crane/Docker)'
-    } else if (fileExists('.next/BUILD_ID')) { buildProof = '.next build present' }
-    else if (fileExists('target')) { buildProof = 'target/ present' }
-    else if (fileExists('dist')) { buildProof = 'dist/ present' }
+    } else if (fileExists("${buildAppRoot}/.next/BUILD_ID")) { buildProof = "${buildAppRoot}/.next build present" }
+    else if (fileExists("${buildAppRoot}/target") || fileExists('target')) { buildProof = 'target/ present' }
+    else if (fileExists("${buildAppRoot}/dist") || fileExists('dist')) { buildProof = 'dist/ present' }
+    else if (fileExists("${buildAppRoot}/build") || fileExists('build')) { buildProof = 'build/ present' }
     paasStepOk(3, 'compile', "${buildProof}; see paas-artifacts/build-artifact-manifest.txt")
     println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
@@ -1072,14 +1119,23 @@ def runPaasDeploy = {
       sh "mkdir -p sca"
       if (!dockerAvailable) {
         println "[sca] Docker CLI missing; npm audit + @cyclonedx/cyclonedx-npm (Node) or extend agent for full SCA."
-        if (fileExists("package.json")) {
+        def scaAppRoot = detectAppRoot()
+        if (fileExists("${scaAppRoot}/package.json")) {
           ensureNodeTool()
-          sh '''
+          def scaRc = sh(script: """
             set +e
-            npm audit --json > sca/npm-audit.json
-            npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
-            exit 0
-          '''
+            cd '${scaAppRoot}'
+            mkdir -p sca
+            npm audit --json > sca/npm-audit.json 2>/dev/null
+            npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
+            echo \$?
+          """, returnStdout: true).trim().tokenize('\n').last()
+          if (scaRc != "0" || !fileExists("${scaAppRoot}/sca/bom.json")) {
+            paasStepWarn(4, 'sca', "bom.json missing or cyclonedx failed (rc=${scaRc}) — check npm lockfile / DEPENDENCY_TRACK_API_KEY")
+          }
+          if (fileExists("${scaAppRoot}/sca/bom.json") && !fileExists("sca/bom.json")) {
+            sh "mkdir -p sca && cp '${scaAppRoot}/sca/bom.json' sca/bom.json"
+          }
         } else {
           println "[sca] No package.json; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
         }
@@ -1156,7 +1212,7 @@ exit 0
         }
         ensureNodeTool()
         withEnv(["SONAR_HOST_URL=${sonarUrl}", "SONAR_TOKEN=${sonarToken}", "SONAR_PROJECT_KEY=${projectId}", "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"]) {
-          sh '''
+          def sonarRc = sh(script: '''
             set +e
             npx --yes sonarqube-scanner \
               -Dsonar.host.url="${SONAR_HOST_URL}" \
@@ -1167,8 +1223,13 @@ exit 0
               -Dsonar.projectVersion="${SONAR_VERSION}" \
               -Dsonar.sources=. \
               -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
-            exit 0
-          '''
+            echo $?
+          ''', returnStdout: true).trim().tokenize('\n').last()
+          if (sonarRc != "0") {
+            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — regenerate SONAR_TOKEN (Not authorized)")
+          } else {
+            paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
+          }
         }
         return
       }
@@ -1183,7 +1244,7 @@ exit 0
         "SONAR_SCAN_PROJECT_KEY=${projectId}",
         "SONAR_SCAN_PROJECT_VERSION=${branchName}-${env.BUILD_NUMBER}"
       ]) {
-        sh '''#!/bin/bash
+        def sonarDockerRc = sh(script: '''#!/bin/bash
 set +e
 SONAR_WS="${SONAR_SCAN_WORKSPACE}"
 if [ -z "${SONAR_WS}" ]; then SONAR_WS="$(pwd)"; fi
@@ -1199,10 +1260,14 @@ docker run --rm \
   -Dsonar.sources=. \
   -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
   -Dsonar.scm.provider=git
-exit 0
-'''
+echo $?
+''', returnStdout: true).trim().tokenize('\n').last()
+        if (sonarDockerRc != "0") {
+          paasStepWarn(5, 'sonar', "scanner exit ${sonarDockerRc} — check SONAR_TOKEN")
+        } else {
+          paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
+        }
       }
-      paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
     }
     }
   }

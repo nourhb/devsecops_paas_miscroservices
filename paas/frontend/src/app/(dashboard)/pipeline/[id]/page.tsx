@@ -165,18 +165,18 @@ export default function PipelinePage() {
     const wfStages = pipelineStagesQuery.data;
     const jenkinsOpenHref = useMemo(() => jenkinsUrlForBrowser(wfStages?.buildUrl, { buildNumber: wfStages?.buildNumber }), [wfStages?.buildUrl, wfStages?.buildNumber]);
     const liveStagesList = useMemo(() => wfStages?.stages ?? [], [wfStages?.stages]);
-    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages), [liveStagesList, wfStages]);
+    const deployVerifyLogs = useMemo(() => {
+        const s = statusQuery.data;
+        return `${s?.deploymentLogs ?? ""}\n${s?.buildLogs ?? ""}`;
+    }, [statusQuery.data]);
+    const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
+    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus ?? statusQuery.data?.status), [liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus, statusQuery.data?.status]);
     const jStarted = useMemo(() => displayStages.filter((s) => {
         const u = (s.status || "").toUpperCase();
         return u !== "NOT_EXECUTED" && u !== "NOT_BUILT" && u !== "SKIPPED";
     }).length, [displayStages]);
     const jTotal = displayStages.length;
     const jProgressPct = jTotal > 0 ? Math.min(100, Math.round(jStarted / jTotal * 100)) : 0;
-    const deployVerifyLogs = useMemo(() => {
-        const s = statusQuery.data;
-        return `${s?.deploymentLogs ?? ""}\n${s?.buildLogs ?? ""}`;
-    }, [statusQuery.data]);
-    const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
     if (projectQuery.isLoading) {
         return (<div className="space-y-6">
         <Skeleton className="h-4 w-56"/>

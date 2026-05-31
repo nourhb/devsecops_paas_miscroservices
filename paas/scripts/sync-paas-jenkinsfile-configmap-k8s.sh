@@ -16,6 +16,10 @@ if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE}"; then
   echo "ERROR: Jenkinsfile missing crane-next16-202605-j48300-split — git pull origin main" >&2
   exit 1
 fi
+if ! grep -qF 'monorepo-app-root-20260531' "${JENKINSFILE}"; then
+  echo "ERROR: Jenkinsfile missing monorepo-app-root-20260531 (Step 6 mutate in server/ fix) — git pull origin main" >&2
+  exit 1
+fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
@@ -66,4 +70,4 @@ fi
 
 kubectl rollout restart deployment/"${DEPLOY}" -n "${NS}"
 kubectl rollout status deployment/"${DEPLOY}" -n "${NS}" --timeout=300s
-echo "OK: PaaS inline sync will read Jenkinsfile from ConfigMap (crane-next16-202605-j48300-split)"
+echo "OK: PaaS inline sync will read Jenkinsfile from ConfigMap (monorepo-app-root-20260531)"
