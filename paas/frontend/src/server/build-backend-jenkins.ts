@@ -207,11 +207,12 @@ export class JenkinsBuildBackend implements BuildBackend {
                 await markDeploymentFailed(args.deploymentId, projectId, "Timed out waiting for the build backend to expose a new deployment run.", DeploymentFailureReason.TIMEOUT);
                 return;
             }
-            logTail = mergeLogTail(logTail, `[build] Monitoring ${this.provider} run #${buildNum}`);
+            let activeBuildNum: number = buildNum;
+            logTail = mergeLogTail(logTail, `[build] Monitoring ${this.provider} run #${activeBuildNum}`);
             await prisma.deployment.update({
                 where: { id: args.deploymentId },
                 data: {
-                    jenkinsBuildNumber: buildNum,
+                    jenkinsBuildNumber: activeBuildNum,
                     status: DeploymentJobStatus.DEPLOYING,
                     logs: logTail,
                     ...clearDeploymentFailureFields()
@@ -219,12 +220,12 @@ export class JenkinsBuildBackend implements BuildBackend {
             });
             while (Date.now() < deadline) {
                 const currentOffset = progressiveLogOffsets.get(args.deploymentId) ?? 0;
-                const progressive = await jenkinsClient.getBuildConsoleProgressiveText(projectName, projectId, buildNum, currentOffset, "deploy");
+                const progressive = await jenkinsClient.getBuildConsoleProgressiveText(projectName, projectId, activeBuildNum, currentOffset, "deploy");
                 if (progressive) {
                     progressiveLogOffsets.set(args.deploymentId, progressive.nextStart);
                     logTail = mergeLogTail(logTail, progressive.text);
                 }
-                const meta = await jenkinsClient.getBuildApiJson(projectName, projectId, buildNum, "deploy");
+                const meta = await jenkinsClient.getBuildApiJson(projectName, projectId, activeBuildNum, "deploy");
                 if (!meta) {
                     logTail = mergeLogTail(logTail, "[build-monitor] Waiting for Jenkins metadata. Log streaming may continue while the upstream API is slow.");
                     await prisma.deployment.update({
@@ -240,33 +241,34 @@ export class JenkinsBuildBackend implements BuildBackend {
                 }
                 if (terminalResult(meta.result, meta.building)) {
                     if (meta.result === "SUCCESS") {
-                        if (!(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, buildNum))) {
-                            buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
+                        if (!(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, activeBuildNum))) {
+                            const reassigned = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
                                 baseline,
                                 afterMs: deployment.createdAt.getTime() - 120_000
                             });
-                            if (buildNum === null) {
+                            if (reassigned === null) {
                                 await sleep(interval);
                                 continue;
                             }
+                            activeBuildNum = reassigned;
                             progressiveLogOffsets.set(args.deploymentId, 0);
-                            logTail = mergeLogTail(logTail, `[build] Reassigned monitor to Jenkins run #${buildNum} (prior run belonged to another project).`);
+                            logTail = mergeLogTail(logTail, `[build] Reassigned monitor to Jenkins run #${activeBuildNum} (prior run belonged to another project).`);
                             await prisma.deployment.update({
                                 where: { id: args.deploymentId },
-                                data: { jenkinsBuildNumber: buildNum, logs: logTail, ...clearDeploymentFailureFields() }
+                                data: { jenkinsBuildNumber: activeBuildNum, logs: logTail, ...clearDeploymentFailureFields() }
                             });
                             continue;
                         }
-                        const verified = resolveVerifiedArtifactImage(logTail, projectId, projectName, buildNum);
+                        const verified = resolveVerifiedArtifactImage(logTail, projectId, projectName, activeBuildNum);
                         if (!verified.image) {
-                            await markDeploymentFailed(args.deploymentId, projectId, verified.error ?? `Could not verify Jenkins artifact for build #${buildNum}.`, DeploymentFailureReason.JENKINS);
+                            await markDeploymentFailed(args.deploymentId, projectId, verified.error ?? `Could not verify Jenkins artifact for build #${activeBuildNum}.`, DeploymentFailureReason.JENKINS);
                             return;
                         }
                         try {
                             await promoteDeploymentAfterBuildSuccess(args.deploymentId, projectId, projectName, {
                                 provider: this.provider,
-                                runId: String(buildNum),
-                                runNumber: buildNum,
+                                runId: String(activeBuildNum),
+                                runNumber: activeBuildNum,
                                 artifactImage: verified.image,
                                 artifactDigest: null,
                                 buildLogTail: logTail
