@@ -27,7 +27,14 @@ awk '
   match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) {
     eq = index($0, "=")
     key = substr($0, 1, eq - 1)
-    env[key] = substr($0, eq + 1)
+    val = substr($0, eq + 1)
+    # docker-compose.env uses quoted values; kubectl --from-env-file must not keep literal quotes.
+    if (val ~ /^".*"$/) {
+      val = substr(val, 2, length(val) - 2)
+    } else if (val ~ /^'\''.*'\''$/) {
+      val = substr(val, 2, length(val) - 2)
+    }
+    env[key] = val
   }
   END {
     for (k in env) print k "=" env[k]
