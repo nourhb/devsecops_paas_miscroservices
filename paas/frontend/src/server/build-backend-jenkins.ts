@@ -137,6 +137,7 @@ export class JenkinsBuildBackend implements BuildBackend {
         const baseline = args.baseline.runNumber ?? deployment.priorJenkinsBuildNumber ?? null;
         const interval = env.JENKINS_DEPLOY_POLL_INTERVAL_MS;
         const deadline = Date.now() + env.JENKINS_DEPLOY_POLL_MAX_MS;
+        const resolveDeadline = Date.now() + env.PAAS_JENKINS_BUILD_RESOLVE_MAX_MS;
         let logTail = (deployment.logs ?? "").slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
         if (allowSimulation() || !jenkinsConfigured()) {
             if (allowSimulation()) {
@@ -180,6 +181,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             buildNum = null;
         }
         try {
+            let waitTicks = 0;
             while (buildNum === null && Date.now() < deadline) {
                 const fromLogs = extractJenkinsRunFromLogs(deployment.logs);
                 if (fromLogs != null && (baseline === null || fromLogs > baseline)) {
@@ -190,7 +192,8 @@ export class JenkinsBuildBackend implements BuildBackend {
                 if (buildNum === null) {
                     buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
                         baseline,
-                        afterMs: deployment.createdAt.getTime() - 120_000
+                        afterMs: deployment.createdAt.getTime() - 120_000,
+                        limit: 50
                     });
                 }
                 if (buildNum === null && !usesSharedJenkinsDeployJob()) {
@@ -200,6 +203,23 @@ export class JenkinsBuildBackend implements BuildBackend {
                     }
                 }
                 if (buildNum === null) {
+                    waitTicks++;
+                    if (waitTicks === 1 || waitTicks % 6 === 0) {
+                        logTail = mergeLogTail(logTail, "[build] Waiting for Jenkins run for this project on shared paas-deploy…");
+                        await prisma.deployment.update({
+                            where: { id: args.deploymentId },
+                            data: {
+                                status: DeploymentJobStatus.PENDING,
+                                jenkinsBuildNumber: null,
+                                logs: logTail,
+                                ...clearDeploymentFailureFields()
+                            }
+                        });
+                    }
+                    if (Date.now() > resolveDeadline) {
+                        await markDeploymentFailed(args.deploymentId, projectId, "No Jenkins build matched this project within 15 minutes. Cancel this deployment, wait until the Jenkins queue is idle, then deploy this project alone.", DeploymentFailureReason.TIMEOUT);
+                        return;
+                    }
                     await sleep(interval);
                 }
             }
@@ -208,6 +228,7 @@ export class JenkinsBuildBackend implements BuildBackend {
                 return;
             }
             let activeBuildNum: number = buildNum;
+            let monitorTicks = 0;
             logTail = mergeLogTail(logTail, `[build] Monitoring ${this.provider} run #${activeBuildNum}`);
             await prisma.deployment.update({
                 where: { id: args.deploymentId },
@@ -219,6 +240,25 @@ export class JenkinsBuildBackend implements BuildBackend {
                 }
             });
             while (Date.now() < deadline) {
+                monitorTicks++;
+                if (usesSharedJenkinsDeployJob() && monitorTicks % 6 === 0) {
+                    if (!(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, activeBuildNum))) {
+                        const reassigned = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
+                            baseline,
+                            afterMs: deployment.createdAt.getTime() - 120_000,
+                            limit: 50
+                        });
+                        if (reassigned != null && reassigned !== activeBuildNum) {
+                            activeBuildNum = reassigned;
+                            progressiveLogOffsets.set(args.deploymentId, 0);
+                            logTail = mergeLogTail(logTail, `[build] Switched monitor to Jenkins run #${activeBuildNum} for this project.`);
+                            await prisma.deployment.update({
+                                where: { id: args.deploymentId },
+                                data: { jenkinsBuildNumber: activeBuildNum, logs: logTail, ...clearDeploymentFailureFields() }
+                            });
+                        }
+                    }
+                }
                 const currentOffset = progressiveLogOffsets.get(args.deploymentId) ?? 0;
                 const progressive = await jenkinsClient.getBuildConsoleProgressiveText(projectName, projectId, activeBuildNum, currentOffset, "deploy");
                 if (progressive) {

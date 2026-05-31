@@ -66,6 +66,10 @@ async function resolveDeployBuildNumber(deployment: {
         if (await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, fromColumn)) {
             return fromColumn;
         }
+        await prisma.deployment.update({
+            where: { id: deployment.id },
+            data: { jenkinsBuildNumber: null }
+        });
     }
     const fromLogs = extractJenkinsRunFromLogs(deployment.logs);
     if (fromLogs != null && (baseline == null || fromLogs > baseline)) {
