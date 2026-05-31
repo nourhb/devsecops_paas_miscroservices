@@ -123,6 +123,43 @@ async function waitForJenkinsBuildNumberAfterTrigger(base: string, jobPath: stri
     }
     return null;
 }
+function usesSharedJenkinsDeployJob(): boolean {
+    return Boolean(env.JENKINS_DEPLOY_JOB_NAME.trim());
+}
+function usesSharedJenkinsBuildJob(): boolean {
+    return Boolean(env.JENKINS_BUILD_JOB_NAME.trim());
+}
+export { usesSharedJenkinsDeployJob };
+async function waitForBuildNumberFromQueueItem(base: string, headers: Record<string, string>, queueLocation: string | null, timeoutMs = 120_000): Promise<number | null> {
+    const queueId = parseQueueItemId(queueLocation);
+    if (!queueId) {
+        return null;
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            const res = await jenkinsIntegrationFetch(`${base}/queue/item/${queueId}/api/json?tree=cancelled,why,executable[number,url]`, { headers });
+            if (res.ok) {
+                const payload = (await res.json()) as {
+                    cancelled?: boolean;
+                    executable?: {
+                        number?: number;
+                    };
+                };
+                if (payload.cancelled) {
+                    return null;
+                }
+                if (typeof payload.executable?.number === "number") {
+                    return payload.executable.number;
+                }
+            }
+        }
+        catch {
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+    }
+    return null;
+}
 function appendSharedJobAgentLabel(q: URLSearchParams): void {
     const param = env.JENKINS_AGENT_LABEL_PARAMETER.trim() || "JENKINS_AGENT_LABEL";
     // Always send the param (even empty) so Jenkins job default "built-in" does not win.
@@ -520,7 +557,14 @@ export class JenkinsClient {
                     jobUrl: jobUrlFor(null)
                 };
             }
-            const lastNumber = await waitForJenkinsBuildNumberAfterTrigger(base, jobPath, headers, baselineBeforeTrigger);
+            const queueLocation = triggerRes.headers.get("location");
+            const triggeredAfterMs = Date.now();
+            const lastNumber = await this.resolveTriggeredBuildNumber(projectName, projectId, "build", {
+                queueLocation,
+                baseline: baselineBeforeTrigger,
+                expectedProjectUuid: sharedBuildJob ? buildParams.projectUuid : undefined,
+                triggeredAfterMs
+            });
             let consoleTail = "";
             if (lastNumber != null) {
                 try {
@@ -539,7 +583,9 @@ export class JenkinsClient {
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
                 lastNumber != null
                     ? `[jenkins] New run #${lastNumber}`
-                    : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
+                    : sharedBuildJob
+                        ? "[jenkins] New run number not visible yet (monitor will match by PROJECT_ID on shared job)"
+                        : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
                 consoleTail ? `\n--- console (tail) ---\n${consoleTail}` : ""
             ].join("\n");
             return {
@@ -614,7 +660,14 @@ export class JenkinsClient {
                     jobUrl: jobUrlFor(null)
                 };
             }
-            const lastNumber = await waitForJenkinsBuildNumberAfterTrigger(base, jobPath, headers, baselineBeforeTrigger);
+            const queueLocation = triggerRes.headers.get("location");
+            const triggeredAfterMs = Date.now();
+            const lastNumber = await this.resolveTriggeredBuildNumber(projectName, projectId, "deploy", {
+                queueLocation,
+                baseline: baselineBeforeTrigger,
+                expectedProjectUuid: deployParams.projectUuid,
+                triggeredAfterMs
+            });
             let consoleTail = "";
             if (lastNumber != null) {
                 try {
@@ -633,7 +686,9 @@ export class JenkinsClient {
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
                 lastNumber != null
                     ? `[jenkins] New run #${lastNumber}`
-                    : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
+                    : usesSharedJenkinsDeployJob()
+                        ? "[jenkins] New run number not visible yet (monitor will match by PROJECT_ID on shared job)"
+                        : "[jenkins] New run number not visible yet (monitor will poll until lastBuild > baseline)",
                 consoleTail ? `\n--- console (tail) ---\n${consoleTail}` : ""
             ].join("\n");
             return {
@@ -653,6 +708,41 @@ export class JenkinsClient {
             }
             throw new IntegrationError(`Jenkins deploy trigger failed (${detail}). Check JENKINS_BASE_URL from this host, or set DEVSECOPS_ALLOW_SIMULATION=true for local demo.`);
         }
+    }
+    async resolveTriggeredBuildNumber(projectName: string, projectId: string, kind: JenkinsJobKind, opts: {
+        queueLocation: string | null;
+        baseline: number | null;
+        expectedProjectUuid?: string;
+        triggeredAfterMs?: number;
+    }): Promise<number | null> {
+        const base = jenkinsBaseUrl();
+        const jobPath = jenkinsJobUrlPath(projectName, projectId, kind);
+        const headers: Record<string, string> = { Authorization: jenkinsAuthHeader() };
+        let buildNum = await waitForBuildNumberFromQueueItem(base, headers, opts.queueLocation);
+        if (buildNum != null && opts.expectedProjectUuid) {
+            const param = await this.getBuildParameterValue(projectName, projectId, buildNum, env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER, kind);
+            if (param !== opts.expectedProjectUuid) {
+                buildNum = null;
+            }
+        }
+        if (buildNum == null && opts.expectedProjectUuid) {
+            buildNum = await this.findDeployBuildForProject(projectName, opts.expectedProjectUuid, {
+                baseline: opts.baseline,
+                afterMs: opts.triggeredAfterMs ?? Date.now() - 120_000
+            });
+        }
+        const shared = kind === "deploy" ? usesSharedJenkinsDeployJob() : usesSharedJenkinsBuildJob();
+        if (buildNum == null && !shared) {
+            buildNum = await waitForJenkinsBuildNumberAfterTrigger(base, jobPath, headers, opts.baseline);
+        }
+        return buildNum;
+    }
+    async verifyDeployBuildBelongsToProject(projectName: string, projectId: string, buildNumber: number): Promise<boolean> {
+        if (!usesSharedJenkinsDeployJob()) {
+            return true;
+        }
+        const param = await this.getBuildParameterValue(projectName, projectId, buildNumber, env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER, "deploy");
+        return param === projectId;
     }
     async getLastBuildSummary(projectName: string, projectId: string, kind: JenkinsJobKind = "build"): Promise<{
         number: number;

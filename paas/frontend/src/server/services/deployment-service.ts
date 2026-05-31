@@ -11,7 +11,7 @@ import { assertProjectAccess, getProjectById, updateProject } from "@/server/pro
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
-import { jenkinsClient } from "@/server/integrations/devsecops-clients";
+import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import type { ActionResponse, RecentDeploymentListItem, UserRole } from "@/types";
 function effectiveTriggerUserId(jwtUserId: string): string | null {
     const override = env.DEPLOYMENT_TRIGGER_USER_ID.trim();
@@ -126,6 +126,19 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
             }
         });
     }
+    const maxConcurrent = env.PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS;
+    if (maxConcurrent > 0 && getBuildBackend().provider === "jenkins") {
+        const activeCount = await prisma.deployment.count({
+            where: {
+                status: { in: [DeploymentJobStatus.PENDING, DeploymentJobStatus.DEPLOYING] }
+            }
+        });
+        if (activeCount >= maxConcurrent) {
+            throw new ApiError(429, "Too many deployments are already running.", {
+                details: `${activeCount} deployment(s) are active. Wait for one to finish or raise PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS (currently ${maxConcurrent}).`
+            });
+        }
+    }
     const triggeredById = effectiveTriggerUserId(jwtUserId);
     const plan = resolveBuildPlan(project);
     const backend = getBuildBackend();
@@ -175,11 +188,14 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
         });
     }
     const initialLog = build.logs.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
-    const confirmedRunNumber =
+    let confirmedRunNumber =
         build.runNumber != null &&
         (baseline.runNumber == null || build.runNumber > baseline.runNumber)
             ? build.runNumber
             : null;
+    if (confirmedRunNumber != null && !(await jenkinsClient.verifyDeployBuildBelongsToProject(project.projectName, project.id, confirmedRunNumber))) {
+        confirmedRunNumber = null;
+    }
     await prisma.deployment.update({
         where: { id: deployment.id },
         data: {
@@ -226,13 +242,27 @@ export async function cancelRunningDeploymentForUser(deploymentId: string, userI
     const { projectName, id: projectId } = row.project;
     const baseline = row.priorJenkinsBuildNumber ?? null;
     let buildNum = row.jenkinsBuildNumber;
-    const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
-    if (buildNum === null && summary && summary.building && (baseline === null || summary.number > baseline)) {
-        buildNum = summary.number;
-        await prisma.deployment.update({
-            where: { id: deploymentId },
-            data: { jenkinsBuildNumber: buildNum }
+    if (buildNum === null) {
+        buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
+            baseline,
+            afterMs: row.createdAt.getTime() - 120_000
         });
+        if (buildNum != null) {
+            await prisma.deployment.update({
+                where: { id: deploymentId },
+                data: { jenkinsBuildNumber: buildNum }
+            });
+        }
+    }
+    if (buildNum === null && !usesSharedJenkinsDeployJob()) {
+        const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
+        if (summary && summary.building && (baseline === null || summary.number > baseline)) {
+            buildNum = summary.number;
+            await prisma.deployment.update({
+                where: { id: deploymentId },
+                data: { jenkinsBuildNumber: buildNum }
+            });
+        }
     }
     const parts: string[] = [];
     if (buildNum !== null) {
