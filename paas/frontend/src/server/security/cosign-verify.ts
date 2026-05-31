@@ -54,22 +54,23 @@ async function resolvePublicKeyFile(): Promise<{
     return { path: tempPath, cleanup: true };
 }
 
-/** Try external NodePort and in-cluster Harbor registry hosts (pods cannot always reach NodePort). */
+/** Try in-cluster nginx first, then external NodePort (with docker config), then raw registry. */
 function imageRefsForVerify(imageRef: string): string[] {
-    const refs = [imageRef.trim()];
+    const refs: string[] = [];
     const slash = imageRef.indexOf("/");
     if (slash <= 0) {
-        return refs;
+        return [imageRef.trim()];
     }
     const repoTag = imageRef.slice(slash + 1);
     const external = env.HARBOR_REGISTRY.trim();
-    const cluster = env.HARBOR_REGISTRY_CLUSTER.trim();
-    if (external && cluster && imageRef.startsWith(`${external}/`)) {
-        refs.push(`${cluster}/${repoTag}`);
-    }
     const nginx = env.HARBOR_REGISTRY_NGINX_CLUSTER.trim();
+    const cluster = env.HARBOR_REGISTRY_CLUSTER.trim();
     if (external && nginx && imageRef.startsWith(`${external}/`)) {
         refs.push(`${nginx}/${repoTag}`);
+    }
+    refs.push(imageRef.trim());
+    if (external && cluster && imageRef.startsWith(`${external}/`)) {
+        refs.push(`${cluster}/${repoTag}`);
     }
     return [...new Set(refs.filter(Boolean))];
 }
@@ -90,10 +91,15 @@ function cosignVerifyArgs(keyPath: string, imageRef: string): string[] {
 
 async function runCosignVerify(keyPath: string, imageRef: string, timeoutMs: number): Promise<void> {
     const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
+    const dockerConfig = process.env.DOCKER_CONFIG?.trim() || "/etc/docker";
     await execFileAsync(bin, cosignVerifyArgs(keyPath, imageRef), {
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
-        windowsHide: true
+        windowsHide: true,
+        env: {
+            ...process.env,
+            DOCKER_CONFIG: dockerConfig
+        }
     });
 }
 

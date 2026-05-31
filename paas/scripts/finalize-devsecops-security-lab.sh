@@ -23,8 +23,9 @@ cd "${REPO_ROOT}"
 step "1/7 — Sync Cosign keys (env, Jenkins pod, Kyverno, frontend env)"
 SYNC_JENKINS=1 SYNC_FRONTEND=1 bash "${SCRIPT_DIR}/sync-cosign-keys-lab.sh"
 
-step "2/7 — Mount cosign.pub file into frontend (no PEM-in-env bugs)"
+step "2/7 — Mount cosign.pub + Harbor docker auth into frontend"
 bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
+bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh"
 
 if [[ "${SKIP_FRONTEND_REBUILD}" != "1" ]]; then
   step "3/7 — Rebuild frontend image (bundled cosign + Harbor-aware verify) — ~6 min"
@@ -34,6 +35,7 @@ else
   bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}" || true
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
+  bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh"
 fi
 
 step "4/7 — Sign latest successful Jenkins artifact image"
