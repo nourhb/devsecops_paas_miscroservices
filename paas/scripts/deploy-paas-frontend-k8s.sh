@@ -78,6 +78,11 @@ if grep -qF 'crane-next16-202605' "${PAAS_DIR}/jenkins/Jenkinsfile.paas-deploy" 
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || true
 fi
 
+if [[ -f "${REPO_ROOT}/paas/.lab-cosign/cosign.pub" ]]; then
+  echo "==> Mount cosign public key for Security UI verify"
+  bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh" || true
+fi
+
 curl -sf "http://127.0.0.1:30100/api/health" | head -c 200 || true
 echo ""
 echo "OK: http://192.168.56.129:30100"
