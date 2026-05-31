@@ -10,6 +10,7 @@ import { IntegrationError } from "@/server/http/errors";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
+import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
@@ -46,11 +47,6 @@ function mergeLogTail(existing: string, incoming: string): string {
         return base.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
     }
     return `${base}\n${chunk}`.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
-}
-function artifactImageFromJenkinsLog(log: string, fallback: string): string {
-    const matches = [...log.matchAll(/PAAS_ARTIFACT_IMAGE=([^\s]+)/g)];
-    const value = matches.at(-1)?.[1]?.trim();
-    return value || fallback;
 }
 function normalizeInitialBuildNumber(reported: number | null, baseline: number | null): number | null {
     if (reported === null) {
@@ -244,13 +240,34 @@ export class JenkinsBuildBackend implements BuildBackend {
                 }
                 if (terminalResult(meta.result, meta.building)) {
                     if (meta.result === "SUCCESS") {
+                        if (!(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, buildNum))) {
+                            buildNum = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
+                                baseline,
+                                afterMs: deployment.createdAt.getTime() - 120_000
+                            });
+                            if (buildNum === null) {
+                                await sleep(interval);
+                                continue;
+                            }
+                            progressiveLogOffsets.set(args.deploymentId, 0);
+                            logTail = mergeLogTail(logTail, `[build] Reassigned monitor to Jenkins run #${buildNum} (prior run belonged to another project).`);
+                            await prisma.deployment.update({
+                                where: { id: args.deploymentId },
+                                data: { jenkinsBuildNumber: buildNum, logs: logTail, ...clearDeploymentFailureFields() }
+                            });
+                            continue;
+                        }
+                        const verified = resolveVerifiedArtifactImage(logTail, projectId, projectName, buildNum);
+                        if (!verified.image) {
+                            await markDeploymentFailed(args.deploymentId, projectId, verified.error ?? `Could not verify Jenkins artifact for build #${buildNum}.`, DeploymentFailureReason.JENKINS);
+                            return;
+                        }
                         try {
-                            const artifactImage = artifactImageFromJenkinsLog(logTail, `${buildDeployImageRepository(projectName)}:${buildNum}`);
                             await promoteDeploymentAfterBuildSuccess(args.deploymentId, projectId, projectName, {
                                 provider: this.provider,
                                 runId: String(buildNum),
                                 runNumber: buildNum,
-                                artifactImage,
+                                artifactImage: verified.image,
                                 artifactDigest: null,
                                 buildLogTail: logTail
                             });

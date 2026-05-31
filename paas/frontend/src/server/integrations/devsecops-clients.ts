@@ -1,4 +1,5 @@
 import { env } from "@/server/config/env";
+import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
@@ -742,7 +743,18 @@ export class JenkinsClient {
             return true;
         }
         const param = await this.getBuildParameterValue(projectName, projectId, buildNumber, env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER, "deploy");
-        return param === projectId;
+        if (param !== projectId) {
+            return false;
+        }
+        const imageParam = await this.getBuildParameterValue(projectName, projectId, buildNumber, env.JENKINS_DEPLOY_IMAGE_NAME_PARAMETER, "deploy");
+        if (imageParam?.trim()) {
+            const expected = buildDeployImageRepository(projectName).toLowerCase();
+            const actual = imageParam.trim().toLowerCase();
+            if (actual !== expected && !actual.startsWith(`${expected}:`) && !actual.startsWith(`${expected}@`)) {
+                return false;
+            }
+        }
+        return true;
     }
     async getLastBuildSummary(projectName: string, projectId: string, kind: JenkinsJobKind = "build"): Promise<{
         number: number;
@@ -1250,6 +1262,20 @@ export class JenkinsClient {
                 building = Boolean(meta.building);
                 result = meta.result ?? null;
             }
+        }
+        if (usesSharedJenkinsDeployJob() && !(await this.verifyDeployBuildBelongsToProject(projectName, projectId, bn))) {
+            return withUrl({
+                configured: true,
+                error: `Jenkins build #${bn} is not for project "${projectName}" (shared job parameter mismatch). Wait for the correct build or redeploy.`,
+                jobUrlPath: jobPath,
+                displayJobName,
+                buildNumber: null,
+                building: false,
+                result: null,
+                runStatus: null,
+                stages: [],
+                wfapiHint: "When many projects deploy at once on paas-deploy, each project must match its own PROJECT_ID — do not use another project's run number."
+            });
         }
         const wfapiFallbackStages = (): JenkinsWorkflowStageRow[] => {
             const rows = syntheticStagesWhenWfapiUnavailable({

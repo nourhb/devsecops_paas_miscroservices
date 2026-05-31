@@ -196,7 +196,7 @@ export default function DeploymentDetailPage() {
           </CardContent>
         </Card>) : null}
 
-      <DeploymentPipelinePreview buildNumber={d.buildNumber} buildProvider={d.buildProvider} deploymentStatus={d.status} projectId={d.projectId}/>
+      <DeploymentPipelinePreview buildNumber={d.buildNumber} buildProvider={d.buildProvider} deploymentStatus={d.status} projectId={d.projectId} deploymentLogs={d.logs}/>
 
       <Card>
         <CardHeader>

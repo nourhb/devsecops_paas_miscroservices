@@ -2,7 +2,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
 import type { BuildProfile } from "@/server/build-planner";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
-import { withGitOpsProjectLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
+import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
 import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
@@ -75,7 +75,14 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
     ref: string;
     chartBootstrapped: boolean;
 }> {
-    return withGitOpsProjectLock(projectName, () => commitHelmValuesGitHubUnlocked(projectName, imageTag, options));
+    if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
+        if (allowSimulation()) {
+            return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}`, chartBootstrapped: false };
+        }
+        throw new IntegrationError("GITOPS_REPO_URL and GITOPS_REPO_TOKEN are required to commit GitOps changes.");
+    }
+    const { owner, repo } = parseGithubRepo(env.GITOPS_REPO_URL);
+    return withGitOpsRepoLock(`${owner}/${repo}`, () => commitHelmValuesGitHubUnlocked(projectName, imageTag, options));
 }
 async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;

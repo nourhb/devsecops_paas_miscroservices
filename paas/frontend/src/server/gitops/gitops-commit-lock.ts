@@ -1,24 +1,36 @@
-const projectLocks = new Map<string, Promise<void>>();
+const repoLocks = new Map<string, Promise<void>>();
 
-export async function withGitOpsProjectLock<T>(projectName: string, fn: () => Promise<T>): Promise<T> {
-    const key = projectName.trim().toLowerCase();
-    const prior = projectLocks.get(key) ?? Promise.resolve();
+async function withAsyncLock<T>(key: string, store: Map<string, Promise<void>>, fn: () => Promise<T>): Promise<T> {
+    const prior = store.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
         release = resolve;
     });
     const tail = prior.then(() => gate);
-    projectLocks.set(key, tail);
+    store.set(key, tail);
     await prior;
     try {
         return await fn();
     }
     finally {
         release();
-        if (projectLocks.get(key) === tail) {
-            projectLocks.delete(key);
+        if (store.get(key) === tail) {
+            store.delete(key);
         }
     }
+}
+
+/** Serializes all GitHub writes to the GitOps repo (prevents 409 during concurrent bootstraps). */
+export async function withGitOpsRepoLock<T>(repoKey: string, fn: () => Promise<T>): Promise<T> {
+    const key = repoKey.trim().toLowerCase() || "default";
+    return withAsyncLock(key, repoLocks, fn);
+}
+
+const projectLocks = new Map<string, Promise<void>>();
+
+export async function withGitOpsProjectLock<T>(projectName: string, fn: () => Promise<T>): Promise<T> {
+    const key = projectName.trim().toLowerCase();
+    return withAsyncLock(key, projectLocks, fn);
 }
 
 export async function sleepMs(ms: number): Promise<void> {

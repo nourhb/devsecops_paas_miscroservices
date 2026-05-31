@@ -131,7 +131,34 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
         synthetic: true
     }));
 }
-export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf: WfMeta | undefined): PaasDeployDisplayStage[] {
+export function applyDeployChecksToDisplayStages(stages: PaasDeployDisplayStage[], deployChecks: Array<{
+    step: string;
+    status: "OK" | "WARN" | "FAIL";
+    detail: string;
+}> | undefined): PaasDeployDisplayStage[] {
+    if (!deployChecks?.length) {
+        return stages;
+    }
+    const hasFail = deployChecks.some((check) => check.status === "FAIL");
+    const hasWarn = deployChecks.some((check) => check.status === "WARN");
+    const hasOk = deployChecks.some((check) => check.status === "OK");
+    const worst = hasFail ? "FAILURE" : hasWarn && !hasOk ? "UNSTABLE" : hasOk ? "SUCCESS" : "UNSTABLE";
+    return stages.map((stage, idx) => {
+        if (idx !== PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length - 1) {
+            return stage;
+        }
+        return {
+            ...stage,
+            status: worst,
+            synthetic: false
+        };
+    });
+}
+export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf: WfMeta | undefined, deployChecks?: Array<{
+    step: string;
+    status: "OK" | "WARN" | "FAIL";
+    detail: string;
+}>): PaasDeployDisplayStage[] {
     let stages: PaasDeployDisplayStage[];
     if (!wf?.configured || wf.skipped) {
         stages = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
@@ -155,5 +182,5 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
             synthetic: true
         }));
     }
-    return applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks);
+    return applyDeployChecksToDisplayStages(applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks), deployChecks);
 }

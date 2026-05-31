@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Workflow } from "lucide-react";
 import { jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle, formatStageDurationMs } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { buildPaasDeployDisplayStages } from "@/lib/paas-deploy-jenkins-stages";
+import { parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,8 +16,9 @@ type DeploymentPipelinePreviewProps = {
     buildNumber: number | null;
     buildProvider: string | null;
     deploymentStatus: string;
+    deploymentLogs?: string | null;
 };
-export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvider, deploymentStatus }: DeploymentPipelinePreviewProps) {
+export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvider, deploymentStatus, deploymentLogs }: DeploymentPipelinePreviewProps) {
     const isJenkins = !buildProvider || buildProvider === "jenkins";
     const statusU = deploymentStatus.toUpperCase();
     const deployBusy = statusU === "PENDING" || statusU === "DEPLOYING";
@@ -39,7 +41,8 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
     const jenkinsHref = jenkinsUrlForBrowser(data?.buildUrl, {
         buildNumber: data?.buildNumber ?? buildNumber
     });
-    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined);
+    const deployChecks = deploymentLogs ? parsePipelineVerificationLogs(deploymentLogs).deployChecks : [];
+    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined, deployChecks);
     const stages: JenkinsPipelineStageRow[] = displayStages;
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;
@@ -76,7 +79,9 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
           </Button>) : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        {stagesQuery.isLoading ? (<Skeleton className="h-24 w-full"/>) : null}
+        {deployChecks.some((check) => check.status === "FAIL") ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
+            Jenkins finished successfully, but PaaS post-deploy verification failed (GitOps, Argo CD, or URL probe). See console output below.
+          </p>) : null}
         {stagesQuery.isError ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
             Could not load pipeline stages. Console output below may still show progress.
           </p>) : null}

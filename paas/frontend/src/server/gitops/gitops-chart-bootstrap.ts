@@ -68,7 +68,7 @@ async function githubFileExists(owner: string, repo: string, path: string, branc
 }
 async function githubPutText(owner: string, repo: string, path: string, branch: string, token: string, content: string, message: string): Promise<void> {
     const base = contentsUrl(owner, repo, path);
-    for (let attempt = 1; attempt <= 6; attempt++) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
         let sha: string | undefined;
         const getRes = await integrationFetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers: githubHeaders(token) });
         if (getRes.ok) {
@@ -98,8 +98,8 @@ async function githubPutText(owner: string, repo: string, path: string, branch: 
             return;
         }
         const t = await putRes.text();
-        if (putRes.status === 409 && attempt < 6) {
-            await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+        if (putRes.status === 409 && attempt < 10) {
+            await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 150 * 2 ** (attempt - 1))));
             continue;
         }
         throw new IntegrationError(`GitHub PUT ${path} failed (${putRes.status}): ${t.slice(0, 600)}`);
@@ -125,8 +125,11 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
     const profileSpec = resolveDeployProfileSpec(buildProfile);
     const filesWritten: string[] = [];
     for (const rel of CHART_RELATIVE_FILES) {
-        const srcPath = `${refBase}/${rel}`;
         const destPath = `${chartPath}/${rel}`;
+        if (await githubFileExists(owner, repo, destPath, branch, token)) {
+            continue;
+        }
+        const srcPath = `${refBase}/${rel}`;
         let text = await githubGetText(owner, repo, srcPath, branch, token);
         if (referenceName !== projectName) {
             text = text.replaceAll(referenceName, projectName);
