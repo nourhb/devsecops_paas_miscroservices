@@ -1,9 +1,7 @@
-/** @type {import("next").NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
     output: "standalone",
     experimental: {
-        /** Prisma query engine binaries are native; ensure they survive file tracing into `.next/standalone`. */
         outputFileTracingIncludes: {
             "/*": [
                 "./node_modules/.prisma/client/**/*",

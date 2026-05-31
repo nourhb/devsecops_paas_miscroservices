@@ -9,8 +9,19 @@ const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as c
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
 const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
 const CRANE_NEXT16_MARKER = "crane-next16-202605";
+const COSIGN_SANDBOX_MARKER = "cosign-sandbox-sh-20260531";
+function jenkinsfileHasCosignSandboxFix(groovy: string): boolean {
+    return groovy.includes(COSIGN_SANDBOX_MARKER) ||
+        (groovy.contains("def ensureCosignTool()") && groovy.contains("test -x '${labBin}'"));
+}
 const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
 const DEFAULT_JENKINSFILE_RAW_URL = "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy";
+function jenkinsfileHasFixedStep6(groovy: string): boolean {
+    return (groovy.includes("crane-next16-202605: npm ci") ||
+        groovy.includes("crane-next16-202605-j48300: npm ci") ||
+        groovy.includes("crane-next16-202605-j48300-split") ||
+        (groovy.includes("Step 6a") && groovy.includes("foreground cmd; JENKINS-48300")));
+}
 function jenkinsfileHasCraneFix(groovy: string): boolean {
     return PAAS_JENKINSFILE_MARKER_RE.test(groovy) && groovy.includes(CRANE_NEXT16_MARKER);
 }
@@ -60,7 +71,10 @@ function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath:
     if (!groovy.includes(CRANE_NEXT16_MARKER)) {
         throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${CRANE_NEXT16_MARKER}). Run fix-jenkins-paas-deploy-pipeline-lab.sh on the lab VM.`);
     }
-    if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !groovy.includes("crane-next16-202605: npm ci")) {
+    if (!jenkinsfileHasCosignSandboxFix(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${COSIGN_SANDBOX_MARKER}). Re-sync paas-deploy from the current repo Jenkinsfile.`);
+    }
+    if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !jenkinsfileHasFixedStep6(groovy)) {
         throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still has obsolete Step 6 logic. Git pull and refresh the Jenkins job from the current Jenkinsfile.`);
     }
 }
@@ -98,7 +112,10 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     const mountHint = env.PAAS_MONOREPO_ROOT.trim();
     const mounted = Boolean(mountHint && jenkinsfileRelativePathExists(path.resolve(mountHint)));
     const root = findMonorepoRoot();
-    const shouldSync = flag === "true" || mounted || (flag !== "false" && root !== null);
+    if (flag === "false") {
+        return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false; mounted Jenkinsfile=${mounted}).`;
+    }
+    const shouldSync = flag === "true" || mounted || root !== null;
     if (!shouldSync) {
         return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=${flag}; mounted Jenkinsfile=${mounted}).`;
     }
