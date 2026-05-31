@@ -2,7 +2,7 @@ import { env } from "@/server/config/env";
 import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-github-service";
 import { argocdFetchWithAuth, resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
-import { refreshArgoApplicationViaK8s } from "@/server/services/argocd-k8s-refresh";
+import { refreshArgoApplicationViaK8s, syncArgoApplicationViaK8s } from "@/server/services/argocd-k8s-refresh";
 import { IntegrationError } from "@/server/http/errors";
 import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
@@ -218,24 +218,45 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
 }> {
     const base = getArgoCdApiBase();
     const appName = argoApplicationName(projectName);
-    if (!base || !(await argoAuthConfigured())) {
-        if (allowSimulation()) {
-            return { logs: `[argocd] Simulated sync for ${appName} (Argo CD not configured).` };
+    const ensureLogs: string[] = [];
+    const apiConfigured = Boolean(base && await argoAuthConfigured());
+
+    if (apiConfigured) {
+        try {
+            const ensured = await ensureArgoCdApplication(projectName, destinationNamespace);
+            ensureLogs.push(ensured.logs);
         }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+                throw e instanceof IntegrationError ? e : new IntegrationError(msg);
+            }
+            ensureLogs.push(`[argocd] WARN: ensure application failed: ${msg}`);
+        }
+    }
+    else if (env.KUBERNETES_ENABLED === "true") {
+        ensureLogs.push(`[argocd] API auth unavailable — ensure Application "${appName}" exists, then sync via Kubernetes API.`);
+    }
+    else if (!base || !allowSimulation()) {
         throw new IntegrationError(`Argo CD is not configured: ${argoAuthHint()}`);
     }
-    const ensureLogs: string[] = [];
-    try {
-        const ensured = await ensureArgoCdApplication(projectName, destinationNamespace);
-        ensureLogs.push(ensured.logs);
+    else {
+        return { logs: `[argocd] Simulated sync for ${appName} (Argo CD not configured).` };
     }
-    catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (env.PAAS_STRICT_INTEGRATIONS === "true") {
-            throw e instanceof IntegrationError ? e : new IntegrationError(msg);
+
+    if (env.KUBERNETES_ENABLED === "true") {
+        const k8s = await syncArgoApplicationViaK8s(appName);
+        if (k8s.ok) {
+            const line = k8s.logs;
+            return { logs: ensureLogs.length ? `${ensureLogs.join("\n")}\n${line}` : line };
         }
-        ensureLogs.push(`[argocd] WARN: ensure application failed: ${msg}`);
+        ensureLogs.push(k8s.logs);
     }
+
+    if (!apiConfigured) {
+        throw new IntegrationError(`Argo CD sync failed for "${appName}": ${ensureLogs.join(" ")}`);
+    }
+
     const url = `${base}/api/v1/applications/${encodeURIComponent(appName)}/sync`;
     let response: Response;
     try {
@@ -263,9 +284,11 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
         const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
         if ((response.status === 401 || response.status === 403) && lenientIntegrations) {
             const tail = body.trim() ? body.slice(0, 400) : "";
-            const k8sRefresh = await refreshArgoApplicationViaK8s(appName);
+            const k8sSync = env.KUBERNETES_ENABLED === "true"
+                ? await syncArgoApplicationViaK8s(appName)
+                : await refreshArgoApplicationViaK8s(appName);
             return {
-                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — trying Kubernetes refresh fallback. ${k8sRefresh.logs} ` +
+                logs: `[argocd] WARN: HTTP ${response.status} on sync for "${appName}" (${url}) — trying Kubernetes fallback. ${k8sSync.logs} ` +
                     `Set ARGOCD_PASSWORD for API login or grant this token applications/sync on the AppProject. ${tail}`
             };
         }

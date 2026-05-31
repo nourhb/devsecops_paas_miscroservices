@@ -167,7 +167,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const argo = await syncArgoApplication(projectName, destNamespace);
         sections.push(argo.logs);
-        if (/Sync accepted|already exists|created/i.test(argo.logs)) {
+        if (/Sync accepted|Sync triggered|already exists|created/i.test(argo.logs)) {
             sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=OK detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
             argoSyncOk = true;
         }
