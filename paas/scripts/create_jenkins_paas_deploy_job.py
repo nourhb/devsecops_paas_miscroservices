@@ -55,6 +55,14 @@ MINIMAL_GROOVY = """node('built-in') {
 _HOST_ENV_SKIP = frozenset({"JENKINS_BASE_URL", "JENKINS_URL", "JENKINS_PROBE_URL"})
 
 
+def parse_compose_env_value(raw: str) -> str:
+    val = raw.strip()
+    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        inner = val[1:-1]
+        return inner.replace("\\\\", "\\").replace("\\n", "\n").replace("\\$", "$")
+    return val
+
+
 def load_env_file(path: Path, *, skip_keys: frozenset[str] = _HOST_ENV_SKIP) -> None:
     if not path.is_file():
         return
@@ -66,7 +74,7 @@ def load_env_file(path: Path, *, skip_keys: frozenset[str] = _HOST_ENV_SKIP) -> 
         key = key.strip()
         if key in skip_keys or not key or key in os.environ:
             continue
-        os.environ[key] = val
+        os.environ[key] = parse_compose_env_value(val)
 
 
 def esc_xml(t: str) -> str:
@@ -92,6 +100,7 @@ ENV_PARAM_DEFAULTS: dict[str, str] = {
     "BUILD_PACKAGE_PROXY_URL": "BUILD_PACKAGE_PROXY_URL",
     "NPM_CONFIG_REGISTRY": "BUILD_NPM_REGISTRY",
     "COSIGN_PRIVATE_KEY": "COSIGN_PRIVATE_KEY",
+    "COSIGN_PASSWORD": "COSIGN_PASSWORD",
     "HELM_OCI_PROJECT": "HELM_OCI_PROJECT",
 }
 
@@ -138,6 +147,7 @@ FULL_PARAMETER_DEFINITIONS: list[tuple[str, str]] = [
     ("ARTIFACTORY_CREDENTIALS_ID", ""),
     ("COSIGN_CREDENTIALS_ID", ""),
     ("COSIGN_PRIVATE_KEY", ""),
+    ("COSIGN_PASSWORD", ""),
     ("COSIGN_ALLOW_INSECURE_REGISTRY", "true"),
     ("HELM_OCI_PROJECT", "paas"),
     ("HELM_OCI_INSECURE", "false"),
@@ -148,7 +158,11 @@ FULL_PARAMETER_DEFINITIONS: list[tuple[str, str]] = [
 def resolve_param_default(name: str, fallback: str) -> str:
     env_key = ENV_PARAM_DEFAULTS.get(name, name)
     val = (os.environ.get(env_key) or os.environ.get(name) or "").strip()
-    return val or fallback
+    if not val:
+        return fallback
+    if "\n" in val:
+        return val.replace("\\", "\\\\").replace("\n", "\\n")
+    return val
 
 
 def param_block_xml(name: str, default_value: str, indent: str = "      ") -> str:

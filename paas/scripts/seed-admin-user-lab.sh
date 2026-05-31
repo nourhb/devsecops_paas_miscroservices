@@ -28,12 +28,14 @@ cd "${PAAS_DIR}"
 docker build -f frontend/Dockerfile.db -t "${IMAGE}" .
 
 echo "=== Seed admin (docker → ${PG_IP}) ==="
+# Dockerfile.db default CMD is `prisma db push`; override to run the seed script.
 docker run --rm \
   -e "DATABASE_URL=${DB_URL}" \
   -e "SEED_ADMIN_EMAIL=${SEED_EMAIL}" \
   -e "SEED_ADMIN_PASSWORD=${SEED_PASSWORD}" \
   -e "SEED_ADMIN_FULL_NAME=${SEED_NAME}" \
-  "${IMAGE}"
+  "${IMAGE}" \
+  node scripts/seed-admin-user.cjs
 
 echo ""
 echo "Login: http://192.168.56.129:30100/login"
