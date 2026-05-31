@@ -28,23 +28,22 @@ fi
 CANONICAL_URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:${INGRESS_PORT}/"
 CHART_DIR="${GITOPS}/apps/${PROJECT_NAME}"
 VALUES="${CHART_DIR}/values.yaml"
-REF_CHART="${GITOPS}/apps/simple-app"
+REF_CHART="${ROOT}/gitops/apps/simple-app"
+[[ -d "${REF_CHART}" ]] || REF_CHART="${GITOPS}/apps/simple-app"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 [[ -d "${GITOPS}/.git" ]] || die "Clone gitops first: git clone https://github.com/nourhb/gitops.git ${GITOPS}"
+[[ -d "${REF_CHART}" ]] || die "Missing chart reference at ${REF_CHART}"
 
-if [[ ! -f "${CHART_DIR}/Chart.yaml" ]] || [[ ! -f "${CHART_DIR}/templates/deployment.yaml" ]]; then
-  echo "==> Bootstrapping Helm chart from simple-app → apps/${PROJECT_NAME}"
-  [[ -d "${REF_CHART}" ]] || die "Missing ${REF_CHART}"
-  mkdir -p "${CHART_DIR}/templates"
-  for f in Chart.yaml templates/_helpers.tpl templates/deployment.yaml templates/service.yaml templates/ingress.yaml; do
-    src="${REF_CHART}/${f}"
-    dest="${CHART_DIR}/${f}"
-    [[ -f "${src}" ]] || continue
-    sed "s/simple-app/${PROJECT_NAME}/g" "${src}" > "${dest}"
-  done
-fi
+echo "==> Refresh Helm chart templates from ${REF_CHART} → apps/${PROJECT_NAME}"
+mkdir -p "${CHART_DIR}/templates"
+for f in Chart.yaml templates/_helpers.tpl templates/deployment.yaml templates/service.yaml templates/ingress.yaml; do
+  src="${REF_CHART}/${f}"
+  dest="${CHART_DIR}/${f}"
+  [[ -f "${src}" ]] || continue
+  sed "s/simple-app/${PROJECT_NAME}/g" "${src}" > "${dest}"
+done
 
 python3 - "${VALUES}" "${PROJECT_NAME}" "${NODE_IP}" "${INGRESS_CLASS}" <<'PY'
 import sys
@@ -78,6 +77,18 @@ doc.setdefault("nodeSelector", {"kubernetes.io/hostname": "master"})
 service = doc.get("service") if isinstance(doc.get("service"), dict) else {}
 service.setdefault("targetPort", 3000)
 doc["service"] = service
+
+resources = doc.get("resources") if isinstance(doc.get("resources"), dict) else {}
+limits = resources.get("limits") if isinstance(resources.get("limits"), dict) else {}
+requests = resources.get("requests") if isinstance(resources.get("requests"), dict) else {}
+limits.setdefault("cpu", "500m")
+limits.setdefault("memory", "768Mi")
+requests.setdefault("cpu", "100m")
+requests.setdefault("memory", "256Mi")
+resources["limits"] = limits
+resources["requests"] = requests
+doc["resources"] = resources
+doc.setdefault("env", [])
 
 ingress = doc.get("ingress") if isinstance(doc.get("ingress"), dict) else {}
 ingress["enabled"] = True

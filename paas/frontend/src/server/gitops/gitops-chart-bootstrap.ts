@@ -167,6 +167,15 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         : {};
     doc.service = service;
     service.targetPort = profileSpec.containerPort;
+    if (!doc.resources || typeof doc.resources !== "object" || doc.resources === null) {
+        doc.resources = {
+            limits: { cpu: "500m", memory: "768Mi" },
+            requests: { cpu: "100m", memory: "256Mi" }
+        };
+    }
+    if (!Array.isArray(doc.env)) {
+        doc.env = [];
+    }
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     if (labIp && !doc.nodeSelector) {
         doc.nodeSelector = { "kubernetes.io/hostname": "master" };

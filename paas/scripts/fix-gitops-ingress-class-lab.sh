@@ -58,6 +58,13 @@ nodeSelector:
   kubernetes.io/hostname: master
 service:
   targetPort: 3000
+resources:
+  limits:
+    cpu: "500m"
+    memory: "768Mi"
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
 ingress:
   enabled: true
   className: ${INGRESS_CLASS}
@@ -122,6 +129,17 @@ for values_path in sorted(apps_root.glob("*/values.yaml")):
     ingress.setdefault("tls", [])
     doc["ingress"] = ingress
     doc.setdefault("imagePullSecrets", [{"name": "harbor-regcred"}])
+    resources = doc.get("resources") if isinstance(doc.get("resources"), dict) else {}
+    limits = resources.get("limits") if isinstance(resources.get("limits"), dict) else {}
+    requests = resources.get("requests") if isinstance(resources.get("requests"), dict) else {}
+    limits.setdefault("cpu", "500m")
+    limits.setdefault("memory", "768Mi")
+    requests.setdefault("cpu", "100m")
+    requests.setdefault("memory", "256Mi")
+    resources["limits"] = limits
+    resources["requests"] = requests
+    doc["resources"] = resources
+    doc.setdefault("env", [])
     new_text = yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
     old_text = values_path.read_text(encoding="utf-8")
     if new_text != old_text or before != ingress_class:
