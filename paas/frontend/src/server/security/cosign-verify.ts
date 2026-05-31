@@ -54,6 +54,49 @@ async function resolvePublicKeyFile(): Promise<{
     return { path: tempPath, cleanup: true };
 }
 
+/** Try external NodePort and in-cluster Harbor registry hosts (pods cannot always reach NodePort). */
+function imageRefsForVerify(imageRef: string): string[] {
+    const refs = [imageRef.trim()];
+    const slash = imageRef.indexOf("/");
+    if (slash <= 0) {
+        return refs;
+    }
+    const repoTag = imageRef.slice(slash + 1);
+    const external = env.HARBOR_REGISTRY.trim();
+    const cluster = env.HARBOR_REGISTRY_CLUSTER.trim();
+    if (external && cluster && imageRef.startsWith(`${external}/`)) {
+        refs.push(`${cluster}/${repoTag}`);
+    }
+    const nginx = env.HARBOR_REGISTRY_NGINX_CLUSTER.trim();
+    if (external && nginx && imageRef.startsWith(`${external}/`)) {
+        refs.push(`${nginx}/${repoTag}`);
+    }
+    return [...new Set(refs.filter(Boolean))];
+}
+
+function cosignVerifyArgs(keyPath: string, imageRef: string): string[] {
+    const args = ["verify", "--key", keyPath];
+    if (env.COSIGN_ALLOW_INSECURE_REGISTRY === "true") {
+        args.push("--allow-insecure-registry");
+    }
+    const user = env.HARBOR_USERNAME.trim();
+    const pass = env.HARBOR_PASSWORD.trim();
+    if (user && pass) {
+        args.push("--registry-username", user, "--registry-password", pass);
+    }
+    args.push(imageRef);
+    return args;
+}
+
+async function runCosignVerify(keyPath: string, imageRef: string, timeoutMs: number): Promise<void> {
+    const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
+    await execFileAsync(bin, cosignVerifyArgs(keyPath, imageRef), {
+        timeout: timeoutMs,
+        maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true
+    });
+}
+
 export async function verifyImageWithCosign(imageRef: string, options?: {
     timeoutMs?: number;
 }): Promise<boolean> {
@@ -67,22 +110,17 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
     catch {
         return false;
     }
+    const timeout = options?.timeoutMs ?? 180000;
     try {
-        const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
-        const timeout = options?.timeoutMs ?? 180000;
-        const args = ["verify", "--key", keyFile.path];
-        if (env.COSIGN_ALLOW_INSECURE_REGISTRY === "true") {
-            args.push("--allow-insecure-registry");
+        for (const ref of imageRefsForVerify(imageRef)) {
+            try {
+                await runCosignVerify(keyFile.path, ref, timeout);
+                return true;
+            }
+            catch {
+                continue;
+            }
         }
-        args.push(imageRef);
-        await execFileAsync(bin, args, {
-            timeout,
-            maxBuffer: 10 * 1024 * 1024,
-            windowsHide: true
-        });
-        return true;
-    }
-    catch {
         return false;
     }
     finally {
@@ -95,3 +133,10 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
         }
     }
 }
+
+/** Exported for lab shell scripts mirroring Security API verify behaviour. */
+export function buildCosignVerifyCliArgs(keyPath: string, imageRef: string): string[] {
+    return cosignVerifyArgs(keyPath, imageRef);
+}
+
+export { imageRefsForVerify };

@@ -111,6 +111,7 @@ if [[ "${SYNC_FRONTEND}" == "1" ]]; then
   if ! grep -q '^COSIGN_ALLOW_INSECURE_REGISTRY=' "${ENV_FILE}" 2>/dev/null; then
     echo 'COSIGN_ALLOW_INSECURE_REGISTRY=true' >> "${ENV_FILE}"
   fi
+  bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}" || true
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
 fi

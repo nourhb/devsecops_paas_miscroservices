@@ -27,10 +27,11 @@ step "2/7 — Mount cosign.pub file into frontend (no PEM-in-env bugs)"
 bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
 
 if [[ "${SKIP_FRONTEND_REBUILD}" != "1" ]]; then
-  step "3/7 — Rebuild frontend image (bundled cosign + verify code) — ~6 min"
+  step "3/7 — Rebuild frontend image (bundled cosign + Harbor-aware verify) — ~6 min"
   bash "${SCRIPT_DIR}/deploy-paas-frontend-k8s.sh"
 else
-  step "3/7 — SKIP_FRONTEND_REBUILD=1 (reusing current frontend image)"
+  step "3/7 — SKIP_FRONTEND_REBUILD=1 (API may stay cosignSigned=false until you rebuild once)"
+  bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}" || true
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
 fi
