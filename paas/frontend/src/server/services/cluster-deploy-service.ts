@@ -8,7 +8,7 @@ import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
-import { normalizeBuildEnvInput } from "@/server/projects/project-build-env";
+import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
@@ -154,7 +154,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     try {
         const git = await commitHelmValuesGitHub(projectName, artifactRef, {
             buildProfile: buildPlan.profile,
-            buildEnv: normalizeBuildEnvInput(projectRow?.buildEnv)
+            buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
         });
         sections.push(`[gitops] committed ${git.ref}`);
         const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/simple-app" : "";
