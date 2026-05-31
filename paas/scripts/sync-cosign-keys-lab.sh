@@ -132,6 +132,15 @@ if [[ "${SYNC_JENKINS}" == "1" ]]; then
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 fi
 
+if kubectl get deployment frontend -n paas >/dev/null 2>&1; then
+  PEM_HEAD="$(kubectl exec -n paas deploy/frontend -- sh -c 'printf "%s" "$COSIGN_PUBLIC_KEY" | head -c 24' 2>/dev/null || true)"
+  if [[ "${PEM_HEAD}" == '"-----BEGIN PUBLIC KEY' ]]; then
+    echo "WARN: COSIGN_PUBLIC_KEY in frontend pod still has literal quote prefix — re-run: bash paas/scripts/sync-paas-frontend-env-k8s.sh"
+  elif [[ "${PEM_HEAD}" == '-----BEGIN PUBLIC KEY'-* ]]; then
+    echo "OK: COSIGN_PUBLIC_KEY in frontend pod looks like valid PEM (no outer quotes)"
+  fi
+fi
+
 echo ""
 echo "Next: trigger ONE deploy (do not Ctrl+C):"
 echo "  PROJECT_ID=<uuid> python3 paas/scripts/trigger-paas-deploy-lab.py"

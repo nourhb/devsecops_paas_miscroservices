@@ -210,10 +210,11 @@ function resolvedHarborRegistryHost(): string {
     return harborRegistryHostFromBase();
 }
 function pemFromEnv(raw: string): string {
-    return String(raw)
-        .trim()
-        .replace(/\\n/g, "\n")
-        .trim();
+    let s = String(raw).trim();
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+        s = s.slice(1, -1);
+    }
+    return s.replace(/\\n/g, "\n").trim();
 }
 function resolveCosignPublicKeyPem(): string {
     const pub = firstNonEmpty(process.env.COSIGN_PUBLIC_KEY);
