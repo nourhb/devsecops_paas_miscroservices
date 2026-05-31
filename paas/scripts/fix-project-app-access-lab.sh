@@ -73,7 +73,7 @@ if not image.get("pullPolicy"):
 doc["image"] = image
 
 doc.setdefault("imagePullSecrets", [{"name": "harbor-regcred"}])
-doc.setdefault("nodeSelector", {"kubernetes.io/hostname": "master"})
+doc.pop("nodeSelector", None)
 service = doc.get("service") if isinstance(doc.get("service"), dict) else {}
 service.setdefault("targetPort", 3000)
 doc["service"] = service
