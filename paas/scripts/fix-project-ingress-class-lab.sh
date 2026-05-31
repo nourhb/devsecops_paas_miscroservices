@@ -25,5 +25,9 @@ while IFS=$'\t' read -r ns name current; do
 done < <(kubectl get ingress -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.ingressClassName}{"\n"}{end}' \
   | grep -v '^paas	' || true)
 
-echo "==> Done ($count patched). Probe example:"
+echo "==> Done ($count cluster patched)."
+echo "WARN: Argo CD selfHeal reverts kubectl patches when GitOps values still have ingress.className=nginx."
+echo "      Fix Git + sync: bash paas/scripts/fix-gitops-ingress-class-lab.sh"
+echo "      Or per project:  bash paas/scripts/fix-project-app-access-lab.sh sanhome"
+echo "Probe example:"
 echo "    curl -s -o /dev/null -w '%{http_code}\n' http://sanhome.192.168.56.129.nip.io:30659/"

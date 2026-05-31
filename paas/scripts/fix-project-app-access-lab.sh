@@ -14,6 +14,17 @@ NODE_IP="${NODE_IP:-192.168.56.129}"
 INGRESS_PORT="${APPS_PUBLIC_INGRESS_HTTP_PORT:-30659}"
 GITOPS="${GITOPS:-${HOME}/gitops}"
 ARGOCD_APP_PREFIX="${ARGOCD_APP_PREFIX:-paas}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$ROOT/frontend/docker-compose.env}"
+INGRESS_CLASS="${APPS_INGRESS_CLASS:-traefik}"
+if [[ -f "${ENV_FILE}" ]]; then
+  val="$(grep -E '^APPS_INGRESS_CLASS=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | sed 's/[[:space:]]*#.*//' | tr -d '\r"' | xargs || true)"
+  [[ -n "${val}" ]] && INGRESS_CLASS="${val}"
+fi
+if [[ -f "${ENV_FILE}" && -z "${GITHUB_TOKEN:-}" ]]; then
+  tok="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+  [[ -n "${tok}" ]] && export GITHUB_TOKEN="${tok}"
+fi
 CANONICAL_URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:${INGRESS_PORT}/"
 CHART_DIR="${GITOPS}/apps/${PROJECT_NAME}"
 VALUES="${CHART_DIR}/values.yaml"
@@ -35,7 +46,7 @@ if [[ ! -f "${CHART_DIR}/Chart.yaml" ]]; then
   done
 fi
 
-python3 - "${VALUES}" "${PROJECT_NAME}" "${NODE_IP}" <<'PY'
+python3 - "${VALUES}" "${PROJECT_NAME}" "${NODE_IP}" "${INGRESS_CLASS}" <<'PY'
 import sys
 from pathlib import Path
 
@@ -45,7 +56,7 @@ except ImportError:
     sys.stderr.write("Install PyYAML: pip3 install pyyaml\n")
     raise
 
-values_path, project_name, node_ip = sys.argv[1:4]
+values_path, project_name, node_ip, ingress_class = sys.argv[1:5]
 path = Path(values_path)
 doc = {}
 if path.exists():
@@ -70,7 +81,7 @@ doc["service"] = service
 
 ingress = doc.get("ingress") if isinstance(doc.get("ingress"), dict) else {}
 ingress["enabled"] = True
-ingress.setdefault("className", "traefik")
+ingress["className"] = ingress_class
 ingress["hosts"] = [{"host": f"{project_name}.{node_ip}.nip.io"}]
 ingress.setdefault("tls", [])
 doc["ingress"] = ingress
