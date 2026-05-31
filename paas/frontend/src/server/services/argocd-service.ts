@@ -309,3 +309,36 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     const syncLine = `[argocd] Sync accepted for ${appName}`;
     return { logs: ensureLogs.length ? `${ensureLogs.join("\n")}\n${syncLine}` : syncLine };
 }
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+export async function waitForArgoApplicationReady(projectName: string, options?: {
+    timeoutMs?: number;
+    pollMs?: number;
+}): Promise<{
+    logs: string;
+    ready: boolean;
+}> {
+    const timeoutMs = options?.timeoutMs ?? env.PAAS_DEPLOY_WAIT_ARGO_MS;
+    const pollMs = options?.pollMs ?? 5000;
+    const deadline = Date.now() + timeoutMs;
+    const lines: string[] = [];
+    while (Date.now() < deadline) {
+        const status = await getArgoApplicationStatus(projectName);
+        const health = String(status.health || "").toLowerCase();
+        const sync = String(status.syncStatus || "").toLowerCase();
+        if (health === "healthy" && sync === "synced") {
+            lines.push(`[argocd] Application ready (health=${status.health}, sync=${status.syncStatus})`);
+            return { logs: lines.join("\n"), ready: true };
+        }
+        if (status.unreachableReason) {
+            lines.push(`[argocd] waiting: ${status.unreachableReason}`);
+        }
+        else {
+            lines.push(`[argocd] waiting: health=${status.health} sync=${status.syncStatus}`);
+        }
+        await sleep(pollMs);
+    }
+    lines.push(`[argocd] Timed out after ${timeoutMs}ms waiting for Healthy+Synced`);
+    return { logs: lines.join("\n"), ready: false };
+}

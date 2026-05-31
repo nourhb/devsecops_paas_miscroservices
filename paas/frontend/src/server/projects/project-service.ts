@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/prisma";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/server/http/errors";
 import { detectRepositoryLanguage } from "@/server/projects/repository-language";
 import { ensureArgoCdApplication } from "@/server/services/argocd-service";
+import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
 import type { PendingGitHubPush, Project, ProjectRequest, UserRole } from "@/types";
 const createProjectSchema = z.object({
     projectName: z.string().min(2).max(120),
@@ -96,7 +97,11 @@ function mapProject(project: {
         pendingGitHubPush: normalizePendingGitHubPush(project.pendingGitHubPush)
     };
 }
-export async function createProject(payload: unknown, userId: string): Promise<Project> {
+export async function createProject(payload: unknown, userId: string): Promise<{
+    project: Project;
+    warnings: string[];
+}> {
+    const warnings: string[] = [];
     const parsed = createProjectSchema.safeParse(payload);
     if (!parsed.success) {
         throw new ValidationError(parsed.error.flatten().formErrors.join(", ") || "Invalid project payload");
@@ -144,11 +149,20 @@ export async function createProject(payload: unknown, userId: string): Promise<P
         }
     });
     try {
-        await ensureArgoCdApplication(parsed.data.projectName, namespace);
+        const argo = await ensureArgoCdApplication(parsed.data.projectName, namespace);
+        if (/WARN|disabled|failed/i.test(argo.logs)) {
+            warnings.push(argo.logs);
+        }
     }
-    catch {
+    catch (error) {
+        warnings.push(error instanceof Error ? error.message : String(error));
     }
-    return mapProject(created);
+    const namespacePrep = await ensureProjectNamespaceReady(namespace);
+    if (namespacePrep.logs && /WARN|Created|Copied|Updated/i.test(namespacePrep.logs)) {
+        warnings.push(namespacePrep.logs);
+    }
+    warnings.push(...namespacePrep.warnings);
+    return { project: mapProject(created), warnings };
 }
 export async function listProjects(userId: string, role: "ADMIN" | "DEVELOPER"): Promise<Project[]> {
     const projects = await prisma.project.findMany({

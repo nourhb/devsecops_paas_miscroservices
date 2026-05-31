@@ -1,5 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
+import type { BuildProfile } from "@/server/build-planner";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
 import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
 import { IntegrationError } from "@/server/http/errors";
@@ -66,11 +67,14 @@ const githubHeaders = (token: string) => ({
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28"
 });
-export async function commitHelmValuesGitHub(projectName: string, imageTag: string): Promise<{
+export async function commitHelmValuesGitHub(projectName: string, imageTag: string, options?: {
+    buildProfile?: BuildProfile;
+}): Promise<{
     committed: boolean;
     ref: string;
     chartBootstrapped: boolean;
 }> {
+    const buildProfile = options?.buildProfile ?? "node";
     if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
         if (allowSimulation()) {
             return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}`, chartBootstrapped: false };
@@ -78,7 +82,7 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         throw new IntegrationError("GITOPS_REPO_URL and GITOPS_REPO_TOKEN are required to commit GitOps changes.");
     }
     const { owner, repo } = parseGithubRepo(env.GITOPS_REPO_URL);
-    const bootstrap = await ensureGitOpsHelmChartFromReference(projectName);
+    const bootstrap = await ensureGitOpsHelmChartFromReference(projectName, buildProfile);
     const path = gitopsValuesPathForProject(projectName);
     const branch = env.GITOPS_DEFAULT_BRANCH;
     const token = env.GITOPS_REPO_TOKEN;
@@ -120,7 +124,7 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
                 pullPolicy: "IfNotPresent"
             }
         };
-        applyDeployValuesDefaults(doc, projectName);
+        applyDeployValuesDefaults(doc, projectName, buildProfile);
         return { contentYaml: stringifyYaml(doc) };
     }
         if (!res.ok) {
@@ -141,7 +145,7 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
             throw new IntegrationError(`Values file ${path} is not a YAML object.`);
         }
         setImageTag(doc, imageTag);
-        applyDeployValuesDefaults(doc, projectName);
+        applyDeployValuesDefaults(doc, projectName, buildProfile);
         return { sha: meta.sha, contentYaml: stringifyYaml(doc) };
     }
 

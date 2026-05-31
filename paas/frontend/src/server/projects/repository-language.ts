@@ -242,17 +242,22 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 8000
-CMD ["python", "-m", "http.server", "8000"]`;
+CMD ["sh", "-c", "if [ -f manage.py ]; then python manage.py runserver 0.0.0.0:8000; else python -m http.server 8000; fi"]`;
         case "java":
-            return `FROM eclipse-temurin:17-jre-alpine
+            return `FROM eclipse-temurin:17-jdk-alpine AS build
 WORKDIR /app
-COPY target/*.jar app.jar
+COPY . .
+RUN ./mvnw -q -DskipTests package || mvn -q -DskipTests package
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]`;
         case "static":
             return `FROM nginx:alpine
 COPY . /usr/share/nginx/html
-EXPOSE 80`;
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]`;
         default:
             return `FROM alpine:3.20
 WORKDIR /app
