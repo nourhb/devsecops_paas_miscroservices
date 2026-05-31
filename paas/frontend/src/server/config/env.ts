@@ -8,6 +8,12 @@ function firstNonEmpty(...values: (string | undefined)[]): string {
     }
     return "";
 }
+function stripInlineEnvComment(v: unknown): unknown {
+    if (typeof v !== "string") {
+        return v;
+    }
+    return v.replace(/\s+#.*$/, "").trim();
+}
 function preprocessStrictIntegrations(v: unknown): unknown {
     if (v === undefined || v === null) {
         return undefined;
@@ -186,7 +192,7 @@ const envSchema = z.object({
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
     APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
-    APPS_INGRESS_CLASS: z.string().default("traefik"),
+    APPS_INGRESS_CLASS: z.preprocess(stripInlineEnvComment, z.string().default("traefik")),
     APPS_REACHABILITY_TIMEOUT_MS: z.coerce.number().int().min(1000).default(8000),
     PAAS_DEPLOY_WAIT_ARGO_MS: z.coerce.number().int().min(10000).default(300000),
     PAAS_DEPLOY_WAIT_HTTP_MS: z.coerce.number().int().min(10000).default(180000),
@@ -194,6 +200,8 @@ const envSchema = z.object({
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
     NOTIFY_PIPELINE_FAILURE_EMAILS: z.enum(["true", "false"]).default("true"),
     PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
+    /** Block GitOps promote when Cosign/policy/Sonar gate fails (lab: keep false until tokens work). */
+    PAAS_ENFORCE_SECURITY_GATE: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ENABLED: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ISSUER: z.string().default(""),
     KEYCLOAK_CLIENT_ID: z.string().default(""),
@@ -439,6 +447,7 @@ const parsed = envSchema.safeParse({
     AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN,
     NOTIFY_PIPELINE_FAILURE_EMAILS: process.env.NOTIFY_PIPELINE_FAILURE_EMAILS,
     PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS,
+    PAAS_ENFORCE_SECURITY_GATE: process.env.PAAS_ENFORCE_SECURITY_GATE,
     KEYCLOAK_ENABLED: process.env.KEYCLOAK_ENABLED,
     KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
     KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,

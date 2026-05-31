@@ -97,6 +97,13 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         .filter(Boolean)
         .join("\n");
     const buildPart = tail(buildSection);
+    const sections: string[] = [
+        buildPart,
+        "",
+        "--- GitOps (Helm values) + Argo CD ---",
+        `[image] ${artifactRef}`,
+        `[build-profile] ${buildPlan.profile}`
+    ];
     await prisma.deployment.update({
         where: { id: deploymentId },
         data: { status: DeploymentJobStatus.SUCCESS, logs: buildPart, ...clearDeploymentFailureFields() }
@@ -109,27 +116,21 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     });
     if (env.PAAS_ENFORCE_SECURITY_GATE === "true") {
         const security = await getSecurityMetrics(projectId);
-        if (!security.securityEnforcement.deploymentAllowed) {
-            const gateMsg = security.securityEnforcement.summary || "Security gate did not pass.";
+        const enforcement = security.securityEnforcement;
+        if (!enforcement?.deploymentAllowed) {
+            const gateMsg = enforcement?.summary || "Security gate did not pass.";
             sections.push(`[security-gate] BLOCKED: ${gateMsg}`);
             sections.push(`PAAS_DEPLOY_VERIFY step=security_gate status=FAIL detail=${gateMsg.slice(0, 400)}`);
             await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.UNKNOWN, gateMsg);
             return;
         }
-        sections.push(`PAAS_DEPLOY_VERIFY step=security_gate status=OK detail=${security.securityEnforcement.summary.slice(0, 300)}`);
+        sections.push(`PAAS_DEPLOY_VERIFY step=security_gate status=OK detail=${(enforcement.summary || "Security gate passed.").slice(0, 300)}`);
     }
     await prisma.deployment.update({
         where: { id: deploymentId },
         data: { status: DeploymentJobStatus.DEPLOYING, ...clearDeploymentFailureFields() }
     });
     await updateProject(projectId, { lastDeploymentStatus: "PROMOTING" });
-    const sections: string[] = [
-        buildPart,
-        "",
-        "--- GitOps (Helm values) + Argo CD ---",
-        `[image] ${artifactRef}`,
-        `[build-profile] ${buildPlan.profile}`
-    ];
     await prisma.containerImage.create({
         data: {
             projectId,

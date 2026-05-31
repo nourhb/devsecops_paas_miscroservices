@@ -170,7 +170,7 @@ export default function PipelinePage() {
         return `${s?.deploymentLogs ?? ""}\n${s?.buildLogs ?? ""}`;
     }, [statusQuery.data]);
     const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
-    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus ?? statusQuery.data?.status), [liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus, statusQuery.data?.status]);
+    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus), [liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus]);
     const jStarted = useMemo(() => displayStages.filter((s) => {
         const u = (s.status || "").toUpperCase();
         return u !== "NOT_EXECUTED" && u !== "NOT_BUILT" && u !== "SKIPPED";
