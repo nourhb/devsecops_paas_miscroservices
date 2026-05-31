@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { Hint } from "@/components/hint";
 import { projectApi } from "@/lib/api";
 import { hints } from "@/lib/app-hints";
@@ -24,7 +25,7 @@ export default function EditProjectPage() {
     const [buildEnvText, setBuildEnvText] = useState("");
     const projectQuery = useQuery({
         queryKey: ["project", projectId],
-        queryFn: () => projectApi.getProject(projectId)
+        queryFn: () => projectApi.getProject(projectId, { includeBuildEnv: true })
     });
     const mutation = useMutation({
         mutationFn: (body: Parameters<typeof projectApi.updateProject>[1]) => projectApi.updateProject(projectId, body),
@@ -115,18 +116,19 @@ export default function EditProjectPage() {
               </label>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="buildEnv">Build / runtime environment (.env)</Label>
+              <Label htmlFor="buildEnv">Application environment (.env) — optional</Label>
               <p className="text-xs text-muted">
-                One KEY=value per line. Required for Next.js apps with Firebase (NEXT_PUBLIC_FIREBASE_*). Values are injected at Jenkins build time and synced to Kubernetes on deploy.
+                Stored encrypted (AES-256-GCM) in the database. Values are only loaded on this edit screen. Injected during Jenkins build and synced to Kubernetes on deploy.
               </p>
-              <textarea
+              <Textarea
                 id="buildEnv"
                 name="buildEnv"
                 rows={10}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs"
+                className="font-mono text-xs"
+                spellCheck={false}
                 value={buildEnvText}
                 onChange={(event) => setBuildEnvText(event.target.value)}
-                placeholder={"NEXT_PUBLIC_FIREBASE_API_KEY=...\nNEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...\nNEXT_PUBLIC_FIREBASE_PROJECT_ID=..."}
+                placeholder={"NEXT_PUBLIC_FIREBASE_API_KEY=...\nNEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=..."}
               />
             </div>
             {error ? <p className="text-sm text-danger">{error}</p> : null}

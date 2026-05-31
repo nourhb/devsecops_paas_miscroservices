@@ -10,7 +10,8 @@ export async function GET(request: NextRequest, { params }: {
 }) {
     try {
         const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
-        const project = await getProjectForUser(params.projectId, auth.userId, auth.role);
+        const includeBuildEnv = request.nextUrl.searchParams.get("includeBuildEnv") === "true";
+        const project = await getProjectForUser(params.projectId, auth.userId, auth.role, { revealBuildEnv: includeBuildEnv });
         return ok(project);
     }
     catch (error) {

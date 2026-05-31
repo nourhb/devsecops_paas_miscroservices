@@ -199,8 +199,9 @@ export const projectApi = {
         const { data } = await apiClient.get<Project[]>("/api/projects");
         return data;
     },
-    getProject: async (projectId: string) => {
-        const { data } = await apiClient.get<Project>(`/api/project/${projectId}`);
+    getProject: async (projectId: string, options?: { includeBuildEnv?: boolean }) => {
+        const query = options?.includeBuildEnv ? "?includeBuildEnv=true" : "";
+        const { data } = await apiClient.get<Project>(`/api/project/${projectId}${query}`);
         return data;
     },
     updateProject: async (projectId: string, payload: Partial<ProjectRequest>) => {
