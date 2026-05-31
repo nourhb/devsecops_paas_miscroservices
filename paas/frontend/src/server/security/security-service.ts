@@ -2,7 +2,7 @@ import type { SecurityMetrics } from "@/types";
 import { env } from "@/server/config/env";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { getProjectById } from "@/server/projects/project-service";
-import { cosignClient, dependencyTrackClient, opaClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
+import { cosignClient, dependencyTrackClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import type { Project } from "@prisma/client";
 
 function score(base: number, penalty: number): number {
@@ -109,8 +109,13 @@ function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectU
     return hints.join(" ");
 }
 
+async function resolveSecurityImageRef(project: Project): Promise<string> {
+    const latest = await resolveLatestDeployArtifactImage(project.projectName, project.id);
+    return latest?.trim() || project.imageTag?.trim() || project.projectName;
+}
+
 async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> {
-    const imageTag = project.imageTag || project.projectName;
+    const imageTag = await resolveSecurityImageRef(project);
     const sonar = await resolveSonarQualityGate(project);
     const dependencyTrackProject = await resolveDependencyTrackMetrics(project);
     const dependencyTrack = dependencyTrackProject.metrics;

@@ -20,7 +20,12 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
     try {
         const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
         const timeout = options?.timeoutMs ?? 180000;
-        await execFileAsync(bin, ["verify", "--key", keyPath, imageRef], {
+        const args = ["verify", "--key", keyPath];
+        if (env.COSIGN_ALLOW_INSECURE_REGISTRY === "true") {
+            args.push("--allow-insecure-registry");
+        }
+        args.push(imageRef);
+        await execFileAsync(bin, args, {
             timeout,
             maxBuffer: 10 * 1024 * 1024,
             windowsHide: true

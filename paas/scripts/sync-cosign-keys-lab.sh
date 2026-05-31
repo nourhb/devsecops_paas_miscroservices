@@ -109,6 +109,22 @@ fi
 
 if [[ "${SYNC_FRONTEND}" == "1" ]]; then
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+  if command -v kubectl >/dev/null 2>&1 && command -v cosign >/dev/null 2>&1; then
+    FRONTEND_POD="$(kubectl get pod -n paas -l app=frontend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [[ -n "${FRONTEND_POD}" ]]; then
+      kubectl exec -n paas "${FRONTEND_POD}" -- mkdir -p /app/.tools 2>/dev/null || true
+      kubectl cp "$(command -v cosign)" "paas/${FRONTEND_POD}:/app/.tools/cosign" 2>/dev/null || true
+      kubectl exec -n paas "${FRONTEND_POD}" -- chmod +x /app/.tools/cosign 2>/dev/null || true
+      if ! grep -q '^COSIGN_BINARY_PATH=' "${ENV_FILE}" 2>/dev/null; then
+        echo 'COSIGN_BINARY_PATH="/app/.tools/cosign"' >> "${ENV_FILE}"
+      fi
+      if ! grep -q '^COSIGN_ALLOW_INSECURE_REGISTRY=' "${ENV_FILE}" 2>/dev/null; then
+        echo 'COSIGN_ALLOW_INSECURE_REGISTRY=true' >> "${ENV_FILE}"
+      fi
+      ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+      echo "OK: frontend pod has /app/.tools/cosign for Security UI verify"
+    fi
+  fi
 fi
 
 if [[ "${SYNC_JENKINS}" == "1" ]]; then

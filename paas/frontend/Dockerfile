@@ -23,7 +23,10 @@ ENV NODE_ENV=production \
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 --ingroup nodejs nextjs \
-    && apk add --no-cache wget openssl
+    && apk add --no-cache wget openssl \
+    && wget -qO /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64 \
+    && chmod +x /usr/local/bin/cosign \
+    && chown root:root /usr/local/bin/cosign
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
