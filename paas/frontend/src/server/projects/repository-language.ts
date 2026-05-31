@@ -1,6 +1,7 @@
 import { IntegrationError, ValidationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import type { BuildProfile } from "@/server/build-planner";
+import { env } from "@/server/config/env";
 import type { RepositoryLanguageDetectionResponse } from "@/types";
 type GitHubRepoRef = {
     owner: string;
@@ -19,10 +20,32 @@ function parseGitHubRepo(url: string): GitHubRepoRef {
     throw new ValidationError("Only GitHub repository URLs are supported for automatic language detection.");
 }
 function githubHeaders() {
-    return {
+    const headers: Record<string, string> = {
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28"
     };
+    const token = env.GITHUB_API_TOKEN.trim();
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+}
+function uniqueBranchCandidates(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    const candidates: string[] = [];
+    for (const value of values) {
+        const branch = String(value || "").trim();
+        if (!branch) {
+            continue;
+        }
+        const key = branch.toLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        candidates.push(branch);
+    }
+    return candidates;
 }
 function decodeBase64(content: string) {
     return Buffer.from(content.replace(/\n/g, ""), "base64").toString("utf8");
@@ -116,26 +139,67 @@ async function fetchRepoMetadata(repoRef: GitHubRepoRef) {
         cache: "no-store"
     });
     if (!response.ok) {
-        throw new IntegrationError(`GitHub repository lookup failed with HTTP ${response.status}.`);
+        const hint = response.status === 404
+            ? " Confirm the repository URL is correct and public, or configure GITHUB_API_TOKEN for private repositories."
+            : "";
+        throw new IntegrationError(`GitHub repository lookup failed with HTTP ${response.status}.${hint}`);
     }
     return response.json() as Promise<{
         default_branch?: string;
         language?: string | null;
     }>;
 }
-async function fetchRepoContents(repoRef: GitHubRepoRef, branch: string) {
+type RepoContentEntry = {
+    name?: string;
+    type?: string;
+    path?: string;
+};
+async function tryFetchRepoContents(repoRef: GitHubRepoRef, branch: string): Promise<{
+    ok: true;
+    contents: RepoContentEntry[];
+} | {
+    ok: false;
+    status: number;
+}> {
     const response = await integrationFetch(`https://api.github.com/repos/${repoRef.owner}/${repoRef.repo}/contents?ref=${encodeURIComponent(branch)}`, {
         headers: githubHeaders(),
         cache: "no-store"
     });
     if (!response.ok) {
-        throw new IntegrationError(`GitHub repository contents lookup failed with HTTP ${response.status}.`);
+        return { ok: false, status: response.status };
     }
-    return response.json() as Promise<Array<{
-        name?: string;
-        type?: string;
-        path?: string;
-    }>>;
+    return {
+        ok: true,
+        contents: await response.json() as RepoContentEntry[]
+    };
+}
+async function resolveRepositoryBranch(repoRef: GitHubRepoRef, metadata: {
+    default_branch?: string;
+}, requestedBranch?: string | null): Promise<{
+    branch: string;
+    contents: RepoContentEntry[];
+}> {
+    const candidates = uniqueBranchCandidates([
+        requestedBranch,
+        metadata.default_branch,
+        "main",
+        "master"
+    ]);
+    let lastStatus = 404;
+    for (const branch of candidates) {
+        const result = await tryFetchRepoContents(repoRef, branch);
+        if (result.ok) {
+            return { branch, contents: result.contents };
+        }
+        lastStatus = result.status;
+        if (result.status !== 404) {
+            throw new IntegrationError(`GitHub repository contents lookup failed with HTTP ${result.status}.`);
+        }
+    }
+    const hint = lastStatus === 404
+        ? " Confirm the repository URL is correct and public, or configure GITHUB_API_TOKEN for private repositories."
+        : "";
+    throw new IntegrationError(`GitHub repository contents lookup failed with HTTP ${lastStatus}.${hint}`);
 }
 async function fetchContentFile(repoRef: GitHubRepoRef, path: string, branch: string) {
     const response = await integrationFetch(`https://api.github.com/repos/${repoRef.owner}/${repoRef.repo}/contents/${path}?ref=${encodeURIComponent(branch)}`, {
@@ -218,8 +282,9 @@ export async function detectRepositoryLanguage(input: {
 }): Promise<RepositoryLanguageDetectionResponse> {
     const repoRef = parseGitHubRepo(input.gitRepositoryUrl);
     const metadata = await fetchRepoMetadata(repoRef);
-    const branch = (input.branch || metadata.default_branch || "main").trim();
-    const contents = await fetchRepoContents(repoRef, branch);
+    const requestedBranch = (input.branch || "").trim();
+    const { branch, contents } = await resolveRepositoryBranch(repoRef, metadata, input.branch);
+    const branchWasCorrected = Boolean(requestedBranch && requestedBranch.toLowerCase() !== branch.toLowerCase());
     const names = new Set(contents.map((entry) => (entry.name || "").toLowerCase()));
     const hasDockerfile = names.has("dockerfile") || names.has("containerfile");
     function finalize(core: {
@@ -227,8 +292,12 @@ export async function detectRepositoryLanguage(input: {
         buildProfile: BuildProfile;
         detectionReason: string;
     }): RepositoryLanguageDetectionResponse {
+        const detectionReason = branchWasCorrected
+            ? `${core.detectionReason} Using repository branch "${branch}" (${requestedBranch} was not found).`
+            : core.detectionReason;
         return {
             ...core,
+            detectionReason,
             branch,
             hasDockerfile,
             suggestedDockerfile: hasDockerfile ? undefined : buildSuggestedDockerfile(core.buildProfile)
