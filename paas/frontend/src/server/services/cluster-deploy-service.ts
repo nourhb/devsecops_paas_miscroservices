@@ -103,7 +103,8 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     await updateProject(projectId, {
         lastDeploymentStatus: "SUCCESS",
         deploymentLogs: buildPart,
-        buildStatus: "PUSHING"
+        buildStatus: "PUSHING",
+        imageTag: artifactRef
     });
     await prisma.deployment.update({
         where: { id: deploymentId },

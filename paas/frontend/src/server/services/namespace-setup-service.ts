@@ -1,5 +1,6 @@
 import type { V1Secret } from "@kubernetes/client-node";
 import { env } from "@/server/config/env";
+import { harborDockerConfigSecretData } from "@/server/deploy/harbor-pull-secret";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
 
 const HARBOR_PULL_SECRET = "harbor-regcred";
@@ -39,16 +40,29 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
         }
     }
     const sourceNs = harborSecretSourceNamespace();
+    let secretData: Record<string, string> | null = null;
     try {
         const { body: sourceSecret } = await api.readNamespacedSecret(HARBOR_PULL_SECRET, sourceNs);
-        if (!sourceSecret.data) {
+        secretData = sourceSecret.data ?? null;
+        if (!secretData) {
             warnings.push(`Harbor pull secret ${HARBOR_PULL_SECRET} in ${sourceNs} has no data.`);
-            return { logs: logs.join("\n"), warnings };
         }
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        warnings.push(`Could not read ${HARBOR_PULL_SECRET} from ${sourceNs}: ${msg}`);
+    }
+    if (!secretData) {
+        secretData = harborDockerConfigSecretData();
+        if (secretData) {
+            logs.push(`[k8s] Built ${HARBOR_PULL_SECRET} from HARBOR_REGISTRY credentials (namespace copy unavailable).`);
+        }
+    }
+    if (secretData) {
         const copy: V1Secret = {
             metadata: { name: HARBOR_PULL_SECRET, namespace: ns },
-            type: sourceSecret.type || "kubernetes.io/dockerconfigjson",
-            data: sourceSecret.data
+            type: "kubernetes.io/dockerconfigjson",
+            data: secretData
         };
         try {
             await api.createNamespacedSecret(ns, copy);
@@ -65,9 +79,8 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
             }
         }
     }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        warnings.push(`Harbor pull secret sync skipped (${sourceNs}/${HARBOR_PULL_SECRET}): ${msg}`);
+    else {
+        warnings.push(`Harbor pull secret not available — set HARBOR_REGISTRY/HARBOR_USERNAME/HARBOR_PASSWORD or create ${HARBOR_PULL_SECRET} in ${sourceNs}.`);
     }
     return { logs: logs.join("\n") || `[k8s] Namespace ${ns} ready.`, warnings };
 }

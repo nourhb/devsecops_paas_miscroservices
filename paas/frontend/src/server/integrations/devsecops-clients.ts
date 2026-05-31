@@ -1433,7 +1433,7 @@ export class SonarQubeClient {
     }
 }
 export class DependencyTrackClient {
-    private enabled = Boolean(env.DEPENDENCY_TRACK_BASE_URL);
+    private enabled = Boolean(env.DEPENDENCY_TRACK_BASE_URL && env.DEPENDENCY_TRACK_API_KEY);
     private headers() {
         return {
             "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY
@@ -1442,6 +1442,23 @@ export class DependencyTrackClient {
     private async resolveProjectUuid(projectKey: string): Promise<string | null> {
         if (!this.enabled) {
             return null;
+        }
+        const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (uuidLike.test(projectKey)) {
+            try {
+                const direct = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project/${encodeURIComponent(projectKey)}`, {
+                    method: "GET",
+                    headers: this.headers()
+                });
+                if (direct.ok) {
+                    const payload = (await direct.json()) as {
+                        uuid?: string;
+                    };
+                    return payload.uuid ?? projectKey;
+                }
+            }
+            catch {
+            }
         }
         const response = await integrationFetch(`${env.DEPENDENCY_TRACK_BASE_URL}/api/v1/project?name=${encodeURIComponent(projectKey)}`, {
             method: "GET",

@@ -2,6 +2,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
 import type { BuildProfile } from "@/server/build-planner";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
+import { withGitOpsProjectLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
 import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
@@ -68,6 +69,15 @@ const githubHeaders = (token: string) => ({
     "X-GitHub-Api-Version": "2022-11-28"
 });
 export async function commitHelmValuesGitHub(projectName: string, imageTag: string, options?: {
+    buildProfile?: BuildProfile;
+}): Promise<{
+    committed: boolean;
+    ref: string;
+    chartBootstrapped: boolean;
+}> {
+    return withGitOpsProjectLock(projectName, () => commitHelmValuesGitHubUnlocked(projectName, imageTag, options));
+}
+async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
 }): Promise<{
     committed: boolean;
@@ -185,7 +195,7 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
         throw e;
     }
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 8; attempt++) {
         const body: Record<string, string> = {
             message,
             content: Buffer.from(contentYaml, "utf8").toString("base64"),
@@ -212,7 +222,8 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
             };
         }
         const t = await putRes.text();
-        if (putRes.status === 409 && attempt < 3) {
+        if (putRes.status === 409 && attempt < 8) {
+            await sleepMs(150 * attempt);
             const refreshed = await loadExistingValues();
             contentYaml = refreshed.contentYaml;
             sha = refreshed.sha;
