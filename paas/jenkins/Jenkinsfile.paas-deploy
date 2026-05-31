@@ -248,7 +248,7 @@ def normalizeCosignPrivateKeyPem(String raw) {
 
 def ensureCosignTool() {
   def labBin = "/var/jenkins_home/bin/cosign"
-  if (new File(labBin).canExecute()) {
+  if (sh(script: "test -x '${labBin}'", returnStatus: true) == 0) {
     return labBin
   }
   if (commandExists("cosign")) {
@@ -669,7 +669,7 @@ ${paasShellKeepaliveHelper()}
         --workdir=/app \\
         --entrypoint=/bin/sh \\
         --cmd=-c \\
-        --cmd='if [ -f server.js ]; then node server.js; elif [ -d build ] && [ -f build/index.html ]; then npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then npm start; else node server.js; fi' \\
+        --cmd='if [ -f package.json ] && node -e "const p=require(\"./package.json\");const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then export NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000; exec npx next start -H 0.0.0.0 -p 3000; elif [ -f server.js ]; then node server.js; elif [ -d build ] && [ -f build/index.html ]; then npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then npm start; else node server.js; fi' \\
         --exposed-ports=3000/tcp
     fi
   """
@@ -791,6 +791,34 @@ def runPaasDeploy = {
 
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
+    if (fileExists('package.json')) {
+      sh '''
+        set +e
+        node <<'NODE'
+const fs = require('fs');
+for (const f of ['next.config.mjs', 'next.config.js', 'next.config.ts']) {
+  if (!fs.existsSync(f)) continue;
+  const txt = fs.readFileSync(f, 'utf8');
+  if (/output\\s*:\\s*['"]standalone['"]/i.test(txt)) {
+    console.log('[build] ' + f + ' already has output standalone');
+    process.exit(0);
+  }
+  let patched = txt;
+  if (/const\\s+nextConfig\\s*=\\s*\\{/.test(txt)) {
+    patched = txt.replace(/const\\s+nextConfig\\s*=\\s*\\{/, "const nextConfig = {\\n  output: 'standalone',");
+  } else if (/export\\s+default\\s*\\{/.test(txt)) {
+    patched = txt.replace(/export\\s+default\\s*\\{/, "export default {\\n  output: 'standalone',");
+  } else {
+    console.log('[build] skip standalone patch — unrecognized ' + f + ' shape');
+    process.exit(0);
+  }
+  fs.writeFileSync(f, patched);
+  console.log('[build] patched ' + f + " with output: 'standalone'");
+  process.exit(0);
+}
+NODE
+      '''
+    }
     if (fileExists("pom.xml")) {
       if (commandExists("mvn")) {
         sh "mvn -B -DskipTests package"
@@ -1350,7 +1378,13 @@ EOF
         println "[cosign] COSIGN_CREDENTIALS_ID, COSIGN_PRIVATE_KEY, or ${labKeyPath} absent — étape ignorée."
         return
       }
-      def cosignExe = ensureCosignTool()
+      def cosignExe
+      try {
+        cosignExe = ensureCosignTool()
+      } catch (Throwable cosignToolErr) {
+        paasStepWarn(9, 'cosign', "tool bootstrap failed: ${cosignToolErr.message?.take(200)}")
+        return
+      }
       def insecure = (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim().equalsIgnoreCase("true")
       def insecureFlag = insecure ? "--allow-insecure-registry" : ""
       if (commandExists("docker") && env.HARBOR_REGISTRY?.trim() && env.HARBOR_USERNAME?.trim() && env.HARBOR_PASSWORD?.trim()) {

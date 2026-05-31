@@ -1,4 +1,5 @@
 import type { JenkinsPipelineStageRow } from "@/lib/api";
+import type { PipelineStepCheck, PipelineStepCheckLevel } from "@/server/jenkins/pipeline-step-verification";
 export const PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES = [
     "Step 1 — Params validation",
     "Step 2 — Checkout du code (Git / GitHub)",
@@ -49,7 +50,51 @@ type WfMeta = {
     building?: boolean;
     result?: string | null;
     error?: string | null;
+    jenkinsChecks?: PipelineStepCheck[];
 };
+function checkLevelToStageStatus(level: PipelineStepCheckLevel): string {
+    switch (level) {
+        case "OK":
+            return "SUCCESS";
+        case "WARN":
+            return "UNSTABLE";
+        case "SKIP":
+            return "NOT_EXECUTED";
+        case "FAIL":
+            return "FAILURE";
+        default:
+            return "NOT_EXECUTED";
+    }
+}
+export function applyJenkinsChecksToDisplayStages(stages: PaasDeployDisplayStage[], checks: PipelineStepCheck[] | undefined): PaasDeployDisplayStage[] {
+    if (!checks?.length) {
+        return stages;
+    }
+    return stages.map((stage, idx) => {
+        const stepNum = idx + 1;
+        const stepChecks = checks.filter((check) => check.step === stepNum);
+        if (stepChecks.length === 0) {
+            return stage;
+        }
+        const hasFail = stepChecks.some((check) => check.level === "FAIL");
+        const hasOk = stepChecks.some((check) => check.level === "OK");
+        const allSkip = stepChecks.every((check) => check.level === "SKIP");
+        const worst = hasFail
+            ? "FAIL"
+            : allSkip && !hasOk
+                ? "SKIP"
+                : stepChecks.some((check) => check.level === "WARN") && !hasOk
+                    ? "WARN"
+                    : hasOk
+                        ? "OK"
+                        : "WARN";
+        return {
+            ...stage,
+            status: checkLevelToStageStatus(worst),
+            synthetic: false
+        };
+    });
+}
 export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDisplayStage[] {
     const labels = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES;
     const building = Boolean(wf.building);
@@ -63,12 +108,13 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
         }));
     }
     if (result === "SUCCESS") {
-        return labels.map((name) => ({
+        const base = labels.map((name) => ({
             name,
             status: "SUCCESS",
             durationMs: null,
             synthetic: true
         }));
+        return applyJenkinsChecksToDisplayStages(base, wf.jenkinsChecks);
     }
     if (result === "FAILURE" || result === "ABORTED" || result === "UNSTABLE") {
         return labels.map((name) => ({
@@ -86,24 +132,28 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
     }));
 }
 export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf: WfMeta | undefined): PaasDeployDisplayStage[] {
+    let stages: PaasDeployDisplayStage[];
     if (!wf?.configured || wf.skipped) {
-        return PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
+        stages = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
             name,
             status: "NOT_EXECUTED",
             durationMs: null,
             synthetic: true
         }));
     }
-    if (live.length > 0) {
-        return mergeReferenceWithLiveStages(live);
+    else if (live.length > 0) {
+        stages = mergeReferenceWithLiveStages(live);
     }
-    if (wf.error) {
-        return syntheticStagesWhenWfapiUnavailable(wf);
+    else if (wf.error) {
+        stages = syntheticStagesWhenWfapiUnavailable(wf);
     }
-    return PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
-        name,
-        status: "NOT_EXECUTED",
-        durationMs: null,
-        synthetic: true
-    }));
+    else {
+        stages = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
+            name,
+            status: "NOT_EXECUTED",
+            durationMs: null,
+            synthetic: true
+        }));
+    }
+    return applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks);
 }
