@@ -23,6 +23,12 @@ CRANE_MARKERS = (
     "crane-next16-202605",
 )
 STALE_CRANE_RE = "version.split('.').map(Number);process.exit((v[0]||0)>=16"
+MUTATE_FIX_MARKERS = (
+    "monorepo-app-root-20260531",
+    "entrypoint=/app/start-paas.sh",
+    "[image] crane mutate OK",
+)
+BROKEN_MUTATE_SNIPPET = "--cmd=-c"
 
 
 def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
@@ -37,6 +43,31 @@ def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
     if STALE_CRANE_RE in groovy and "foreground cmd; JENKINS-48300" not in groovy:
         print(
             f"ERROR: {path} has obsolete Step 6 next build logic.\n"
+            "  git pull origin main",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def assert_jenkinsfile_mutate_fix(groovy: str, path: Path) -> None:
+    if BROKEN_MUTATE_SNIPPET in groovy and 'require("./package.json")' in groovy:
+        print(
+            f"ERROR: {path} still has broken crane mutate (--cmd=-c with nested quotes).\n"
+            "  git pull origin main\n"
+            "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "mutate runs as a separate pipeline sh step" in groovy:
+        print(
+            f"ERROR: {path} has obsolete split Step 6 mutate (monorepo paths break).\n"
+            "  git pull origin main",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not any(m in groovy for m in MUTATE_FIX_MARKERS):
+        print(
+            f"ERROR: {path} missing Step 6 mutate fix ({', '.join(MUTATE_FIX_MARKERS[:2])}).\n"
             "  git pull origin main",
             file=sys.stderr,
         )
@@ -396,6 +427,7 @@ def main() -> int:
             print("ERROR: empty Jenkinsfile", file=sys.stderr)
             return 1
         assert_jenkinsfile_crane_fix(groovy, jenkinsfile)
+        assert_jenkinsfile_mutate_fix(groovy, jenkinsfile)
 
     if not wait_for_jenkins_api(base):
         return 1
