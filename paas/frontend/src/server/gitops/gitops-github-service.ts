@@ -2,6 +2,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
 import type { BuildProfile } from "@/server/build-planner";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
+import { mergeBuildEnvIntoHelmValues } from "@/server/projects/project-build-env";
 import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
 import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
 import { IntegrationError } from "@/server/http/errors";
@@ -70,6 +71,7 @@ const githubHeaders = (token: string) => ({
 });
 export async function commitHelmValuesGitHub(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
+    buildEnv?: Record<string, string> | null;
 }): Promise<{
     committed: boolean;
     ref: string;
@@ -86,12 +88,14 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
 }
 async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
+    buildEnv?: Record<string, string> | null;
 }): Promise<{
     committed: boolean;
     ref: string;
     chartBootstrapped: boolean;
 }> {
     const buildProfile = options?.buildProfile ?? "node";
+    const buildEnv = options?.buildEnv ?? null;
     if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
         if (allowSimulation()) {
             return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}`, chartBootstrapped: false };
@@ -142,6 +146,7 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
             }
         };
         applyDeployValuesDefaults(doc, projectName, buildProfile);
+        mergeBuildEnvIntoHelmValues(doc, buildEnv);
         return { contentYaml: stringifyYaml(doc) };
     }
         if (!res.ok) {
@@ -163,6 +168,7 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         }
         setImageTag(doc, imageTag);
         applyDeployValuesDefaults(doc, projectName, buildProfile);
+        mergeBuildEnvIntoHelmValues(doc, buildEnv);
         return { sha: meta.sha, contentYaml: stringifyYaml(doc) };
     }
 

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { ActionResponse, DeploymentStatus } from "@/types";
 import type { BuildTriggerOptions } from "@/server/build-backend";
-import { getBuildBackend } from "@/server/build-backend";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { getProjectById, mapProjectToResponse, updateProject } from "@/server/projects/project-service";
@@ -27,7 +27,7 @@ export async function triggerBuild(projectId: string, options?: BuildTriggerOpti
     const project = await getProjectById(projectId);
     const backend = getBuildBackend();
     const plan = resolveBuildPlan(project);
-    const build = await backend.triggerBuild(project, plan, options);
+    const build = await backend.triggerBuild(toBuildProjectRecord(project), plan, options);
     if (!build.accepted) {
         await updateProject(project.id, {
             buildStatus: "FAILED",

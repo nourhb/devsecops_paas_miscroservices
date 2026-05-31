@@ -64,6 +64,34 @@ def dtProjectNameForUpload(String projId, String imageRef) {
   return slug ?: projId
 }
 
+def materializeProjectBuildEnv(String appRoot) {
+  def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
+  if (!b64) {
+    println '[env] No PROJECT_BUILD_ENV_B64 — skip .env (Next.js/Firebase apps need NEXT_PUBLIC_* at build time; set Build env in PaaS Edit project)'
+    return
+  }
+  try {
+    def decoded = new String(b64.decodeBase64(), 'UTF-8')
+    def envMap = readJSON text: decoded
+    def lines = []
+    envMap.each { k, v ->
+      if (k?.toString()?.trim() && v != null) {
+        lines << "${k}=${v}"
+      }
+    }
+    if (lines.isEmpty()) {
+      println '[env] PROJECT_BUILD_ENV_B64 decoded to empty map'
+      return
+    }
+    def content = lines.join('\n')
+    writeFile file: "${appRoot}/.env", text: content
+    writeFile file: "${appRoot}/.env.production", text: content
+    println "[env] Wrote ${lines.size()} variable(s) to ${appRoot}/.env and .env.production"
+  } catch (Exception e) {
+    println "[env] WARN: could not materialize PROJECT_BUILD_ENV_B64: ${e.message}"
+  }
+}
+
 def prependPath(String path) {
   env.PATH = "${path}:${env.PATH}"
 }
@@ -796,6 +824,7 @@ def runPaasDeploy = {
   env.JENKINS_NPM_PRUNE_BEFORE_CRANE = (params.JENKINS_NPM_PRUNE_BEFORE_CRANE?.trim() ?: env.JENKINS_NPM_PRUNE_BEFORE_CRANE ?: "true").trim()
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
+  env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
   def paasFastPipeline = false
   try {
     def p = params.JENKINS_PAAS_FAST_PIPELINE
@@ -871,6 +900,7 @@ def runPaasDeploy = {
     if (buildAppRoot != '.') {
       println "[build] Monorepo/subdir layout — app root: ${buildAppRoot}"
     }
+    materializeProjectBuildEnv(buildAppRoot)
     if (fileExists("${buildAppRoot}/pom.xml")) {
       if (commandExists("mvn")) {
         sh "cd '${buildAppRoot}' && mvn -B -DskipTests package"
@@ -1277,6 +1307,7 @@ echo $?
 
     stage("Step 6 — Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker (aligné Jenkinsfile.paas-deploy.full) ***"
+    materializeProjectBuildEnv(detectAppRoot())
     dockerAvailable = commandExists("docker")
     def dest = normalizeOciImageReference("${imageName}:${env.BUILD_NUMBER}")
     def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"

@@ -1,6 +1,6 @@
 import { DeploymentFailureReason } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { getBuildBackend } from "@/server/build-backend";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { recordDeploymentFailure } from "@/server/services/deployment-failure";
 export function monitorDeployment(deploymentId: string, initialBuildNumber: number | null): void {
@@ -30,7 +30,7 @@ async function runMonitorLoop(deploymentId: string, initialBuildNumber: number |
     const plan = resolveBuildPlan(deployment.project);
     await backend.monitorDeployment({
         deploymentId,
-        project: deployment.project,
+        project: toBuildProjectRecord(deployment.project),
         plan,
         startedRun: {
             accepted: true,

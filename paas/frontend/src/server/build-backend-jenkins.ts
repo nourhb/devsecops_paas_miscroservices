@@ -12,6 +12,7 @@ import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeploy
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@/server/jenkins/jenkins-build-artifact";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
+import { normalizeBuildEnvInput } from "@/server/projects/project-build-env";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
@@ -108,7 +109,8 @@ export class JenkinsBuildBackend implements BuildBackend {
             gitUrl: project.gitRepositoryUrl,
             gitCredentialsId: gitCredentialsId ? String(gitCredentialsId).trim() || null : null,
             imageName: buildDeployImageRepository(project.projectName),
-            projectUuid: project.id
+            projectUuid: project.id,
+            buildEnv: normalizeBuildEnvInput(project.buildEnv)
         });
         return {
             accepted: build.ok,
@@ -137,7 +139,8 @@ export class JenkinsBuildBackend implements BuildBackend {
             branch,
             gitCredentialsId: gitCredentialsId ? String(gitCredentialsId).trim() || null : null,
             imageName: buildDeployImageRepository(project.projectName),
-            projectUuid: project.id
+            projectUuid: project.id,
+            buildEnv: normalizeBuildEnvInput(project.buildEnv)
         });
         return {
             accepted: build.ok,
