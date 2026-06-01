@@ -1,4 +1,3 @@
-# Lab scripts
 
 Postgres uses PVC `postgres-pvc` in namespace `paas` — users and projects survive pod restarts and reboots. The pod is **not** pinned to `hostname=master`; it must run on whichever node holds the volume (local-path).
 
@@ -15,11 +14,13 @@ Entry point: `bash paas/scripts/lab.sh`
 | Command | Action |
 |---------|--------|
 | `lab.sh start` | Postgres + schema + env after reboot |
+| `deploy-paas-frontend-k8s.sh` | Builds frontend; runs `push-paas-schema-lab.sh` first unless `SKIP_SCHEMA=1` |
 | `lab.sh health` | Quick check |
 | `lab.sh bootstrap` | First install |
 | `lab.sh deploy N` | Deploy simple-app (needs `GITHUB_TOKEN`) |
 | `lab.sh app pull N` | Fix image pull on cluster |
 | `lab.sh jenkins` | Refresh `paas-deploy` job from Jenkinsfile |
 | `lab.sh integrations` | K8s RBAC + in-cluster probe URLs for Platform hub |
+| `lab.sh security` | Sonar token, DT URLs, Cosign keys, Kyverno, full pipeline (Steps 4–5, 9) |
 
 Other scripts in this folder are for specific fixes (Harbor, Argo, Jenkins plugins, k3s API). Use only when needed.

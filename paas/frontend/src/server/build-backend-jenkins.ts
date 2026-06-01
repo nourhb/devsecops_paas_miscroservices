@@ -12,6 +12,7 @@ import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeploy
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@/server/jenkins/jenkins-build-artifact";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
+import { buildEnvJenkinsTriggerLog } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
@@ -103,6 +104,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             : project.gitCredentialsId ?? null;
         const jobName = resolveJenkinsJobNameForProject(project.projectName, project.id, "build");
         const syncLog = await syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName);
+        const buildEnvLog = buildEnvJenkinsTriggerLog(project.buildEnvStored, project.buildEnv);
         const build = await jenkinsClient.triggerBuild(project.projectName, project.id, {
             branch,
             gitUrl: project.gitRepositoryUrl,
@@ -116,7 +118,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             provider: this.provider,
             runId: build.buildNumber === null ? null : String(build.buildNumber),
             runNumber: build.buildNumber,
-            logs: prependBuildMetadata(`${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
+            logs: prependBuildMetadata(`${buildEnvLog}\n${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
             externalUrl: build.jobUrl ?? null,
             artifactImage: build.buildNumber === null ? null : `${buildDeployImageRepository(project.projectName)}:${build.buildNumber}`,
             artifactDigest: null
@@ -133,6 +135,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             : project.gitCredentialsId ?? null;
         const jobName = resolveJenkinsJobNameForProject(project.projectName, project.id, "deploy");
         const syncLog = await syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName);
+        const buildEnvLog = buildEnvJenkinsTriggerLog(project.buildEnvStored, project.buildEnv);
         const build = await jenkinsClient.triggerDeployJob(project.projectName, project.id, {
             gitUrl: project.gitRepositoryUrl,
             branch,
@@ -146,7 +149,7 @@ export class JenkinsBuildBackend implements BuildBackend {
             provider: this.provider,
             runId: build.buildNumber === null ? null : String(build.buildNumber),
             runNumber: build.buildNumber,
-            logs: prependBuildMetadata(`${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
+            logs: prependBuildMetadata(`${buildEnvLog}\n${syncLog}\n\n${build.buildLog}`, plan, { runId: build.buildNumber === null ? null : String(build.buildNumber), runNumber: build.buildNumber }),
             externalUrl: build.jobUrl ?? null,
             artifactImage: build.buildNumber === null ? null : `${buildDeployImageRepository(project.projectName)}:${build.buildNumber}`,
             artifactDigest: null

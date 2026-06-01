@@ -1,5 +1,17 @@
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,119}$/;
 
+function stripEnvValueQuotes(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.length >= 2) {
+        const first = trimmed[0];
+        const last = trimmed[trimmed.length - 1];
+        if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+            return trimmed.slice(1, -1);
+        }
+    }
+    return value;
+}
+
 export function parseBuildEnvText(text: string): Record<string, string> {
     const out: Record<string, string> = {};
     for (const line of text.split(/\r?\n/)) {
@@ -12,7 +24,7 @@ export function parseBuildEnvText(text: string): Record<string, string> {
             continue;
         }
         const key = trimmed.slice(0, eq).trim();
-        const value = trimmed.slice(eq + 1);
+        const value = stripEnvValueQuotes(trimmed.slice(eq + 1));
         if (!KEY_PATTERN.test(key)) {
             continue;
         }

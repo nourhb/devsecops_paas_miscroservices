@@ -25,6 +25,13 @@ ensure_dockerfile() {
 ensure_dockerfile
 cd "${PAAS_DIR}"
 
+if [[ "${SKIP_SCHEMA:-}" != "1" ]]; then
+  echo "==> Sync Postgres schema before frontend rollout (Project.buildEnv, etc.)"
+  bash "${SCRIPT_DIR}/push-paas-schema-lab.sh"
+else
+  echo "SKIP_SCHEMA=1 — skipping prisma db push"
+fi
+
 HARBOR="${HARBOR_REGISTRY:-192.168.56.129:30002}"
 IMAGE="${HARBOR}/paas/paas-frontend:latest"
 HARBOR_USER="${HARBOR_USER:-admin}"

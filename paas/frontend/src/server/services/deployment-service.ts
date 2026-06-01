@@ -7,6 +7,7 @@ import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { ApiError, IntegrationError, NotFoundError } from "@/server/http/errors";
+import { assertBuildEnvReadyForDeploy } from "@/server/projects/project-secrets-crypto";
 import { assertProjectAccess, getProjectById, updateProject } from "@/server/projects/project-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
@@ -109,6 +110,7 @@ export async function listRecentDeploymentsForUser(userId: string, role: UserRol
 }
 export async function runProjectDeployment(projectId: string, jwtUserId: string): Promise<ActionResponse> {
     const project = await getProjectById(projectId);
+    assertBuildEnvReadyForDeploy(project.buildEnv);
     const buildProject = toBuildProjectRecord(project);
     const activeDeployment = await prisma.deployment.findFirst({
         where: {
