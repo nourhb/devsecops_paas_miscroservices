@@ -35,10 +35,12 @@ case "$cmd" in
   integrations-start)
     bash "$DIR/start-lab-integration-workloads.sh" ;;
   security|sec)
-    if [[ -f "$DIR/setup-security-lab.sh" ]]; then
+    if [[ -f "$DIR/fix-security-all-projects-lab.sh" ]]; then
+      bash "$DIR/fix-security-all-projects-lab.sh"
+    elif [[ -f "$DIR/setup-security-lab.sh" ]]; then
       bash "$DIR/setup-security-lab.sh"
     else
-      echo "ERROR: missing $DIR/setup-security-lab.sh — git pull or copy from repo (paas/scripts/setup-security-lab.sh)" >&2
+      echo "ERROR: missing paas/scripts/fix-security-all-projects-lab.sh — git pull" >&2
       exit 1
     fi ;;
   jenkins-recover|recover-jenkins)
