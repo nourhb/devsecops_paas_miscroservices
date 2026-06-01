@@ -62,12 +62,12 @@ def postgres_creds() -> tuple[str, str, str, str]:
     return user, password, db, target
 
 
-def fetch_project_from_db(project_id: str) -> tuple[str, str, str]:
-    """Return (git_url, branch, project_name) from PaaS Postgres via kubectl."""
+def fetch_project_from_db(project_id: str) -> tuple[str, str, str, str]:
+    """Return (git_url, branch, project_name, git_credentials_id) from PaaS Postgres via kubectl."""
     user, password, db, target = postgres_creds()
     ns = os.environ.get("PAAS_NS", "paas")
     sql = (
-        'SELECT "gitRepositoryUrl", branch, "projectName" FROM "Project" '
+        'SELECT "gitRepositoryUrl", branch, "projectName", COALESCE("gitCredentialsId", \'\') FROM "Project" '
         f"WHERE id='{project_id}' LIMIT 1;"
     )
     # Escape single quotes in project_id (uuid has none)
@@ -97,10 +97,14 @@ def fetch_project_from_db(project_id: str) -> tuple[str, str, str]:
         raise SystemExit(f"ERROR: could not read project from Postgres: {e}") from e
     if not out or "|" not in out:
         raise SystemExit(f"ERROR: project not found in DB for id={project_id}")
-    git_url, branch, project_name = [p.strip() for p in out.split("|", 2)]
+    parts = [p.strip() for p in out.split("|")]
+    if len(parts) < 3:
+        raise SystemExit(f"ERROR: incomplete project row: {out!r}")
+    git_url, branch, project_name = parts[0], parts[1], parts[2]
+    git_creds = parts[3] if len(parts) > 3 else ""
     if not git_url or not project_name:
         raise SystemExit(f"ERROR: incomplete project row: {out!r}")
-    return git_url, branch or "main", project_name
+    return git_url, branch or "main", project_name, git_creds
 
 
 def main() -> int:
@@ -111,18 +115,21 @@ def main() -> int:
     job = os.environ.get("JOB_NAME", "paas-deploy")
     project_id = os.environ.get("PROJECT_ID", "").strip()
     git_url = os.environ.get("GIT_URL", "").strip()
-    branch = os.environ.get("BRANCH", "main").strip()
+    branch = os.environ.get("BRANCH", "").strip()
     image_name = os.environ.get("IMAGE_NAME", "").strip()
 
     if not user or not token:
         print("ERROR: set JENKINS_USERNAME and JENKINS_API_TOKEN", file=sys.stderr)
         return 1
 
+    git_credentials_id = os.environ.get("GIT_CREDENTIALS_ID", "").strip()
     if project_id and (not git_url or not image_name):
-        git_url_db, branch_db, project_name = fetch_project_from_db(project_id)
+        git_url_db, branch_db, project_name, git_creds_db = fetch_project_from_db(project_id)
         git_url = git_url or git_url_db
-        branch = branch or branch_db
+        branch = branch_db if not branch else branch
         image_name = image_name or build_image_name(project_name)
+        if not git_credentials_id and git_creds_db:
+            git_credentials_id = git_creds_db
         print(f"From DB: projectName={project_name} git={git_url} branch={branch} image={image_name}")
 
     if not project_id or not git_url or not image_name:
@@ -143,13 +150,19 @@ def main() -> int:
         except json.JSONDecodeError:
             baseline = None
 
+    fast = (os.environ.get("JENKINS_PAAS_FAST_PIPELINE") or "false").strip().lower()
     params = {
         "GIT_URL": git_url,
         "BRANCH": branch,
         "IMAGE_NAME": image_name,
         "PROJECT_ID": project_id,
-        "JENKINS_PAAS_FAST_PIPELINE": "false",
+        "JENKINS_PAAS_FAST_PIPELINE": "true" if fast in ("1", "true", "yes") else "false",
     }
+    if git_credentials_id:
+        params["GIT_CREDENTIALS_ID"] = git_credentials_id
+    default_git_creds = (os.environ.get("JENKINS_DEPLOY_GIT_CREDENTIALS_ID") or os.environ.get("GIT_CREDENTIALS_ID_DEFAULT") or "").strip()
+    if not git_credentials_id and default_git_creds:
+        params["GIT_CREDENTIALS_ID"] = default_git_creds
     for key in (
         "SONAR_HOST_URL",
         "SONAR_TOKEN",

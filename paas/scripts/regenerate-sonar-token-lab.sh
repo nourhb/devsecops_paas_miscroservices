@@ -32,13 +32,22 @@ SONAR_USER="${SONAR_ADMIN_USER:-admin}"
 SONAR_PASS="${SONAR_ADMIN_PASSWORD:-admin}"
 
 echo "SonarQube: ${SONAR_BASE:-<not found>}"
-[[ -n "${SONAR_BASE}" ]] || { echo "ERROR: set SONAR_BASE_URL or install Sonar in namespace sonarqube" >&2; exit 1; }
+if [[ -z "${SONAR_BASE}" ]]; then
+  echo "ERROR: set SONAR_BASE_URL or install Sonar in namespace sonarqube" >&2
+  exit 1
+fi
 
 upsert_env SONAR_BASE_URL "${SONAR_BASE}"
 upsert_env SONAR_HOST_URL "${SONAR_BASE}"
 
 echo "==> Sonar status"
-curl -fsS "${SONAR_BASE}/api/system/status" | head -c 200 || { echo "FAIL: cannot reach ${SONAR_BASE}" >&2; exit 1; }
+if ! curl -fsS "${SONAR_BASE}/api/system/status" | head -c 200; then
+  echo ""
+  echo "FAIL: cannot reach ${SONAR_BASE} (connection refused / down)" >&2
+  echo "Run: bash paas/scripts/recover-sonarqube-lab.sh" >&2
+  echo "Or: bash paas/scripts/check.sh   # ensures sonarqube namespace" >&2
+  exit 1
+fi
 echo ""
 
 TOKEN_NAME="paas-lab-$(date +%s)"
