@@ -1479,54 +1479,108 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
+      def sonarKey = dtProjectNameForUpload(projectId, imageName)
+      def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
+      def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
+      if (!sonarUrlParam || !sonarToken) {
+        println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
+        return
+      }
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
-        def sonarUrl = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
-        def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
-        if (!sonarUrl || !sonarToken) {
-          println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
-          return
-        }
         ensureNodeTool()
-        withEnv(["SONAR_HOST_URL=${sonarUrl}", "SONAR_TOKEN=${sonarToken}", "SONAR_PROJECT_KEY=${projectId}", "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"]) {
+        withEnv([
+          "SONAR_HOST_URL_PARAM=${sonarUrlParam}",
+          "SONAR_TOKEN=${sonarToken}",
+          "SONAR_PROJECT_KEY=${sonarKey}",
+          "SONAR_PROJECT_ID_TAG=${projectId}",
+          "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"
+        ]) {
           def sonarRc = sh(script: '''
             set +e
-            npx --yes sonarqube-scanner \
+            pick_sonar_url() {
+              for u in \
+                "${SONAR_HOST_URL_PARAM}" \
+                "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
+                "http://sonarqube.sonarqube.svc.cluster.local:9000"
+              do
+                [ -z "$u" ] && continue
+                if curl -fsS -m 8 -u "${SONAR_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
+                  echo "$u"
+                  return 0
+                fi
+              done
+              echo "${SONAR_HOST_URL_PARAM}"
+            }
+            SONAR_HOST_URL="$(pick_sonar_url)"
+            echo "[sonar] using ${SONAR_HOST_URL}"
+            VALID=$(curl -sS -m 8 -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL%/}/api/authentication/validate" 2>/dev/null || true)
+            echo "[sonar] token validate: ${VALID:-<curl failed>}"
+            if ! printf '%s' "${VALID}" | grep -q '"valid":true'; then
+              echo "[sonar] token not valid from Jenkins agent — check SONAR_TOKEN and Sonar URL reachability"
+              echo 1
+              exit 0
+            fi
+            curl -sS -u "${SONAR_TOKEN}:" -X POST \
+              "${SONAR_HOST_URL%/}/api/projects/create?project=${SONAR_PROJECT_KEY}&name=${SONAR_PROJECT_KEY}" \
+              >/dev/null 2>&1 || true
+            SOURCES="."
+            for d in app src components pages lib server; do
+              if [ -d "$d" ]; then
+                SOURCES="$d"
+                break
+              fi
+            done
+            echo "[sonar] sources=${SOURCES}"
+            LOG=/tmp/sonar-scanner-$$.log
+            npx --yes sonarqube-scanner@4.2.8 \
               -Dsonar.host.url="${SONAR_HOST_URL}" \
               -Dsonar.token="${SONAR_TOKEN}" \
-              -Dsonar.login="${SONAR_TOKEN}" \
               -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
               -Dsonar.projectName="${SONAR_PROJECT_KEY}" \
               -Dsonar.projectVersion="${SONAR_VERSION}" \
-              -Dsonar.sources=. \
-              -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
-            echo $?
+              -Dsonar.sources="${SOURCES}" \
+              -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js \
+              -Dsonar.qualitygate.wait=false \
+              -Dsonar.scanner.analysisCacheEnabled=false \
+              2>&1 | tee "${LOG}"
+            RC=${PIPESTATUS[0]}
+            if [ "${RC}" != "0" ]; then
+              echo "[sonar] scanner tail:"
+              tail -25 "${LOG}" 2>/dev/null || true
+            fi
+            rm -f "${LOG}"
+            echo ${RC}
           ''', returnStdout: true).trim().tokenize('\n').last()
           if (sonarRc != "0") {
-            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — regenerate SONAR_TOKEN (Not authorized)")
+            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — see scanner tail above; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
           } else {
-            paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
+            paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           }
         }
         return
       }
-      if (!env.SONAR_HOST_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
-        println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
-        return
-      }
       withEnv([
-        "SONAR_SCAN_HOST_URL=${env.SONAR_HOST_URL}",
-        "SONAR_SCAN_TOKEN=${env.SONAR_TOKEN}",
+        "SONAR_SCAN_HOST_URL=${sonarUrlParam}",
+        "SONAR_SCAN_TOKEN=${sonarToken}",
         "SONAR_SCAN_WORKSPACE=${env.WORKSPACE ?: ''}",
-        "SONAR_SCAN_PROJECT_KEY=${projectId}",
+        "SONAR_SCAN_PROJECT_KEY=${sonarKey}",
         "SONAR_SCAN_PROJECT_VERSION=${branchName}-${env.BUILD_NUMBER}"
       ]) {
         def sonarDockerRc = sh(script: '''#!/bin/bash
 set +e
 SONAR_WS="${SONAR_SCAN_WORKSPACE}"
 if [ -z "${SONAR_WS}" ]; then SONAR_WS="$(pwd)"; fi
+for u in "${SONAR_SCAN_HOST_URL}" "http://sonarqube-service.sonarqube.svc.cluster.local:9000"; do
+  if curl -fsS -m 8 -u "${SONAR_SCAN_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
+    SONAR_SCAN_HOST_URL="$u"
+    break
+  fi
+done
+echo "[sonar] docker scanner host=${SONAR_SCAN_HOST_URL}"
 docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
 docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
   -e SONAR_HOST_URL="$SONAR_SCAN_HOST_URL" \
   -e SONAR_TOKEN="$SONAR_SCAN_TOKEN" \
   -v "${SONAR_WS}:/usr/src" \
@@ -1534,15 +1588,16 @@ docker run --rm \
   -Dsonar.projectKey="$SONAR_SCAN_PROJECT_KEY" \
   -Dsonar.projectName="$SONAR_SCAN_PROJECT_KEY" \
   -Dsonar.projectVersion="$SONAR_SCAN_PROJECT_VERSION" \
-  -Dsonar.sources=. \
+  -Dsonar.sources=app,src,components,pages,lib \
   -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
+  -Dsonar.qualitygate.wait=false \
   -Dsonar.scm.provider=git
 echo $?
 ''', returnStdout: true).trim().tokenize('\n').last()
         if (sonarDockerRc != "0") {
-          paasStepWarn(5, 'sonar', "scanner exit ${sonarDockerRc} — check SONAR_TOKEN")
+          paasStepWarn(5, 'sonar', "scanner exit ${sonarDockerRc} — check SONAR_TOKEN / URL from Jenkins agent")
         } else {
-          paasStepOk(5, 'sonar', "analysis submitted for projectKey=${projectId}")
+          paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
         }
       }
     }
@@ -1787,8 +1842,15 @@ EOF
             if command -v crane >/dev/null 2>&1; then
               DIGEST="$(crane digest "${COSIGN_IMG}" 2>/dev/null || true)"
             fi
-            if [ -z "${DIGEST}" ]; then
-              DIGEST="$("${COSIGN_EXE}" triangulate "${COSIGN_IMG}" 2>/dev/null || true)"
+            # Harbor OCI: cosign triangulate returns repo:sha256-<hex>.sig — not a signable image ref; use crane @sha256: only.
+            if [ -z "${DIGEST}" ] || ! printf '%s' "${DIGEST}" | grep -q '@sha256:'; then
+              TRI="$("${COSIGN_EXE}" triangulate "${COSIGN_IMG}" 2>/dev/null || true)"
+              if [ -n "${TRI}" ] && printf '%s' "${TRI}" | grep -q '@sha256:'; then
+                DIGEST="${TRI}"
+              else
+                echo "[cosign] digest ref unavailable (crane/triangulate); tag sign only"
+                DIGEST=""
+              fi
             fi
             if [ -n "${DIGEST}" ]; then
               echo "[cosign] also signing digest ${DIGEST}"
