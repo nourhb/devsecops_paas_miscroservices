@@ -34,7 +34,6 @@ spec:
             - entries:
                 - keys:
                     publicKeys: |-
-                      # Replace this sample key with your real cosign public key.
                       -----BEGIN PUBLIC KEY-----
                       REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY
                       -----END PUBLIC KEY-----

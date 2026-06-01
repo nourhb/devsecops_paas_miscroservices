@@ -17,8 +17,16 @@ case "$cmd" in
     bash "$DIR/fix-simple-app-lab.sh" "$@" ;;
   jenkins)
     bash "$DIR/fix-jenkins-paas-deploy-pipeline-lab.sh" ;;
+  env-dotenv|fix-env-dotenv)
+    bash "$DIR/apply-jenkins-env-dotenv-fix-lab.sh" ;;
   env)
     bash "$DIR/sync-paas-frontend-env-k8s.sh" ;;
+  secure-env|env-secure)
+    bash "$DIR/secure-env-files.sh" "$@" ;;
+  push-gitops)
+    bash "$DIR/push-gitops-lab.sh" ;;
+  upgrades|apply-upgrades)
+    bash "$DIR/apply-paas-upgrades-lab.sh" ;;
   seed)
     bash "$DIR/seed-admin-user-lab.sh" "$@" ;;
   autostart)

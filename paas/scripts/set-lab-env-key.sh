@@ -14,7 +14,8 @@ if grep -q "^${KEY}=" "${ENV_FILE}" 2>/dev/null; then
 else
   echo "${KEY}=${VAL}" >> "${ENV_FILE}"
 fi
-echo "OK: ${KEY}=${VAL} in ${ENV_FILE}"
+chmod 600 "${ENV_FILE}" 2>/dev/null || true
+echo "OK: ${KEY} set in ${ENV_FILE} (value not printed)"
 if [[ "${SYNC}" == "sync" || "${SYNC}" == "1" ]]; then
   bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
 fi

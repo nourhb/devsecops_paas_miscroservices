@@ -1,16 +1,12 @@
-# Nginx Ingress Controller – example Helm values
-# Install: helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-#         helm install ingress-nginx ingress-nginx/ingress-nginx -f nginx-ingress-helm-values.example.yaml -n ingress-nginx --create-namespace
-# Use with: TLS termination, HAProxy can sit in front of this controller's LoadBalancer/NodePort.
 
 controller:
   replicaCount: 2
   service:
-    type: LoadBalancer  # On AWS: creates ELB/NLB; HAProxy can point to this or to NodePort
+    type: LoadBalancer
   metrics:
     enabled: true
     serviceMonitor:
-      enabled: true  # Prometheus scrapes Nginx Ingress metrics
+      enabled: true
   config:
     use-forwarded-headers: "true"
     proxy-body-size: "50m"

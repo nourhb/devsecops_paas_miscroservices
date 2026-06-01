@@ -7,13 +7,19 @@ PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 
-for i in $(seq 1 24); do
-  timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1 && break
+echo "==> Wait for k3s API (after VM boot this can take 1–3 min)"
+for i in $(seq 1 36); do
+  if timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
+    echo "OK: Kubernetes API ready (attempt ${i})"
+    break
+  fi
   sleep 5
-  [[ "${i}" -eq 24 ]] && { echo "API not ready"; exit 1; }
+  [[ "${i}" -eq 36 ]] && { echo "ERROR: k8s API not ready — run: sudo systemctl status k3s" >&2; exit 1; }
 done
 
+echo "==> Postgres in namespace ${PAAS_NS} (PVC keeps users/projects)"
 bash "${SCRIPT_DIR}/deploy-paas-postgres-lab.sh"
+bash "${SCRIPT_DIR}/fix-paas-postgres-lab.sh" || true
 
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   kubectl wait --for=condition=available deployment/frontend -n "${PAAS_NS}" --timeout=300s 2>/dev/null || true
@@ -39,6 +45,9 @@ if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   kubectl wait --for=condition=available deployment/frontend -n "${PAAS_NS}" --timeout=300s
 fi
 
+echo "==> Optional: Harbor registry (Jenkins pushes fail with 502 if skipped)"
+bash "${SCRIPT_DIR}/recover-harbor-registry-lab.sh" 2>/dev/null || true
+
 for i in $(seq 1 12); do
   if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
     break
@@ -47,5 +56,7 @@ for i in $(seq 1 12); do
   sleep 15
   [[ "${i}" -eq 12 ]] && { echo "recover finished but health check still failing"; exit 1; }
 done
-echo "login: http://${NODE_IP}:30100/login"
-echo "Data is on PVC postgres-pvc — no seed unless this is a brand-new empty database."
+echo ""
+echo "OK — PaaS login: http://${NODE_IP}:30100/login"
+echo "Data is on PVC postgres-pvc — users/projects survive reboot (no re-seed)."
+echo "Manual recover anytime: bash paas/scripts/recover-paas-after-k3s-restart.sh"

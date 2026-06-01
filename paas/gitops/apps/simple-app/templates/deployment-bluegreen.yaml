@@ -1,0 +1,88 @@
+{{- if eq (.Values.deploymentStrategy | default "Rolling") "BlueGreen" }}
+{{- $root := . }}
+{{- range $slot := list "blue" "green" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "simple-app.fullname" $root }}-{{ $slot }}
+  labels:
+    app.kubernetes.io/name: {{ include "simple-app.name" $root }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    paas.io/slot: {{ $slot }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "simple-app.name" $root }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      paas.io/slot: {{ $slot }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "simple-app.name" $root }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        paas.io/slot: {{ $slot }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: {{ include "simple-app.name" $root }}
+          {{- $slotImg := index $root.Values $slot | default dict }}
+          {{- $slotImage := $slotImg.image | default dict }}
+          {{- $repo := $slotImage.repository | default $root.Values.image.repository }}
+          image: "{{ $repo }}{{- if $slotImage.digest }}@{{ $slotImage.digest }}{{- else if $slotImage.tag }}:{{ $slotImage.tag }}{{- else }}:latest{{- end }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+          ports:
+            - name: http
+              containerPort: {{ $root.Values.service.targetPort | default 3000 }}
+              protocol: TCP
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: {{ $root.Values.service.targetPort | default 3000 | quote }}
+            - name: PAAS_BLUE_GREEN_SLOT
+              value: {{ $slot | quote }}
+            {{- range $root.Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          {{- with $root.Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+          {{- end }}
+{{- end }}
+{{- end }}

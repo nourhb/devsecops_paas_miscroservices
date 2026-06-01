@@ -28,6 +28,7 @@ MUTATE_FIX_MARKERS = (
     "entrypoint=/app/start-paas.sh",
     "[image] crane mutate OK",
 )
+ENV_SAFE_DOTENV_LOADER_MARKER = "env-safe-dotenv-loader-20260601"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
 
 
@@ -44,6 +45,25 @@ def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} has obsolete Step 6 next build logic.\n"
             "  git pull origin main",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def assert_jenkinsfile_env_loader_fix(groovy: str, path: Path) -> None:
+    if ENV_SAFE_DOTENV_LOADER_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing {ENV_SAFE_DOTENV_LOADER_MARKER} "
+            "(build fails when EMAIL_PASS has spaces — old . ./.env loader).\n"
+            "  git pull\n"
+            "  bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if '. ./.env' in groovy and 'Do not use ". ./.env"' not in groovy:
+        print(
+            f"ERROR: {path} still sources . ./.env directly.\n"
+            "  git pull and re-sync Jenkins job",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -429,6 +449,7 @@ def main() -> int:
             return 1
         assert_jenkinsfile_crane_fix(groovy, jenkinsfile)
         assert_jenkinsfile_mutate_fix(groovy, jenkinsfile)
+        assert_jenkinsfile_env_loader_fix(groovy, jenkinsfile)
 
     if not wait_for_jenkins_api(base):
         return 1

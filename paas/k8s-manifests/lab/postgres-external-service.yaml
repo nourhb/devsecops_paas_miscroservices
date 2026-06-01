@@ -1,5 +1,3 @@
-# PaaS frontend expects postgres.paas.svc.cluster.local:5432 (see docker-compose.env).
-# Lab Postgres often runs in namespace `databases` as postgres-service — this alias fixes login.
 apiVersion: v1
 kind: Service
 metadata:

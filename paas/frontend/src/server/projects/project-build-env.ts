@@ -33,13 +33,21 @@ export function parseBuildEnvText(text: string): Record<string, string> {
     return out;
 }
 
+function dotenvFormatLine(key: string, value: string): string {
+    if (/[\s#"\\$`!]/.test(value) || value.includes("=")) {
+        const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "");
+        return `${key}="${escaped}"`;
+    }
+    return `${key}=${value}`;
+}
+
 export function formatBuildEnvText(env: unknown): string {
     if (!env || typeof env !== "object" || Array.isArray(env)) {
         return "";
     }
     return Object.entries(env as Record<string, unknown>)
         .filter(([key, value]) => KEY_PATTERN.test(key) && typeof value === "string" && value.length > 0)
-        .map(([key, value]) => `${key}=${value}`)
+        .map(([key, value]) => dotenvFormatLine(key, value as string))
         .join("\n");
 }
 

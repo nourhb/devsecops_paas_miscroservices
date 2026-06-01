@@ -10,6 +10,9 @@ spec:
   selector:
     app.kubernetes.io/name: {{ include "simple-app.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- if eq (.Values.deploymentStrategy | default "Rolling") "BlueGreen" }}
+    paas.io/slot: {{ .Values.activeSlot | default "blue" }}
+    {{- end }}
   ports:
     - port: 80
       targetPort: http
