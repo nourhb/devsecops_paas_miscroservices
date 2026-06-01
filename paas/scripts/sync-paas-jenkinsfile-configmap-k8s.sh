@@ -30,6 +30,9 @@ fi
 if ! grep -qF 'JENKINS_NPM_SNAPSHOT_MAX_MB' "${JENKINSFILE}"; then
   echo "WARN: Jenkinsfile missing large snapshot guard — sanhome-style builds may fail on cp -a"
 fi
+if ! grep -qF 'pick_sonar_url' "${JENKINSFILE}"; then
+  echo "WARN: Jenkinsfile missing in-cluster Sonar URL probe — Step 5 may fail from Jenkins pod"
+fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 

@@ -193,12 +193,19 @@ if [[ -n "${SONAR_TOKEN:-}" && -n "${SONAR_BASE_URL:-}" ]]; then
     fail "Sonar has 0 projects — no analysis uploaded yet"
   fi
   if [[ -n "${PROJECT_ID}" ]]; then
-    SQ="$(curl -s -u "${SONAR_TOKEN}:" \
-      "${SONAR_BASE_URL%/}/api/qualitygates/project_status?projectKey=${PROJECT_ID}" 2>/dev/null || true)"
-    if echo "${SQ}" | grep -q projectStatus; then
-      ok "Sonar quality gate API responds for PROJECT_ID=${PROJECT_ID}"
-    else
-      fail "Sonar has no projectKey=${PROJECT_ID} (Jenkins uses PROJECT_ID as sonar.projectKey)"
+    SONAR_OK=0
+    for SK in "${PROJECT_NAME:-}" "${PROJECT_ID}"; do
+      [[ -z "${SK}" ]] && continue
+      SQ="$(curl -s -u "${SONAR_TOKEN}:" \
+        "${SONAR_BASE_URL%/}/api/qualitygates/project_status?projectKey=${SK}" 2>/dev/null || true)"
+      if echo "${SQ}" | grep -q projectStatus; then
+        ok "Sonar quality gate API responds for projectKey=${SK}"
+        SONAR_OK=1
+        break
+      fi
+    done
+    if [[ "${SONAR_OK}" -eq 0 ]]; then
+      fail "Sonar has no project for keys ${PROJECT_NAME:-<name>}/${PROJECT_ID} (Jenkins uses image slug e.g. sanhome)"
     fi
   fi
 else
