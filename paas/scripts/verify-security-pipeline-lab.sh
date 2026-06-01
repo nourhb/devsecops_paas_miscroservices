@@ -64,21 +64,28 @@ CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
 if [[ -z "${CFG}" ]]; then
   fail "cannot fetch Jenkins job config.xml from ${JENKINS_URL} (check JENKINS_USERNAME/API_TOKEN)"
 else
+  MISSING_PARAMS="$(printf '%s' "${CFG}" | python3 -c "
+import sys
+cfg = sys.stdin.read()
+required = ['SONAR_HOST_URL', 'SONAR_TOKEN', 'DEPENDENCY_TRACK_BASE_URL', 'DEPENDENCY_TRACK_API_KEY']
+missing = [p for p in required if f'<name>{p}</name>' not in cfg]
+print(','.join(missing))
+" 2>/dev/null || echo "parse-error")"
   for p in SONAR_HOST_URL SONAR_TOKEN DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_API_KEY; do
-    if echo "${CFG}" | grep -q "<name>${p}</name>"; then
+    if [[ ",${MISSING_PARAMS}," != *",${p},"* ]]; then
       ok "job parameter ${p} defined"
     else
       fail "job parameter ${p} NOT in paas-deploy — PaaS trigger values are dropped"
-      if [[ "${AUTO_FIX}" == "1" && "${JENKINS_PARAMS_FIXED:-0}" != "1" ]]; then
-        echo "     AUTO_FIX: fix-jenkins-paas-deploy-pipeline-lab.sh + create_jenkins --force-full"
-        JENKINS_PARAMS_FIXED=1
-        set -a; source "${ENV_FILE}"; set +a
-        bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh" || true
-        python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
-        CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" "${JENKINS_URL}/job/${JOB}/config.xml" 2>/dev/null || true)"
-      fi
     fi
   done
+  if [[ -n "${MISSING_PARAMS}" && "${MISSING_PARAMS}" != "parse-error" && "${AUTO_FIX}" == "1" && "${JENKINS_PARAMS_FIXED:-0}" != "1" ]]; then
+    echo "     AUTO_FIX: fix-jenkins-paas-deploy-pipeline-lab.sh + create_jenkins --force-full"
+    JENKINS_PARAMS_FIXED=1
+    set -a; source "${ENV_FILE}"; set +a
+    bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh" || true
+    python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+    CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" "${JENKINS_URL}/job/${JOB}/config.xml" 2>/dev/null || true)"
+  fi
 fi
 
 if echo "${CFG}" | grep -qF 'npx next build --no-lint --webpack'; then

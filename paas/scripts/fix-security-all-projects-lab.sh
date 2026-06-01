@@ -23,7 +23,7 @@ cd "${REPO_ROOT}"
 [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}"
 
 step "1/6 — Wire Sonar, Dependency-Track, Kyverno, Cosign keys, JENKINS_PAAS_FAST_PIPELINE=false"
-bash "${SCRIPT_DIR}/setup-security-lab.sh"
+SKIP_INTEGRATION_DIAGNOSE=1 bash "${SCRIPT_DIR}/setup-security-lab.sh"
 
 step "2/6 — Jenkins paas-deploy job (Sonar/DT/Cosign parameters + latest Jenkinsfile)"
 bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh"

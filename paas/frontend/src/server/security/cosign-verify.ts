@@ -65,10 +65,16 @@ function imageRefsForVerify(imageRef: string): string[] {
     const external = env.HARBOR_REGISTRY.trim();
     const nginx = env.HARBOR_REGISTRY_NGINX_CLUSTER.trim();
     const cluster = env.HARBOR_REGISTRY_CLUSTER.trim();
+    // Lab images are signed via HARBOR_REGISTRY (NodePort); try that before in-cluster nginx.
+    if (external && imageRef.startsWith(`${external}/`)) {
+        refs.push(imageRef.trim());
+    }
     if (external && nginx && imageRef.startsWith(`${external}/`)) {
         refs.push(`${nginx}/${repoTag}`);
     }
-    refs.push(imageRef.trim());
+    else if (!refs.length) {
+        refs.push(imageRef.trim());
+    }
     if (external && cluster && imageRef.startsWith(`${external}/`)) {
         refs.push(`${cluster}/${repoTag}`);
     }
@@ -80,9 +86,11 @@ function cosignVerifyArgs(keyPath: string, imageRef: string): string[] {
     if (env.COSIGN_ALLOW_INSECURE_REGISTRY === "true") {
         args.push("--allow-insecure-registry");
     }
+    const dockerConfig = process.env.DOCKER_CONFIG?.trim() || "";
     const user = env.HARBOR_USERNAME.trim();
     const pass = env.HARBOR_PASSWORD.trim();
-    if (user && pass) {
+    // Prefer /etc/docker config.json in the frontend pod; CLI flags can prevent Harbor sig discovery.
+    if (user && pass && dockerConfig !== "/etc/docker") {
         args.push("--registry-username", user, "--registry-password", pass);
     }
     args.push(imageRef);
