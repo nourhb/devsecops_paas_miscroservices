@@ -46,7 +46,7 @@ spec:
             - containerPort: 8080
           env:
             - name: JAVA_OPTS
-              value: "-Xms256m -Xmx768m -Djenkins.install.runSetupWizard=false"
+              value: "-Xms256m -Xmx768m -Djenkins.install.runSetupWizard=false -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
           resources:
             requests:
               cpu: 100m

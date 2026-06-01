@@ -32,9 +32,20 @@ else
   kubectl set env deployment/frontend -n "${PAAS_NS}" \
     DATABASE_URL='postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?options=-c%20lc_messages%3DC'
   kubectl rollout restart deployment/frontend -n "${PAAS_NS}"
-  kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
 fi
 
-bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
+if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
+  kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
+  kubectl wait --for=condition=available deployment/frontend -n "${PAAS_NS}" --timeout=300s
+fi
+
+for i in $(seq 1 12); do
+  if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
+    break
+  fi
+  echo "health check ${i}/12 failed (UI may still be rolling out); retry in 15s…"
+  sleep 15
+  [[ "${i}" -eq 12 ]] && { echo "recover finished but health check still failing"; exit 1; }
+done
 echo "login: http://${NODE_IP}:30100/login"
 echo "Data is on PVC postgres-pvc — no seed unless this is a brand-new empty database."
