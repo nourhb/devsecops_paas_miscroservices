@@ -69,9 +69,11 @@ else
       ok "job parameter ${p} defined"
     else
       fail "job parameter ${p} NOT in paas-deploy — PaaS trigger values are dropped"
-      if [[ "${AUTO_FIX}" == "1" ]]; then
-        echo "     AUTO_FIX: running create_jenkins_paas_deploy_job.py --force --force-full"
+      if [[ "${AUTO_FIX}" == "1" && "${JENKINS_PARAMS_FIXED:-0}" != "1" ]]; then
+        echo "     AUTO_FIX: fix-jenkins-paas-deploy-pipeline-lab.sh + create_jenkins --force-full"
+        JENKINS_PARAMS_FIXED=1
         set -a; source "${ENV_FILE}"; set +a
+        bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh" || true
         python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
         CFG="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" "${JENKINS_URL}/job/${JOB}/config.xml" 2>/dev/null || true)"
       fi
@@ -122,12 +124,26 @@ else
 
   if echo "${CONSOLE}" | grep -qiE 'non configuré|SONAR not set'; then
     fail "Sonar/DT credentials missing on build #${BUILD}"
-  elif echo "${CONSOLE}" | grep -qiE 'analysis submitted|sonarqube-scanner|api/v1/bom'; then
-    ok "security scans submitted on build #${BUILD}"
+  fi
+  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey'; then
+    ok "Step 5 (Sonar) submitted on build #${BUILD}"
+  elif echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=5'; then
+    fail "Step 5 skipped on build #${BUILD}"
   elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube'; then
-    warn "Step 5 ran but no clear submit line — check full console"
+    if echo "${CONSOLE}" | grep -qiE 'paasStepWarn\(5|scanner exit|Not authorized'; then
+      fail "Step 5 ran but Sonar failed — check SONAR_TOKEN (run: bash paas/scripts/regenerate-sonar-token-lab.sh)"
+    else
+      warn "Step 5 ran but no PAAS_STEP_OK — check Jenkins console for Sonar"
+    fi
   else
-    fail "Step 5 never ran"
+    fail "Step 5 never ran on build #${BUILD}"
+  fi
+  if echo "${CONSOLE}" | grep -qE 'api/v1/bom|Dependency-Track upload|PAAS_STEP_OK step=4'; then
+    ok "Step 4 (SBOM → Dependency-Track) on build #${BUILD}"
+  elif echo "${CONSOLE}" | grep -qiE 'DEPENDENCY_TRACK.*not set|Dependency-Track non configuré'; then
+    fail "Step 4: DEPENDENCY_TRACK_* missing on Jenkins job — run: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
+  elif echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=4'; then
+    fail "Step 4 skipped (fast pipeline)"
   fi
 
   if echo "${CONSOLE}" | grep -q "unknown option '--webpack'"; then
@@ -203,8 +219,11 @@ else
   echo ""
   echo "Security UI is empty because one or more links in the chain above failed."
   echo "Typical lab fix (run on VM):"
-  echo "  git pull"
+  echo "  AUTO_FIX=1 bash paas/scripts/verify-security-pipeline-lab.sh"
+  echo "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
+  echo "  bash paas/scripts/setup-security-lab.sh"
+  echo "  bash paas/scripts/sign-all-deployed-paas-images-lab.sh   # after git pull"
   echo "  PROJECT_ID=<uuid> python3 paas/scripts/trigger-paas-deploy-lab.py"
-  echo "  # or Deploy from PaaS UI; wait Jenkins SUCCESS; re-run this script"
+  echo "  # wait Jenkins SUCCESS; re-run this script"
   exit 1
 fi

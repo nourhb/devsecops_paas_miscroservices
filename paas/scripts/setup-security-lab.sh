@@ -151,13 +151,31 @@ fi
 SONAR_BASE_NOW="$(grep '^SONAR_BASE_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true)"
 [[ -n "${SONAR_BASE_NOW}" ]] && upsert_env SONAR_HOST_URL "${SONAR_BASE_NOW}"
 
-echo "=== 8. Sync frontend + Jenkins job ==="
+echo "=== 8. Sync frontend + Jenkins job (full parameters: SONAR_*, DEPENDENCY_TRACK_*) ==="
 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
-ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh" || \
-  echo "WARN: fix-jenkins failed — sync Jenkinsfile manually"
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}" 2>/dev/null || true
+set +a
+bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh" || \
+  echo "WARN: fix-jenkins failed — run: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full"
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full || true
+bash "${SCRIPT_DIR}/sync-cosign-keys-lab.sh" 2>/dev/null || true
+bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh" 2>/dev/null || true
+bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh" 2>/dev/null || true
+
+echo "=== 9. Cosign-sign images already deployed (Security UI: signed) ==="
+if [[ -x "${SCRIPT_DIR}/sign-all-deployed-paas-images-lab.sh" ]]; then
+  bash "${SCRIPT_DIR}/sign-all-deployed-paas-images-lab.sh" || echo "WARN: sign-all failed — run finalize-devsecops-security-lab.sh"
+elif [[ -x "${SCRIPT_DIR}/finalize-devsecops-security-lab.sh" ]]; then
+  SKIP_FRONTEND_REBUILD=1 SIGN_IMAGES=1 bash "${SCRIPT_DIR}/finalize-devsecops-security-lab.sh" 2>/dev/null || \
+    bash "${SCRIPT_DIR}/sign-latest-jenkins-paas-image-lab.sh" lastBuild || true
+else
+  echo "WARN: sign-all-deployed-paas-images-lab.sh missing — git pull then re-run setup-security-lab.sh"
+fi
 
 echo ""
-echo "=== 9. Verify from frontend pod ==="
+echo "=== 10. Verify from frontend pod ==="
 set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}" 2>/dev/null || true
@@ -172,5 +190,8 @@ echo "  Pipeline Step 5 → SonarQube analysis (quality gate / sonar charts)"
 echo "  Pipeline Step 9 → Cosign sign image (signed / deployment allowed)"
 echo "  Trivy → scans image on Harbor / TRIVY_BASE_URL (trivy counts)"
 echo ""
-echo "Run a NEW Jenkins build (JENKINS_PAAS_FAST_PIPELINE=false), wait for SUCCESS, refresh Security page."
+echo "Run a NEW Jenkins build per project (JENKINS_PAAS_FAST_PIPELINE=false), wait for SUCCESS, refresh Security page."
+echo "  AUTO_FIX=1 bash paas/scripts/verify-security-pipeline-lab.sh"
+echo "  PROJECT_ID=<uuid> python3 paas/scripts/trigger-paas-deploy-lab.py"
 echo "Sonar UI: ${SONAR_BASE:-http://${NODE_IP}:30900}"
+echo "Harbor Trivy in Security UI needs frontend rebuild after git pull: REBUILD_FRONTEND=1 bash paas/scripts/fix-security-all-projects-lab.sh"

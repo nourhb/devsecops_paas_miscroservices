@@ -21,6 +21,7 @@ Entry point: `bash paas/scripts/lab.sh`
 | `lab.sh app pull N` | Fix image pull on cluster |
 | `lab.sh jenkins` | Refresh `paas-deploy` job from Jenkinsfile |
 | `lab.sh integrations` | K8s RBAC + in-cluster probe URLs for Platform hub |
-| `lab.sh security` | Sonar token, DT URLs, Cosign keys, Kyverno, full pipeline (Steps 4–5, 9) |
+| `lab.sh security` | Full security fix: Sonar/DT/Cosign/Jenkins + sign deployed images (`fix-security-all-projects-lab.sh`) |
+| `fix-security-all-projects-lab.sh` | Same as `lab.sh security`; set `REBUILD_FRONTEND=1` if Security UI still shows Trivy fetch failed |
 
 Other scripts in this folder are for specific fixes (Harbor, Argo, Jenkins plugins, k3s API). Use only when needed.

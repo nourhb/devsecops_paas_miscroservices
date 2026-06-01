@@ -158,6 +158,9 @@ def main() -> int:
         "HARBOR_REGISTRY",
         "HARBOR_USERNAME",
         "HARBOR_PASSWORD",
+        "COSIGN_PRIVATE_KEY",
+        "COSIGN_PASSWORD",
+        "COSIGN_ALLOW_INSECURE_REGISTRY",
     ):
         if key == "SONAR_HOST_URL":
             val = (os.environ.get("SONAR_HOST_URL") or os.environ.get("SONAR_BASE_URL") or "").strip()

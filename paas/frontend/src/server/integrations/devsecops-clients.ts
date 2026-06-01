@@ -453,6 +453,128 @@ function hash(input: string): number {
 function seeded(input: string, max: number): number {
     return hash(input) % (max + 1);
 }
+
+function harborApiBaseUrl(): string {
+    const fromBase = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
+    if (fromBase) {
+        return fromBase;
+    }
+    const reg = env.HARBOR_REGISTRY.trim().replace(/\/+$/, "");
+    if (!reg) {
+        return "";
+    }
+    return reg.startsWith("http://") || reg.startsWith("https://") ? reg : `http://${reg}`;
+}
+
+function harborBasicAuthHeader(): string | null {
+    const user = env.HARBOR_USERNAME.trim();
+    const pass = env.HARBOR_PASSWORD.trim();
+    if (!user || !pass) {
+        return null;
+    }
+    return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
+}
+
+function parseOciImageForHarbor(imageRef: string): {
+    harborProject: string;
+    repository: string;
+    tag: string;
+} | null {
+    const ref = imageRef.trim().toLowerCase().split("@")[0] ?? "";
+    const tagSep = ref.lastIndexOf(":");
+    if (tagSep <= 0) {
+        return null;
+    }
+    const tag = ref.slice(tagSep + 1);
+    const pathWithHost = ref.slice(0, tagSep);
+    const slash = pathWithHost.indexOf("/");
+    if (slash < 0) {
+        return null;
+    }
+    const path = pathWithHost.slice(slash + 1);
+    const segments = path.split("/").filter(Boolean);
+    if (segments.length < 2 || !tag) {
+        return null;
+    }
+    return {
+        harborProject: segments[0] ?? "",
+        repository: segments.slice(1).join("/"),
+        tag
+    };
+}
+
+function countHarborVulnerabilitySeverities(payload: unknown): SeverityBreakdown {
+    const out: SeverityBreakdown = { critical: 0, high: 0, medium: 0, low: 0 };
+    const bump = (severity: string) => {
+        const s = severity.toUpperCase();
+        if (s === "CRITICAL") {
+            out.critical += 1;
+        }
+        else if (s === "HIGH") {
+            out.high += 1;
+        }
+        else if (s === "MEDIUM") {
+            out.medium += 1;
+        }
+        else if (s === "LOW" || s === "NEGLIGIBLE" || s === "UNKNOWN") {
+            out.low += 1;
+        }
+    };
+    const walk = (node: unknown): void => {
+        if (!node || typeof node !== "object") {
+            return;
+        }
+        if (Array.isArray(node)) {
+            for (const item of node) {
+                walk(item);
+            }
+            return;
+        }
+        const record = node as Record<string, unknown>;
+        if (typeof record.severity === "string") {
+            bump(record.severity);
+        }
+        for (const value of Object.values(record)) {
+            if (value && typeof value === "object") {
+                walk(value);
+            }
+        }
+    };
+    walk(payload);
+    return out;
+}
+
+async function scanImageViaHarbor(imageRef: string): Promise<SeverityBreakdown | null> {
+    const base = harborApiBaseUrl();
+    const auth = harborBasicAuthHeader();
+    const parsed = parseOciImageForHarbor(imageRef);
+    if (!base || !auth || !parsed) {
+        return null;
+    }
+    const repoEnc = encodeURIComponent(parsed.repository);
+    const projectEnc = encodeURIComponent(parsed.harborProject);
+    const tagEnc = encodeURIComponent(parsed.tag);
+    const artifactUrl = `${base}/api/v2.0/projects/${projectEnc}/repositories/${repoEnc}/artifacts/${tagEnc}`;
+    const headers: Record<string, string> = { Authorization: auth };
+    try {
+        await integrationFetch(`${artifactUrl}/scan`, { method: "POST", headers });
+    }
+    catch {
+        // scan may already be running or unsupported — continue to read report
+    }
+    const vulnUrl = `${artifactUrl}/additions/vulnerabilities`;
+    const response = await integrationFetch(vulnUrl, { method: "GET", headers });
+    if (response.status === 404) {
+        return { critical: 0, high: 0, medium: 0, low: 0 };
+    }
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new IntegrationError(`Harbor Trivy HTTP ${response.status}: ${errText.slice(0, 400)}`);
+    }
+    const payload = (await response.json()) as unknown;
+    return countHarborVulnerabilitySeverities(payload);
+}
+
 type IntegrationFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 async function fetchOrFallback<T>(serviceLabel: string, enabled: boolean, url: string, init: RequestInit, fallback: T, parser?: (response: Response) => Promise<T>, fetchImpl: IntegrationFetchFn = integrationFetch): Promise<T> {
     if (!enabled) {
@@ -1801,7 +1923,9 @@ export class DependencyTrackClient {
     }
 }
 export class TrivyClient {
-    private enabled = Boolean(env.TRIVY_BASE_URL);
+    private standaloneEnabled = Boolean(env.TRIVY_BASE_URL?.trim());
+    private harborEnabled = Boolean(harborApiBaseUrl() && harborBasicAuthHeader());
+
     async scan(imageRef: string): Promise<SeverityBreakdown> {
         const critical = imageRef.toLowerCase().includes("critical") ? 1 : 0;
         const fallback: SeverityBreakdown = {
@@ -1810,42 +1934,77 @@ export class TrivyClient {
             medium: seeded(imageRef + "-medium", 4),
             low: seeded(imageRef + "-low", 8)
         };
-        return fetchOrFallback("Trivy", this.enabled, `${env.TRIVY_BASE_URL}/scan`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...(env.TRIVY_AUTH_TOKEN ? { Authorization: `Bearer ${env.TRIVY_AUTH_TOKEN}` } : {})
-            },
-            body: JSON.stringify({ image: imageRef })
-        }, fallback, async (response) => {
-            const data = (await response.json()) as {
-                Results?: {
-                    Vulnerabilities?: {
-                        Severity?: string;
-                    }[];
-                }[];
-            };
-            const out: SeverityBreakdown = { critical: 0, high: 0, medium: 0, low: 0 };
-            const results = data.Results ?? [];
-            for (const r of results) {
-                for (const v of r.Vulnerabilities ?? []) {
-                    const s = (v.Severity || "").toUpperCase();
-                    if (s === "CRITICAL") {
-                        out.critical += 1;
-                    }
-                    else if (s === "HIGH") {
-                        out.high += 1;
-                    }
-                    else if (s === "MEDIUM") {
-                        out.medium += 1;
-                    }
-                    else if (s === "LOW") {
-                        out.low += 1;
-                    }
+        const errors: string[] = [];
+
+        if (this.harborEnabled) {
+            try {
+                const harbor = await scanImageViaHarbor(imageRef);
+                if (harbor != null) {
+                    return harbor;
                 }
             }
-            return out;
-        });
+            catch (e) {
+                errors.push(e instanceof Error ? e.message : String(e));
+            }
+        }
+
+        if (this.standaloneEnabled) {
+            try {
+                return await fetchOrFallback("Trivy", true, `${env.TRIVY_BASE_URL.replace(/\/+$/, "")}/scan`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        ...(env.TRIVY_AUTH_TOKEN ? { Authorization: `Bearer ${env.TRIVY_AUTH_TOKEN}` } : {})
+                    },
+                    body: JSON.stringify({ image: imageRef })
+                }, fallback, async (response) => {
+                    const data = (await response.json()) as {
+                        Results?: {
+                            Vulnerabilities?: {
+                                Severity?: string;
+                            }[];
+                        }[];
+                    };
+                    const out: SeverityBreakdown = { critical: 0, high: 0, medium: 0, low: 0 };
+                    const results = data.Results ?? [];
+                    for (const r of results) {
+                        for (const v of r.Vulnerabilities ?? []) {
+                            const s = (v.Severity || "").toUpperCase();
+                            if (s === "CRITICAL") {
+                                out.critical += 1;
+                            }
+                            else if (s === "HIGH") {
+                                out.high += 1;
+                            }
+                            else if (s === "MEDIUM") {
+                                out.medium += 1;
+                            }
+                            else if (s === "LOW") {
+                                out.low += 1;
+                            }
+                        }
+                    }
+                    return out;
+                });
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (e instanceof IntegrationError) {
+                    errors.push(msg);
+                }
+                else {
+                    errors.push(`Trivy request failed: ${msg}`);
+                }
+            }
+        }
+
+        if (errors.length > 0 && !allowSimulation()) {
+            throw new IntegrationError(errors.join("; "));
+        }
+        if (!this.harborEnabled && !this.standaloneEnabled && !allowSimulation()) {
+            throw new IntegrationError("Trivy not configured: set HARBOR_BASE_URL + credentials or TRIVY_BASE_URL.");
+        }
+        return fallback;
     }
 }
 export class CosignClient {
