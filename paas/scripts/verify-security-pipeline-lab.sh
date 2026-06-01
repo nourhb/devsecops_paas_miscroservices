@@ -8,6 +8,9 @@ ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
 JOB="${JOB_NAME:-paas-deploy}"
 PROJECT_ID="${PROJECT_ID:-}"
+# Optional: verify a specific Jenkins build (e.g. BUILD_NUMBER=254) instead of lastBuild
+BUILD_NUMBER="${BUILD_NUMBER:-}"
+PROJECT_NAME="${PROJECT_NAME:-}"
 AUTO_FIX="${AUTO_FIX:-0}"
 FAIL=0
 
@@ -99,19 +102,35 @@ else
   warn "could not confirm Jenkinsfile markers in config.xml"
 fi
 
+if [[ -n "${PROJECT_ID}" && -z "${PROJECT_NAME}" ]] && kubectl get deployment postgres -n paas >/dev/null 2>&1; then
+  PROJECT_NAME="$(kubectl exec -n paas deploy/postgres -- psql -U postgres -d paas -tAc \
+    "SELECT \"projectName\" FROM \"Project\" WHERE id = '${PROJECT_ID}' LIMIT 1;" 2>/dev/null | tr -d ' \r\n' || true)"
+fi
+
 echo ""
-echo "=== 3. Last Jenkins build (must SUCCESS + Steps 4–5 for Security UI data) ==="
-LAST_JSON="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
-  "${JENKINS_URL}/job/${JOB}/lastBuild/api/json" 2>/dev/null || echo '{}')"
-BUILD="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('number') or 0)" 2>/dev/null || echo 0)"
+echo "=== 3. Jenkins build (must SUCCESS + Steps 4–5 for Security UI data) ==="
+if [[ -n "${BUILD_NUMBER}" ]]; then
+  BUILD="${BUILD_NUMBER}"
+  LAST_JSON="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+    "${JENKINS_URL}/job/${JOB}/${BUILD}/api/json" 2>/dev/null || echo '{}')"
+  echo "Checking build #${BUILD} (BUILD_NUMBER set)"
+else
+  LAST_JSON="$(curl -sS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+    "${JENKINS_URL}/job/${JOB}/lastBuild/api/json" 2>/dev/null || echo '{}')"
+  BUILD="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('number') or 0)" 2>/dev/null || echo 0)"
+  echo "Last build: #${BUILD} (set BUILD_NUMBER=<n> to verify a specific SUCCESS build)"
+fi
 RESULT="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result') or 'NONE')" 2>/dev/null || echo NONE)"
 
-if [[ "${BUILD}" == "0" ]]; then
+if [[ "${BUILD}" == "0" || -z "${BUILD}" ]]; then
   fail "no Jenkins builds yet — deploy once from PaaS UI"
 else
-  echo "Last build: #${BUILD} result=${RESULT}"
+  echo "Build #${BUILD} result=${RESULT}"
   if [[ "${RESULT}" != "SUCCESS" ]]; then
-    fail "last build #${BUILD} is ${RESULT} — Security UI stays empty until Jenkins SUCCESS"
+    fail "build #${BUILD} is ${RESULT} — Security UI stays empty until Jenkins SUCCESS for this project"
+    if [[ -z "${BUILD_NUMBER}" ]]; then
+      echo "     Tip: if an older build succeeded, re-run with BUILD_NUMBER=<n> PROJECT_ID=<uuid>"
+    fi
     echo "     Step 3 failure? grep console:"
     echo "     curl -fsS -u \"\$JENKINS_USERNAME:\$JENKINS_API_TOKEN\" \"${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText\" | grep -iE 'ERROR|unknown option|Step 3|Step 4'"
   else
@@ -188,13 +207,14 @@ fi
 
 if [[ -n "${DEPENDENCY_TRACK_API_KEY:-}" && -n "${DEPENDENCY_TRACK_BASE_URL:-}" ]]; then
   if [[ -n "${PROJECT_ID}" ]]; then
+    DT_LOOKUP="${PROJECT_NAME:-${PROJECT_ID}}"
     DT_COUNT="$(curl -s -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
-      "${DEPENDENCY_TRACK_BASE_URL%/}/api/v1/project?name=${PROJECT_ID}" \
+      "${DEPENDENCY_TRACK_BASE_URL%/}/api/v1/project?name=${DT_LOOKUP}" \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)" 2>/dev/null || echo 0)"
     if [[ "${DT_COUNT}" -gt 0 ]]; then
-      ok "Dependency-Track has project named ${PROJECT_ID}"
+      ok "Dependency-Track has project named ${DT_LOOKUP}"
     else
-      fail "Dependency-Track has no project named ${PROJECT_ID} (Jenkins uploads SBOM with projectName=PROJECT_ID)"
+      fail "Dependency-Track has no project named ${DT_LOOKUP} (Jenkins uses projectName=image slug, tag PROJECT_ID)"
     fi
   else
     warn "Set PROJECT_ID=<uuid> to check Dependency-Track project by name"
