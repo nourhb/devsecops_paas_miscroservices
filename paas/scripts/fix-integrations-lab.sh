@@ -66,8 +66,11 @@ ENV_FILE="${ENV_FILE}" NODE_IP="${NODE_IP}" bash "${SCRIPT_DIR}/wire-optional-in
 echo "=== 3. Sync + restart frontend ==="
 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
 
-echo ""
-bash "${SCRIPT_DIR}/diagnose-integration-pods-lab.sh" || true
-
-echo ""
-echo "Rebuild UI if probe code changed: bash paas/scripts/deploy-paas-frontend-k8s.sh"
+if [[ "${SKIP_INTEGRATION_DIAGNOSE:-0}" != "1" ]]; then
+  echo ""
+  bash "${SCRIPT_DIR}/diagnose-integration-pods-lab.sh" || true
+  echo ""
+  echo "Rebuild UI if probe code changed: bash paas/scripts/deploy-paas-frontend-k8s.sh"
+else
+  echo "SKIP_INTEGRATION_DIAGNOSE=1 — skipped pod probes (run diagnose-integration-pods-lab.sh manually)"
+fi

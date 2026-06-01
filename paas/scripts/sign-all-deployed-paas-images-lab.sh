@@ -15,6 +15,24 @@ command -v cosign >/dev/null 2>&1 || die "Install cosign on the VM (apt or GitHu
 
 export COSIGN_PASSWORD=""
 
+sign_refs_for_image() {
+  local image="$1"
+  local refs=("${image}")
+  local external nginx
+  external="$(grep '^HARBOR_REGISTRY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"')"
+  nginx="$(grep '^HARBOR_REGISTRY_NGINX_CLUSTER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"')"
+  if [[ -n "${external}" && -n "${nginx}" && "${image}" == "${external}/"* ]]; then
+    refs+=("${image/${external}/${nginx}}")
+  fi
+  local r
+  local -a seen=()
+  for r in "${refs[@]}"; do
+    [[ " ${seen[*]:-} " == *" ${r} "* ]] && continue
+    seen+=("${r}")
+    cosign sign --yes --allow-insecure-registry --key "${KEYDIR}/cosign.key" "${r}" || return 1
+  done
+}
+
 echo "==> Collect deployed images from Postgres projects"
 mapfile -t ROWS < <(kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -tAc \
   "SELECT \"projectName\", namespace FROM \"Project\" WHERE \"deletedAt\" IS NULL ORDER BY \"projectName\";" 2>/dev/null \
@@ -44,8 +62,8 @@ for row in "${ROWS[@]}"; do
     signed=$((signed + 1))
     continue
   fi
-  echo "==> Sign ${name}: ${image}"
-  if cosign sign --yes --allow-insecure-registry --key "${KEYDIR}/cosign.key" "${image}"; then
+  echo "==> Sign ${name}: ${image} (+ in-cluster Harbor ref when configured)"
+  if sign_refs_for_image "${image}"; then
     signed=$((signed + 1))
   else
     echo "FAIL ${name}: cosign sign failed for ${image}" >&2
