@@ -70,27 +70,48 @@ def materializeProjectBuildEnv(String appRoot) {
     println '[env] No PROJECT_BUILD_ENV_B64 — skip .env (Next.js/Firebase apps need NEXT_PUBLIC_* at build time; set Build env in PaaS Edit project, then Deploy again)'
     return false
   }
+  def prefix = appRoot == '.' ? '' : "${appRoot}/"
+  if (!fileExists("${prefix}package.json")) {
+    println "[env] WARN: no package.json under ${appRoot} — skip .env materialize"
+    return false
+  }
   try {
-    def decoded = new String(b64.decodeBase64(), 'UTF-8')
-    def envMap = readJSON text: decoded
-    def lines = []
-    envMap.each { k, v ->
-      if (k?.toString()?.trim() && v != null) {
-        lines << "${k}=${v}"
-      }
-    }
-    if (lines.isEmpty()) {
-      println '[env] PROJECT_BUILD_ENV_B64 decoded to empty map'
-      return false
-    }
-    def content = lines.join('\n')
-    def envFiles = ['.env', '.env.local', '.env.production', '.env.production.local']
-    envFiles.each { name ->
-      writeFile file: "${appRoot}/${name}", text: content
-    }
-    def keyList = envMap.keySet().collect { it.toString() }.sort().join(', ')
-    println "[env] Wrote ${lines.size()} variable(s) to ${appRoot} (${keyList})"
-    println '[env] NEXT_PUBLIC_* are baked during next build in Jenkins — K8s Helm env at deploy does not replace them'
+    writeFile file: "${prefix}.paas-build-env.b64", text: b64
+    // Groovy decodeBase64 is blocked by Jenkins script security — decode with Node instead.
+    ensureNodeTool()
+    sh """
+      set -eu
+      cd '${appRoot}'
+      if ! command -v node >/dev/null 2>&1; then
+        echo '[env] ERROR: node required to decode PROJECT_BUILD_ENV_B64'
+        exit 1
+      fi
+      node <<'NODE'
+const fs = require('fs');
+const b64 = fs.readFileSync('.paas-build-env.b64', 'utf8').trim();
+let envMap;
+try {
+  envMap = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+} catch (e) {
+  console.error('[env] ERROR: invalid PROJECT_BUILD_ENV_B64 JSON:', e.message);
+  process.exit(1);
+}
+const lines = Object.entries(envMap || {})
+  .filter(([k, v]) => k && v != null && String(v).trim() !== '')
+  .map(([k, v]) => k + '=' + v);
+if (!lines.length) {
+  console.error('[env] ERROR: PROJECT_BUILD_ENV_B64 decoded to empty map');
+  process.exit(1);
+}
+const content = lines.join('\\n');
+for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
+  fs.writeFileSync(name, content);
+}
+console.log('[env] Wrote ' + lines.length + ' variable(s) to ' + process.cwd() + ' (' + Object.keys(envMap).sort().join(', ') + ')');
+console.log('[env] NEXT_PUBLIC_* are baked during next build — K8s Helm env at deploy does not replace them');
+NODE
+      rm -f .paas-build-env.b64
+    """
     ensureBuildEnvDockerignoreExcluded(appRoot)
     return true
   } catch (Exception e) {
@@ -1028,6 +1049,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=security-warn-sca-sonar-20260531 (PAAS_STEP_WARN on failed SCA/Sonar; cyclonedx --package-lock-only)"
   println "[paas-jenkinsfile] marker=monorepo-app-root-20260531 (Step 3/6 mutate use detectAppRoot e.g. server/)"
   println "[paas-jenkinsfile] marker=next-config-build-env-20260531 (patch next.config env + force fresh .next when PROJECT_BUILD_ENV_B64 set)"
+  println "[paas-jenkinsfile] marker=env-decode-node-20260601 (materialize .env via Node — avoids Jenkins decodeBase64 sandbox)"
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
 
   stage("Step 1 — Params validation") {
