@@ -1194,23 +1194,38 @@ def runPaasDeploy = {
               OFFLINE_ARG="--prefer-offline"
             fi
             LOCK_HASH=""
-            if [ -f package-lock.json ]; then
-              if command -v sha256sum >/dev/null 2>&1; then
-                LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
-              else
-                LOCK_HASH=$(openssl dgst -sha256 package-lock.json 2>/dev/null | awk '{print $NF}')
+            LOCK_FILE=""
+            for lf in package-lock.json yarn.lock pnpm-lock.yaml; do
+              if [ -f "${lf}" ]; then
+                LOCK_FILE="${lf}"
+                if command -v sha256sum >/dev/null 2>&1; then
+                  LOCK_HASH=$(sha256sum "${lf}" | awk '{print $1}')
+                else
+                  LOCK_HASH=$(openssl dgst -sha256 "${lf}" 2>/dev/null | awk '{print $NF}')
+                fi
+                break
               fi
-            fi
+            done
             NM_SNAP=""
+            NM_SNAP_MAX_MB="${JENKINS_NPM_SNAPSHOT_MAX_MB:-600}"
             if [ "${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${LOCK_HASH}" ] && [ -n "${PROJECT_ID:-}" ]; then
               NM_SNAP="${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/${PROJECT_ID}/${LOCK_HASH}"
             fi
             DEPS_OK=0
             if [ -n "${NM_SNAP}" ] && [ -d "${NM_SNAP}" ] && [ -n "$(ls -A "${NM_SNAP}" 2>/dev/null)" ]; then
-              echo "[build] node_modules snapshot hit → ${NM_SNAP}"
+              SNAP_MB=$(du -sm "${NM_SNAP}" 2>/dev/null | awk '{print $1}' || echo 0)
+              if [ -n "${SNAP_MB}" ] && [ "${SNAP_MB}" -gt "${NM_SNAP_MAX_MB}" ] 2>/dev/null; then
+                echo "[build] node_modules snapshot ${SNAP_MB}MB > limit ${NM_SNAP_MAX_MB}MB (${LOCK_FILE}) — skip restore; use npm ci (raise JENKINS_NPM_SNAPSHOT_MAX_MB or set JENKINS_NPM_SNAPSHOT_NODE_MODULES=false)"
+                NM_SNAP=""
+              else
+              echo "[build] node_modules snapshot hit → ${NM_SNAP} (${SNAP_MB}MB)"
               rm -rf node_modules
               mkdir -p node_modules
-              run_with_keepalive cp -a "${NM_SNAP}/." node_modules/
+              echo "[build] restoring snapshot via tar (${SNAP_MB}MB)…"
+              run_with_keepalive bash -c "tar -C \"${NM_SNAP}\" -cf - . | tar -C node_modules -xf -"
+              fi
+            fi
+            if [ -n "${NM_SNAP}" ] && [ -d "${NM_SNAP}" ] && [ -n "$(ls -A "${NM_SNAP}" 2>/dev/null)" ] && [ -d node_modules ]; then
               if run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG; then
                 DEPS_OK=1
                 echo "[build] npm install from snapshot OK (skipped full npm ci)"
@@ -1222,17 +1237,25 @@ def runPaasDeploy = {
             if [ "${DEPS_OK}" != "1" ]; then
               if [ -f package-lock.json ]; then
                 run_with_keepalive npm ci --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG || run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
+              elif [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then
+                run_with_keepalive yarn install --frozen-lockfile --non-interactive $LOG_ARG || run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
               else
                 run_with_keepalive npm install --no-audit --no-fund ${OFFLINE_ARG} $LOG_ARG
               fi
             fi
-            if [ -n "${NM_SNAP}" ] && [ -f package-lock.json ] && [ -d node_modules ] && [ "${DEPS_OK}" != "1" ]; then
-              mkdir -p "$(dirname "${NM_SNAP}")"
-              rm -rf "${NM_SNAP}.new" "${NM_SNAP}"
-              mkdir -p "${NM_SNAP}.new"
-              run_with_keepalive cp -a node_modules/. "${NM_SNAP}.new/"
-              mv "${NM_SNAP}.new" "${NM_SNAP}"
-              echo "[build] node_modules snapshot saved → ${NM_SNAP}"
+            if [ -n "${NM_SNAP}" ] && [ -n "${LOCK_FILE}" ] && [ -f "${LOCK_FILE}" ] && [ -d node_modules ] && [ "${DEPS_OK}" != "1" ]; then
+              SNAP_MB=$(du -sm node_modules 2>/dev/null | awk '{print $1}' || echo 0)
+              if [ -n "${SNAP_MB}" ] && [ "${SNAP_MB}" -le "${NM_SNAP_MAX_MB}" ] 2>/dev/null; then
+                mkdir -p "$(dirname "${NM_SNAP}")"
+                rm -rf "${NM_SNAP}.new" "${NM_SNAP}"
+                mkdir -p "${NM_SNAP}.new"
+                echo "[build] saving node_modules snapshot (${SNAP_MB}MB) via tar…"
+                run_with_keepalive bash -c "tar -C node_modules -cf - . | tar -C \"${NM_SNAP}.new\" -xf -"
+                mv "${NM_SNAP}.new" "${NM_SNAP}"
+                echo "[build] node_modules snapshot saved → ${NM_SNAP}"
+              else
+                echo "[build] skip saving snapshot (${SNAP_MB}MB > ${NM_SNAP_MAX_MB}MB limit)"
+              fi
             fi
             if [ "${JENKINS_SKIP_NEXT_BUILD:-}" = "true" ]; then
               echo "[build] JENKINS_SKIP_NEXT_BUILD=true — pas de next build dans ce stage (dépendances prêtes pour SCA/SAST ; build dans l’image Docker)."
@@ -1363,12 +1386,29 @@ def runPaasDeploy = {
             set +e
             cd '${scaAppRoot}'
             mkdir -p sca
-            npm audit --json > sca/npm-audit.json 2>/dev/null
-            npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
-            echo \$?
+            npm audit --json > sca/npm-audit.json 2>/dev/null || true
+            CDX_RC=254
+            if [ -f yarn.lock ]; then
+              echo "[sca] cyclonedx-npm (yarn.lock — do not use --package-lock-only)"
+              npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+              CDX_RC=\$?
+            elif [ -f package-lock.json ]; then
+              echo "[sca] cyclonedx-npm (package-lock.json)"
+              npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
+              CDX_RC=\$?
+            elif [ -f pnpm-lock.yaml ]; then
+              npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+              CDX_RC=\$?
+            else
+              npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+              CDX_RC=\$?
+            fi
+            echo \${CDX_RC}
           """, returnStdout: true).trim().tokenize('\n').last()
           if (scaRc != "0" || !fileExists("${scaAppRoot}/sca/bom.json")) {
-            paasStepWarn(4, 'sca', "bom.json missing or cyclonedx failed (rc=${scaRc}) — check npm lockfile / DEPENDENCY_TRACK_API_KEY")
+            paasStepWarn(4, 'sca', "bom.json missing or cyclonedx failed (rc=${scaRc}) — yarn: use yarn.lock path; npm: package-lock.json; or enable Docker for cdxgen")
+          } else {
+            paasStepOk(4, 'sca', 'sca/bom.json generated (cyclonedx-npm)')
           }
           if (fileExists("${scaAppRoot}/sca/bom.json") && !fileExists("sca/bom.json")) {
             sh "mkdir -p sca && cp '${scaAppRoot}/sca/bom.json' sca/bom.json"
@@ -1735,13 +1775,28 @@ EOF
           sh '''
             set +e
             export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
-            if [ -n "${INSEC}" ]; then
-              "${COSIGN_EXE}" sign --yes ${INSEC} --key "${LAB_KEY}" "${COSIGN_IMG}"
-            else
-              "${COSIGN_EXE}" sign --yes --key "${LAB_KEY}" "${COSIGN_IMG}"
+            sign_img() {
+              if [ -n "${INSEC}" ]; then
+                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${LAB_KEY}" "$1"
+              else
+                "${COSIGN_EXE}" sign --yes --key "${LAB_KEY}" "$1"
+              fi
+            }
+            sign_img "${COSIGN_IMG}" || exit $?
+            DIGEST=""
+            if command -v crane >/dev/null 2>&1; then
+              DIGEST="$(crane digest "${COSIGN_IMG}" 2>/dev/null || true)"
             fi
-            RC=$?
-            exit $RC
+            if [ -z "${DIGEST}" ]; then
+              DIGEST="$("${COSIGN_EXE}" triangulate "${COSIGN_IMG}" 2>/dev/null || true)"
+            fi
+            if [ -n "${DIGEST}" ]; then
+              echo "[cosign] also signing digest ${DIGEST}"
+              sign_img "${DIGEST}" || true
+              mkdir -p paas-artifacts
+              echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
+            fi
+            exit 0
           '''
         }
       } else {

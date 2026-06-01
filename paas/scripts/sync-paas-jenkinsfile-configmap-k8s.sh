@@ -24,6 +24,12 @@ if ! grep -qF 'next-config-build-env-20260531' "${JENKINSFILE}"; then
   echo "ERROR: Jenkinsfile missing next-config-build-env-20260531 (PROJECT_BUILD_ENV_B64 / Firebase) — git pull origin main on dev machine and push" >&2
   exit 1
 fi
+if ! grep -qF 'cyclonedx-npm (yarn.lock' "${JENKINSFILE}"; then
+  echo "WARN: Jenkinsfile missing yarn.lock SCA fix — Security Step 4 may fail on yarn projects"
+fi
+if ! grep -qF 'JENKINS_NPM_SNAPSHOT_MAX_MB' "${JENKINSFILE}"; then
+  echo "WARN: Jenkinsfile missing large snapshot guard — sanhome-style builds may fail on cp -a"
+fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
