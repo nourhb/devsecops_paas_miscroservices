@@ -67,8 +67,8 @@ def dtProjectNameForUpload(String projId, String imageRef) {
 def materializeProjectBuildEnv(String appRoot) {
   def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
   if (!b64) {
-    println '[env] No PROJECT_BUILD_ENV_B64 — skip .env (Next.js/Firebase apps need NEXT_PUBLIC_* at build time; set Build env in PaaS Edit project)'
-    return
+    println '[env] No PROJECT_BUILD_ENV_B64 — skip .env (Next.js/Firebase apps need NEXT_PUBLIC_* at build time; set Build env in PaaS Edit project, then Deploy again)'
+    return false
   }
   try {
     def decoded = new String(b64.decodeBase64(), 'UTF-8')
@@ -81,15 +81,176 @@ def materializeProjectBuildEnv(String appRoot) {
     }
     if (lines.isEmpty()) {
       println '[env] PROJECT_BUILD_ENV_B64 decoded to empty map'
-      return
+      return false
     }
     def content = lines.join('\n')
-    writeFile file: "${appRoot}/.env", text: content
-    writeFile file: "${appRoot}/.env.production", text: content
-    println "[env] Wrote ${lines.size()} variable(s) to ${appRoot}/.env and .env.production"
+    def envFiles = ['.env', '.env.local', '.env.production', '.env.production.local']
+    envFiles.each { name ->
+      writeFile file: "${appRoot}/${name}", text: content
+    }
+    def keyList = envMap.keySet().collect { it.toString() }.sort().join(', ')
+    println "[env] Wrote ${lines.size()} variable(s) to ${appRoot} (${keyList})"
+    println '[env] NEXT_PUBLIC_* are baked during next build in Jenkins — K8s Helm env at deploy does not replace them'
+    ensureBuildEnvDockerignoreExcluded(appRoot)
+    return true
   } catch (Exception e) {
     println "[env] WARN: could not materialize PROJECT_BUILD_ENV_B64: ${e.message}"
+    return false
   }
+}
+
+def ensureBuildEnvDockerignoreExcluded(String appRoot) {
+  def di = "${appRoot}/.dockerignore"
+  if (!fileExists(di)) {
+    return
+  }
+  def text = readFile file: di
+  if (text.contains('!.env')) {
+    return
+  }
+  if (!text.contains('.env')) {
+    return
+  }
+  writeFile file: di, text: "${text.trim()}\n# PaaS: allow project build env for Next.js docker build\n!.env\n!.env.local\n!.env.production\n!.env.production.local\n"
+  println "[env] Patched ${di} so .env files are included in docker build context"
+}
+
+def paasSourceBuildEnvShellSnippet() {
+  return '''
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+  echo "[env] sourced .env for build ($(grep -cE "^[A-Za-z_][A-Za-z0-9_]*=" .env 2>/dev/null || echo 0) vars)"
+fi
+'''
+}
+
+def projectBuildEnvPresent() {
+  return (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim().length() > 0
+}
+
+def paasForceFreshNextBuildShellSnippet() {
+  return '''
+if [ -n "${PROJECT_BUILD_ENV_B64:-}" ]; then
+  echo "[env] PROJECT_BUILD_ENV_B64 set — removing .next so Firebase/NEXT_PUBLIC_* are recompiled"
+  rm -rf .next
+fi
+'''
+}
+
+def patchNextBuildEnvIntoConfig(String appRoot = '.') {
+  def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
+  if (!b64) {
+    return false
+  }
+  def prefix = appRoot == '.' ? '' : "${appRoot}/"
+  if (!fileExists("${prefix}package.json")) {
+    return false
+  }
+  def hasNextConfig = fileExists("${prefix}next.config.mjs") || fileExists("${prefix}next.config.js") || fileExists("${prefix}next.config.ts")
+  if (!hasNextConfig) {
+    return false
+  }
+  ensureNodeTool()
+  withEnv(["PAAS_BUILD_ENV_B64=${b64}"]) {
+    sh """
+      set +e
+      cd '${appRoot}'
+      if ! command -v node >/dev/null 2>&1; then
+        echo "[env] WARN: node unavailable — skip next.config env patch"
+        exit 0
+      fi
+      node <<'NODE'
+const fs = require('fs');
+const b64 = process.env.PAAS_BUILD_ENV_B64 || '';
+if (!b64) process.exit(0);
+let envMap;
+try {
+  envMap = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+} catch (e) {
+  console.log('[env] WARN: could not decode PAAS_BUILD_ENV_B64 for next.config patch:', e.message);
+  process.exit(0);
+}
+const entries = Object.entries(envMap || {}).filter(([k, v]) => k && v != null && String(v).trim() !== '');
+if (!entries.length) process.exit(0);
+const envLines = entries.map(([k, v]) => '    ' + k + ': ' + JSON.stringify(String(v)) + ',').join('\\n');
+const envBlock = '  // __PAAS_BUILD_ENV__\\n  env: {\\n' + envLines + '\\n  },';
+for (const f of ['next.config.mjs', 'next.config.js', 'next.config.ts']) {
+  if (!fs.existsSync(f)) continue;
+  let txt = fs.readFileSync(f, 'utf8');
+  txt = txt.replace(/\\n  \\/\\/ __PAAS_BUILD_ENV__[\\s\\S]*?\\n  \\},\\n/g, '\\n');
+  let patched = null;
+  if (/const\\s+nextConfig[^=]*=\\s*\\{/.test(txt)) {
+    patched = txt.replace(/const\\s+nextConfig[^=]*=\\s*\\{/, (m) => m + '\\n' + envBlock);
+  } else if (/export\\s+default\\s*\\{/.test(txt)) {
+    patched = txt.replace(/export\\s+default\\s*\\{/, (m) => m + '\\n' + envBlock);
+  }
+  if (!patched || patched === txt) {
+    console.log('[env] ERROR: could not patch ' + f + ' — unrecognized shape');
+    process.exit(1);
+  }
+  fs.writeFileSync(f, patched);
+  console.log('[env] patched ' + f + ' with env: { ' + entries.map(([k]) => k).join(', ') + ' }');
+  process.exit(0);
+}
+console.log('[env] ERROR: no next.config.* found to patch');
+process.exit(1);
+NODE
+    """
+  }
+  return true
+}
+
+def verifyNextPublicEnvInBuild(String appRoot = '.') {
+  if (!projectBuildEnvPresent()) {
+    return
+  }
+  def prefix = appRoot == '.' ? '' : "${appRoot}/"
+  if (!fileExists("${prefix}package.json")) {
+    return
+  }
+  sh """
+    set -eu
+    cd '${appRoot}'
+    if ! node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.firebase||d['@firebase/app']?0:1)" 2>/dev/null; then
+      echo "[env] verify: not a Firebase package.json — skip bundle check"
+      exit 0
+    fi
+    if [ ! -d .next ]; then
+      echo "[env] ERROR: .next missing after build — cannot verify NEXT_PUBLIC_* in bundle"
+      exit 1
+    fi
+    NEEDLE=""
+    if [ -f .env.production ]; then
+      NEEDLE=\$(grep -E '^NEXT_PUBLIC_FIREBASE_API_KEY=' .env.production 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\"' | tr -d "\\'" | cut -c1-12)
+    fi
+    if [ -z "\$NEEDLE" ] && [ -f .env ]; then
+      NEEDLE=\$(grep -E '^NEXT_PUBLIC_FIREBASE_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\"' | tr -d "\\'" | cut -c1-12)
+    fi
+    if [ -n "\$NEEDLE" ]; then
+      if grep -Rql "\$NEEDLE" .next/static .next/server 2>/dev/null; then
+        echo "[env] verify OK: Firebase API key prefix found in .next output"
+        exit 0
+      fi
+      echo "[env] ERROR: next build finished but NEXT_PUBLIC_FIREBASE_API_KEY is not in .next — env was not baked"
+      exit 1
+    fi
+    if grep -Rq 'NEXT_PUBLIC_FIREBASE' .next/static/chunks 2>/dev/null; then
+      echo "[env] verify OK: NEXT_PUBLIC_FIREBASE references found in client chunks"
+      exit 0
+    fi
+    echo "[env] ERROR: Firebase app but no NEXT_PUBLIC_* in build output — check PROJECT_BUILD_ENV_B64 and next build logs"
+    exit 1
+  """
+}
+
+def dockerfileHasProductionBuild(String dockerfilePath) {
+  if (!fileExists(dockerfilePath)) {
+    return false
+  }
+  def text = readFile file: dockerfilePath
+  return (text =~ /(?i)(next build|npm run build|npm run build:ci|yarn build|pnpm run build|pnpm build)/)
 }
 
 def prependPath(String path) {
@@ -358,7 +519,11 @@ def ensureCosignTool() {
 
 def dockerfileForDetectedProject(String df) {
   if (fileExists(df)) {
-    return df
+    if (fileExists('package.json') && !dockerfileHasProductionBuild(df)) {
+      println "[image] ${df} has no production build step — using PaaS-generated Dockerfile (NEXT_PUBLIC_* require next build with project env)"
+    } else {
+      return df
+    }
   }
   def appRoot = detectAppRoot()
   if (fileExists("${appRoot}/package.json")) {
@@ -534,6 +699,8 @@ def paasShellKeepaliveHelper() {
 def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
   def appRoot = detectAppRoot()
   println "[image] PAAS app root for build layer: ${appRoot}"
+  materializeProjectBuildEnv(appRoot)
+  patchNextBuildEnvIntoConfig(appRoot)
   imageRef = normalizeOciImageReference(imageRef)
   def registry = registryHostFor(imageRef)
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
@@ -645,8 +812,9 @@ ${paasShellKeepaliveHelper()}
     cd '${appRoot}'
     export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
+${paasForceFreshNextBuildShellSnippet()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
-      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ]; then
         echo "[image] crane-next16-202605-j48300: npx next build"
         NB_FLAGS=""
         if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
@@ -657,6 +825,7 @@ ${paasShellKeepaliveHelper()}
           _next_hb=\$!
           trap 'kill "\${_next_hb}" 2>/dev/null || true' EXIT
         fi
+${paasSourceBuildEnvShellSnippet()}
         run_with_keepalive npx next build \$NB_FLAGS
         if [ -n "\${_next_hb}" ]; then kill "\${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
       fi
@@ -666,6 +835,8 @@ ${paasShellKeepaliveHelper()}
       fi
     fi
   """
+
+  verifyNextPublicEnvInBuild(appRoot)
 
   println "[image] Step 6c — layer tar + crane append"
   sh """
@@ -856,6 +1027,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=crane-mutate-cmd-20260531 (start-paas.sh in layer; no nested quotes in --cmd)"
   println "[paas-jenkinsfile] marker=security-warn-sca-sonar-20260531 (PAAS_STEP_WARN on failed SCA/Sonar; cyclonedx --package-lock-only)"
   println "[paas-jenkinsfile] marker=monorepo-app-root-20260531 (Step 3/6 mutate use detectAppRoot e.g. server/)"
+  println "[paas-jenkinsfile] marker=next-config-build-env-20260531 (patch next.config env + force fresh .next when PROJECT_BUILD_ENV_B64 set)"
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
 
   stage("Step 1 — Params validation") {
@@ -901,6 +1073,15 @@ def runPaasDeploy = {
       println "[build] Monorepo/subdir layout — app root: ${buildAppRoot}"
     }
     materializeProjectBuildEnv(buildAppRoot)
+    patchNextBuildEnvIntoConfig(buildAppRoot)
+    if (projectBuildEnvPresent()) {
+      sh """
+        set -eu
+        cd '${buildAppRoot}'
+        rm -rf .next
+        echo "[env] Cleared .next before build (PROJECT_BUILD_ENV_B64 present)"
+      """
+    }
     if (fileExists("${buildAppRoot}/pom.xml")) {
       if (commandExists("mvn")) {
         sh "cd '${buildAppRoot}' && mvn -B -DskipTests package"
@@ -1064,6 +1245,7 @@ def runPaasDeploy = {
                   _next_hb=$!
                   trap 'kill "${_next_hb}" 2>/dev/null || true' EXIT
                 fi
+''' + paasSourceBuildEnvShellSnippet() + '''
                 run_with_keepalive npx next build $NB_FLAGS
                 if [ -n "${_next_hb}" ]; then kill "${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
                 if [ -d .next/standalone ]; then
@@ -1307,7 +1489,9 @@ echo $?
 
     stage("Step 6 — Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker (aligné Jenkinsfile.paas-deploy.full) ***"
-    materializeProjectBuildEnv(detectAppRoot())
+    def step6AppRoot = detectAppRoot()
+    materializeProjectBuildEnv(step6AppRoot)
+    patchNextBuildEnvIntoConfig(step6AppRoot)
     dockerAvailable = commandExists("docker")
     def dest = normalizeOciImageReference("${imageName}:${env.BUILD_NUMBER}")
     def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"

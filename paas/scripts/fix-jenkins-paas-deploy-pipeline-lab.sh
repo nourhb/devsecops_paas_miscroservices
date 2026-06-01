@@ -98,10 +98,11 @@ if ! bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"; then
 fi
 
 echo ""
-echo "OK — trigger a NEW build (not Rebuild). Step 6 console must show:"
-echo "  marker monorepo-app-root-20260531 in job log"
-echo "  [build] Monorepo/subdir layout — app root: server   (for text-to-floorplan-2D)"
-echo "  [image] crane mutate OK"
+echo "OK — trigger a NEW build (not Rebuild). Console must show:"
+echo "  marker next-config-build-env-20260531"
+echo "  [env] Wrote N variable(s) ... NEXT_PUBLIC_FIREBASE_*"
+echo "  [env] patched next.config.ts with env"
+echo "  [env] verify OK: Firebase ... in .next output"
 echo ""
 echo "If Step 6 still runs npm ci for 15+ min: set JENKINS_PAAS_FAST_PIPELINE=false in docker-compose.env"
 echo "  so Step 3 does npm ci + next build (Step 6 only packages .next/standalone)."

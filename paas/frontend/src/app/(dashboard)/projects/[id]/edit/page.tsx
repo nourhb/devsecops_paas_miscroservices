@@ -118,7 +118,7 @@ export default function EditProjectPage() {
             <div className="space-y-2">
               <Label htmlFor="buildEnv">Application environment (.env) — optional</Label>
               <p className="text-xs text-muted">
-                Stored encrypted (AES-256-GCM) in the database. Values are only loaded on this edit screen. Injected during Jenkins build and synced to Kubernetes on deploy.
+                Stored encrypted in the database. For Next.js/Firebase, <code className="text-xs">NEXT_PUBLIC_*</code> vars are baked into the JS bundle during Jenkins build — save here, then run a full Deploy (not GitOps-only). K8s env from Helm does not fix missing client-side Firebase config.
               </p>
               <Textarea
                 id="buildEnv"

@@ -243,6 +243,25 @@ function redactJenkinsUrl(url: string): string {
 function jenkinsIntegrationFetch(url: string, init?: RequestInit): Promise<Response> {
     return integrationFetch(url, init ?? {}, env.JENKINS_HTTP_TIMEOUT_MS);
 }
+function buildEnvParamSummary(buildEnv: Record<string, string> | null | undefined): string {
+    if (!buildEnv || Object.keys(buildEnv).length === 0) {
+        return "[jenkins] PROJECT_BUILD_ENV_B64: not sent (no build env on project — save Application environment in Edit project)";
+    }
+    const keys = Object.keys(buildEnv);
+    const publicCount = keys.filter((k) => k.startsWith("NEXT_PUBLIC_")).length;
+    return `[jenkins] PROJECT_BUILD_ENV_B64: ${keys.length} key(s), ${publicCount} NEXT_PUBLIC_* (POST body)`;
+}
+async function jenkinsPostBuildWithParameters(base: string, jobPath: string, params: URLSearchParams, headers: Record<string, string>): Promise<Response> {
+    const triggerUrl = `${base}/${jobPath}/buildWithParameters`;
+    return jenkinsIntegrationFetch(triggerUrl, {
+        method: "POST",
+        headers: {
+            ...headers,
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params.toString()
+    });
+}
 function describeJenkinsFetchFailure(error: unknown): string {
     if (!(error instanceof Error)) {
         return String(error);
@@ -539,10 +558,14 @@ export class JenkinsClient {
             }
             const useSimple = env.JENKINS_USE_SIMPLE_BUILD === "true";
             const sharedBuildJob = env.JENKINS_BUILD_JOB_NAME.trim();
-            const triggerUrl = (() => {
-                if (useSimple) {
-                    return `${base}/${jobPath}/build`;
-                }
+            const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
+            let triggerUrl: string;
+            let triggerRes: Response;
+            if (useSimple) {
+                triggerUrl = `${base}/${jobPath}/build`;
+                triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
+            }
+            else {
                 const q = new URLSearchParams();
                 q.set(env.JENKINS_BRANCH_PARAMETER, buildParams.branch);
                 if (sharedBuildJob) {
@@ -558,10 +581,9 @@ export class JenkinsClient {
                 if (buildEnvB64) {
                     q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
                 }
-                return `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
-            })();
-            const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
-            const triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
+                triggerUrl = `${base}/${jobPath}/buildWithParameters`;
+                triggerRes = await jenkinsPostBuildWithParameters(base, jobPath, q, headers);
+            }
             if (!triggerRes.ok) {
                 const errBody = await triggerRes.text();
                 if (allowSimulation()) {
@@ -595,6 +617,7 @@ export class JenkinsClient {
                 }
             }
             const log = [
+                buildEnvParamSummary(buildParams.buildEnv),
                 `[jenkins] Triggered: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
@@ -667,9 +690,9 @@ export class JenkinsClient {
             if (buildEnvB64) {
                 q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
             }
-            const triggerUrl = `${base}/${jobPath}/buildWithParameters?${q.toString()}`;
+            const triggerUrl = `${base}/${jobPath}/buildWithParameters`;
             const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
-            const triggerRes = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
+            const triggerRes = await jenkinsPostBuildWithParameters(base, jobPath, q, headers);
             if (!triggerRes.ok) {
                 const errBody = await triggerRes.text();
                 if (allowSimulation()) {
@@ -703,6 +726,7 @@ export class JenkinsClient {
                 }
             }
             const log = [
+                buildEnvParamSummary(deployParams.buildEnv),
                 `[jenkins] Deploy trigger: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
@@ -1161,9 +1185,11 @@ export class JenkinsClient {
             query.set(key, normalized);
         }
         const triggerUrl = query.size > 0
-            ? `${base}/${jobPath}/buildWithParameters?${query.toString()}`
+            ? `${base}/${jobPath}/buildWithParameters`
             : `${base}/${jobPath}/build`;
-        const response = await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
+        const response = query.size > 0
+            ? await jenkinsPostBuildWithParameters(base, jobPath, query, headers)
+            : await jenkinsIntegrationFetch(triggerUrl, { method: "POST", headers });
         if (!response.ok) {
             const detail = await response.text();
             throw new IntegrationError(`Jenkins build trigger failed (${response.status})`, {
