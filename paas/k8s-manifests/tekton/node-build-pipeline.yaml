@@ -34,7 +34,6 @@ spec:
     - name: clone
       image: alpine/git:2.47.2
       script: |
-        #!/bin/sh
         set -eu
         git clone "$(params.git-url)" /workspace/source/repo
         cd /workspace/source/repo
@@ -43,7 +42,6 @@ spec:
       image: mirror.gcr.io/library/node:20-bookworm-slim
       workingDir: /workspace/source/repo
       script: |
-        #!/bin/sh
         set -eu
         npm config set audit false
         npm config set fund false

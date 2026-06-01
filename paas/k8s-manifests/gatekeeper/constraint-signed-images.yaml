@@ -1,5 +1,3 @@
-# OPA Gatekeeper – Enforce signed images (Cosign)
-# Requires ConstraintTemplate "imagemustbesigned" (or similar) to be installed first.
 ---
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
@@ -28,8 +26,6 @@ spec:
           msg := sprintf("Image %v must be signed with Cosign", [container.image])
         }
         signed(image) {
-          # In practice: verify annotation or external check
-          # Example: require annotation cosign.sig
           input.review.object.metadata.annotations["cosign.sig"]
         }
         input_containers[c] {

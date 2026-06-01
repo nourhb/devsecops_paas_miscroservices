@@ -11,6 +11,7 @@ const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\
 const CRANE_NEXT16_MARKER = "crane-next16-202605";
 const COSIGN_SANDBOX_MARKER = "cosign-sandbox-sh-20260531";
 const MUTATE_CMD_FIX_MARKER = "monorepo-app-root-20260531";
+const ENV_SAFE_DOTENV_LOADER_MARKER = "env-safe-dotenv-loader-20260601";
 const BROKEN_CRANE_MUTATE_CMD_RE = /--entrypoint=\/bin\/sh\s*\\?\s*\n?\s*--cmd=-c[\s\S]*require\("\\\.\/package\.json"\)/m;
 function jenkinsfileHasMutateCmdFix(groovy: string): boolean {
     return groovy.includes(MUTATE_CMD_FIX_MARKER) ||
@@ -86,6 +87,9 @@ function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath:
     }
     if (BROKEN_CRANE_MUTATE_CMD_RE.test(groovy) || !jenkinsfileHasMutateCmdFix(groovy)) {
         throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing Step 6 crane mutate fix — need ${MUTATE_CMD_FIX_MARKER}). Run: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh`);
+    }
+    if (!groovy.includes(ENV_SAFE_DOTENV_LOADER_MARKER)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${ENV_SAFE_DOTENV_LOADER_MARKER} — EMAIL_PASS with spaces breaks . ./.env). Run: bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh`);
     }
 }
 function jenkinsfileRelativePathExists(root: string): boolean {

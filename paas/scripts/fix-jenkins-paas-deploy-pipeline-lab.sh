@@ -34,6 +34,11 @@ if ! grep -qF 'entrypoint=/app/start-paas.sh' "${JENKINSFILE_TO_PUSH}" 2>/dev/nu
   echo "FAIL: Jenkinsfile missing start-paas.sh mutate fix (entrypoint=/app/start-paas.sh)" >&2
   exit 1
 fi
+if ! grep -qF 'env-safe-dotenv-loader-20260601' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing env-safe-dotenv-loader-20260601 (EMAIL_PASS / .env spaces fix)." >&2
+  echo "  Push latest code from your dev machine, then on VM: git pull && bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh" >&2
+  exit 1
+fi
 
 echo "==> 2. Wait for Jenkins API (pod may be Ready before :30090 accepts connections)"
 JENKINS_WAIT_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
@@ -57,6 +62,7 @@ python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 echo "==> 4. Update PaaS pod Jenkinsfile mount (safe even when sync is disabled)"
 if command -v kubectl >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || echo "WARN: ConfigMap sync skipped (no cluster?)"
+  echo "If builds fail on '. ./.env' / EMAIL_PASS spaces: Jenkinsfile now loads .env via Node (no secret echo). Re-trigger deploy after sync."
 fi
 
 echo "==> 5. Patch Jenkins JAVA_OPTS (JENKINS-48300 durable-task heartbeat)"

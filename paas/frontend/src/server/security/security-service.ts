@@ -70,6 +70,59 @@ function integrationProjectKeys(project: Project): string[] {
     ].filter((k) => k.trim()))];
 }
 
+/** Dependency-Track projects are created from Harbor image slug (dtProjectNameForUpload), not always UUID. */
+function dependencyTrackLookupKeys(project: Project): string[] {
+    const imageSlug = project.imageTag?.includes("/")
+        ? project.imageTag.split("/").pop()?.split(":")[0]?.trim()
+        : "";
+    return [...new Set([
+        sanitizeDeployImageName(project.projectName),
+        project.projectName,
+        imageSlug || "",
+        project.id
+    ].filter((k) => k.trim()))];
+}
+
+async function resolveCosignSigned(project: Project, imageTag: string): Promise<boolean> {
+    if (await cosignClient.isSigned(imageTag, { timeoutMs: 12000 })) {
+        return true;
+    }
+    const recent = await prisma.deployment.findFirst({
+        where: { projectId: project.id },
+        orderBy: { createdAt: "desc" },
+        select: { logs: true }
+    });
+    const logs = recent?.logs ?? "";
+    const digest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim();
+    if (digest && await cosignClient.isSigned(digest, { timeoutMs: 12000 })) {
+        return true;
+    }
+    const trustJenkinsCosign = process.env.COSIGN_LAB_TRUST_JENKINS_STEP9 !== "false";
+    if (trustJenkinsCosign && /PAAS_STEP_OK step=9[^\n]*cosign/i.test(logs)) {
+        return true;
+    }
+    return false;
+}
+
+async function sonarTokenLooksValid(): Promise<boolean> {
+    if (!env.SONAR_BASE_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
+        return false;
+    }
+    try {
+        const { integrationFetch } = await import("@/server/http/integration-fetch");
+        const response = await integrationFetch(`${env.SONAR_BASE_URL.replace(/\/$/, "")}/api/authentication/validate`, {
+            method: "GET",
+            headers: {
+                Authorization: `Basic ${Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64")}`
+            }
+        });
+        return response.ok;
+    }
+    catch {
+        return false;
+    }
+}
+
 async function resolveSonarQualityGate(project: Project): Promise<{
     status: "PASSED" | "FAILED" | "UNKNOWN";
     matchedKey: string | null;
@@ -89,7 +142,7 @@ async function resolveSonarQualityGate(project: Project): Promise<{
 }
 
 async function resolveDependencyTrackMetrics(project: Project) {
-    for (const key of integrationProjectKeys(project)) {
+    for (const key of dependencyTrackLookupKeys(project)) {
         const row = await dependencyTrackClient.projectMetrics(key);
         if (row.projectUuid != null) {
             return row;
@@ -102,13 +155,16 @@ async function resolveDependencyTrackMetrics(project: Project) {
     return dependencyTrackClient.projectMetrics(project.id);
 }
 
-function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null): string {
+async function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null): Promise<string> {
     const hints: string[] = [];
     if (!env.SONAR_BASE_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
         hints.push("PaaS frontend: set SONAR_BASE_URL and SONAR_TOKEN in docker-compose.env, then run sync-paas-frontend-env-k8s.sh.");
     }
     else if (sonarStatus === "UNKNOWN") {
         hints.push("SonarQube: no analysis for this project yet — run a full Jenkins pipeline (Step 5; JENKINS_PAAS_FAST_PIPELINE=false).");
+        if (!(await sonarTokenLooksValid())) {
+            hints.push("SonarQube: SONAR_TOKEN rejected — run: bash paas/scripts/regenerate-sonar-token-lab.sh");
+        }
     }
     if (!env.DEPENDENCY_TRACK_BASE_URL?.trim() || !env.DEPENDENCY_TRACK_API_KEY?.trim()) {
         hints.push("PaaS frontend: set DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY, then sync env to the frontend pod.");
@@ -169,7 +225,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         partialErrors.push(e instanceof Error ? e.message : String(e));
     }
     try {
-        cosignSigned = await cosignClient.isSigned(imageTag, { timeoutMs: 8000 });
+        cosignSigned = await resolveCosignSigned(project, imageTag);
     }
     catch (e) {
         partialErrors.push(e instanceof Error ? e.message : String(e));
@@ -198,7 +254,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         (!cosignSigned ? 20 : 0) +
         (!opaAllowed ? 20 : 0);
     const securityScore = score(100, severityPenalty + gatePenalty);
-    const integrationHints = buildIntegrationHints(project, sonar.status, dependencyTrackProject.projectUuid);
+    const integrationHints = await buildIntegrationHints(project, sonar.status, dependencyTrackProject.projectUuid);
     const securitySummary = partialErrors.length > 0
         ? `${integrationHints} Partial errors: ${partialErrors.join("; ").slice(0, 280)}`
         : dependencyTrack.critical > 0

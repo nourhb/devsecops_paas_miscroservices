@@ -11,9 +11,6 @@ spec:
         any:
           - resources:
               kinds:
-                # Pod only: Kyverno autogen expands this to Deployment/StatefulSet/DaemonSet
-                # with the correct spec.template.spec path. Matching Deployment directly with a
-                # Pod-shaped pattern rejects valid Deployments (spec.containers is under template).
                 - Pod
       exclude:
         any:

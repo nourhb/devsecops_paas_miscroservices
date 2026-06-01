@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { buildAppIngressHost } from "@/server/deploy/app-public-url";
+import { resolveDeploymentStrategy } from "@/server/gitops/gitops-blue-green";
 import { resolveDeployProfileSpec, type DeployProfileSpec } from "@/server/deploy/deploy-profile";
 import type { BuildProfile } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
@@ -11,6 +12,7 @@ const CHART_RELATIVE_FILES = [
     "Chart.yaml",
     "templates/_helpers.tpl",
     "templates/deployment.yaml",
+    "templates/deployment-bluegreen.yaml",
     "templates/service.yaml",
     "templates/ingress.yaml"
 ];
@@ -185,6 +187,10 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     }
     if (!Array.isArray(doc.env)) {
         doc.env = [];
+    }
+    if (!doc.deploymentStrategy && resolveDeploymentStrategy(null) === "BlueGreen") {
+        doc.deploymentStrategy = "BlueGreen";
+        doc.activeSlot = doc.activeSlot === "green" ? "green" : "blue";
     }
     const pinNode = env.APPS_LAB_NODE_SELECTOR.trim();
     if (pinNode) {

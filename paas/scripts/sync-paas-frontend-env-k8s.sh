@@ -8,7 +8,9 @@ PAAS_NS="${PAAS_NS:-paas}"
 DEPLOY_NAME="${DEPLOY_NAME:-frontend}"
 CONTAINER_NAME="${CONTAINER_NAME:-frontend}"
 SECRET_NAME="${SECRET_NAME:-paas-frontend-env}"
-FILTERED="/tmp/paas-frontend-env-$$.env"
+umask 077
+FILTERED="$(mktemp "${TMPDIR:-/tmp}/paas-frontend-env.XXXXXX")"
+trap 'rm -f "${FILTERED}"' EXIT
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: env file not found: ${ENV_FILE}" >&2
@@ -45,9 +47,9 @@ if ! grep -qE '^DATABASE_URL=.*postgres\.paas\.svc\.cluster\.local' "${FILTERED}
   echo "ERROR: DATABASE_URL must use postgres.paas.svc.cluster.local for Kubernetes PaaS." >&2
   echo "       Do not use postgres:5432 (Docker Compose) or localhost." >&2
   echo "       Fix ${ENV_FILE} then re-run this script." >&2
-  rm -f "${FILTERED}"
   exit 1
 fi
+chmod 600 "${FILTERED}" 2>/dev/null || true
 
 if ! grep -qE '^SMTP_HOST=' "${FILTERED}"; then
   echo "WARN: SMTP_HOST missing in ${ENV_FILE} — verification mail will use console mode only."
@@ -58,8 +60,6 @@ kubectl create secret generic "${SECRET_NAME}" \
   --from-env-file="${FILTERED}" \
   -n "${PAAS_NS}" \
   --dry-run=client -o yaml | kubectl apply -f -
-
-rm -f "${FILTERED}"
 
 echo "==> Attach envFrom secret to deployment/${DEPLOY_NAME}"
 kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH

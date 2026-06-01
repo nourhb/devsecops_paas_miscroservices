@@ -199,6 +199,9 @@ const envSchema = z.object({
     PAAS_DEPLOY_WAIT_ARGO_MS: z.coerce.number().int().min(10000).default(300000),
     PAAS_DEPLOY_WAIT_HTTP_MS: z.coerce.number().int().min(10000).default(180000),
     PAAS_DEPLOY_HTTP_POLL_MS: z.coerce.number().int().min(1000).default(5000),
+    /** Rolling (default) or BlueGreen — BlueGreen deploys to inactive slot then flips Service selector. */
+    PAAS_DEPLOYMENT_STRATEGY: z.enum(["Rolling", "BlueGreen", "rolling", "bluegreen"]).default("Rolling"),
+    PAAS_BLUE_GREEN_WAIT_DEPLOY_MS: z.coerce.number().int().min(10000).default(300000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
     NOTIFY_PIPELINE_FAILURE_EMAILS: z.enum(["true", "false"]).default("true"),
     PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
@@ -279,6 +282,14 @@ function collectProductionEnvErrors(parsedEnv: z.infer<typeof envSchema>) {
     }
     if (parsedEnv.JWT_SECRET === "change-this-dev-secret-to-32-char-min") {
         errors.push("JWT_SECRET still default");
+    }
+    const gitopsToken = parsedEnv.GITOPS_REPO_TOKEN.trim();
+    if (gitopsToken && /ghp_your_|your_github|changeme|example|placeholder/i.test(gitopsToken)) {
+        errors.push("GITOPS_REPO_TOKEN looks like a placeholder");
+    }
+    const jenkinsToken = parsedEnv.JENKINS_API_TOKEN.trim();
+    if (jenkinsToken && /changeme|example|placeholder|your_token/i.test(jenkinsToken)) {
+        errors.push("JENKINS_API_TOKEN looks like a placeholder");
     }
     if (!parsedEnv.JENKINS_BASE_URL || !parsedEnv.JENKINS_USERNAME || !parsedEnv.JENKINS_API_TOKEN) {
         errors.push("need Jenkins URL + user + token");
@@ -447,6 +458,8 @@ const parsed = envSchema.safeParse({
     PAAS_DEPLOY_WAIT_ARGO_MS: process.env.PAAS_DEPLOY_WAIT_ARGO_MS,
     PAAS_DEPLOY_WAIT_HTTP_MS: process.env.PAAS_DEPLOY_WAIT_HTTP_MS,
     PAAS_DEPLOY_HTTP_POLL_MS: process.env.PAAS_DEPLOY_HTTP_POLL_MS,
+    PAAS_DEPLOYMENT_STRATEGY: process.env.PAAS_DEPLOYMENT_STRATEGY,
+    PAAS_BLUE_GREEN_WAIT_DEPLOY_MS: process.env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS,
     AUTH_ALLOW_UNVERIFIED_LOGIN: process.env.AUTH_ALLOW_UNVERIFIED_LOGIN,
     NOTIFY_PIPELINE_FAILURE_EMAILS: process.env.NOTIFY_PIPELINE_FAILURE_EMAILS,
     PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS,

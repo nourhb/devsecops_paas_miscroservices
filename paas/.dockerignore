@@ -1,4 +1,3 @@
-# Build context root is paas/
 
 .git
 **/node_modules
@@ -12,7 +11,12 @@ frontend/test-results
 frontend/playwright-report
 frontend/blob-report
 
-# Never bake local secrets into the image
-**/frontend/.env
-**/frontend/.env.*
+**/.env
+**/.env.*
+!**/.env.example
+**/docker-compose.env
+!**/docker-compose.env.example
+**/.lab-cosign/
+**/*.pem
+**/cosign.key
 **/frontend/*.local

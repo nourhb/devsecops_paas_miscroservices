@@ -1,6 +1,13 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
 import type { BuildProfile } from "@/server/build-planner";
+import {
+    applyBlueGreenInactiveImage,
+    flipBlueGreenActiveSlot,
+    inactiveSlot,
+    resolveDeploymentStrategy,
+    type BlueGreenSlot
+} from "@/server/gitops/gitops-blue-green";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
 import { mergeBuildEnvIntoHelmValues } from "@/server/projects/project-build-env";
 import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
@@ -64,6 +71,30 @@ function setImageTag(doc: Record<string, unknown>, imageTag: string): void {
     }
     doc.imageTag = imageTag;
 }
+function applyImageToValuesDoc(
+    doc: Record<string, unknown>,
+    projectName: string,
+    imageTag: string,
+    blueGreenPhase?: "inactive" | "flip"
+): void {
+    const strategy = resolveDeploymentStrategy(doc);
+    if (strategy !== "BlueGreen") {
+        setImageTag(doc, imageTag);
+        return;
+    }
+    if (blueGreenPhase === "flip") {
+        flipBlueGreenActiveSlot(doc);
+        return;
+    }
+    applyBlueGreenInactiveImage(doc, projectName, imageTag);
+}
+function readBlueGreenSlots(doc: Record<string, unknown>): {
+    activeSlot: BlueGreenSlot;
+    inactiveSlot: BlueGreenSlot;
+} {
+    const activeSlot: BlueGreenSlot = doc.activeSlot === "green" ? "green" : "blue";
+    return { activeSlot, inactiveSlot: inactiveSlot(activeSlot) };
+}
 const githubHeaders = (token: string) => ({
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github+json",
@@ -72,10 +103,16 @@ const githubHeaders = (token: string) => ({
 export async function commitHelmValuesGitHub(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
     buildEnv?: Record<string, string> | null;
+    /** BlueGreen: deploy image to inactive slot, or flip traffic to that slot. */
+    blueGreenPhase?: "inactive" | "flip";
 }): Promise<{
     committed: boolean;
     ref: string;
     chartBootstrapped: boolean;
+    blueGreen?: {
+        activeSlot: BlueGreenSlot;
+        inactiveSlot: BlueGreenSlot;
+    };
 }> {
     if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
         if (allowSimulation()) {
@@ -89,10 +126,15 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
 async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
     buildEnv?: Record<string, string> | null;
+    blueGreenPhase?: "inactive" | "flip";
 }): Promise<{
     committed: boolean;
     ref: string;
     chartBootstrapped: boolean;
+    blueGreen?: {
+        activeSlot: BlueGreenSlot;
+        inactiveSlot: BlueGreenSlot;
+    };
 }> {
     const buildProfile = options?.buildProfile ?? "node";
     const buildEnv = options?.buildEnv ?? null;
@@ -125,9 +167,14 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         }
         throw new IntegrationError(`GitHub GET ${path} failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+    const bgPhase = options?.blueGreenPhase;
     const message = bootstrap.bootstrapped
         ? `chore(gitops): bootstrap ${projectName} Helm chart and bump ${imageTag}`
-        : env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
+        : bgPhase === "flip"
+            ? `chore(gitops): ${projectName} blue-green traffic switch`
+            : bgPhase === "inactive"
+                ? `chore(gitops): ${projectName} blue-green deploy ${imageTag} (inactive slot)`
+                : env.GITOPS_COMMIT_MESSAGE_TEMPLATE.replace(/\{\{projectName\}\}/g, projectName).replace(/\{\{imageTag\}\}/g, imageTag);
 
     async function loadExistingValues(): Promise<{
         sha?: string;
@@ -147,6 +194,12 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         };
         applyDeployValuesDefaults(doc, projectName, buildProfile);
         mergeBuildEnvIntoHelmValues(doc, buildEnv);
+        if (bgPhase !== "flip") {
+            applyImageToValuesDoc(doc, projectName, imageTag, bgPhase ?? (resolveDeploymentStrategy(doc) === "BlueGreen" ? "inactive" : undefined));
+        }
+        else {
+            applyImageToValuesDoc(doc, projectName, imageTag, "flip");
+        }
         return { contentYaml: stringifyYaml(doc) };
     }
         if (!res.ok) {
@@ -166,7 +219,7 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         if (!doc || typeof doc !== "object") {
             throw new IntegrationError(`Values file ${path} is not a YAML object.`);
         }
-        setImageTag(doc, imageTag);
+        applyImageToValuesDoc(doc, projectName, imageTag, bgPhase);
         applyDeployValuesDefaults(doc, projectName, buildProfile);
         mergeBuildEnvIntoHelmValues(doc, buildEnv);
         return { sha: meta.sha, contentYaml: stringifyYaml(doc) };
@@ -228,10 +281,15 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
                     sha?: string;
                 };
             };
+            const parsed = parseYaml(contentYaml) as Record<string, unknown>;
+            const blueGreen = resolveDeploymentStrategy(parsed) === "BlueGreen"
+                ? readBlueGreenSlots(parsed)
+                : undefined;
             return {
                 committed: true,
                 ref: result.commit?.sha ?? `${branch}:${path}`,
-                chartBootstrapped: bootstrap.bootstrapped
+                chartBootstrapped: bootstrap.bootstrapped,
+                blueGreen
             };
         }
         const t = await putRes.text();

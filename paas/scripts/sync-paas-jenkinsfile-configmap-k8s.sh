@@ -20,6 +20,10 @@ if ! grep -qF 'monorepo-app-root-20260531' "${JENKINSFILE}"; then
   echo "ERROR: Jenkinsfile missing monorepo-app-root-20260531 (Step 6 mutate in server/ fix) — git pull origin main" >&2
   exit 1
 fi
+if ! grep -qF 'env-safe-dotenv-loader-20260601' "${JENKINSFILE}"; then
+  echo "ERROR: Jenkinsfile missing env-safe-dotenv-loader-20260601 (EMAIL_PASS / .env spaces fix) — git pull" >&2
+  exit 1
+fi
 if ! grep -qF 'next-config-build-env-20260531' "${JENKINSFILE}"; then
   echo "ERROR: Jenkinsfile missing next-config-build-env-20260531 (PROJECT_BUILD_ENV_B64 / Firebase) — git pull origin main on dev machine and push" >&2
   exit 1

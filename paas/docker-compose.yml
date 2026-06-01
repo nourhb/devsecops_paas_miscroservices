@@ -17,7 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Use the default Compose network so DATABASE_URL host "postgres" resolves (host network breaks that name).
   db-push:
     build:
       context: .
@@ -41,13 +40,13 @@ services:
       db-push:
         condition: service_completed_successfully
     env_file:
+      # Real secrets live in docker-compose.env (gitignored). Optional paas/.env override (also gitignored).
       - path: frontend/docker-compose.env
         required: true
       - path: .env
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC
-      # Must match the kubeconfig volume mount below (overrides a host-only path from .env).
       KUBE_CONFIG_PATH: /home/nextjs/.kube/config
       NEXT_PUBLIC_API_BASE_URL: ""
       PAAS_STRICT_INTEGRATIONS: "false"
@@ -59,7 +58,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ..:/monorepo:ro
-      # Optional cluster credentials: set KUBECONFIG_HOST_PATH in paas/.env if the default mount is wrong for your host.
       - ${KUBECONFIG_HOST_PATH:-${HOME}/.kube/config}:/home/nextjs/.kube/config:ro
     ports:
       - "3000:3000"

@@ -599,6 +599,36 @@ export async function listClusterDeployments(): Promise<{
         };
     }
 }
+export async function waitForDeploymentReady(
+    namespace: string,
+    deploymentName: string,
+    timeoutMs: number
+): Promise<{ ready: boolean; message: string }> {
+    const api = getAppsV1Api();
+    if (!api) {
+        return { ready: false, message: "Kubernetes API not configured." };
+    }
+    const deadline = Date.now() + Math.max(10000, timeoutMs);
+    let lastStatus = "waiting";
+    while (Date.now() < deadline) {
+        try {
+            const { body: deployment } = await api.readNamespacedDeployment(deploymentName, namespace);
+            const ready = deployment.status?.readyReplicas ?? 0;
+            const desired = deployment.status?.replicas ?? 1;
+            if (ready >= desired && desired > 0) {
+                return { ready: true, message: `${deploymentName}: ${ready}/${desired} ready` };
+            }
+            const cond = deployment.status?.conditions?.find((c) => c.type === "Available");
+            lastStatus = cond?.reason || `ready=${ready}/${desired}`;
+        }
+        catch (e) {
+            lastStatus = kubernetesErrorMessage(e);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    return { ready: false, message: `${deploymentName}: timeout (${lastStatus})` };
+}
+
 export async function getClusterNodeCount(): Promise<number | null> {
     const api = getCoreV1Api();
     if (!api) {

@@ -7,7 +7,12 @@ import { buildMetadataLines, formatArtifactReference } from "@/server/build-meta
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import {
+    blueGreenDeploymentName,
+    resolveDeploymentStrategy
+} from "@/server/gitops/gitops-blue-green";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
+import { waitForDeploymentReady } from "@/server/integrations/kubernetes-client";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
@@ -26,6 +31,57 @@ interface PromoteDeploymentInput {
     artifactImage: string | null;
     artifactDigest: string | null;
     buildLogTail: string;
+}
+
+function useBlueGreenDeploy(): boolean {
+    return resolveDeploymentStrategy(null) === "BlueGreen";
+}
+
+async function appendArgoSyncAndWait(
+    sections: string[],
+    projectName: string,
+    destNamespace: string
+): Promise<{ argoSyncOk: boolean; shouldAbort: boolean }> {
+    let argoSyncOk = false;
+    try {
+        const argo = await syncArgoApplication(projectName, destNamespace);
+        sections.push(argo.logs);
+        if (/Sync accepted|Sync triggered|already exists|created/i.test(argo.logs)) {
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=OK detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
+            argoSyncOk = true;
+        }
+        else if (/WARN/i.test(argo.logs)) {
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=WARN detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
+        }
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
+        if (lenientIntegrations) {
+            sections.push(`[argocd] WARN: ${msg} — continuing to wait for cluster (PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}).`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=WARN detail=${msg.slice(0, 400)}`);
+        }
+        else {
+            sections.push(`[argocd] FAILED: ${msg}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=FAIL detail=${msg.slice(0, 400)}`);
+            return { argoSyncOk: false, shouldAbort: true };
+        }
+    }
+    if (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true") {
+        const argoWait = await waitForArgoApplicationReady(projectName, { timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS });
+        sections.push(argoWait.logs);
+        if (argoWait.ready) {
+            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK detail=Healthy+Synced");
+        }
+        else if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=FAIL detail=timeout");
+            return { argoSyncOk, shouldAbort: true };
+        }
+        else {
+            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=WARN detail=timeout");
+        }
+    }
+    return { argoSyncOk, shouldAbort: false };
 }
 
 async function persistFailure(deploymentId: string, projectId: string, fullLog: string, reason: DeploymentFailureReason, shortMessage: string): Promise<void> {
@@ -151,14 +207,61 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     for (const warning of namespacePrep.warnings) {
         sections.push(`[k8s] WARN: ${warning}`);
     }
+    const gitopsOptions = {
+        buildProfile: buildPlan.profile,
+        buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
+    };
+    const blueGreen = useBlueGreenDeploy();
+    let argoSyncOk = false;
     try {
-        const git = await commitHelmValuesGitHub(projectName, artifactRef, {
-            buildProfile: buildPlan.profile,
-            buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
-        });
-        sections.push(`[gitops] committed ${git.ref}`);
-        const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/simple-app" : "";
-        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}${bootstrapNote}`);
+        if (blueGreen) {
+            sections.push("[deploy] strategy=BlueGreen phase=inactive");
+            const gitInactive = await commitHelmValuesGitHub(projectName, artifactRef, {
+                ...gitopsOptions,
+                blueGreenPhase: "inactive"
+            });
+            sections.push(`[gitops] inactive slot committed ${gitInactive.ref}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=gitops_inactive status=OK detail=${gitInactive.ref}`);
+            sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+            const argoInactive = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+            if (argoInactive.shouldAbort) {
+                await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green inactive deploy.");
+                return;
+            }
+            argoSyncOk = argoInactive.argoSyncOk;
+            const inactiveSlot = gitInactive.blueGreen?.inactiveSlot ?? "green";
+            const inactiveDeploy = blueGreenDeploymentName(projectName, inactiveSlot);
+            sections.push(`[blue-green] waiting for ${inactiveDeploy} in ${destNamespace}…`);
+            const slotReady = await waitForDeploymentReady(destNamespace, inactiveDeploy, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
+            sections.push(`[blue-green] ${slotReady.message}`);
+            if (!slotReady.ready) {
+                const msg = `Inactive slot deployment not ready: ${slotReady.message}`;
+                sections.push(`PAAS_DEPLOY_VERIFY step=blue_green_inactive status=FAIL detail=${msg.slice(0, 400)}`);
+                await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
+                return;
+            }
+            sections.push("PAAS_DEPLOY_VERIFY step=blue_green_inactive status=OK");
+            sections.push("[deploy] strategy=BlueGreen phase=flip");
+            const gitFlip = await commitHelmValuesGitHub(projectName, artifactRef, {
+                ...gitopsOptions,
+                blueGreenPhase: "flip"
+            });
+            sections.push(`[gitops] traffic switch committed ${gitFlip.ref} active=${gitFlip.blueGreen?.activeSlot ?? "?"}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=gitops_flip status=OK detail=${gitFlip.ref}`);
+        }
+        else {
+            const git = await commitHelmValuesGitHub(projectName, artifactRef, gitopsOptions);
+            sections.push(`[gitops] committed ${git.ref}`);
+            const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/simple-app" : "";
+            sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}${bootstrapNote}`);
+            sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+            const argoRolling = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+            if (argoRolling.shouldAbort) {
+                await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD application did not become Healthy and Synced in time.");
+                return;
+            }
+            argoSyncOk = argoRolling.argoSyncOk;
+        }
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -167,47 +270,14 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
         return;
     }
-    sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-    let argoSyncOk = false;
-    try {
-        const argo = await syncArgoApplication(projectName, destNamespace);
-        sections.push(argo.logs);
-        if (/Sync accepted|Sync triggered|already exists|created/i.test(argo.logs)) {
-            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=OK detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
-            argoSyncOk = true;
-        }
-        else if (/WARN/i.test(argo.logs)) {
-            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=WARN detail=${argo.logs.replace(/\s+/g, " ").slice(0, 300)}`);
-        }
-    }
-    catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
-        if (lenientIntegrations) {
-            sections.push(`[argocd] WARN: ${msg} — continuing to wait for cluster (PAAS_STRICT_INTEGRATIONS=${env.PAAS_STRICT_INTEGRATIONS}).`);
-            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=WARN detail=${msg.slice(0, 400)}`);
-        }
-        else {
-            sections.push(`[argocd] FAILED: ${msg}`);
-            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=FAIL detail=${msg.slice(0, 400)}`);
-            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
+    if (blueGreen) {
+        sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+        const argoFlip = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+        if (argoFlip.shouldAbort) {
+            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green traffic switch.");
             return;
         }
-    }
-    if (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true") {
-        const argoWait = await waitForArgoApplicationReady(projectName, { timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS });
-        sections.push(argoWait.logs);
-        if (argoWait.ready) {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK detail=Healthy+Synced");
-        }
-        else if (env.PAAS_STRICT_INTEGRATIONS === "true") {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=FAIL detail=timeout");
-            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD application did not become Healthy and Synced in time.");
-            return;
-        }
-        else {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=WARN detail=timeout");
-        }
+        argoSyncOk = argoFlip.argoSyncOk;
     }
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
