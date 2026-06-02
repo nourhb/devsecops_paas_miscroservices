@@ -4,7 +4,8 @@ import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
-import { cosignClient, dependencyTrackClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
+import { cosignClient, dependencyTrackClient, jenkinsClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
+import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { getProjectById } from "@/server/projects/project-service";
 
 function score(base: number, penalty: number): number {
@@ -83,23 +84,72 @@ function dependencyTrackLookupKeys(project: Project): string[] {
     ].filter((k) => k.trim()))];
 }
 
-async function resolveCosignSigned(project: Project, imageTag: string): Promise<boolean> {
-    if (await cosignClient.isSigned(imageTag, { timeoutMs: 12000 })) {
-        return true;
+function normalizeCosignDigestRef(imageTag: string, rawDigest: string): string {
+    const digest = rawDigest.trim();
+    if (!digest) {
+        return "";
     }
+    if (digest.includes("/") || digest.includes("@")) {
+        return digest;
+    }
+    if (/^sha256:[a-f0-9]{64}$/i.test(digest)) {
+        const repo = imageTag.replace(/:[^@]+$/, "").replace(/@.*$/, "").trim();
+        return repo ? `${repo}@${digest}` : digest;
+    }
+    return digest;
+}
+
+async function deploymentLogsForCosign(project: Project): Promise<string> {
     const recent = await prisma.deployment.findFirst({
         where: { projectId: project.id },
         orderBy: { createdAt: "desc" },
-        select: { logs: true }
+        select: { logs: true, jenkinsBuildNumber: true }
     });
-    const logs = recent?.logs ?? "";
-    const digest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
-        ?? logs.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim();
-    if (digest && await cosignClient.isSigned(digest, { timeoutMs: 12000 })) {
+    let logs = recent?.logs ?? "";
+    const buildNum = recent?.jenkinsBuildNumber;
+    const needsJenkins =
+        buildNum != null &&
+        !/PAAS_(COSIGN_DIGEST|IMAGE_DIGEST)=/i.test(logs) &&
+        !/PAAS_STEP_OK step=9 id=cosign/i.test(logs);
+    if (needsJenkins) {
+        try {
+            const console = await jenkinsClient.getBuildConsoleText(
+                project.projectName,
+                project.id,
+                buildNum,
+                "deploy"
+            );
+            if (console?.trim()) {
+                logs = console.length <= DEPLOYMENT_LOG_TAIL_MAX_CHARS
+                    ? console
+                    : console.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
+            }
+        }
+        catch {
+            // keep DB tail
+        }
+    }
+    return logs;
+}
+
+async function resolveCosignSigned(project: Project, imageTag: string): Promise<boolean> {
+    const verifyTimeoutMs = 30000;
+    if (await cosignClient.isSigned(imageTag, { timeoutMs: verifyTimeoutMs })) {
+        return true;
+    }
+    const logs = await deploymentLogsForCosign(project);
+    const rawDigest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
+        ?? logs.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim()
+        ?? "";
+    const digestRef = normalizeCosignDigestRef(imageTag, rawDigest);
+    if (digestRef && await cosignClient.isSigned(digestRef, { timeoutMs: verifyTimeoutMs })) {
         return true;
     }
     const trustJenkinsCosign = process.env.COSIGN_LAB_TRUST_JENKINS_STEP9 !== "false";
-    if (trustJenkinsCosign && /PAAS_STEP_OK step=9[^\n]*cosign/i.test(logs)) {
+    if (trustJenkinsCosign && (
+        /PAAS_STEP_OK step=9 id=cosign/i.test(logs) ||
+        /\[cosign\] signing digest /i.test(logs)
+    )) {
         return true;
     }
     return false;
