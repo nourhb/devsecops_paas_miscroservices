@@ -1603,6 +1603,7 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
+      println "[paas-jenkinsfile] marker=sonar-login-token-20260602 (native scanner needs -Dsonar.login + -Dsonar.token)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -1659,6 +1660,7 @@ exit 0
             LOG=/tmp/sonar-scanner-$$.log
             npx --yes sonarqube-scanner@4.2.8 \
               -Dsonar.host.url="${SONAR_HOST_URL}" \
+              -Dsonar.login="${SONAR_TOKEN}" \
               -Dsonar.token="${SONAR_TOKEN}" \
               -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
               -Dsonar.projectName="${SONAR_PROJECT_KEY}" \
@@ -1709,6 +1711,9 @@ docker run --rm \
   -e SONAR_TOKEN="$SONAR_SCAN_TOKEN" \
   -v "${SONAR_WS}:/usr/src" \
   sonarsource/sonar-scanner-cli:latest \
+  -Dsonar.host.url="$SONAR_SCAN_HOST_URL" \
+  -Dsonar.login="$SONAR_SCAN_TOKEN" \
+  -Dsonar.token="$SONAR_SCAN_TOKEN" \
   -Dsonar.projectKey="$SONAR_SCAN_PROJECT_KEY" \
   -Dsonar.projectName="$SONAR_SCAN_PROJECT_KEY" \
   -Dsonar.projectVersion="$SONAR_SCAN_PROJECT_VERSION" \
