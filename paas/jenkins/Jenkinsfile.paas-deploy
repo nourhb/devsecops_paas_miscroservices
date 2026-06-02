@@ -1010,7 +1010,7 @@ PAAS_START
     fi
     echo "[image] crane mutate OK"
     mkdir -p paas-artifacts
-    DIGEST_REF="$('${craneBin}' ${craneInsecure} digest '${imageRef}' 2>/dev/null | tr -d '\\r\\n' || true)"
+    DIGEST_REF="\$('${craneBin}' ${craneInsecure} digest '${imageRef}' 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
       echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
@@ -1046,7 +1046,7 @@ def cosignSignImageShellSnippet() {
                 printf '%s' "${d}"
                 return 0
               fi
-              if printf '%s' "${d}" | grep -qE '^sha256:[a-f0-9]{64}$'; then
+              if printf '%s' "${d}" | grep -qE '^sha256:[a-f0-9]{64}\$'; then
                 local repo="${img%%@*}"
                 repo="${repo%:*}"
                 printf '%s@%s' "${repo}" "${d}"
@@ -1055,7 +1055,7 @@ def cosignSignImageShellSnippet() {
               # Harbor cosign triangulate: repo:sha256-<hex>.sig (not @sha256: — still signable once normalized)
               local tri=""
               tri="$("${COSIGN_EXE}" triangulate "${img}" 2>/dev/null || true)"
-              if printf '%s' "${tri}" | grep -qE ':sha256-[a-f0-9]{64}(\\.sig)?$'; then
+              if printf '%s' "${tri}" | grep -qE ':sha256-[a-f0-9]{64}(\\.sig)?\$'; then
                 local repo="${tri%%:sha256-*}"
                 local hex="${tri#*:sha256-}"
                 hex="${hex%.sig}"
@@ -1164,6 +1164,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=env-safe-dotenv-loader-20260601 (Node loads .env — fixes EMAIL_PASS spaces; no . ./.env)"
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
   println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
+  println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
