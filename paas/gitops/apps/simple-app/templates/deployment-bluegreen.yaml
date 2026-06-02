@@ -39,7 +39,7 @@ spec:
           {{- $slotImg := index $root.Values $slot | default dict }}
           {{- $slotImage := $slotImg.image | default dict }}
           {{- $repo := $slotImage.repository | default $root.Values.image.repository }}
-          image: "{{ $repo }}{{- if $slotImage.digest }}@{{ $slotImage.digest }}{{- else if $slotImage.tag }}:{{ $slotImage.tag }}{{- else }}:latest{{- end }}"
+          image: "{{ $repo }}{{- if $slotImage.digest }}@{{ $slotImage.digest }}{{- else if $slotImage.tag }}:{{ $slotImage.tag }}{{- else if $root.Values.image.tag }}:{{ $root.Values.image.tag }}{{- else }}:latest{{- end }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             readOnlyRootFilesystem: false

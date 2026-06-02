@@ -1009,7 +1009,73 @@ PAAS_START
         --exposed-ports=3000/tcp
     fi
     echo "[image] crane mutate OK"
+    mkdir -p paas-artifacts
+    DIGEST_REF="$('${craneBin}' ${craneInsecure} digest '${imageRef}' 2>/dev/null | tr -d '\\r\\n' || true)"
+    if [ -n "\${DIGEST_REF}" ]; then
+      echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}" >> paas-artifacts/cosign-meta.txt
+    fi
   """
+}
+
+/** Shell helpers for Step 9 — sign tag + digest (Harbor needs digest signature for Kyverno verifyImages). */
+def cosignSignImageShellSnippet() {
+  return '''
+            set +e
+            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            sign_img() {
+              if [ -n "${INSEC}" ]; then
+                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "$1"
+              else
+                "${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "$1"
+              fi
+            }
+            resolve_digest_ref() {
+              local img="$1"
+              local d=""
+              if [ -f paas-artifacts/image-digest-ref.txt ]; then
+                d="$(tr -d '\\r\\n' < paas-artifacts/image-digest-ref.txt)"
+              fi
+              if [ -z "${d}" ] && [ -n "${CRANE_BIN:-}" ] && [ -x "${CRANE_BIN}" ]; then
+                d="$("${CRANE_BIN}" digest "${img}" 2>/dev/null | tr -d '\\r\\n' || true)"
+              elif [ -z "${d}" ] && command -v crane >/dev/null 2>&1; then
+                d="$(crane digest "${img}" 2>/dev/null | tr -d '\\r\\n' || true)"
+              fi
+              if printf '%s' "${d}" | grep -q '@sha256:'; then
+                printf '%s' "${d}"
+                return 0
+              fi
+              if printf '%s' "${d}" | grep -qE '^sha256:[a-f0-9]{64}$'; then
+                local repo="${img%%@*}"
+                repo="${repo%:*}"
+                printf '%s@%s' "${repo}" "${d}"
+                return 0
+              fi
+              # Harbor cosign triangulate: repo:sha256-<hex>.sig (not @sha256: — still signable once normalized)
+              local tri=""
+              tri="$("${COSIGN_EXE}" triangulate "${img}" 2>/dev/null || true)"
+              if printf '%s' "${tri}" | grep -qE ':sha256-[a-f0-9]{64}(\\.sig)?$'; then
+                local repo="${tri%%:sha256-*}"
+                local hex="${tri#*:sha256-}"
+                hex="${hex%.sig}"
+                printf '%s@sha256:%s' "${repo}" "${hex}"
+                return 0
+              fi
+              return 1
+            }
+            COSIGN_KEY="${COSIGN_KEY_FILE:-${LAB_KEY:-paas-cosign-private.key}}"
+            DIGEST="$(resolve_digest_ref "${COSIGN_IMG}" || true)"
+            if [ -n "${DIGEST}" ]; then
+              echo "[cosign] signing digest ${DIGEST}"
+              sign_img "${DIGEST}" || exit $?
+              mkdir -p paas-artifacts
+              echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
+            fi
+            echo "[cosign] signing tag ${COSIGN_IMG}"
+            sign_img "${COSIGN_IMG}" || exit $?
+            exit 0
+          '''
 }
 
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
@@ -1097,6 +1163,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=env-decode-node-20260601 (materialize .env via Node — avoids Jenkins decodeBase64 sandbox)"
   println "[paas-jenkinsfile] marker=env-safe-dotenv-loader-20260601 (Node loads .env — fixes EMAIL_PASS spaces; no . ./.env)"
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
+  println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -1848,81 +1915,43 @@ EOF
       }
       def insecure = (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim().equalsIgnoreCase("true")
       def insecureFlag = insecure ? "--allow-insecure-registry" : ""
+      def craneBinCosign = ""
+      if (imagePublishedViaCrane) {
+        try {
+          craneBinCosign = ensureCraneTool()
+        } catch (Throwable ignored) {
+          println "[cosign] crane unavailable for digest resolve — tag sign only"
+        }
+      }
       if (commandExists("docker") && env.HARBOR_REGISTRY?.trim() && env.HARBOR_USERNAME?.trim() && env.HARBOR_PASSWORD?.trim()) {
         sh """
           set +e
           echo "\${HARBOR_PASSWORD}" | docker login "\${HARBOR_REGISTRY}" -u "\${HARBOR_USERNAME}" --password-stdin
         """
       }
+      def cosignEnvBase = [
+        "COSIGN_EXE=${cosignExe}",
+        "COSIGN_IMG=${cosignImageRef}",
+        "INSEC=${insecureFlag}",
+        "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}",
+        "CRANE_BIN=${craneBinCosign}"
+      ]
+      def cosignSignSh = cosignSignImageShellSnippet()
       if (credId) {
         withCredentials([file(credentialsId: credId, variable: "COSIGN_KEY_FILE")]) {
-          withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}"]) {
-            sh '''
-              set +e
-              export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
-              if [ -n "${INSEC}" ]; then
-                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY_FILE}" "${COSIGN_IMG}"
-              else
-                "${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY_FILE}" "${COSIGN_IMG}"
-              fi
-              RC=$?
-              exit $RC
-            '''
+          withEnv(cosignEnvBase) {
+            sh cosignSignSh
           }
         }
       } else if (fileExists(labKeyPath)) {
         println "[cosign] Using lab key file ${labKeyPath}"
-        withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}", "LAB_KEY=${labKeyPath}"]) {
-          sh '''
-            set +e
-            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
-            sign_img() {
-              if [ -n "${INSEC}" ]; then
-                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${LAB_KEY}" "$1"
-              else
-                "${COSIGN_EXE}" sign --yes --key "${LAB_KEY}" "$1"
-              fi
-            }
-            sign_img "${COSIGN_IMG}" || exit $?
-            DIGEST=""
-            if command -v crane >/dev/null 2>&1; then
-              DIGEST="$(crane digest "${COSIGN_IMG}" 2>/dev/null || true)"
-            fi
-            # Harbor OCI: cosign triangulate returns repo:sha256-<hex>.sig — not a signable image ref; use crane @sha256: only.
-            if [ -z "${DIGEST}" ] || ! printf '%s' "${DIGEST}" | grep -q '@sha256:'; then
-              TRI="$("${COSIGN_EXE}" triangulate "${COSIGN_IMG}" 2>/dev/null || true)"
-              if [ -n "${TRI}" ] && printf '%s' "${TRI}" | grep -q '@sha256:'; then
-                DIGEST="${TRI}"
-              else
-                echo "[cosign] digest ref unavailable (crane/triangulate); tag sign only"
-                DIGEST=""
-              fi
-            fi
-            if [ -n "${DIGEST}" ]; then
-              echo "[cosign] also signing digest ${DIGEST}"
-              sign_img "${DIGEST}" || true
-              mkdir -p paas-artifacts
-              echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
-            fi
-            exit 0
-          '''
+        withEnv(cosignEnvBase + ["LAB_KEY=${labKeyPath}"]) {
+          sh cosignSignSh
         }
       } else {
         writeFile file: "paas-cosign-private.key", text: pemFromEnv
-        withEnv(["COSIGN_EXE=${cosignExe}", "COSIGN_IMG=${cosignImageRef}", "INSEC=${insecureFlag}", "COSIGN_PASSWORD=${env.COSIGN_PASSWORD ?: ""}"]) {
-          sh '''
-            set +e
-            chmod 600 paas-cosign-private.key
-            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
-            if [ -n "${INSEC}" ]; then
-              "${COSIGN_EXE}" sign --yes ${INSEC} --key paas-cosign-private.key "${COSIGN_IMG}"
-            else
-              "${COSIGN_EXE}" sign --yes --key paas-cosign-private.key "${COSIGN_IMG}"
-            fi
-            RC=$?
-            rm -f paas-cosign-private.key
-            exit $RC
-          '''
+        withEnv(cosignEnvBase) {
+          sh "chmod 600 paas-cosign-private.key\n${cosignSignSh}\nrm -f paas-cosign-private.key"
         }
       }
       paasStepOk(9, 'cosign', cosignImageRef ? "sign attempted for ${cosignImageRef}" : 'no image to sign')

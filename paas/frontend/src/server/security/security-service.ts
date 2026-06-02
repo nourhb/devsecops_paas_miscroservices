@@ -93,7 +93,8 @@ async function resolveCosignSigned(project: Project, imageTag: string): Promise<
         select: { logs: true }
     });
     const logs = recent?.logs ?? "";
-    const digest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim();
+    const digest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
+        ?? logs.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim();
     if (digest && await cosignClient.isSigned(digest, { timeoutMs: 12000 })) {
         return true;
     }

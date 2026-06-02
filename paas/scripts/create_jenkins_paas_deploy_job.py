@@ -29,6 +29,8 @@ MUTATE_FIX_MARKERS = (
     "[image] crane mutate OK",
 )
 ENV_SAFE_DOTENV_LOADER_MARKER = "env-safe-dotenv-loader-20260601"
+COSIGN_DIGEST_MARKER = "cosign-digest-crane-bin-20260602"
+OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign only"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
 
 
@@ -64,6 +66,25 @@ def assert_jenkinsfile_env_loader_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} still sources . ./.env directly.\n"
             "  git pull and re-sync Jenkins job",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def assert_jenkinsfile_cosign_digest_fix(groovy: str, path: Path) -> None:
+    if COSIGN_DIGEST_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing {COSIGN_DIGEST_MARKER} "
+            "(Step 9 must sign digest for Kyverno).\n"
+            "  git pull origin main\n"
+            "  bash paas/scripts/apply-jenkins-cosign-digest-fix-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if OLD_COSIGN_STEP9_SNIPPET in groovy and "cosignSignImageShellSnippet" not in groovy:
+        print(
+            f"ERROR: {path} still has OLD tag-only cosign Step 9.\n"
+            "  git pull origin main",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -450,6 +471,7 @@ def main() -> int:
         assert_jenkinsfile_crane_fix(groovy, jenkinsfile)
         assert_jenkinsfile_mutate_fix(groovy, jenkinsfile)
         assert_jenkinsfile_env_loader_fix(groovy, jenkinsfile)
+        assert_jenkinsfile_cosign_digest_fix(groovy, jenkinsfile)
 
     if not wait_for_jenkins_api(base):
         return 1

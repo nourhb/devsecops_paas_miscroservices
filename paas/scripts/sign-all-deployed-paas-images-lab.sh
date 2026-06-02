@@ -15,20 +15,50 @@ command -v cosign >/dev/null 2>&1 || die "Install cosign on the VM (apt or GitHu
 
 export COSIGN_PASSWORD=""
 
+resolve_digest_ref() {
+  local img="$1"
+  local d=""
+  if command -v crane >/dev/null 2>&1; then
+    d="$(crane digest "${img}" 2>/dev/null | tr -d '\r\n' || true)"
+  fi
+  if [[ "${d}" == *@sha256:* ]]; then
+    printf '%s' "${d}"
+    return 0
+  fi
+  if [[ "${d}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    printf '%s@%s' "${img%:*}" "${d}"
+    return 0
+  fi
+  return 1
+}
+
 sign_refs_for_image() {
   local image="$1"
-  local refs=("${image}")
+  local refs=()
+  local digest_ref=""
+  digest_ref="$(resolve_digest_ref "${image}" 2>/dev/null || true)"
+  if [[ -n "${digest_ref}" ]]; then
+    refs+=("${digest_ref}")
+  fi
+  refs+=("${image}")
   local external nginx
   external="$(grep '^HARBOR_REGISTRY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"')"
   nginx="$(grep '^HARBOR_REGISTRY_NGINX_CLUSTER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"')"
   if [[ -n "${external}" && -n "${nginx}" && "${image}" == "${external}/"* ]]; then
     refs+=("${image/${external}/${nginx}}")
+    if [[ -n "${digest_ref}" ]]; then
+      refs+=("${digest_ref/${external}/${nginx}}")
+    fi
   fi
   local r
   local -a seen=()
   for r in "${refs[@]}"; do
     [[ " ${seen[*]:-} " == *" ${r} "* ]] && continue
     seen+=("${r}")
+    if cosign verify --key "${KEYDIR}/cosign.pub" --allow-insecure-registry "${r}" >/dev/null 2>&1; then
+      echo "     already verified ${r}"
+      continue
+    fi
     cosign sign --yes --allow-insecure-registry --key "${KEYDIR}/cosign.key" "${r}" || return 1
   done
 }
