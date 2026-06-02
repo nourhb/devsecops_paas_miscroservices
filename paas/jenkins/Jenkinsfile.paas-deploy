@@ -971,10 +971,10 @@ PAAS_START
     if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
       _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
       echo "[image] crane append: foreground heartbeat every \${_hb}s while crane runs (durable-task friendly)"
-      '${craneBin}' ${craneInsecure} append \\
+      "${craneBin}" ${craneInsecure} append \\
         -b mirror.gcr.io/library/node:20-bookworm-slim \\
         -f paas-artifacts/app-layer.tar \\
-        -t '${imageRef}' &
+        -t "${imageRef}" &
       CRANE_APPEND_PID=\$!
       while kill -0 "\${CRANE_APPEND_PID}" 2>/dev/null; do
         echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -982,10 +982,10 @@ PAAS_START
       done
       wait "\${CRANE_APPEND_PID}"
     else
-      '${craneBin}' ${craneInsecure} append \\
+      "${craneBin}" ${craneInsecure} append \\
         -b mirror.gcr.io/library/node:20-bookworm-slim \\
         -f paas-artifacts/app-layer.tar \\
-        -t '${imageRef}'
+        -t "${imageRef}"
     fi
     echo "[image] crane append finished; running crane mutate (same shell as append — monorepo-safe)"
     USE_STANDALONE=0
@@ -995,22 +995,22 @@ PAAS_START
       echo "[image] WARN: paas-artifacts/_crane_use_standalone missing — assuming non-standalone layer"
     fi
     if [ "\$USE_STANDALONE" = "1" ]; then
-      '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
-        -t '${imageRef}' \\
+      "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+        -t "${imageRef}" \\
         --workdir=/app \\
         --entrypoint=/usr/local/bin/node \\
         --cmd=server.js \\
         --exposed-ports=3000/tcp
     else
-      '${craneBin}' ${craneInsecure} mutate '${imageRef}' \\
-        -t '${imageRef}' \\
+      "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+        -t "${imageRef}" \\
         --workdir=/app \\
         --entrypoint=/app/start-paas.sh \\
         --exposed-ports=3000/tcp
     fi
     echo "[image] crane mutate OK"
     mkdir -p paas-artifacts
-    DIGEST_REF="\$('${craneBin}' ${craneInsecure} digest '${imageRef}' 2>/dev/null | tr -d '\\r\\n' || true)"
+    DIGEST_REF="\$(${craneBin} ${craneInsecure} digest ${imageRef} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
       echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
@@ -1165,6 +1165,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
   println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
   println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
+  println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
