@@ -22,6 +22,9 @@ MUTATE_FIX_MARKERS=(
   'entrypoint=/app/start-paas.sh'
   'crane mutate OK'
 )
+ENV_LOADER_MARKER='env-safe-dotenv-loader-20260601'
+COSIGN_DIGEST_MARKER='cosign-digest-crane-bin-20260602'
+BROKEN_ENV_LOADER_PATTERN='. ./.env'
 
 if [[ -f "${ENV_FILE}" ]]; then
   set +u; source "${ENV_FILE}" 2>/dev/null || true; set -u
@@ -86,6 +89,22 @@ else
   exit 1
 fi
 
+echo "==> Local Jenkinsfile contains env-safe dotenv loader?"
+if grep -qF "${ENV_LOADER_MARKER}" "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has ${ENV_LOADER_MARKER}"
+else
+  echo "FAIL: missing ${ENV_LOADER_MARKER} in ${JENKINSFILE} — git pull"
+  exit 1
+fi
+
+echo "==> Local Jenkinsfile contains cosign digest signing fix?"
+if grep -qF "${COSIGN_DIGEST_MARKER}" "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has ${COSIGN_DIGEST_MARKER}"
+else
+  echo "FAIL: missing ${COSIGN_DIGEST_MARKER} in ${JENKINSFILE} — git pull"
+  exit 1
+fi
+
 echo ""
 echo "==> Jenkins job config (needs JENKINS_USERNAME + JENKINS_API_TOKEN)"
 if [[ -z "${JENKINS_USERNAME:-}" || -z "${JENKINS_API_TOKEN:-}" ]]; then
@@ -118,6 +137,28 @@ if jenkins_text_has_mutate_fix "${CFG}"; then
   echo "OK: Jenkins job has Step 6 mutate fix (start-paas.sh)"
 elif jenkins_text_has_crane_fix "${CFG}"; then
   echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run fix-jenkins-paas-deploy-pipeline-lab.sh"
+  exit 1
+fi
+
+if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}"; then
+  echo "OK: Jenkins job has ${ENV_LOADER_MARKER}"
+else
+  echo "FAIL: Jenkins job missing ${ENV_LOADER_MARKER} (builds fail on EMAIL_PASS with spaces)"
+  echo "Fix: bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh"
+  exit 1
+fi
+
+if echo "${CFG}" | grep -qF 'Do not use ". ./.env"'; then
+  echo "OK: Jenkins job uses Node .env loader (not raw . ./.env)"
+elif echo "${CFG}" | grep -qF "${BROKEN_ENV_LOADER_PATTERN}"; then
+  echo "FAIL: Jenkins job still sources ${BROKEN_ENV_LOADER_PATTERN} — run apply-jenkins-env-dotenv-fix-lab.sh"
+  exit 1
+fi
+
+if echo "${CFG}" | grep -qF "${COSIGN_DIGEST_MARKER}"; then
+  echo "OK: Jenkins job has ${COSIGN_DIGEST_MARKER}"
+elif echo "${CFG}" | grep -qF 'digest ref unavailable (crane/triangulate); tag sign only'; then
+  echo "FAIL: Jenkins job still has OLD Step 9 cosign (tag-only) — run fix-jenkins-paas-deploy-pipeline-lab.sh"
   exit 1
 fi
 

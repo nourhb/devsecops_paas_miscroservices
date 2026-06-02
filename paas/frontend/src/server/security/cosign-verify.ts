@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { env } from "@/server/config/env";
+import { integrationFetch } from "@/server/http/integration-fetch";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +53,57 @@ async function resolvePublicKeyFile(): Promise<{
     const tempPath = join(tmpdir(), `cosign-pub-${process.pid}-${Date.now()}.pem`);
     await writeFile(tempPath, `${pem}\n`, { mode: 0o600 });
     return { path: tempPath, cleanup: true };
+}
+
+function harborBasicAuthHeader(): string | null {
+    const user = env.HARBOR_USERNAME.trim();
+    const pass = env.HARBOR_PASSWORD.trim();
+    if (!user || !pass) {
+        return null;
+    }
+    return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
+}
+
+/** Resolve tag → digest ref via Harbor API (Kyverno verifyImages matches digest). */
+async function harborDigestRefForTag(imageRef: string): Promise<string | null> {
+    const registry = env.HARBOR_REGISTRY.trim();
+    const base = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
+    const auth = harborBasicAuthHeader();
+    if (!registry || !base || !auth || !imageRef.startsWith(`${registry}/`)) {
+        return null;
+    }
+    const tagMatch = imageRef.match(/^(.+):([^@:]+)$/);
+    if (!tagMatch) {
+        return null;
+    }
+    const repoPath = tagMatch[1].slice(registry.length + 1);
+    const tag = tagMatch[2];
+    const slash = repoPath.indexOf("/");
+    if (slash <= 0) {
+        return null;
+    }
+    const harborProject = repoPath.slice(0, slash);
+    const repository = repoPath.slice(slash + 1);
+    const url = `${base}/api/v2.0/projects/${encodeURIComponent(harborProject)}`
+        + `/repositories/${encodeURIComponent(repository)}/artifacts/${encodeURIComponent(tag)}`;
+    try {
+        const response = await integrationFetch(url, {
+            method: "GET",
+            headers: { Authorization: auth }
+        });
+        if (!response.ok) {
+            return null;
+        }
+        const payload = (await response.json()) as { digest?: string };
+        const digest = payload.digest?.trim();
+        if (!digest?.startsWith("sha256:")) {
+            return null;
+        }
+        return `${tagMatch[1]}@${digest}`;
+    }
+    catch {
+        return null;
+    }
 }
 
 /** Try in-cluster nginx first, then external NodePort (with docker config), then raw registry. */
@@ -125,8 +177,15 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
         return false;
     }
     const timeout = options?.timeoutMs ?? 180000;
+    const refs = [...imageRefsForVerify(imageRef)];
+    if (imageRef.includes(":") && !imageRef.includes("@sha256:")) {
+        const digestRef = await harborDigestRefForTag(imageRef);
+        if (digestRef) {
+            refs.push(...imageRefsForVerify(digestRef));
+        }
+    }
     try {
-        for (const ref of imageRefsForVerify(imageRef)) {
+        for (const ref of [...new Set(refs)]) {
             try {
                 await runCosignVerify(keyFile.path, ref, timeout);
                 return true;

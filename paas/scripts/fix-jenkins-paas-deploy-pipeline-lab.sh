@@ -39,6 +39,11 @@ if ! grep -qF 'env-safe-dotenv-loader-20260601' "${JENKINSFILE_TO_PUSH}" 2>/dev/
   echo "  Push latest code from your dev machine, then on VM: git pull && bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh" >&2
   exit 1
 fi
+if ! grep -qF 'cosign-digest-crane-bin-20260602' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing cosign-digest-crane-bin-20260602 (Kyverno needs digest cosign sign)." >&2
+  echo "  git pull origin main && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh" >&2
+  exit 1
+fi
 
 echo "==> 2. Wait for Jenkins API (pod may be Ready before :30090 accepts connections)"
 JENKINS_WAIT_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
@@ -105,6 +110,9 @@ fi
 
 echo ""
 echo "OK — trigger a NEW build (not Rebuild). Console must show:"
+echo "  marker cosign-digest-crane-bin-20260602"
+echo "  PAAS_IMAGE_DIGEST=... after crane mutate"
+echo "  [cosign] signing digest ... then [cosign] signing tag ..."
 echo "  marker next-config-build-env-20260531"
 echo "  [env] Wrote N variable(s) ... NEXT_PUBLIC_FIREBASE_*"
 echo "  [env] patched next.config.ts with env"
