@@ -52,7 +52,11 @@ echo ""
 
 TOKEN_NAME="paas-lab-$(date +%s)"
 RAW="$(curl -fsS -u "${SONAR_USER}:${SONAR_PASS}" -X POST \
-  "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}" 2>/dev/null || true)"
+  "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}&type=GLOBAL_ANALYSIS_TOKEN" 2>/dev/null || true)"
+if [[ -z "${RAW}" || "${RAW}" == *"errors"* ]]; then
+  RAW="$(curl -fsS -u "${SONAR_USER}:${SONAR_PASS}" -X POST \
+    "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}" 2>/dev/null || true)"
+fi
 NEW_TOKEN="$(printf '%s' "${RAW}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
 
 if [[ -z "${NEW_TOKEN}" ]]; then

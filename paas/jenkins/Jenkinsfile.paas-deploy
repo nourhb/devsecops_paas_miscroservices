@@ -1603,7 +1603,7 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-login-token-20260602 (native scanner needs -Dsonar.login + -Dsonar.token)"
+      println "[paas-jenkinsfile] marker=sonar-project-properties-20260603 (sonar-project.properties + sonar.login for native CLI)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -1657,25 +1657,31 @@ exit 0
               fi
             done
             echo "[sonar] sources=${SOURCES}"
+            SP=sonar-project.properties
+            rm -f "${SP}"
+            {
+              printf 'sonar.host.url=%s\n' "${SONAR_HOST_URL}"
+              printf 'sonar.login=%s\n' "${SONAR_TOKEN}"
+              printf 'sonar.token=%s\n' "${SONAR_TOKEN}"
+              printf 'sonar.projectKey=%s\n' "${SONAR_PROJECT_KEY}"
+              printf 'sonar.projectName=%s\n' "${SONAR_PROJECT_KEY}"
+              printf 'sonar.projectVersion=%s\n' "${SONAR_VERSION}"
+              printf 'sonar.sources=%s\n' "${SOURCES}"
+              printf 'sonar.exclusions=%s\n' '**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js'
+              printf 'sonar.qualitygate.wait=%s\n' 'false'
+              printf 'sonar.scanner.analysisCacheEnabled=%s\n' 'false'
+            } > "${SP}"
+            chmod 600 "${SP}"
+            echo "[sonar] wrote ${SP} (credentials in file; not echoed)"
+            export SONAR_LOGIN="${SONAR_TOKEN}"
             LOG=/tmp/sonar-scanner-$$.log
-            npx --yes sonarqube-scanner@4.2.8 \
-              -Dsonar.host.url="${SONAR_HOST_URL}" \
-              -Dsonar.login="${SONAR_TOKEN}" \
-              -Dsonar.token="${SONAR_TOKEN}" \
-              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
-              -Dsonar.projectName="${SONAR_PROJECT_KEY}" \
-              -Dsonar.projectVersion="${SONAR_VERSION}" \
-              -Dsonar.sources="${SOURCES}" \
-              -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js \
-              -Dsonar.qualitygate.wait=false \
-              -Dsonar.scanner.analysisCacheEnabled=false \
-              2>&1 | tee "${LOG}"
+            npx --yes sonarqube-scanner@4.2.8 2>&1 | tee "${LOG}"
             RC=${PIPESTATUS[0]}
             if [ "${RC}" != "0" ]; then
               echo "[sonar] scanner tail:"
               tail -25 "${LOG}" 2>/dev/null || true
             fi
-            rm -f "${LOG}"
+            rm -f "${LOG}" "${SP}"
             echo ${RC}
           ''', returnStdout: true).trim().tokenize('\n').last()
           if (sonarRc != "0") {
@@ -1704,23 +1710,28 @@ for u in "${SONAR_SCAN_HOST_URL}" "http://sonarqube-service.sonarqube.svc.cluste
   fi
 done
 echo "[sonar] docker scanner host=${SONAR_SCAN_HOST_URL}"
+SP="${SONAR_WS}/sonar-project.properties"
+cat > "${SP}" <<SONARPROP
+sonar.host.url=${SONAR_SCAN_HOST_URL}
+sonar.login=${SONAR_SCAN_TOKEN}
+sonar.token=${SONAR_SCAN_TOKEN}
+sonar.projectKey=${SONAR_SCAN_PROJECT_KEY}
+sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
+sonar.projectVersion=${SONAR_SCAN_PROJECT_VERSION}
+sonar.sources=app,src,components,pages,lib
+sonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
+sonar.qualitygate.wait=false
+sonar.scm.provider=git
+SONARPROP
+chmod 600 "${SP}"
 docker pull sonarsource/sonar-scanner-cli:latest >/dev/null
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -e SONAR_HOST_URL="$SONAR_SCAN_HOST_URL" \
+  -e SONAR_LOGIN="$SONAR_SCAN_TOKEN" \
   -e SONAR_TOKEN="$SONAR_SCAN_TOKEN" \
   -v "${SONAR_WS}:/usr/src" \
-  sonarsource/sonar-scanner-cli:latest \
-  -Dsonar.host.url="$SONAR_SCAN_HOST_URL" \
-  -Dsonar.login="$SONAR_SCAN_TOKEN" \
-  -Dsonar.token="$SONAR_SCAN_TOKEN" \
-  -Dsonar.projectKey="$SONAR_SCAN_PROJECT_KEY" \
-  -Dsonar.projectName="$SONAR_SCAN_PROJECT_KEY" \
-  -Dsonar.projectVersion="$SONAR_SCAN_PROJECT_VERSION" \
-  -Dsonar.sources=app,src,components,pages,lib \
-  -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/** \
-  -Dsonar.qualitygate.wait=false \
-  -Dsonar.scm.provider=git
+  sonarsource/sonar-scanner-cli:latest
 echo $?
 ''', returnStdout: true).trim().tokenize('\n').last()
         if (sonarDockerRc != "0") {
