@@ -65,27 +65,53 @@ function harborBasicAuthHeader(): string | null {
 }
 
 /** Resolve tag → digest ref via Harbor API (Kyverno verifyImages matches digest). */
-async function harborDigestRefForTag(imageRef: string): Promise<string | null> {
+function parseHarborImageRef(imageRef: string): {
+    harborProject: string;
+    repository: string;
+    reference: string;
+    repoPrefix: string;
+} | null {
     const registry = env.HARBOR_REGISTRY.trim();
+    if (!registry || !imageRef.startsWith(`${registry}/`)) {
+        return null;
+    }
+    const withoutRegistry = imageRef.slice(registry.length + 1);
+    let reference = "";
+    let repoPath = withoutRegistry;
+    if (withoutRegistry.includes("@sha256:")) {
+        const at = withoutRegistry.lastIndexOf("@sha256:");
+        repoPath = withoutRegistry.slice(0, at);
+        reference = withoutRegistry.slice(at + 1);
+    }
+    else if (withoutRegistry.includes(":")) {
+        const colon = withoutRegistry.lastIndexOf(":");
+        repoPath = withoutRegistry.slice(0, colon);
+        reference = withoutRegistry.slice(colon + 1);
+    }
+    else {
+        return null;
+    }
+    const slash = repoPath.indexOf("/");
+    if (slash <= 0 || !reference.trim()) {
+        return null;
+    }
+    return {
+        harborProject: repoPath.slice(0, slash),
+        repository: repoPath.slice(slash + 1),
+        reference: reference.trim(),
+        repoPrefix: `${registry}/${repoPath}`
+    };
+}
+
+async function harborDigestRefForTag(imageRef: string): Promise<string | null> {
     const base = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
     const auth = harborBasicAuthHeader();
-    if (!registry || !base || !auth || !imageRef.startsWith(`${registry}/`)) {
+    const parsed = parseHarborImageRef(imageRef);
+    if (!base || !auth || !parsed || parsed.reference.startsWith("sha256:")) {
         return null;
     }
-    const tagMatch = imageRef.match(/^(.+):([^@:]+)$/);
-    if (!tagMatch) {
-        return null;
-    }
-    const repoPath = tagMatch[1].slice(registry.length + 1);
-    const tag = tagMatch[2];
-    const slash = repoPath.indexOf("/");
-    if (slash <= 0) {
-        return null;
-    }
-    const harborProject = repoPath.slice(0, slash);
-    const repository = repoPath.slice(slash + 1);
-    const url = `${base}/api/v2.0/projects/${encodeURIComponent(harborProject)}`
-        + `/repositories/${encodeURIComponent(repository)}/artifacts/${encodeURIComponent(tag)}`;
+    const url = `${base}/api/v2.0/projects/${encodeURIComponent(parsed.harborProject)}`
+        + `/repositories/${encodeURIComponent(parsed.repository)}/artifacts/${encodeURIComponent(parsed.reference)}`;
     try {
         const response = await integrationFetch(url, {
             method: "GET",
@@ -99,10 +125,104 @@ async function harborDigestRefForTag(imageRef: string): Promise<string | null> {
         if (!digest?.startsWith("sha256:")) {
             return null;
         }
-        return `${tagMatch[1]}@${digest}`;
+        return `${parsed.repoPrefix}@${digest}`;
     }
     catch {
         return null;
+    }
+}
+
+/** Harbor stores cosign signatures as accessories — works when pod cosign CLI cannot reach NodePort sigs. */
+async function harborArtifactHasCosignSignature(imageRef: string): Promise<boolean> {
+    const base = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
+    const auth = harborBasicAuthHeader();
+    const parsed = parseHarborImageRef(imageRef);
+    if (!base || !auth || !parsed) {
+        return false;
+    }
+    const artifactBase = `${base}/api/v2.0/projects/${encodeURIComponent(parsed.harborProject)}`
+        + `/repositories/${encodeURIComponent(parsed.repository)}/artifacts/${encodeURIComponent(parsed.reference)}`;
+    const hasCosignType = (value: unknown): boolean => {
+        if (typeof value !== "string") {
+            return false;
+        }
+        const lower = value.toLowerCase();
+        return lower.includes("cosign") || lower.includes("signature");
+    };
+    const scanPayload = (payload: unknown): boolean => {
+        if (!payload || typeof payload !== "object") {
+            return false;
+        }
+        const row = payload as Record<string, unknown>;
+        if (row.addition_links && typeof row.addition_links === "object") {
+            const links = row.addition_links as Record<string, unknown>;
+            if ("signatures" in links) {
+                return true;
+            }
+        }
+        const accessories = row.accessories;
+        if (Array.isArray(accessories)) {
+            for (const item of accessories) {
+                if (!item || typeof item !== "object") {
+                    continue;
+                }
+                const acc = item as Record<string, unknown>;
+                if (hasCosignType(String(acc.artifact_type ?? acc.type ?? ""))) {
+                    return true;
+                }
+            }
+        }
+        const refs = row.references;
+        if (Array.isArray(refs)) {
+            for (const item of refs) {
+                if (!item || typeof item !== "object") {
+                    continue;
+                }
+                const ref = item as Record<string, unknown>;
+                const annotations = ref.annotations;
+                if (annotations && typeof annotations === "object") {
+                    for (const [key, val] of Object.entries(annotations as Record<string, unknown>)) {
+                        if (hasCosignType(key) || hasCosignType(String(val ?? ""))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    try {
+        const artifactRes = await integrationFetch(artifactBase, {
+            method: "GET",
+            headers: { Authorization: auth }
+        });
+        if (artifactRes.ok) {
+            const artifact = await artifactRes.json();
+            if (scanPayload(artifact)) {
+                return true;
+            }
+        }
+        const accessoriesRes = await integrationFetch(`${artifactBase}/accessories`, {
+            method: "GET",
+            headers: { Authorization: auth }
+        });
+        if (!accessoriesRes.ok) {
+            return false;
+        }
+        const accessories = await accessoriesRes.json();
+        if (Array.isArray(accessories)) {
+            return accessories.some((item) => {
+                if (!item || typeof item !== "object") {
+                    return false;
+                }
+                const acc = item as Record<string, unknown>;
+                return hasCosignType(String(acc.artifact_type ?? acc.type ?? ""));
+            });
+        }
+        return scanPayload(accessories);
+    }
+    catch {
+        return false;
     }
 }
 
@@ -133,26 +253,35 @@ function imageRefsForVerify(imageRef: string): string[] {
     return [...new Set(refs.filter(Boolean))];
 }
 
-function cosignVerifyArgs(keyPath: string, imageRef: string): string[] {
+function cosignVerifyArgs(
+    keyPath: string,
+    imageRef: string,
+    options?: { useRegistryCliAuth?: boolean; dockerConfig?: string }
+): string[] {
     const args = ["verify", "--key", keyPath];
     if (env.COSIGN_ALLOW_INSECURE_REGISTRY === "true") {
         args.push("--allow-insecure-registry");
     }
-    const dockerConfig = process.env.DOCKER_CONFIG?.trim() || "";
     const user = env.HARBOR_USERNAME.trim();
     const pass = env.HARBOR_PASSWORD.trim();
-    // Prefer /etc/docker config.json in the frontend pod; CLI flags can prevent Harbor sig discovery.
-    if (user && pass && dockerConfig !== "/etc/docker") {
+    if (options?.useRegistryCliAuth && user && pass) {
         args.push("--registry-username", user, "--registry-password", pass);
     }
     args.push(imageRef);
     return args;
 }
 
-async function runCosignVerify(keyPath: string, imageRef: string, timeoutMs: number): Promise<void> {
+async function runCosignVerify(
+    keyPath: string,
+    imageRef: string,
+    timeoutMs: number,
+    options?: { useRegistryCliAuth?: boolean; dockerConfig?: string }
+): Promise<void> {
     const bin = env.COSIGN_BINARY_PATH.trim() || "cosign";
-    const dockerConfig = process.env.DOCKER_CONFIG?.trim() || "/etc/docker";
-    await execFileAsync(bin, cosignVerifyArgs(keyPath, imageRef), {
+    const dockerConfig = options?.dockerConfig
+        ?? process.env.DOCKER_CONFIG?.trim()
+        ?? "/etc/docker";
+    await execFileAsync(bin, cosignVerifyArgs(keyPath, imageRef, options), {
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true,
@@ -184,15 +313,29 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
             refs.push(...imageRefsForVerify(digestRef));
         }
     }
+    const verifyAttempts: Array<{ useRegistryCliAuth: boolean; dockerConfig: string }> = [
+        { useRegistryCliAuth: false, dockerConfig: process.env.DOCKER_CONFIG?.trim() || "/etc/docker" },
+        { useRegistryCliAuth: true, dockerConfig: process.env.DOCKER_CONFIG?.trim() || "/etc/docker" },
+        { useRegistryCliAuth: true, dockerConfig: "" }
+    ];
     try {
         for (const ref of [...new Set(refs)]) {
-            try {
-                await runCosignVerify(keyFile.path, ref, timeout);
-                return true;
+            for (const attempt of verifyAttempts) {
+                try {
+                    await runCosignVerify(keyFile.path, ref, timeout, attempt);
+                    return true;
+                }
+                catch {
+                    continue;
+                }
             }
-            catch {
-                continue;
-            }
+        }
+        if (await harborArtifactHasCosignSignature(imageRef)) {
+            return true;
+        }
+        const digestOnly = await harborDigestRefForTag(imageRef);
+        if (digestOnly && digestOnly !== imageRef && await harborArtifactHasCosignSignature(digestOnly)) {
+            return true;
         }
         return false;
     }
@@ -208,8 +351,12 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
 }
 
 /** Exported for lab shell scripts mirroring Security API verify behaviour. */
-export function buildCosignVerifyCliArgs(keyPath: string, imageRef: string): string[] {
-    return cosignVerifyArgs(keyPath, imageRef);
+export function buildCosignVerifyCliArgs(
+    keyPath: string,
+    imageRef: string,
+    options?: { useRegistryCliAuth?: boolean }
+): string[] {
+    return cosignVerifyArgs(keyPath, imageRef, options);
 }
 
 export { imageRefsForVerify };

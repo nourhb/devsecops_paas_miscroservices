@@ -33,7 +33,7 @@ interface PromoteDeploymentInput {
     buildLogTail: string;
 }
 
-function useBlueGreenDeploy(): boolean {
+function blueGreenDeployEnabled(): boolean {
     return resolveDeploymentStrategy(null) === "BlueGreen";
 }
 
@@ -211,7 +211,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         buildProfile: buildPlan.profile,
         buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
     };
-    const blueGreen = useBlueGreenDeploy();
+    const blueGreen = blueGreenDeployEnabled();
     let argoSyncOk = false;
     try {
         if (blueGreen) {

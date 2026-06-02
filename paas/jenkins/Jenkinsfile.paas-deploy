@@ -1010,8 +1010,16 @@ PAAS_START
     fi
     echo "[image] crane mutate OK"
     mkdir -p paas-artifacts
-    DIGEST_REF="\$(${craneBin} ${craneInsecure} digest ${imageRef} 2>/dev/null | tr -d '\\r\\n' || true)"
+    REF="${imageRef}"
+    DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
+      case "\${DIGEST_REF}" in
+        *@sha256:*) ;;
+        sha256:*)
+          REPO="\${REF%:*}"
+          DIGEST_REF="\${REPO}@\${DIGEST_REF}"
+          ;;
+      esac
       echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
       echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
       echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}" >> paas-artifacts/cosign-meta.txt
@@ -1068,6 +1076,7 @@ def cosignSignImageShellSnippet() {
             DIGEST="$(resolve_digest_ref "${COSIGN_IMG}" || true)"
             if [ -n "${DIGEST}" ]; then
               echo "[cosign] signing digest ${DIGEST}"
+              echo "PAAS_COSIGN_DIGEST=${DIGEST}"
               sign_img "${DIGEST}" || exit $?
               mkdir -p paas-artifacts
               echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
