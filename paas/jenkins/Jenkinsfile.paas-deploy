@@ -707,10 +707,8 @@ def normalizeRegistryHost(String reg) {
 /** Crane push host: bypass Harbor nginx NodePort (502 on large blob PATCH) when Jenkins runs in-cluster. */
 def resolveHarborPushImageRef(String imageRef) {
   def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
-  def pushReg = normalizeRegistryHost(
-    params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim()
-      ?: env.HARBOR_REGISTRY_NGINX_CLUSTER?.trim() ?: env.HARBOR_REGISTRY_CLUSTER?.trim() ?: ""
-  )
+  def pushRaw = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim() ?: "")
+  def pushReg = normalizeRegistryHost(pushRaw)
   if (!external || !pushReg || external == pushReg || !imageRef?.trim()) {
     return imageRef
   }
