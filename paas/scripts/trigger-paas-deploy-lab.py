@@ -170,6 +170,7 @@ def main() -> int:
         "DEPENDENCY_TRACK_API_KEY",
         "HARBOR_REGISTRY",
         "HARBOR_REGISTRY_PUSH",
+        "HARBOR_REGISTRY_NGINX_CLUSTER",
         "HARBOR_USERNAME",
         "HARBOR_PASSWORD",
         "COSIGN_PRIVATE_KEY",

@@ -15,14 +15,27 @@ upsert() {
 
 REGISTRY_CLUSTER=""
 NGINX_CLUSTER=""
+PUSH_HOST=""
 
 if command -v kubectl >/dev/null 2>&1 && kubectl get ns harbor >/dev/null 2>&1; then
   if kubectl get svc harbor-nginx -n harbor >/dev/null 2>&1; then
     NGINX_CLUSTER="harbor-nginx.harbor.svc.cluster.local"
+    NGINX_PORT="$(kubectl get svc harbor-nginx -n harbor -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 80)"
   elif kubectl get svc nginx -n harbor >/dev/null 2>&1; then
     NGINX_CLUSTER="nginx.harbor.svc.cluster.local"
+    NGINX_PORT="$(kubectl get svc nginx -n harbor -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 80)"
   elif kubectl get svc harbor -n harbor >/dev/null 2>&1; then
     NGINX_CLUSTER="harbor.harbor.svc.cluster.local"
+    NGINX_PORT="$(kubectl get svc harbor -n harbor -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 80)"
+  else
+    NGINX_PORT="80"
+  fi
+  if [[ -n "${NGINX_CLUSTER}" ]]; then
+    if [[ "${NGINX_PORT}" == "80" ]]; then
+      PUSH_HOST="${NGINX_CLUSTER}"
+    else
+      PUSH_HOST="${NGINX_CLUSTER}:${NGINX_PORT}"
+    fi
   fi
   if kubectl get svc harbor-registry -n harbor >/dev/null 2>&1; then
     PORT="$(kubectl get svc harbor-registry -n harbor -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 5000)"
@@ -37,4 +50,8 @@ fi
 if [[ -n "${NGINX_CLUSTER}" ]]; then
   upsert "HARBOR_REGISTRY_NGINX_CLUSTER" "${NGINX_CLUSTER}"
   echo "OK: HARBOR_REGISTRY_NGINX_CLUSTER=${NGINX_CLUSTER}"
+fi
+if [[ -n "${PUSH_HOST}" ]]; then
+  upsert "HARBOR_REGISTRY_PUSH" "${PUSH_HOST}"
+  echo "OK: HARBOR_REGISTRY_PUSH=${PUSH_HOST} (in-cluster nginx — use for Jenkins crane push)"
 fi

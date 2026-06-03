@@ -22,6 +22,13 @@ if kubectl get deployment harbor-registry -n "${HARBOR_NS}" >/dev/null 2>&1; the
 fi
 
 echo ""
+echo "==> Wait for harbor-registry 2/2 Ready before restart storm"
+if kubectl get deployment harbor-registry -n "${HARBOR_NS}" >/dev/null 2>&1; then
+  kubectl wait --for=condition=available deployment/harbor-registry -n "${HARBOR_NS}" --timeout=120s 2>/dev/null \
+    || echo "WARN: harbor-registry deployment not Available yet"
+fi
+
+echo ""
 echo "==> Restart registry + nginx + core (502 on PATCH/POST /v2/.../blobs/uploads/)"
 for dep in harbor-registry harbor-nginx harbor-core; do
   if kubectl get deployment "${dep}" -n "${HARBOR_NS}" >/dev/null 2>&1; then
