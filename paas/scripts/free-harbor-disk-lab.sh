@@ -48,4 +48,11 @@ kubectl exec -n "${HARBOR_NS}" deploy/harbor-registry -c registry -- df -h /stor
   || kubectl exec -n "${HARBOR_NS}" deploy/harbor-registry -c registry -- df -h / 2>/dev/null || true
 df -h / | tail -1
 echo ""
-echo "If registry still >85%: SSH to worker2 (Harbor pods node) and run: docker system prune -af; df -h /"
+echo "==> worker2 (Harbor node) — prune container images"
+WORKER="${WORKER2_HOST:-worker2}"
+if command -v ssh >/dev/null 2>&1 && ssh -o BatchMode=yes -o ConnectTimeout=5 "${WORKER}" "df -h / | tail -1" 2>/dev/null; then
+  ssh "${WORKER}" "docker system prune -af 2>/dev/null; sudo crictl rmi --prune 2>/dev/null; df -h / | tail -1" 2>/dev/null || true
+else
+  echo "WARN: cannot SSH to ${WORKER} — run manually on worker2:"
+  echo "  docker system prune -af && sudo crictl rmi --prune && df -h /"
+fi

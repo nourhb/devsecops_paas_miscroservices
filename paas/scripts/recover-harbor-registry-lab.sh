@@ -29,6 +29,9 @@ if kubectl get deployment harbor-registry -n "${HARBOR_NS}" >/dev/null 2>&1; the
 fi
 
 echo ""
+if [[ "${HARBOR_RECOVER_LIGHT:-0}" == "1" ]]; then
+  echo "==> Light mode (HARBOR_RECOVER_LIGHT=1) — probe only, no restarts"
+else
 echo "==> Restart registry + nginx + core (502 on PATCH/POST /v2/.../blobs/uploads/)"
 for dep in harbor-registry harbor-nginx harbor-core; do
   if kubectl get deployment "${dep}" -n "${HARBOR_NS}" >/dev/null 2>&1; then
@@ -37,6 +40,7 @@ for dep in harbor-registry harbor-nginx harbor-core; do
     echo "OK: restarted ${dep}"
   fi
 done
+fi
 
 echo ""
 echo "==> Probe registry /v2/ (401 Unauthorized = registry up; 502 = broken)"
@@ -51,9 +55,8 @@ for i in 1 2 3 4 5; do
   if harbor_v2_ok; then
     echo "OK: http://${NODE_IP}:${REGISTRY_PORT}/v2/ reachable (HTTP 200 or 401)"
     echo ""
-    echo "Large crane pushes via NodePort often still 502 — use in-cluster push:"
-    echo "  bash paas/scripts/fix-harbor-jenkins-crane-push-lab.sh"
-    echo "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
+    echo "Large crane pushes: keep HARBOR_REGISTRY_PUSH empty (NodePort from Jenkins on master)."
+    echo "  worker2 disk ~90% → SSH worker2: docker system prune -af; sudo crictl rmi --prune"
     if df -h / 2>/dev/null | awk 'NR>1 {gsub(/%/,"",$5); if ($5+0 >= 85) print}' | grep -q .; then
       echo "WARN: root disk >= 85% full — prune images/logs or expand disk (Harbor blob upload may fail)"
     fi
