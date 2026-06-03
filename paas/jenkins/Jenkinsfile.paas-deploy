@@ -708,7 +708,8 @@ def normalizeRegistryHost(String reg) {
 def resolveHarborPushImageRef(String imageRef) {
   def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
   def pushReg = normalizeRegistryHost(
-    params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_CLUSTER?.trim() ?: ""
+    params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim()
+      ?: env.HARBOR_REGISTRY_NGINX_CLUSTER?.trim() ?: env.HARBOR_REGISTRY_CLUSTER?.trim() ?: ""
   )
   if (!external || !pushReg || external == pushReg || !imageRef?.trim()) {
     return imageRef
@@ -1144,8 +1145,9 @@ def cosignImageRef = ""
 
 def runPaasDeploy = {
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
-  env.HARBOR_REGISTRY_PUSH = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH ?: env.HARBOR_REGISTRY_CLUSTER ?: "").trim()
-  env.HARBOR_REGISTRY_CLUSTER = (env.HARBOR_REGISTRY_CLUSTER ?: env.HARBOR_REGISTRY_PUSH ?: "").trim()
+  env.HARBOR_REGISTRY_PUSH = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH ?: env.HARBOR_REGISTRY_NGINX_CLUSTER ?: env.HARBOR_REGISTRY_CLUSTER ?: "").trim()
+  env.HARBOR_REGISTRY_NGINX_CLUSTER = (env.HARBOR_REGISTRY_NGINX_CLUSTER ?: "").trim()
+  env.HARBOR_REGISTRY_CLUSTER = (env.HARBOR_REGISTRY_CLUSTER ?: "").trim()
   env.HARBOR_USERNAME = (params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: "").trim()
   env.HARBOR_PASSWORD = (params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: "").trim()
   env.DOCKERHUB_USERNAME = (params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: "").trim()
@@ -1220,7 +1222,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
   println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
   println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
-  println '[paas-jenkinsfile] marker=harbor-registry-push-20260603 (HARBOR_REGISTRY_PUSH bypasses nginx 502; crane append retries)'
+  println '[paas-jenkinsfile] marker=harbor-nginx-push-20260604 (HARBOR_REGISTRY_PUSH=in-cluster nginx; not registry:5000)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
