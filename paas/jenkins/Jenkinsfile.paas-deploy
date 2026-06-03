@@ -1039,20 +1039,35 @@ PAAS_START
     else
       echo "[image] WARN: paas-artifacts/_crane_use_standalone missing — assuming non-standalone layer"
     fi
-    if [ "\$USE_STANDALONE" = "1" ]; then
-      "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
-        -t "${imageRef}" \\
-        --workdir=/app \\
-        --entrypoint=/usr/local/bin/node \\
-        --cmd=server.js \\
-        --exposed-ports=3000/tcp
-    else
-      "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
-        -t "${imageRef}" \\
-        --workdir=/app \\
-        --entrypoint=/app/start-paas.sh \\
-        --exposed-ports=3000/tcp
-    fi
+    _mutate_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
+    _mutate_attempt=1
+    _mutate_rc=1
+    while [ "\${_mutate_attempt}" -le "\${_mutate_max}" ]; do
+      echo "[image] crane mutate attempt \${_mutate_attempt}/\${_mutate_max} → ${imageRef}"
+      if [ "\$USE_STANDALONE" = "1" ]; then
+        "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+          -t "${imageRef}" \\
+          --workdir=/app \\
+          --entrypoint=/usr/local/bin/node \\
+          --cmd=server.js \\
+          --exposed-ports=3000/tcp && _mutate_rc=0 || _mutate_rc=\$?
+      else
+        "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+          -t "${imageRef}" \\
+          --workdir=/app \\
+          --entrypoint=/app/start-paas.sh \\
+          --exposed-ports=3000/tcp && _mutate_rc=0 || _mutate_rc=\$?
+      fi
+      if [ "\${_mutate_rc}" = "0" ]; then
+        break
+      fi
+      echo "[image] WARN: crane mutate failed (rc=\${_mutate_rc}); Harbor blob 502? wait and retry"
+      if [ "\${_mutate_attempt}" -ge "\${_mutate_max}" ]; then
+        exit "\${_mutate_rc}"
+      fi
+      _mutate_attempt=\$((_mutate_attempt + 1))
+      sleep 45
+    done
     echo "[image] crane mutate OK"
     ARTIFACT_REF="${artifactImageRef}"
     if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
