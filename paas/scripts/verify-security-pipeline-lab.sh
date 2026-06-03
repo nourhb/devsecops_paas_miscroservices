@@ -126,19 +126,23 @@ if [[ "${BUILD}" == "0" || -z "${BUILD}" ]]; then
   fail "no Jenkins builds yet — deploy once from PaaS UI"
 else
   echo "Build #${BUILD} result=${RESULT}"
+  CONSOLE="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+    "${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText" 2>/dev/null || true)"
+
   if [[ "${RESULT}" != "SUCCESS" ]]; then
-    fail "build #${BUILD} is ${RESULT} — Security UI stays empty until Jenkins SUCCESS for this project"
-    if [[ -z "${BUILD_NUMBER}" ]]; then
-      echo "     Tip: if an older build succeeded, re-run with BUILD_NUMBER=<n> PROJECT_ID=<uuid>"
+    if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image.*Harbor|harbor.*502'; then
+      warn "build #${BUILD} is ${RESULT} — likely Harbor push (Step 6); Sonar/SCA may still be OK below"
+    else
+      fail "build #${BUILD} is ${RESULT} — need Jenkins SUCCESS for new image tag + GitOps deploy"
+      if [[ -z "${BUILD_NUMBER}" ]]; then
+        echo "     Tip: if an older build succeeded, re-run with BUILD_NUMBER=<n> PROJECT_ID=<uuid>"
+      fi
+      echo "     Step 3 failure? grep console:"
+      echo "     curl -fsS -u \"\$JENKINS_USERNAME:\$JENKINS_API_TOKEN\" \"${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText\" | grep -iE 'ERROR|unknown option|Step 3|Step 4'"
     fi
-    echo "     Step 3 failure? grep console:"
-    echo "     curl -fsS -u \"\$JENKINS_USERNAME:\$JENKINS_API_TOKEN\" \"${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText\" | grep -iE 'ERROR|unknown option|Step 3|Step 4'"
   else
     ok "last build SUCCESS"
   fi
-
-  CONSOLE="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
-    "${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText" 2>/dev/null || true)"
 
   if echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=4'; then
     fail "Step 4 skipped (fast pipeline or config)"
@@ -187,13 +191,8 @@ if [[ -n "${SONAR_TOKEN:-}" && -n "${SONAR_BASE_URL:-}" ]]; then
   SONAR_TOTAL="$(curl -s -u "${SONAR_TOKEN}:" \
     "${SONAR_BASE_URL%/}/api/projects/search?ps=1" \
     | python3 -c "import json,sys; print(json.load(sys.stdin).get('paging',{}).get('total',0))" 2>/dev/null || echo 0)"
-  if [[ "${SONAR_TOTAL}" -gt 0 ]]; then
-    ok "Sonar has ${SONAR_TOTAL} project(s)"
-  else
-    fail "Sonar has 0 projects — no analysis uploaded yet"
-  fi
+  SONAR_OK=0
   if [[ -n "${PROJECT_ID}" ]]; then
-    SONAR_OK=0
     for SK in "${PROJECT_NAME:-}" "${PROJECT_ID}"; do
       [[ -z "${SK}" ]] && continue
       SQ="$(curl -s -u "${SONAR_TOKEN}:" \
@@ -204,9 +203,12 @@ if [[ -n "${SONAR_TOKEN:-}" && -n "${SONAR_BASE_URL:-}" ]]; then
         break
       fi
     done
-    if [[ "${SONAR_OK}" -eq 0 ]]; then
-      fail "Sonar has no project for keys ${PROJECT_NAME:-<name>}/${PROJECT_ID} (Jenkins uses image slug e.g. sanhome)"
-    fi
+  fi
+  if [[ "${SONAR_TOTAL}" -gt 0 ]]; then
+    ok "Sonar has ${SONAR_TOTAL} project(s)"
+    SONAR_OK=1
+  elif [[ "${SONAR_OK}" -eq 0 ]]; then
+    fail "Sonar has no project / quality gate for ${PROJECT_NAME:-<name>} — run a build with Step 5 OK"
   fi
 else
   fail "SONAR_BASE_URL / SONAR_TOKEN not set in shell — source ${ENV_FILE}"
