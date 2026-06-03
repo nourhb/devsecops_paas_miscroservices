@@ -818,9 +818,12 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
       sh '''
         set -eu
         echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
+        if command -v getent >/dev/null 2>&1; then
+          getent hosts "${REGISTRY%%:*}" 2>/dev/null || echo "[image] WARN: DNS lookup failed for ${REGISTRY%%:*} (Jenkins agent must run inside the cluster for HARBOR_REGISTRY_PUSH)"
+        fi
         _hc="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" 2>/dev/null || echo 000)"
         if [ "${_hc}" != "200" ] && [ "${_hc}" != "401" ]; then
-          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (502 = fix: bash paas/scripts/recover-harbor-registry-lab.sh)"
+          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (502/000 = recover: bash paas/scripts/recover-harbor-registry-lab.sh; in-cluster: HARBOR_REGISTRY_PUSH)"
         else
           echo "[image] Harbor /v2/ OK (HTTP ${_hc})"
         fi
@@ -1141,6 +1144,8 @@ def cosignImageRef = ""
 
 def runPaasDeploy = {
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
+  env.HARBOR_REGISTRY_PUSH = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH ?: env.HARBOR_REGISTRY_CLUSTER ?: "").trim()
+  env.HARBOR_REGISTRY_CLUSTER = (env.HARBOR_REGISTRY_CLUSTER ?: env.HARBOR_REGISTRY_PUSH ?: "").trim()
   env.HARBOR_USERNAME = (params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: "").trim()
   env.HARBOR_PASSWORD = (params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: "").trim()
   env.DOCKERHUB_USERNAME = (params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: "").trim()

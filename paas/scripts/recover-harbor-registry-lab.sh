@@ -47,6 +47,9 @@ for i in 1 2 3 4 5; do
     echo "Large crane pushes via NodePort often still 502 — use in-cluster push:"
     echo "  bash paas/scripts/fix-harbor-jenkins-crane-push-lab.sh"
     echo "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
+    if df -h / 2>/dev/null | awk 'NR>1 {gsub(/%/,"",$5); if ($5+0 >= 85) print}' | grep -q .; then
+      echo "WARN: root disk >= 85% full — prune images/logs or expand disk (Harbor blob upload may fail)"
+    fi
     exit 0
   fi
   echo "waiting (${i}/5)…"
