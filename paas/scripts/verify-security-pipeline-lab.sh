@@ -121,13 +121,22 @@ else
   echo "Last build: #${BUILD} (set BUILD_NUMBER=<n> to verify a specific SUCCESS build)"
 fi
 RESULT="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result') or 'NONE')" 2>/dev/null || echo NONE)"
+BUILDING="$(printf '%s' "${LAST_JSON}" | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('building') else 'false')" 2>/dev/null || echo false)"
 
 if [[ "${BUILD}" == "0" || -z "${BUILD}" ]]; then
   fail "no Jenkins builds yet — deploy once from PaaS UI"
 else
-  echo "Build #${BUILD} result=${RESULT}"
+  echo "Build #${BUILD} result=${RESULT} building=${BUILDING}"
   CONSOLE="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
     "${JENKINS_URL}/job/${JOB}/${BUILD}/consoleText" 2>/dev/null || true)"
+
+  if [[ "${BUILDING}" == "true" || "${RESULT}" == "NONE" || -z "${RESULT}" ]]; then
+    warn "build #${BUILD} still running — wait, then: BUILD_NUMBER=${BUILD} PROJECT_ID=<uuid> bash paas/scripts/verify-security-pipeline-lab.sh"
+    echo "     Poll: curl -fsS -u \"\$JENKINS_USERNAME:\$JENKINS_API_TOKEN\" \"${JENKINS_URL}/job/${JOB}/${BUILD}/api/json\" | python3 -c \"import json,sys; j=json.load(sys.stdin); print(j.get('result'), j.get('building'))\""
+    echo ""
+    echo "=== 4–5 skipped (build in progress) ==="
+    exit 0
+  fi
 
   if [[ "${RESULT}" != "SUCCESS" ]]; then
     if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image.*Harbor|harbor.*502'; then
@@ -155,12 +164,15 @@ else
   if echo "${CONSOLE}" | grep -qiE 'non configuré|SONAR not set'; then
     fail "Sonar/DT credentials missing on build #${BUILD}"
   fi
-  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey|ANALYSIS SUCCESSFUL'; then
+  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey|ANALYSIS SUCCESSFUL|EXECUTION SUCCESS'; then
     ok "Step 5 (Sonar) submitted on build #${BUILD}"
-  elif echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=5'; then
-    fail "Step 5 skipped on build #${BUILD}"
-  elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube'; then
+  elif echo "${CONSOLE}" | grep -qE 'PAAS_STEP_SKIP step=5|Fast pipeline: skip Step 5'; then
+    fail "Step 5 skipped on build #${BUILD} (set JENKINS_PAAS_FAST_PIPELINE=false)"
+  elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube|Tests SAST|sonar-scanner|sonar-bash-rc-fix|marker=sonar-bash'; then
     if echo "${CONSOLE}" | grep -qiE 'paasStepWarn\(5|scanner exit|Not authorized'; then
+      if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image'; then
+        warn "Step 5 may have failed or been cut short — build failed at Harbor push; check an earlier build: BUILD_NUMBER=295"
+      fi
       fail "Step 5 ran but Sonar failed — check SONAR_TOKEN (run: bash paas/scripts/regenerate-sonar-token-lab.sh)"
     else
       warn "Step 5 ran but no PAAS_STEP_OK — check Jenkins console for Sonar"

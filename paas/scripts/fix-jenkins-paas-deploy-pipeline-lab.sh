@@ -60,8 +60,18 @@ for i in $(seq 1 60); do
   fi
 done
 
-echo "==> 3. Push pipeline + full job parameters (SONAR_*, DEPENDENCY_TRACK_*) to Jenkins"
+echo "==> 3. Harbor in-cluster push (avoids nginx 502 on crane blob upload)"
+if command -v kubectl >/dev/null 2>&1 && kubectl get ns harbor >/dev/null 2>&1; then
+  bash "${SCRIPT_DIR}/fix-harbor-jenkins-crane-push-lab.sh" || echo "WARN: fix-harbor-jenkins-crane-push-lab.sh skipped"
+else
+  echo "WARN: no Harbor namespace — skip HARBOR_REGISTRY_PUSH wiring"
+fi
+
+echo "==> 3b. Push pipeline + full job parameters (SONAR_*, DEPENDENCY_TRACK_*, HARBOR_REGISTRY_PUSH) to Jenkins"
 export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
+if ! grep -qF 'harbor-registry-push-20260603' "${JENKINSFILE}" 2>/dev/null; then
+  echo "WARN: Jenkinsfile missing harbor-registry-push-20260603 — git pull origin main for Harbor 502 fix"
+fi
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 
 echo "==> 4. Update PaaS pod Jenkinsfile mount (safe even when sync is disabled)"
