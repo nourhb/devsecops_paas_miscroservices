@@ -48,21 +48,15 @@ kubectl exec -n "${HARBOR_NS}" deploy/harbor-registry -c registry -- df -h /stor
   || kubectl exec -n "${HARBOR_NS}" deploy/harbor-registry -c registry -- df -h / 2>/dev/null || true
 df -h / | tail -1
 echo ""
-echo "==> worker2 (Harbor node) — prune container images"
-WORKER_NODE="${WORKER2_NODE:-worker2}"
-WORKER_IP="$(kubectl get node "${WORKER_NODE}" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
-WORKER_HOST="${WORKER2_SSH:-}"
-if [[ -z "${WORKER_HOST}" && -n "${WORKER_IP}" ]]; then
-  WORKER_HOST="${WORKER_IP}"
-fi
-if [[ -n "${WORKER_HOST}" ]] && command -v ssh >/dev/null 2>&1; then
-  echo "Pruning via ssh ${WORKER_HOST} (node ${WORKER_NODE})…"
-  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no \
-    "${WORKER2_USER:-master}@${WORKER_HOST}" \
-    "docker system prune -af 2>/dev/null; sudo crictl rmi --prune 2>/dev/null; df -h / | tail -1" 2>/dev/null \
-    || bash "${SCRIPT_DIR}/prune-worker-node-disk-lab.sh" 2>/dev/null \
-    || echo "WARN: prune failed — run: bash paas/scripts/prune-worker-node-disk-lab.sh"
+echo "==> Prune images on Harbor node (via kubectl, no SSH hostname required)"
+HARBOR_NODE="$(kubectl get pods -n "${HARBOR_NS}" -l app=harbor,component=registry \
+  -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)"
+if [[ -n "${HARBOR_NODE}" ]]; then
+  echo "Harbor registry runs on node: ${HARBOR_NODE}"
+  kubectl debug "node/${HARBOR_NODE}" -n harbor --profile=general \
+    --image=busybox:1.36 -- chroot /host sh -c \
+    'crictl rmi --prune 2>/dev/null; docker system prune -af 2>/dev/null; df -h / | tail -1' \
+    2>/dev/null || echo "WARN: node debug prune failed — on that node run: sudo crictl rmi --prune; df -h /"
 else
-  echo "WARN: set WORKER2_SSH=192.168.56.x (worker2 IP from: kubectl get nodes -o wide)"
-  echo "  docker system prune -af && sudo crictl rmi --prune && df -h /"
+  echo "WARN: could not find Harbor node — prune manually on the node hosting harbor-registry"
 fi

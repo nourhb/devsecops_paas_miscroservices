@@ -70,8 +70,8 @@ fi
 
 echo "==> 3b. Push pipeline + full job parameters (SONAR_*, DEPENDENCY_TRACK_*, HARBOR_REGISTRY_PUSH) to Jenkins"
 export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
-if ! grep -qE 'harbor-nodeport-push-20260604|harbor-nginx-push-20260604|harbor-registry-push-20260603' "${JENKINSFILE}" 2>/dev/null; then
-  echo "WARN: Jenkinsfile missing harbor push fix — git pull origin main"
+if ! grep -qF 'harbor-nodeport-push-20260605' "${JENKINSFILE}" 2>/dev/null; then
+  echo "WARN: Jenkinsfile missing harbor-nodeport-push-20260605 — git pull origin main"
 fi
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 
