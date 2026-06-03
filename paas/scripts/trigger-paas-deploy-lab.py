@@ -169,6 +169,9 @@ def main() -> int:
         "DEPENDENCY_TRACK_BASE_URL",
         "DEPENDENCY_TRACK_API_KEY",
         "HARBOR_REGISTRY",
+        "HARBOR_REGISTRY_PUSH",
+        "HARBOR_FORCE_NODEPORT_PUSH",
+        "HARBOR_REGISTRY_NGINX_CLUSTER",
         "HARBOR_USERNAME",
         "HARBOR_PASSWORD",
         "COSIGN_PRIVATE_KEY",
@@ -181,12 +184,6 @@ def main() -> int:
             val = (os.environ.get(key) or "").strip()
         if val:
             params[key] = val
-
-    # Always pass push mode so Jenkins job defaults (old harbor.harbor.svc) cannot override env.
-    params["HARBOR_FORCE_NODEPORT_PUSH"] = (
-        os.environ.get("HARBOR_FORCE_NODEPORT_PUSH") or "true"
-    ).strip().lower()
-    params["HARBOR_REGISTRY_PUSH"] = (os.environ.get("HARBOR_REGISTRY_PUSH") or "").strip()
 
     q = urllib.parse.urlencode(params)
     path = f"/job/{urllib.parse.quote(job)}/buildWithParameters?{q}"

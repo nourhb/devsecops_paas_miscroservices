@@ -20,14 +20,9 @@ echo "==> Wire cluster Harbor hosts (cosign verify only)"
 bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}"
 
 EXT="$(grep '^HARBOR_REGISTRY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 192.168.56.129:30002)"
-NGINX="$(grep '^HARBOR_REGISTRY_NGINX_CLUSTER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
-
-# Lab default: Jenkins runs on master; in-cluster DNS often fails from Jenkins pod (curl 000).
-if [[ "${HARBOR_FORCE_NODEPORT_PUSH:-true}" == "true" ]]; then
-  upsert "HARBOR_FORCE_NODEPORT_PUSH" "true"
-  upsert "HARBOR_REGISTRY_PUSH" ""
-  echo "OK: HARBOR_FORCE_NODEPORT_PUSH=true → HARBOR_REGISTRY_PUSH cleared (NodePort ${EXT})"
-fi
+upsert "HARBOR_FORCE_NODEPORT_PUSH" "true"
+upsert "HARBOR_REGISTRY_PUSH" ""
+echo "OK: HARBOR_FORCE_NODEPORT_PUSH=true, HARBOR_REGISTRY_PUSH cleared (NodePort ${EXT})"
 
 echo ""
 echo "==> Harbor disk"
@@ -43,14 +38,8 @@ sleep 3
 verify_out="$(WIRE_ENV=0 bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh" 2>&1)" || true
 echo "${verify_out}"
 
-if [[ "${HARBOR_FORCE_NODEPORT_PUSH:-true}" != "true" ]] \
-    && echo "${verify_out}" | grep -q "Jenkins pod can use in-cluster push"; then
-  upsert "HARBOR_REGISTRY_PUSH" "${NGINX}"
-  echo "OK: HARBOR_REGISTRY_PUSH=${NGINX}"
-else
-  upsert "HARBOR_REGISTRY_PUSH" ""
-  echo "OK: crane push via NodePort ${EXT} (HARBOR_REGISTRY_PUSH empty)"
-fi
+upsert "HARBOR_REGISTRY_PUSH" ""
+echo "OK: crane push via NodePort ${EXT} (Jenkinsfile must not fall back to HARBOR_REGISTRY_NGINX_CLUSTER)"
 
 grep '^HARBOR_REGISTRY_PUSH=' "${ENV_FILE}" || echo "HARBOR_REGISTRY_PUSH="
 

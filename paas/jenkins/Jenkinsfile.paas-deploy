@@ -704,13 +704,17 @@ def normalizeRegistryHost(String reg) {
   return reg.trim().replaceFirst('^https?://', '').replaceAll('/+$', '').split('/')[0]
 }
 
-/** Crane push host: only when HARBOR_REGISTRY_PUSH is explicitly set (never fall back to NGINX_CLUSTER). */
+def harborForceNodePortPush() {
+  def v = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: 'true')
+  return v.equalsIgnoreCase('true')
+}
+
+/** Crane push host: only when HARBOR_REGISTRY_PUSH is set (never auto-fill from NGINX_CLUSTER). */
 def resolveHarborPushImageRef(String imageRef) {
-  def forceNodeport = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: '').equalsIgnoreCase('true')
-  if (forceNodeport) {
+  def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
+  if (harborForceNodePortPush()) {
     return imageRef
   }
-  def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
   def pushRaw = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim() ?: "")
   def pushReg = normalizeRegistryHost(pushRaw)
   if (!external || !pushReg || external == pushReg || !imageRef?.trim()) {
@@ -1147,8 +1151,12 @@ def cosignImageRef = ""
 
 def runPaasDeploy = {
   env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
-  env.HARBOR_FORCE_NODEPORT_PUSH = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: "true").trim()
-  env.HARBOR_REGISTRY_PUSH = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH ?: "").trim()
+  env.HARBOR_FORCE_NODEPORT_PUSH = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: 'true').trim()
+  if (harborForceNodePortPush()) {
+    env.HARBOR_REGISTRY_PUSH = ""
+  } else {
+    env.HARBOR_REGISTRY_PUSH = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH ?: "").trim()
+  }
   env.HARBOR_REGISTRY_NGINX_CLUSTER = (env.HARBOR_REGISTRY_NGINX_CLUSTER ?: "").trim()
   env.HARBOR_REGISTRY_CLUSTER = (env.HARBOR_REGISTRY_CLUSTER ?: "").trim()
   env.HARBOR_USERNAME = (params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: "").trim()
@@ -1225,7 +1233,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
   println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
   println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
-  println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260604 (HARBOR_FORCE_NODEPORT_PUSH; no NGINX_CLUSTER fallback for push)'
+  println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
