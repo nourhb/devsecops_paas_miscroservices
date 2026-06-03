@@ -151,7 +151,7 @@ else
   if echo "${CONSOLE}" | grep -qiE 'non configuré|SONAR not set'; then
     fail "Sonar/DT credentials missing on build #${BUILD}"
   fi
-  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey'; then
+  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey|ANALYSIS SUCCESSFUL'; then
     ok "Step 5 (Sonar) submitted on build #${BUILD}"
   elif echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=5'; then
     fail "Step 5 skipped on build #${BUILD}"

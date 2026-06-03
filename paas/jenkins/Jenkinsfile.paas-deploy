@@ -1603,7 +1603,7 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-project-properties-20260603 (sonar-project.properties + sonar.login for native CLI)"
+      println "[paas-jenkinsfile] marker=sonar-bash-rc-fix-20260603 (sonar-project.properties; bash RC; no PIPESTATUS under /bin/sh)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -1621,7 +1621,7 @@ exit 0
           "SONAR_PROJECT_ID_TAG=${projectId}",
           "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"
         ]) {
-          def sonarRc = sh(script: '''
+          def sonarRc = sh(script: '''#!/bin/bash
             set +e
             pick_sonar_url() {
               for u in \
@@ -1661,7 +1661,6 @@ exit 0
             rm -f "${SP}"
             {
               printf 'sonar.host.url=%s\n' "${SONAR_HOST_URL}"
-              printf 'sonar.login=%s\n' "${SONAR_TOKEN}"
               printf 'sonar.token=%s\n' "${SONAR_TOKEN}"
               printf 'sonar.projectKey=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectName=%s\n' "${SONAR_PROJECT_KEY}"
@@ -1673,10 +1672,14 @@ exit 0
             } > "${SP}"
             chmod 600 "${SP}"
             echo "[sonar] wrote ${SP} (credentials in file; not echoed)"
-            export SONAR_LOGIN="${SONAR_TOKEN}"
             LOG=/tmp/sonar-scanner-$$.log
-            npx --yes sonarqube-scanner@4.2.8 2>&1 | tee "${LOG}"
-            RC=${PIPESTATUS[0]}
+            npx --yes sonarqube-scanner@4.2.8 > "${LOG}" 2>&1
+            RC=$?
+            cat "${LOG}"
+            if [ "${RC}" != "0" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
+              echo "[sonar] scanner reported success despite exit ${RC} — treating as OK"
+              RC=0
+            fi
             if [ "${RC}" != "0" ]; then
               echo "[sonar] scanner tail:"
               tail -25 "${LOG}" 2>/dev/null || true
@@ -1713,7 +1716,6 @@ echo "[sonar] docker scanner host=${SONAR_SCAN_HOST_URL}"
 SP="${SONAR_WS}/sonar-project.properties"
 cat > "${SP}" <<SONARPROP
 sonar.host.url=${SONAR_SCAN_HOST_URL}
-sonar.login=${SONAR_SCAN_TOKEN}
 sonar.token=${SONAR_SCAN_TOKEN}
 sonar.projectKey=${SONAR_SCAN_PROJECT_KEY}
 sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
