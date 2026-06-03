@@ -60,7 +60,8 @@ if [[ -n "${WORKER_HOST}" ]] && command -v ssh >/dev/null 2>&1; then
   ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no \
     "${WORKER2_USER:-master}@${WORKER_HOST}" \
     "docker system prune -af 2>/dev/null; sudo crictl rmi --prune 2>/dev/null; df -h / | tail -1" 2>/dev/null \
-    || echo "WARN: ssh to ${WORKER_HOST} failed — use: WORKER2_SSH=<ip> bash paas/scripts/free-harbor-disk-lab.sh"
+    || bash "${SCRIPT_DIR}/prune-worker-node-disk-lab.sh" 2>/dev/null \
+    || echo "WARN: prune failed — run: bash paas/scripts/prune-worker-node-disk-lab.sh"
 else
   echo "WARN: set WORKER2_SSH=192.168.56.x (worker2 IP from: kubectl get nodes -o wide)"
   echo "  docker system prune -af && sudo crictl rmi --prune && df -h /"
