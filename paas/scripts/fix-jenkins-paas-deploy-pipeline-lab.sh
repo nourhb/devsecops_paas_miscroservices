@@ -63,7 +63,6 @@ done
 echo "==> 3. Harbor in-cluster push (avoids nginx 502 on crane blob upload)"
 if command -v kubectl >/dev/null 2>&1 && kubectl get ns harbor >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/fix-harbor-jenkins-crane-push-lab.sh" || echo "WARN: fix-harbor-jenkins-crane-push-lab.sh skipped"
-  bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh" || echo "WARN: Jenkins → Harbor push registry probe failed"
 else
   echo "WARN: no Harbor namespace — skip HARBOR_REGISTRY_PUSH wiring"
 fi

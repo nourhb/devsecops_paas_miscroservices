@@ -1,50 +1,56 @@
 #!/usr/bin/env bash
-# Jenkins (in-cluster) → push crane layers via Harbor nginx Service (not raw registry:5000).
+# Pick crane push URL: in-cluster nginx only when a curl probe pod confirms it; else NodePort.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 
-echo "==> Wire cluster Harbor hosts + HARBOR_REGISTRY_PUSH (nginx, not registry:5000)"
+upsert() {
+  local key="$1" val="$2"
+  [[ -f "${ENV_FILE}" ]] || { echo "FAIL: missing ${ENV_FILE}" >&2; exit 1; }
+  if grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${val}|" "${ENV_FILE}"
+  else
+    echo "${key}=${val}" >> "${ENV_FILE}"
+  fi
+}
+
+echo "==> Wire cluster Harbor hosts"
 bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}"
 
-PUSH="$(grep '^HARBOR_REGISTRY_PUSH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
-if [[ -z "${PUSH}" ]]; then
-  echo "FAIL: HARBOR_REGISTRY_PUSH not set — kubectl get svc -n harbor" >&2
-  exit 1
-fi
-
-echo "OK: crane push host=${PUSH} (external pull tag stays HARBOR_REGISTRY NodePort)"
+EXT="$(grep '^HARBOR_REGISTRY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 192.168.56.129:30002)"
+NGINX_PUSH="$(grep '^HARBOR_REGISTRY_PUSH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
 
 echo ""
-echo "==> Wait for Harbor registry pod 2/2 Ready (1/2 → crane HTTP 000)"
+echo "==> Wait for harbor-registry 2/2 Ready"
 HARBOR_NS="${HARBOR_NS:-harbor}"
-for i in $(seq 1 36); do
+for i in $(seq 1 24); do
   ready="$(kubectl get pods -n "${HARBOR_NS}" -l app=harbor,component=registry \
     -o jsonpath='{.items[0].status.containerStatuses[*].ready}' 2>/dev/null || true)"
-  if echo "${ready}" | grep -q false; then
-    echo "waiting registry containers (${i}/36): ${ready:-unknown}"
-    sleep 10
-  else
-    echo "OK: harbor-registry containers ready (${ready})"
+  if ! echo "${ready}" | grep -q false; then
+    echo "OK: harbor-registry ready (${ready})"
     break
   fi
-  if [[ "${i}" -eq 36 ]]; then
-    echo "WARN: registry pod not fully ready — check: kubectl logs -n harbor deploy/harbor-registry --all-containers --tail=40"
-  fi
+  sleep 10
 done
 
-echo ""
+bash "${SCRIPT_DIR}/patch-harbor-nginx-large-upload-lab.sh" 2>/dev/null || true
 bash "${SCRIPT_DIR}/recover-harbor-registry-lab.sh" || true
 
 echo ""
-echo "==> Probe from Jenkins pod"
-if ! bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh"; then
-  echo "FAIL: fix Jenkins → Harbor before triggering paas-deploy" >&2
-  exit 1
+verify_out="$(bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh" 2>&1)" || true
+echo "${verify_out}"
+
+if echo "${verify_out}" | grep -q "use in-cluster push"; then
+  echo "OK: keep HARBOR_REGISTRY_PUSH=${NGINX_PUSH}"
+elif echo "${verify_out}" | grep -q "use HARBOR_REGISTRY for crane push"; then
+  upsert "HARBOR_REGISTRY_PUSH" ""
+  echo "OK: HARBOR_REGISTRY_PUSH cleared — crane uses NodePort ${EXT}"
+else
+  upsert "HARBOR_REGISTRY_PUSH" ""
+  echo "WARN: probe unclear — cleared HARBOR_REGISTRY_PUSH; using NodePort ${EXT}"
 fi
 
 echo ""
-echo "OK — next: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
-echo "Console should show: Harbor crane push via in-cluster registry ${PUSH}"
+bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh"
