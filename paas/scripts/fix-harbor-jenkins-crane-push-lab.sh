@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pick crane push URL: in-cluster nginx only when a curl probe pod confirms it; else NodePort.
+# Crane push via NodePort unless in-cluster nginx is provably OK. Avoid restart storms.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -16,41 +16,35 @@ upsert() {
   fi
 }
 
-echo "==> Wire cluster Harbor hosts"
+echo "==> Wire cluster Harbor hosts (cosign verify only; no HARBOR_REGISTRY_PUSH)"
 bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}"
 
 EXT="$(grep '^HARBOR_REGISTRY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 192.168.56.129:30002)"
-NGINX_PUSH="$(grep '^HARBOR_REGISTRY_PUSH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
 
 echo ""
-echo "==> Wait for harbor-registry 2/2 Ready"
-HARBOR_NS="${HARBOR_NS:-harbor}"
-for i in $(seq 1 24); do
-  ready="$(kubectl get pods -n "${HARBOR_NS}" -l app=harbor,component=registry \
-    -o jsonpath='{.items[0].status.containerStatuses[*].ready}' 2>/dev/null || true)"
-  if ! echo "${ready}" | grep -q false; then
-    echo "OK: harbor-registry ready (${ready})"
-    break
-  fi
-  sleep 10
-done
-
-bash "${SCRIPT_DIR}/patch-harbor-nginx-large-upload-lab.sh" 2>/dev/null || true
-bash "${SCRIPT_DIR}/recover-harbor-registry-lab.sh" || true
+echo "==> Harbor disk (worker2 registry PVC often 89%+ → 502 on upload)"
+bash "${SCRIPT_DIR}/free-harbor-disk-lab.sh" || true
 
 echo ""
-verify_out="$(bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh" 2>&1)" || true
+echo "==> Single Harbor recover (no nested restarts)"
+bash "${SCRIPT_DIR}/recover-harbor-registry-lab.sh" || echo "WARN: recover returned non-zero — wait 60s and re-probe"
+
+echo ""
+echo "==> Probe push path"
+sleep 5
+verify_out="$(WIRE_ENV=0 bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh" 2>&1)" || true
 echo "${verify_out}"
 
+NGINX_PUSH="$(grep '^HARBOR_REGISTRY_NGINX_CLUSTER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
 if echo "${verify_out}" | grep -q "use in-cluster push"; then
-  echo "OK: keep HARBOR_REGISTRY_PUSH=${NGINX_PUSH}"
-elif echo "${verify_out}" | grep -q "use HARBOR_REGISTRY for crane push"; then
-  upsert "HARBOR_REGISTRY_PUSH" ""
-  echo "OK: HARBOR_REGISTRY_PUSH cleared — crane uses NodePort ${EXT}"
+  upsert "HARBOR_REGISTRY_PUSH" "${NGINX_PUSH}"
+  echo "OK: HARBOR_REGISTRY_PUSH=${NGINX_PUSH}"
 else
   upsert "HARBOR_REGISTRY_PUSH" ""
-  echo "WARN: probe unclear — cleared HARBOR_REGISTRY_PUSH; using NodePort ${EXT}"
+  echo "OK: HARBOR_REGISTRY_PUSH cleared — crane uses NodePort ${EXT}"
 fi
 
+grep '^HARBOR_REGISTRY_PUSH=' "${ENV_FILE}" || echo "HARBOR_REGISTRY_PUSH="
+
 echo ""
-bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh"
+WIRE_ENV=0 bash "${SCRIPT_DIR}/verify-harbor-push-from-jenkins-lab.sh"
