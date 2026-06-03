@@ -24,6 +24,7 @@ NGINX="$(grep '^HARBOR_REGISTRY_NGINX_CLUSTER=' "${ENV_FILE}" 2>/dev/null | cut 
 
 # Lab default: Jenkins runs on master; in-cluster DNS often fails from Jenkins pod (curl 000).
 if [[ "${HARBOR_FORCE_NODEPORT_PUSH:-true}" == "true" ]]; then
+  upsert "HARBOR_FORCE_NODEPORT_PUSH" "true"
   upsert "HARBOR_REGISTRY_PUSH" ""
   echo "OK: HARBOR_FORCE_NODEPORT_PUSH=true → HARBOR_REGISTRY_PUSH cleared (NodePort ${EXT})"
 fi

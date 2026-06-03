@@ -49,10 +49,19 @@ kubectl exec -n "${HARBOR_NS}" deploy/harbor-registry -c registry -- df -h /stor
 df -h / | tail -1
 echo ""
 echo "==> worker2 (Harbor node) — prune container images"
-WORKER="${WORKER2_HOST:-worker2}"
-if command -v ssh >/dev/null 2>&1 && ssh -o BatchMode=yes -o ConnectTimeout=5 "${WORKER}" "df -h / | tail -1" 2>/dev/null; then
-  ssh "${WORKER}" "docker system prune -af 2>/dev/null; sudo crictl rmi --prune 2>/dev/null; df -h / | tail -1" 2>/dev/null || true
+WORKER_NODE="${WORKER2_NODE:-worker2}"
+WORKER_IP="$(kubectl get node "${WORKER_NODE}" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+WORKER_HOST="${WORKER2_SSH:-}"
+if [[ -z "${WORKER_HOST}" && -n "${WORKER_IP}" ]]; then
+  WORKER_HOST="${WORKER_IP}"
+fi
+if [[ -n "${WORKER_HOST}" ]] && command -v ssh >/dev/null 2>&1; then
+  echo "Pruning via ssh ${WORKER_HOST} (node ${WORKER_NODE})…"
+  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no \
+    "${WORKER2_USER:-master}@${WORKER_HOST}" \
+    "docker system prune -af 2>/dev/null; sudo crictl rmi --prune 2>/dev/null; df -h / | tail -1" 2>/dev/null \
+    || echo "WARN: ssh to ${WORKER_HOST} failed — use: WORKER2_SSH=<ip> bash paas/scripts/free-harbor-disk-lab.sh"
 else
-  echo "WARN: cannot SSH to ${WORKER} — run manually on worker2:"
+  echo "WARN: set WORKER2_SSH=192.168.56.x (worker2 IP from: kubectl get nodes -o wide)"
   echo "  docker system prune -af && sudo crictl rmi --prune && df -h /"
 fi
