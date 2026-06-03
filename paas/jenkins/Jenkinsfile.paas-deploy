@@ -704,6 +704,22 @@ def normalizeRegistryHost(String reg) {
   return reg.trim().replaceFirst('^https?://', '').replaceAll('/+$', '').split('/')[0]
 }
 
+/** Crane push host: bypass Harbor nginx NodePort (502 on large blob PATCH) when Jenkins runs in-cluster. */
+def resolveHarborPushImageRef(String imageRef) {
+  def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
+  def pushReg = normalizeRegistryHost(
+    params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_CLUSTER?.trim() ?: ""
+  )
+  if (!external || !pushReg || external == pushReg || !imageRef?.trim()) {
+    return imageRef
+  }
+  def ref = imageRef.trim()
+  if (ref.startsWith("${external}/")) {
+    return ref.replaceFirst(external, pushReg)
+  }
+  return imageRef
+}
+
 def isDockerHubStyleImageRef(String imageRef) {
   def parts = imageRef?.trim()?.tokenize('/') ?: []
   if (parts.size() != 2) {
@@ -764,12 +780,17 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   println "[image] PAAS app root for build layer: ${appRoot}"
   materializeProjectBuildEnv(appRoot)
   patchNextBuildEnvIntoConfig(appRoot)
-  imageRef = normalizeOciImageReference(imageRef)
+  def artifactImageRef = normalizeOciImageReference(imageRef)
+  imageRef = resolveHarborPushImageRef(artifactImageRef)
+  if (imageRef != artifactImageRef) {
+    println "[image] Harbor crane push via in-cluster registry ${imageRef} (GitOps/cosign ref stays ${artifactImageRef})"
+  }
   def registry = registryHostFor(imageRef)
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
   def harborHost = normalizeRegistryHost(harborRegistry)
+  def pushHost = normalizeRegistryHost(imageRef)
   def craneInsecure = ""
-  if (harborHost && registry == harborHost) {
+  if ((harborHost && (registry == harborHost || pushHost == harborHost)) || (pushHost && pushHost.contains('.svc.'))) {
     craneInsecure = "--insecure"
   } else if (harborRegistry.startsWith('http://') || (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: '').trim().equalsIgnoreCase('true')) {
     craneInsecure = "--insecure"
@@ -968,25 +989,39 @@ PAAS_START
         --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
     fi
     echo "[image] crane append → registry (this step can take many minutes on slow links)"
-    if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
-      _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
-      echo "[image] crane append: foreground heartbeat every \${_hb}s while crane runs (durable-task friendly)"
-      "${craneBin}" ${craneInsecure} append \\
-        -b mirror.gcr.io/library/node:20-bookworm-slim \\
-        -f paas-artifacts/app-layer.tar \\
-        -t "${imageRef}" &
-      CRANE_APPEND_PID=\$!
-      while kill -0 "\${CRANE_APPEND_PID}" 2>/dev/null; do
-        echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        sleep "\${_hb}" || true
-      done
-      wait "\${CRANE_APPEND_PID}"
-    else
-      "${craneBin}" ${craneInsecure} append \\
-        -b mirror.gcr.io/library/node:20-bookworm-slim \\
-        -f paas-artifacts/app-layer.tar \\
-        -t "${imageRef}"
-    fi
+    _crane_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
+    _crane_attempt=1
+    _crane_rc=1
+    while [ "\${_crane_attempt}" -le "\${_crane_max}" ]; do
+      echo "[image] crane append attempt \${_crane_attempt}/\${_crane_max} → ${imageRef}"
+      if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
+        _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
+        "${craneBin}" ${craneInsecure} append \\
+          -b mirror.gcr.io/library/node:20-bookworm-slim \\
+          -f paas-artifacts/app-layer.tar \\
+          -t "${imageRef}" &
+        CRANE_APPEND_PID=\$!
+        while kill -0 "\${CRANE_APPEND_PID}" 2>/dev/null; do
+          echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sleep "\${_hb}" || true
+        done
+        wait "\${CRANE_APPEND_PID}" && _crane_rc=0 || _crane_rc=\$?
+      else
+        "${craneBin}" ${craneInsecure} append \\
+          -b mirror.gcr.io/library/node:20-bookworm-slim \\
+          -f paas-artifacts/app-layer.tar \\
+          -t "${imageRef}" && _crane_rc=0 || _crane_rc=\$?
+      fi
+      if [ "\${_crane_rc}" = "0" ]; then
+        break
+      fi
+      echo "[image] WARN: crane append failed (rc=\${_crane_rc}); Harbor 502? bash paas/scripts/recover-harbor-registry-lab.sh"
+      if [ "\${_crane_attempt}" -ge "\${_crane_max}" ]; then
+        exit "\${_crane_rc}"
+      fi
+      _crane_attempt=\$((_crane_attempt + 1))
+      sleep 30
+    done
     echo "[image] crane append finished; running crane mutate (same shell as append — monorepo-safe)"
     USE_STANDALONE=0
     if [ -f paas-artifacts/_crane_use_standalone ]; then
@@ -1009,8 +1044,13 @@ PAAS_START
         --exposed-ports=3000/tcp
     fi
     echo "[image] crane mutate OK"
+    ARTIFACT_REF="${artifactImageRef}"
+    if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
+      echo "[image] crane copy → GitOps/cosign ref \${ARTIFACT_REF}"
+      "${craneBin}" ${craneInsecure} copy "${imageRef}" "\${ARTIFACT_REF}" || echo "[image] WARN: crane copy to external Harbor ref failed (pull may still work via in-cluster push)"
+    fi
     mkdir -p paas-artifacts
-    REF="${imageRef}"
+    REF="\${ARTIFACT_REF:-${artifactImageRef}}"
     DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       case "\${DIGEST_REF}" in
@@ -1175,6 +1215,7 @@ def runPaasDeploy = {
   println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
   println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
   println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
+  println '[paas-jenkinsfile] marker=harbor-registry-push-20260603 (HARBOR_REGISTRY_PUSH bypasses nginx 502; crane append retries)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
