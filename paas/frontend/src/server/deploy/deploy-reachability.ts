@@ -1,16 +1,10 @@
 import { env } from "@/server/config/env";
 import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
-import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
+import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
 import { integrationFetch } from "@/server/http/integration-fetch";
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Helm Service name = {release}-{chart}; per-project charts use apps/{project}, not apps/simple-app. */
-function gitopsChartShortNameForProject(projectName: string): string {
-    const chartPath = gitopsHelmChartPathForProject(projectName).replace(/\\/g, "/").replace(/\/$/, "");
-    return chartPath.split("/").filter(Boolean).pop() ?? "simple-app";
 }
 
 export function buildInClusterAppServiceUrl(projectName: string, namespace: string): string {

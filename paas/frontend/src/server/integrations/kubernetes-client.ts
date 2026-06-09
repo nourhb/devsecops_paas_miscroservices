@@ -629,6 +629,57 @@ export async function waitForDeploymentReady(
     return { ready: false, message: `${deploymentName}: timeout (${lastStatus})` };
 }
 
+export async function waitForAnyDeploymentReady(
+    namespace: string,
+    deploymentNames: string[],
+    timeoutMs: number
+): Promise<{ ready: boolean; message: string; deploymentName: string | null }> {
+    const names = [...new Set(deploymentNames.map((n) => n.trim()).filter(Boolean))];
+    if (names.length === 0) {
+        return { ready: false, message: "No deployment names to watch.", deploymentName: null };
+    }
+    const api = getAppsV1Api();
+    if (!api) {
+        return { ready: false, message: "Kubernetes API not configured.", deploymentName: null };
+    }
+    const deadline = Date.now() + Math.max(10000, timeoutMs);
+    let lastStatus = "waiting";
+    let tracked: string | null = null;
+    while (Date.now() < deadline) {
+        const probeList = tracked ? [tracked] : names;
+        for (const name of probeList) {
+            try {
+                const { body: deployment } = await api.readNamespacedDeployment(name, namespace);
+                if (!tracked) {
+                    tracked = name;
+                }
+                const ready = deployment.status?.readyReplicas ?? 0;
+                const desired = deployment.status?.replicas ?? 1;
+                if (ready >= desired && desired > 0) {
+                    return { ready: true, message: `${name}: ${ready}/${desired} ready`, deploymentName: name };
+                }
+                const cond = deployment.status?.conditions?.find((c) => c.type === "Available");
+                lastStatus = cond?.reason || `ready=${ready}/${desired}`;
+            }
+            catch (e) {
+                const msg = kubernetesErrorMessage(e);
+                if (tracked === name) {
+                    lastStatus = msg;
+                }
+                else if (!/404|not found/i.test(msg)) {
+                    lastStatus = msg;
+                }
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    return {
+        ready: false,
+        message: `${tracked ?? names.join("|")}: timeout (${lastStatus})`,
+        deploymentName: tracked
+    };
+}
+
 export async function getClusterNodeCount(): Promise<number | null> {
     const api = getCoreV1Api();
     if (!api) {

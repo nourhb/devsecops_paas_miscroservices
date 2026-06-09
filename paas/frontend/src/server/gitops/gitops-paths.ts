@@ -11,6 +11,12 @@ function applyProjectPathPattern(pattern: string, projectName: string): string {
 export function gitopsValuesPathForProject(projectName: string): string {
     return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
 }
+/** Last segment of the per-project Helm chart path (often equals project slug; Chart.yaml may still be simple-app). */
+export function gitopsChartShortNameForProject(projectName: string): string {
+    const chartPath = gitopsHelmChartPathForProject(projectName).replace(/\\/g, "/").replace(/\/$/, "");
+    return chartPath.split("/").filter(Boolean).pop() ?? "simple-app";
+}
+
 export function gitopsHelmChartPathForProject(projectName: string): string {
     const explicit = env.GITOPS_CHART_PATH_PATTERN.trim();
     if (explicit) {

@@ -43,5 +43,5 @@ bash "${SCRIPT_DIR}/secure-env-files.sh" --fix
 echo ""
 echo "Next:"
 echo "  bash ${SCRIPT_DIR}/push-gitops-lab.sh 'chore: blue-green helm templates'"
-echo "  bash ${SCRIPT_DIR}/set-lab-env-key.sh PAAS_DEPLOYMENT_STRATEGY BlueGreen sync"
-echo "  Trigger Deploy from PaaS for sanhome"
+echo "  bash ${SCRIPT_DIR}/set-lab-env-key.sh PAAS_DEPLOYMENT_STRATEGY Rolling sync"
+echo "  bash ${SCRIPT_DIR}/fix-lab-rolling-deploy-now.sh   # if BlueGreen deploys still fail"
