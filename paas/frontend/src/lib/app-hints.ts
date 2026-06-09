@@ -104,6 +104,8 @@ export const hints = {
         deployId: "Internal row ID for this deploy—I paste it when two different jobs both claim ‘build 142’.",
         failedCallout: "Structured failureReason/failureMessage when Jenkins gave them to us; otherwise I live in the console card.",
         liveApp: "URL recorded when we marked DEPLOYED; the reachability badge is a simple HTTP poke from the platform.",
+        deploying: "Jenkins finished the build — we are pushing the image, syncing GitOps/Argo CD, and waiting for your app URL to come up.",
+        deployedRun: "Deployment complete — open this URL to run your application in the browser."
         artifact: "Image ref we captured for this run—digest shows up when the registry metadata came back clean.",
         console: "Tail of what we buffered (last ~5k chars) with angry highlighting if it failed—full log still lives in Jenkins."
     },

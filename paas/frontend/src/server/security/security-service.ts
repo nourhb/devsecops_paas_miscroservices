@@ -1,4 +1,4 @@
-import type { SecurityMetrics } from "@/types";
+import type { SecurityIntegrationProbe, SecurityMetrics } from "@/types";
 import { DeploymentJobStatus, type Project } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
@@ -6,6 +6,7 @@ import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/de
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { cosignClient, dependencyTrackClient, jenkinsClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
+import { parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
 import { getProjectById } from "@/server/projects/project-service";
 
 function score(base: number, penalty: number): number {
@@ -55,7 +56,22 @@ function degradedMetrics(project: Project, message: string): SecurityMetrics {
         trivy: emptySeverity(),
         cosignSigned: false,
         opaViolations: 0,
-        securityScore: 0
+        securityScore: 0,
+        integrationProbes: [],
+        pipelineVerification: {
+            jenkinsChecks: [],
+            deployChecks: [],
+            buildComplete: null,
+            artifactImage: null
+        },
+        buildContext: {
+            jenkinsBuildNumber: null,
+            jenkinsBuildResult: null,
+            deploymentStatus: project.lastDeploymentStatus ?? null,
+            deploymentFailureReason: null,
+            deploymentFailureMessage: null
+        },
+        securityLogExcerpt: ""
     };
 }
 
@@ -99,18 +115,29 @@ function normalizeCosignDigestRef(imageTag: string, rawDigest: string): string {
     return digest;
 }
 
-async function deploymentLogsForCosign(project: Project): Promise<string> {
+async function resolveLatestDeploymentLogs(project: Project, maxJenkinsChars = DEPLOYMENT_LOG_TAIL_MAX_CHARS): Promise<{
+    logs: string;
+    jenkinsBuildNumber: number | null;
+    deploymentStatus: string | null;
+    failureReason: string | null;
+    failureMessage: string | null;
+}> {
     const recent = await prisma.deployment.findFirst({
         where: { projectId: project.id },
         orderBy: { createdAt: "desc" },
-        select: { logs: true, jenkinsBuildNumber: true }
+        select: {
+            logs: true,
+            jenkinsBuildNumber: true,
+            status: true,
+            failureReason: true,
+            failureMessage: true
+        }
     });
     let logs = recent?.logs ?? "";
-    const buildNum = recent?.jenkinsBuildNumber;
+    const buildNum = recent?.jenkinsBuildNumber ?? null;
     const needsJenkins =
         buildNum != null &&
-        !/PAAS_(COSIGN_DIGEST|IMAGE_DIGEST)=/i.test(logs) &&
-        !/PAAS_STEP_OK step=9 id=cosign/i.test(logs);
+        !/PAAS_STEP_(OK|WARN|FAIL|SKIP)/i.test(logs);
     if (needsJenkins) {
         try {
             const console = await jenkinsClient.getBuildConsoleText(
@@ -120,24 +147,148 @@ async function deploymentLogsForCosign(project: Project): Promise<string> {
                 "deploy"
             );
             if (console?.trim()) {
-                logs = console.length <= DEPLOYMENT_LOG_TAIL_MAX_CHARS
+                logs = console.length <= maxJenkinsChars
                     ? console
-                    : console.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
+                    : console.slice(-maxJenkinsChars);
             }
         }
         catch {
             // keep DB tail
         }
     }
-    return logs;
+    return {
+        logs,
+        jenkinsBuildNumber: buildNum,
+        deploymentStatus: recent?.status ?? null,
+        failureReason: recent?.failureReason ?? null,
+        failureMessage: recent?.failureMessage ?? null
+    };
 }
 
-async function resolveCosignSigned(project: Project, imageTag: string): Promise<boolean> {
-    const verifyTimeoutMs = 30000;
+async function deploymentLogsForCosign(project: Project): Promise<string> {
+    return (await resolveLatestDeploymentLogs(project)).logs;
+}
+
+const SECURITY_LOG_LINE = /PAAS_STEP_|PAAS_BUILD_COMPLETE|PAAS_(COSIGN|IMAGE)_DIGEST|PAAS_ARTIFACT_IMAGE|PAAS_DEPLOY_VERIFY|sonar|dependency-track|cyclonedx|dependency-check|\bSCA\b|cosign|trivy|\bzap\b|dast|quality gate|Not authorized|EXECUTION SUCCESS|ANALYSIS SUCCESSFUL|WARN.*step=|FAIL.*step=/i;
+
+function extractSecurityLogExcerpt(logs: string, maxChars = 12000): string {
+    const text = logs.trim();
+    if (!text) {
+        return "No deployment or Jenkins logs stored yet. Trigger a build from Pipeline, then reopen Security.";
+    }
+    const matched = text
+        .split(/\r?\n/)
+        .filter((line) => SECURITY_LOG_LINE.test(line))
+        .join("\n");
+    const excerpt = matched.trim() || text;
+    return excerpt.length > maxChars ? excerpt.slice(-maxChars) : excerpt;
+}
+
+function buildIntegrationProbes(input: {
+    sonarStatus: "PASSED" | "FAILED" | "UNKNOWN";
+    sonarMatchedKey: string | null;
+    dtProjectUuid: string | null;
+    trivy: ReturnType<typeof emptySeverity>;
+    trivyError: string | null;
+    cosignSigned: boolean;
+    policyEngine: ReturnType<typeof policyEngineLabel>;
+    policyValidated: boolean;
+    opaAllowed: boolean;
+    partialErrors: string[];
+}): SecurityIntegrationProbe[] {
+    const sonarConfigured = Boolean(env.SONAR_BASE_URL?.trim() && env.SONAR_TOKEN?.trim());
+    const dtConfigured = Boolean(env.DEPENDENCY_TRACK_BASE_URL?.trim() && env.DEPENDENCY_TRACK_API_KEY?.trim());
+    const trivyConfigured = Boolean(env.TRIVY_BASE_URL?.trim() || (env.HARBOR_BASE_URL?.trim() && env.HARBOR_USERNAME?.trim()));
+    const cosignConfigured = Boolean(env.COSIGN_PRIVATE_KEY?.trim() || env.COSIGN_CREDENTIALS_ID?.trim());
+    const probes: SecurityIntegrationProbe[] = [
+        {
+            tool: "SonarQube (Step 5)",
+            configured: sonarConfigured,
+            status: !sonarConfigured
+                ? "SKIPPED"
+                : input.sonarStatus === "PASSED"
+                    ? "OK"
+                    : input.sonarStatus === "FAILED"
+                        ? "FAIL"
+                        : "UNKNOWN",
+            detail: !sonarConfigured
+                ? "SONAR_BASE_URL / SONAR_TOKEN not set on PaaS frontend."
+                : input.sonarMatchedKey
+                    ? `Quality gate ${input.sonarStatus} for key ${input.sonarMatchedKey}.`
+                    : "No Sonar analysis found — run full pipeline (Step 5)."
+        },
+        {
+            tool: "Dependency-Track (Step 4)",
+            configured: dtConfigured,
+            status: !dtConfigured
+                ? "SKIPPED"
+                : input.dtProjectUuid
+                    ? "OK"
+                    : "UNKNOWN",
+            detail: !dtConfigured
+                ? "DEPENDENCY_TRACK_BASE_URL / API key not set."
+                : input.dtProjectUuid
+                    ? `Project linked (${input.dtProjectUuid.slice(0, 8)}…).`
+                    : "No SBOM project — Step 4 must upload bom.json."
+        },
+        {
+            tool: "Trivy / Harbor scan",
+            configured: trivyConfigured,
+            status: !trivyConfigured
+                ? "SKIPPED"
+                : input.trivyError
+                    ? "WARN"
+                    : input.trivy.critical + input.trivy.high > 0
+                        ? "WARN"
+                        : "OK",
+            detail: input.trivyError
+                ? input.trivyError.slice(0, 220)
+                : `Critical ${input.trivy.critical}, high ${input.trivy.high}, medium ${input.trivy.medium}, low ${input.trivy.low}.`
+        },
+        {
+            tool: "Cosign (Step 9)",
+            configured: cosignConfigured,
+            status: !cosignConfigured ? "SKIPPED" : input.cosignSigned ? "OK" : "FAIL",
+            detail: !cosignConfigured
+                ? "Cosign key not configured in Jenkins/PaaS env."
+                : input.cosignSigned
+                    ? "Image signature verified (or Jenkins Step 9 marker trusted)."
+                    : "Image not signed — deploy may be blocked by policy."
+        },
+        {
+            tool: `${input.policyEngine} policy`,
+            configured: input.policyEngine !== "None",
+            status: input.policyEngine === "None"
+                ? "SKIPPED"
+                : input.policyValidated
+                    ? "OK"
+                    : "FAIL",
+            detail: input.policyEngine === "None"
+                ? "POLICY_ENGINE=none — policy checks disabled."
+                : input.policyValidated
+                    ? "Policy validation passed."
+                    : input.opaAllowed === false
+                        ? "OPA rejected this image."
+                        : "Policy requirements not met (e.g. unsigned image)."
+        }
+    ];
+    if (input.partialErrors.length > 0) {
+        probes.push({
+            tool: "Integration errors",
+            configured: true,
+            status: "WARN",
+            detail: input.partialErrors.join("; ").slice(0, 280)
+        });
+    }
+    return probes;
+}
+
+async function resolveCosignSigned(project: Project, imageTag: string, prefetchedLogs?: string): Promise<boolean> {
+    const verifyTimeoutMs = 15000;
     if (await cosignClient.isSigned(imageTag, { timeoutMs: verifyTimeoutMs })) {
         return true;
     }
-    const logs = await deploymentLogsForCosign(project);
+    const logs = prefetchedLogs ?? await deploymentLogsForCosign(project);
     const rawDigest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
         ?? logs.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim()
         ?? "";
@@ -174,11 +325,23 @@ async function sonarTokenLooksValid(): Promise<boolean> {
     }
 }
 
-async function resolveSonarQualityGate(project: Project): Promise<{
+function sonarProjectKeysFromLogs(logs: string): string[] {
+    const keys: string[] = [];
+    for (const m of logs.matchAll(/analysis submitted for projectKey=(\S+)/gi)) {
+        keys.push(m[1].replace(/[,;.`'"]+$/, ""));
+    }
+    for (const m of logs.matchAll(/sonar\.projectKey=(\S+)/gi)) {
+        keys.push(m[1].trim());
+    }
+    return [...new Set(keys.filter((k) => k.trim()))];
+}
+
+async function resolveSonarQualityGate(project: Project, logKeys: string[] = []): Promise<{
     status: "PASSED" | "FAILED" | "UNKNOWN";
     matchedKey: string | null;
 }> {
-    for (const key of integrationProjectKeys(project)) {
+    const keys = [...new Set([...logKeys, ...integrationProjectKeys(project)])];
+    for (const key of keys) {
         try {
             const result = await sonarQubeClient.qualityGate(key);
             if (result.status === "PASSED" || result.status === "FAILED") {
@@ -206,13 +369,30 @@ async function resolveDependencyTrackMetrics(project: Project) {
     return dependencyTrackClient.projectMetrics(project.id);
 }
 
-async function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null): Promise<string> {
+async function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null, scaFromLogs?: {
+    level: string;
+    message: string;
+} | null, sonarFromLogs?: {
+    level: string;
+    message: string;
+} | null): Promise<string> {
     const hints: string[] = [];
     if (!env.SONAR_BASE_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
         hints.push("PaaS frontend: set SONAR_BASE_URL and SONAR_TOKEN in docker-compose.env, then run sync-paas-frontend-env-k8s.sh.");
     }
     else if (sonarStatus === "UNKNOWN") {
-        hints.push("SonarQube: no analysis for this project yet — run a full Jenkins pipeline (Step 5; JENKINS_PAAS_FAST_PIPELINE=false).");
+        if (sonarFromLogs?.level === "SKIP") {
+            hints.push(`SonarQube Step 5 skipped (${sonarFromLogs.message}) — set JENKINS_PAAS_FAST_PIPELINE=false on the Jenkins job and run Deploy again.`);
+        }
+        else if (sonarFromLogs?.level === "WARN" || sonarFromLogs?.level === "FAIL") {
+            hints.push(`SonarQube Step 5 ${sonarFromLogs.level}: ${sonarFromLogs.message}`);
+        }
+        else if (!sonarFromLogs) {
+            hints.push("SonarQube: no Step 5 marker in the last Jenkins build — trigger a full deploy (not GitOps-only).");
+        }
+        else {
+            hints.push(`SonarQube: analysis may still be processing — refresh in a minute or check Sonar UI for project key ${project.projectName}.`);
+        }
         if (!(await sonarTokenLooksValid())) {
             hints.push("SonarQube: SONAR_TOKEN rejected — run: bash paas/scripts/regenerate-sonar-token-lab.sh");
         }
@@ -221,7 +401,18 @@ async function buildIntegrationHints(project: Project, sonarStatus: string, dtPr
         hints.push("PaaS frontend: set DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY, then sync env to the frontend pod.");
     }
     else if (!dtProjectUuid) {
-        hints.push("Dependency-Track: no SBOM project — Step 4 must upload bom.json (Jenkins needs DEPENDENCY_TRACK_API_KEY).");
+        if (scaFromLogs?.level === "SKIP") {
+            hints.push(`Dependency-Track Step 4 skipped (${scaFromLogs.message}) — full pipeline required for SBOM upload.`);
+        }
+        else if (scaFromLogs?.level === "WARN" || scaFromLogs?.level === "FAIL") {
+            hints.push(`Dependency-Track Step 4 ${scaFromLogs.level}: ${scaFromLogs.message}`);
+        }
+        else if (!scaFromLogs) {
+            hints.push("Dependency-Track: no Step 4 marker in last build — Jenkins must run SCA and POST bom.json (needs DEPENDENCY_TRACK_API_KEY on the Jenkins job).");
+        }
+        else {
+            hints.push("Dependency-Track: Step 4 ran but no project linked yet — check Jenkins console for [sca] upload errors.");
+        }
     }
     if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
         hints.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps.");
@@ -261,32 +452,40 @@ async function resolveSecurityImageRef(project: Project): Promise<string> {
 }
 
 async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> {
-    const imageTag = await resolveSecurityImageRef(project);
-    const sonar = await resolveSonarQualityGate(project);
-    const dependencyTrackProject = await resolveDependencyTrackMetrics(project);
-    const dependencyTrack = dependencyTrackProject.metrics;
-    let trivy = emptySeverity();
-    let cosignSigned = false;
-    let kyvernoPolicies = { enforcedPolicies: [] as string[] };
+    const [imageTag, deploymentLogBundle] = await Promise.all([
+        resolveSecurityImageRef(project),
+        resolveLatestDeploymentLogs(project, 80_000)
+    ]);
+    const parsedLogs = parsePipelineVerificationLogs(deploymentLogBundle.logs);
+    const securitySteps = parsedLogs.jenkinsChecks.filter((c) => [4, 5, 9, 10].includes(c.step));
+    const sonarFromLogs = securitySteps.find((c) => c.step === 5);
+    const scaFromLogs = securitySteps.find((c) => c.step === 4);
+    const cosignFromLogs = securitySteps.find((c) => c.step === 9);
+
     const partialErrors: string[] = [];
-    try {
-        trivy = await trivyClient.scan(imageTag);
-    }
-    catch (e) {
-        partialErrors.push(e instanceof Error ? e.message : String(e));
-    }
-    try {
-        cosignSigned = await resolveCosignSigned(project, imageTag);
-    }
-    catch (e) {
-        partialErrors.push(e instanceof Error ? e.message : String(e));
-    }
-    try {
-        kyvernoPolicies = await getKyvernoPolicyStatus(["require-signed-images", "require-non-root"]);
-    }
-    catch (e) {
-        partialErrors.push(e instanceof Error ? e.message : String(e));
-    }
+    let trivyError: string | null = null;
+
+    const sonarLogKeys = sonarProjectKeysFromLogs(deploymentLogBundle.logs);
+
+    const [sonar, dependencyTrackProject, trivyResult, cosignSigned, kyvernoPolicies] = await Promise.all([
+        resolveSonarQualityGate(project, sonarLogKeys),
+        resolveDependencyTrackMetrics(project),
+        trivyClient.scan(imageTag).catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            trivyError = msg;
+            partialErrors.push(msg);
+            return emptySeverity();
+        }),
+        resolveCosignSigned(project, imageTag, deploymentLogBundle.logs).catch((e) => {
+            partialErrors.push(e instanceof Error ? e.message : String(e));
+            return false;
+        }),
+        getKyvernoPolicyStatus(["require-signed-images", "require-non-root"]).catch((e) => {
+            partialErrors.push(e instanceof Error ? e.message : String(e));
+            return { enforcedPolicies: [] as string[] };
+        })
+    ]);
+
     let opaAllowed = true;
     try {
         opaAllowed = await opaClient.isAllowed(imageTag, cosignSigned);
@@ -294,25 +493,9 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
     catch (e) {
         partialErrors.push(e instanceof Error ? e.message : String(e));
     }
-    const severityPenalty = dependencyTrack.critical * 15 +
-        dependencyTrack.high * 8 +
-        dependencyTrack.medium * 3 +
-        trivy.critical * 20 +
-        trivy.high * 10 +
-        trivy.medium * 4 +
-        trivy.low * 1;
-    const gatePenalty = (sonar.status === "FAILED" ? 20 : 0) +
-        (!cosignSigned ? 20 : 0) +
-        (!opaAllowed ? 20 : 0);
-    const securityScore = score(100, severityPenalty + gatePenalty);
-    const integrationHints = await buildIntegrationHints(project, sonar.status, dependencyTrackProject.projectUuid);
-    const securitySummary = partialErrors.length > 0
-        ? `${integrationHints} Partial errors: ${partialErrors.join("; ").slice(0, 280)}`
-        : dependencyTrack.critical > 0
-            ? `${dependencyTrack.critical} critical vulnerabilities found in Dependency-Track.`
-            : dependencyTrack.high > 0
-                ? `${dependencyTrack.high} high vulnerabilities detected in Dependency-Track.`
-                : integrationHints;
+
+    const dependencyTrack = dependencyTrackProject.metrics;
+    const trivy = trivyResult;
     const policyEngine = policyEngineLabel();
     const policyValidated = policyEngine === "None"
         ? true
@@ -323,11 +506,56 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                 cosignSigned
             : opaAllowed;
     const deploymentAllowed = cosignSigned && policyValidated;
+    const severityPenalty = dependencyTrack.critical * 15 +
+        dependencyTrack.high * 8 +
+        dependencyTrack.medium * 3 +
+        trivy.critical * 20 +
+        trivy.high * 10 +
+        trivy.medium * 4 +
+        trivy.low * 1;
+    const gatePenalty = (sonar.status === "FAILED" ? 20 : sonar.status === "UNKNOWN" ? 15 : 0) +
+        (!dependencyTrackProject.projectUuid ? 10 : 0) +
+        (!cosignSigned ? 20 : 0) +
+        (!opaAllowed ? 20 : 0) +
+        (!deploymentAllowed ? 15 : 0);
+    const securityScore = score(100, severityPenalty + gatePenalty);
+    const integrationHints = await buildIntegrationHints(project, sonar.status, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
+    const logHints: string[] = [];
+    if (scaFromLogs?.level === "FAIL" || scaFromLogs?.level === "WARN") {
+        logHints.push(`Jenkins Step 4: ${scaFromLogs.level} — ${scaFromLogs.message}`);
+    }
+    if (sonarFromLogs?.level === "FAIL" || sonarFromLogs?.level === "WARN") {
+        logHints.push(`Jenkins Step 5: ${sonarFromLogs.level} — ${sonarFromLogs.message}`);
+    }
+    if (cosignFromLogs?.level === "FAIL" || cosignFromLogs?.level === "WARN") {
+        logHints.push(`Jenkins Step 9: ${cosignFromLogs.level} — ${cosignFromLogs.message}`);
+    }
+    const securitySummary = partialErrors.length > 0
+        ? `${integrationHints}${logHints.length ? ` ${logHints.join(" ")}` : ""} Partial errors: ${partialErrors.join("; ").slice(0, 220)}`
+        : logHints.length > 0
+            ? logHints.join(" ")
+            : dependencyTrack.critical > 0
+                ? `${dependencyTrack.critical} critical vulnerabilities found in Dependency-Track.`
+                : dependencyTrack.high > 0
+                    ? `${dependencyTrack.high} high vulnerabilities detected in Dependency-Track.`
+                    : integrationHints;
     const enforcementSummary = !cosignSigned
         ? "Deployment blocked: image is not signed with Cosign."
         : !policyValidated
             ? `${policyEngine} policy rejected this workload because the image is not trusted or policy requirements were not met.`
             : `${policyEngine} policy validation passed. Deployment is allowed.`;
+    const integrationProbes = buildIntegrationProbes({
+        sonarStatus: sonar.status,
+        sonarMatchedKey: sonar.matchedKey,
+        dtProjectUuid: dependencyTrackProject.projectUuid,
+        trivy,
+        trivyError,
+        cosignSigned,
+        policyEngine,
+        policyValidated,
+        opaAllowed,
+        partialErrors
+    });
     return {
         qualityGateStatus: sonar.status,
         dependencyTrack,
@@ -350,7 +578,22 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         trivy,
         cosignSigned,
         opaViolations: opaAllowed ? 0 : 1,
-        securityScore
+        securityScore,
+        integrationProbes,
+        pipelineVerification: {
+            jenkinsChecks: parsedLogs.jenkinsChecks,
+            deployChecks: parsedLogs.deployChecks,
+            buildComplete: parsedLogs.buildComplete,
+            artifactImage: parsedLogs.artifactImage
+        },
+        buildContext: {
+            jenkinsBuildNumber: deploymentLogBundle.jenkinsBuildNumber,
+            jenkinsBuildResult: parsedLogs.buildComplete?.result ?? null,
+            deploymentStatus: deploymentLogBundle.deploymentStatus ?? project.lastDeploymentStatus ?? null,
+            deploymentFailureReason: deploymentLogBundle.failureReason,
+            deploymentFailureMessage: deploymentLogBundle.failureMessage
+        },
+        securityLogExcerpt: extractSecurityLogExcerpt(deploymentLogBundle.logs)
     };
 }
 

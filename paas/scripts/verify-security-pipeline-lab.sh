@@ -102,9 +102,12 @@ else
   warn "could not confirm Jenkinsfile markers in config.xml"
 fi
 
-if [[ -n "${PROJECT_ID}" && -z "${PROJECT_NAME}" ]] && kubectl get deployment postgres -n paas >/dev/null 2>&1; then
-  PROJECT_NAME="$(kubectl exec -n paas deploy/postgres -- psql -U postgres -d paas -tAc \
-    "SELECT \"projectName\" FROM \"Project\" WHERE id = '${PROJECT_ID}' LIMIT 1;" 2>/dev/null | tr -d ' \r\n' || true)"
+if [[ -n "${PROJECT_ID}" && -z "${PROJECT_NAME}" ]]; then
+  if kubectl get deployment postgres -n paas >/dev/null 2>&1; then
+    PROJECT_NAME="$(kubectl exec -n paas deploy/postgres -- psql -U postgres -d paas -tAc \
+      "SELECT \"projectName\" FROM \"Project\" WHERE id = '${PROJECT_ID}' LIMIT 1;" 2>/dev/null | tr -d ' \r\n' || true)"
+  fi
+  [[ -n "${PROJECT_NAME}" ]] || warn "could not resolve PROJECT_NAME from postgres (kubectl timeout?) — pass PROJECT_NAME=sanhome"
 fi
 
 echo ""
@@ -138,6 +141,20 @@ else
     exit 0
   fi
 
+  if [[ -n "${PROJECT_ID}" ]] && [[ -n "${CONSOLE}" ]]; then
+    if ! echo "${CONSOLE}" | grep -qF "${PROJECT_ID}"; then
+      fail "build #${BUILD} is NOT for PROJECT_ID=${PROJECT_ID} — paas-deploy is shared across projects"
+      echo "     Find the right build: bash paas/scripts/find-jenkins-build-for-project-lab.sh ${PROJECT_NAME:-<name>}" >&2
+    else
+      ok "build #${BUILD} belongs to PROJECT_ID=${PROJECT_ID}"
+    fi
+  elif [[ -n "${PROJECT_NAME}" && -n "${CONSOLE}" ]]; then
+    if ! echo "${CONSOLE}" | grep -qE "projectName=${PROJECT_NAME}([^a-z0-9-]|$)|paas/${PROJECT_NAME}:"; then
+      warn "build #${BUILD} may not be for PROJECT_NAME=${PROJECT_NAME} — set PROJECT_ID for certainty"
+      echo "     bash paas/scripts/find-jenkins-build-for-project-lab.sh ${PROJECT_NAME}" >&2
+    fi
+  fi
+
   if [[ "${RESULT}" != "SUCCESS" ]]; then
     if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image.*Harbor|harbor.*502'; then
       warn "build #${BUILD} is ${RESULT} — likely Harbor push (Step 6); Sonar/SCA may still be OK below"
@@ -155,7 +172,7 @@ else
 
   if echo "${CONSOLE}" | grep -q 'PAAS_STEP_SKIP step=4'; then
     fail "Step 4 skipped (fast pipeline or config)"
-  elif echo "${CONSOLE}" | grep -qE 'Step 4|SCA \(Dependency-Check'; then
+  elif echo "${CONSOLE}" | grep -qE 'Step 4|SCA \(Dependency-Check|PAAS_STEP_OK step=4|Dependency-Track upload|api/v1/bom'; then
     ok "Step 4 ran"
   else
     fail "Step 4 never ran (pipeline failed earlier)"
@@ -164,16 +181,55 @@ else
   if echo "${CONSOLE}" | grep -qiE 'non configuré|SONAR not set'; then
     fail "Sonar/DT credentials missing on build #${BUILD}"
   fi
-  if echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey|ANALYSIS SUCCESSFUL|EXECUTION SUCCESS'; then
+  SONAR_ART=""
+  SONAR_ART="$(curl -fsS -u "${JENKINS_USERNAME}:${JENKINS_API_TOKEN}" \
+    "${JENKINS_URL}/job/${JOB}/${BUILD}/artifact/paas-artifacts/sonar-scanner.log" 2>/dev/null || true)"
+  sonar_step5_ok() {
+    echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey|ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' \
+      || { [[ -n "${SONAR_ART}" ]] && echo "${SONAR_ART}" | grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS'; }
+  }
+  if sonar_step5_ok; then
     ok "Step 5 (Sonar) submitted on build #${BUILD}"
   elif echo "${CONSOLE}" | grep -qE 'PAAS_STEP_SKIP step=5|Fast pipeline: skip Step 5'; then
     fail "Step 5 skipped on build #${BUILD} (set JENKINS_PAAS_FAST_PIPELINE=false)"
-  elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube|Tests SAST|sonar-scanner|sonar-bash-rc-fix|marker=sonar-bash'; then
-    if echo "${CONSOLE}" | grep -qiE 'paasStepWarn\(5|scanner exit|Not authorized'; then
-      if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image'; then
-        warn "Step 5 may have failed or been cut short — build failed at Harbor push; check an earlier build: BUILD_NUMBER=295"
+  elif [[ -n "${SONAR_ART}" ]] && echo "${SONAR_ART}" | grep -qi 'Not authorized'; then
+    fail "Step 5: Sonar Not authorized on build #${BUILD} — token missing in Scanner CLI 6 (need sonar.login). Run: bash paas/scripts/regenerate-sonar-token-lab.sh && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh"
+  elif [[ -n "${SONAR_TOKEN:-}" && -n "${SONAR_BASE_URL:-}" && -n "${PROJECT_NAME:-}" ]]; then
+    # Jenkins may print PAAS_STEP_WARN while analysis still landed (or an older build's gate is OK).
+    if curl -fsS -u "${SONAR_TOKEN}:" \
+      "${SONAR_BASE_URL%/}/api/qualitygates/project_status?projectKey=${PROJECT_NAME}" 2>/dev/null \
+      | grep -qE '"status":"OK"|"status":"ERROR"'; then
+      if echo "${CONSOLE}" | grep -qiE 'PAAS_STEP_WARN step=5|scanner exit'; then
+        warn "Step 5 Jenkins WARN on #${BUILD} but Sonar API has quality gate for ${PROJECT_NAME} — UI may still show data"
+        ok "Step 5 (Sonar) — quality gate API OK for projectKey=${PROJECT_NAME}"
+      else
+        ok "Step 5 (Sonar) — quality gate API OK for projectKey=${PROJECT_NAME}"
       fi
-      fail "Step 5 ran but Sonar failed — check SONAR_TOKEN (run: bash paas/scripts/regenerate-sonar-token-lab.sh)"
+    elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube|Tests SAST|sonar-scanner|sonar-bash-rc-fix|marker=sonar-bash'; then
+      if echo "${CONSOLE}" | grep -qiE 'paasStepWarn\(5|PAAS_STEP_WARN step=5|scanner exit|Not authorized'; then
+        if echo "${CONSOLE}" | grep -qE '502 Bad Gateway|crane append|pushing image'; then
+          if [[ "${RESULT}" == "SUCCESS" ]] && echo "${CONSOLE}" | grep -q 'PAAS_BUILD_COMPLETE'; then
+            warn "Harbor 502 during Step 6 on #${BUILD} — Sonar may still have failed; verify image tag in registry"
+          else
+            warn "Step 5 may have been cut short — build did not finish cleanly (Harbor/earlier step)"
+          fi
+        fi
+        if [[ -n "${SONAR_ART}" ]]; then
+          echo "     sonar-scanner.log tail (build #${BUILD} artifact):" >&2
+          echo "${SONAR_ART}" | tail -20 >&2
+        else
+          echo "     Fetch log: curl -fsS -u \"\$JENKINS_USERNAME:\$JENKINS_API_TOKEN\" \"${JENKINS_URL}/job/${JOB}/${BUILD}/artifact/paas-artifacts/sonar-scanner.log\" | tail -40" >&2
+        fi
+        fail "Step 5 ran but Sonar failed on build #${BUILD} — bash paas/scripts/diagnose-sonar-jenkins-lab.sh (or regenerate token)"
+      else
+        warn "Step 5 ran but no PAAS_STEP_OK — check Jenkins console for Sonar"
+      fi
+    else
+      fail "Step 5 never ran on build #${BUILD}"
+    fi
+  elif echo "${CONSOLE}" | grep -qE 'Step 5|SonarQube|Tests SAST|sonar-scanner|sonar-bash-rc-fix|marker=sonar-bash'; then
+    if echo "${CONSOLE}" | grep -qiE 'paasStepWarn\(5|PAAS_STEP_WARN step=5|scanner exit|Not authorized'; then
+      fail "Step 5 ran but Sonar failed — set PROJECT_NAME and re-run, or: bash paas/scripts/regenerate-sonar-token-lab.sh"
     else
       warn "Step 5 ran but no PAAS_STEP_OK — check Jenkins console for Sonar"
     fi
@@ -200,45 +256,88 @@ fi
 echo ""
 echo "=== 4. SonarQube + Dependency-Track APIs ==="
 if [[ -n "${SONAR_TOKEN:-}" && -n "${SONAR_BASE_URL:-}" ]]; then
-  SONAR_TOTAL="$(curl -s -u "${SONAR_TOKEN}:" \
+  SONAR_TOTAL="$(curl -sS -m 15 -u "${SONAR_TOKEN}:" \
     "${SONAR_BASE_URL%/}/api/projects/search?ps=1" \
     | python3 -c "import json,sys; print(json.load(sys.stdin).get('paging',{}).get('total',0))" 2>/dev/null || echo 0)"
-  SONAR_OK=0
-  if [[ -n "${PROJECT_ID}" ]]; then
-    for SK in "${PROJECT_NAME:-}" "${PROJECT_ID}"; do
-      [[ -z "${SK}" ]] && continue
-      SQ="$(curl -s -u "${SONAR_TOKEN}:" \
-        "${SONAR_BASE_URL%/}/api/qualitygates/project_status?projectKey=${SK}" 2>/dev/null || true)"
-      if echo "${SQ}" | grep -q projectStatus; then
-        ok "Sonar quality gate API responds for projectKey=${SK}"
-        SONAR_OK=1
-        break
-      fi
-    done
+  if [[ "${SONAR_TOTAL}" == "0" ]]; then
+    VALID="$(curl -sS -m 10 -u "${SONAR_TOKEN}:" "${SONAR_BASE_URL%/}/api/authentication/validate" 2>/dev/null || true)"
+    if ! echo "${VALID}" | grep -q '"valid":true'; then
+      warn "SONAR_TOKEN invalid or Sonar unreachable at ${SONAR_BASE_URL} — bash paas/scripts/regenerate-sonar-token-lab.sh"
+    fi
   fi
+  SONAR_OK=0
+  SONAR_KEYS=()
+  if [[ -n "${PROJECT_NAME}" ]]; then
+    SONAR_KEYS+=("${PROJECT_NAME}")
+  fi
+  if [[ -n "${PROJECT_ID}" ]]; then
+    SONAR_KEYS+=("${PROJECT_ID}")
+  fi
+  if [[ -n "${CONSOLE:-}" ]]; then
+    while IFS= read -r pk; do
+      [[ -n "${pk}" ]] && SONAR_KEYS+=("${pk}")
+    done < <(printf '%s\n' "${CONSOLE}" | grep -oE 'projectKey=[^[:space:]"'\''`]+' | sed 's/^projectKey=//' | sort -u)
+  fi
+  for SK in $(printf '%s\n' "${SONAR_KEYS[@]:-}" | awk '!seen[$0]++'); do
+    [[ -z "${SK}" ]] && continue
+    SQ="$(curl -sS -m 15 -u "${SONAR_TOKEN}:" \
+      "${SONAR_BASE_URL%/}/api/qualitygates/project_status?projectKey=${SK}" 2>/dev/null || true)"
+    if echo "${SQ}" | grep -q projectStatus; then
+      ok "Sonar quality gate API responds for projectKey=${SK}"
+      SONAR_OK=1
+      break
+    fi
+  done
   if [[ "${SONAR_TOTAL}" -gt 0 ]]; then
     ok "Sonar has ${SONAR_TOTAL} project(s)"
-    SONAR_OK=1
+    [[ "${SONAR_OK}" -eq 0 ]] && SONAR_OK=1
   elif [[ "${SONAR_OK}" -eq 0 ]]; then
-    fail "Sonar has no project / quality gate for ${PROJECT_NAME:-<name>} — run a build with Step 5 OK"
+    if [[ -n "${CONSOLE:-}" ]] && echo "${CONSOLE}" | grep -qE 'PAAS_STEP_OK step=5|analysis submitted for projectKey'; then
+      warn "Step 5 submitted on build #${BUILD} but Sonar quality gate API not ready yet for ${PROJECT_NAME:-project} — wait 2–5 min and re-run with BUILD_NUMBER=${BUILD} PROJECT_ID=<uuid>"
+    else
+      fail "Sonar has no project / quality gate for ${PROJECT_NAME:-<name>} — run a build with Step 5 OK"
+    fi
   fi
 else
   fail "SONAR_BASE_URL / SONAR_TOKEN not set in shell — source ${ENV_FILE}"
 fi
 
 if [[ -n "${DEPENDENCY_TRACK_API_KEY:-}" && -n "${DEPENDENCY_TRACK_BASE_URL:-}" ]]; then
-  if [[ -n "${PROJECT_ID}" ]]; then
-    DT_LOOKUP="${PROJECT_NAME:-${PROJECT_ID}}"
-    DT_COUNT="$(curl -s -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
+  DT_HTTP="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
+    "${DEPENDENCY_TRACK_BASE_URL%/}/api/v1/project" 2>/dev/null || echo 000)"
+  if [[ "${DT_HTTP}" == "401" || "${DT_HTTP}" == "403" ]]; then
+    fail "Dependency-Track API key rejected (HTTP ${DT_HTTP}) — run: bash paas/scripts/regenerate-dependency-track-api-key-lab.sh"
+  elif [[ "${DT_HTTP}" != "200" ]]; then
+    warn "Dependency-Track /api/v1/project HTTP ${DT_HTTP} (expected 200)"
+  fi
+  DT_LOOKUP="${PROJECT_NAME:-}"
+  if [[ -z "${DT_LOOKUP}" && -n "${PROJECT_ID}" ]]; then
+    DT_LOOKUP="${PROJECT_ID}"
+  fi
+  if [[ -n "${DT_LOOKUP}" ]]; then
+    DT_COUNT="$(curl -sS -m 15 -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
       "${DEPENDENCY_TRACK_BASE_URL%/}/api/v1/project?name=${DT_LOOKUP}" \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)" 2>/dev/null || echo 0)"
     if [[ "${DT_COUNT}" -gt 0 ]]; then
       ok "Dependency-Track has project named ${DT_LOOKUP}"
+    elif [[ -n "${PROJECT_ID}" ]]; then
+      DT_TAG="$(curl -sS -m 15 -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
+        "${DEPENDENCY_TRACK_BASE_URL%/}/api/v1/project" \
+        | python3 -c "import json,sys; pid='${PROJECT_ID}'; d=json.load(sys.stdin); print(sum(1 for p in d if any((t.get('name') or '')==pid for t in (p.get('tags') or []))))" 2>/dev/null || echo 0)"
+      if [[ "${DT_TAG}" -gt 0 ]]; then
+        ok "Dependency-Track has project tagged with PROJECT_ID ${PROJECT_ID}"
+      elif [[ -n "${CONSOLE:-}" ]] && echo "${CONSOLE}" | grep -qE 'api/v1/bom|PAAS_STEP_OK step=4'; then
+        warn "Step 4 ran on #${BUILD} but DT project ${DT_LOOKUP} not found yet — upload may have failed; grep console for [sca]"
+      else
+        fail "Dependency-Track has no project named ${DT_LOOKUP} (Jenkins uses projectName=image slug, tag PROJECT_ID)"
+      fi
+    elif [[ -n "${CONSOLE:-}" ]] && echo "${CONSOLE}" | grep -qE 'api/v1/bom|PAAS_STEP_OK step=4'; then
+      warn "Step 4 ran on #${BUILD} — set PROJECT_ID=<uuid> to verify DT project by tag"
     else
-      fail "Dependency-Track has no project named ${DT_LOOKUP} (Jenkins uses projectName=image slug, tag PROJECT_ID)"
+      fail "Dependency-Track has no project named ${DT_LOOKUP}"
     fi
   else
-    warn "Set PROJECT_ID=<uuid> to check Dependency-Track project by name"
+    warn "Set PROJECT_NAME=sanhome or PROJECT_ID=<uuid> to check Dependency-Track"
   fi
 else
   fail "DEPENDENCY_TRACK_* not set in shell"

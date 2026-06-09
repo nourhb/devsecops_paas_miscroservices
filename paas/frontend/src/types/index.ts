@@ -267,6 +267,26 @@ export interface ArtifactListResponse {
     artifacts: ArtifactRecord[];
     latestArtifact: ArtifactRecord | null;
 }
+export type SecurityIntegrationProbeStatus = "OK" | "WARN" | "FAIL" | "SKIPPED" | "UNKNOWN";
+export interface SecurityIntegrationProbe {
+    tool: string;
+    configured: boolean;
+    status: SecurityIntegrationProbeStatus;
+    detail: string;
+}
+export interface SecurityPipelineStepCheck {
+    step: number;
+    level: "OK" | "WARN" | "SKIP" | "FAIL";
+    id: string;
+    message: string;
+}
+export interface SecurityBuildContext {
+    jenkinsBuildNumber: number | null;
+    jenkinsBuildResult: string | null;
+    deploymentStatus: string | null;
+    deploymentFailureReason: string | null;
+    deploymentFailureMessage: string | null;
+}
 export interface SecurityMetrics {
     qualityGateStatus: string;
     dependencyTrack: SeverityBreakdown;
@@ -280,6 +300,24 @@ export interface SecurityMetrics {
     cosignSigned: boolean;
     opaViolations: number;
     securityScore: number;
+    integrationProbes?: SecurityIntegrationProbe[];
+    pipelineVerification?: {
+        jenkinsChecks: SecurityPipelineStepCheck[];
+        deployChecks: Array<{
+            step: string;
+            status: "OK" | "WARN" | "FAIL";
+            detail: string;
+        }>;
+        buildComplete: {
+            result: string;
+            image: string;
+            project: string;
+            build: string;
+        } | null;
+        artifactImage: string | null;
+    };
+    buildContext?: SecurityBuildContext;
+    securityLogExcerpt?: string;
 }
 export interface SeverityBreakdown {
     critical: number;

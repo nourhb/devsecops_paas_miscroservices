@@ -27,6 +27,8 @@ case "$cmd" in
     bash "$DIR/push-gitops-lab.sh" ;;
   upgrades|apply-upgrades)
     bash "$DIR/apply-paas-upgrades-lab.sh" ;;
+  argo-bg|fix-argo-bg)
+    bash "$DIR/fix-argocd-bluegreen-sync-lab.sh" "${2:?usage: lab.sh argo-bg <projectName>}" ;;
   seed)
     bash "$DIR/seed-admin-user-lab.sh" "$@" ;;
   autostart)

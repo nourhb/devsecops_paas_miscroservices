@@ -117,10 +117,20 @@ ensure_dependency_track() {
   local release="dtrack"
   local api_svc="dtrack-dependency-track-api-server"
   local fe_svc="dtrack-dependency-track-frontend"
+  local node_ip="${NODE_IP:-$(detect_node_ip)}"
+  local fe_np=31992
+  local api_np=30353
+  local api_base="http://${node_ip}:${api_np}"
 
   print_section "Dependency-Track"
   if ! ns_exists "$ns"; then
     warn "namespace '$ns' not found"
+    if [ "$FIX" -eq 1 ]; then
+      log "healing: install Dependency-Track (bash paas/scripts/install-dependency-track-lab.sh)"
+      bash "${SCRIPT_DIR:-$(cd "$(dirname "$0")" && pwd)}/install-dependency-track-lab.sh" || true
+    else
+      log "suggested fix: bash paas/scripts/install-dependency-track-lab.sh"
+    fi
     return 0
   fi
 
@@ -132,18 +142,20 @@ ensure_dependency_track() {
   if ! svc_has_endpoints "$ns" "$api_svc" || ! svc_has_endpoints "$ns" "$fe_svc"; then
     warn "services have no endpoints (likely scaled to 0 or pods missing)"
     if [ "$FIX" -eq 1 ]; then
-      log "healing: helm upgrade --install $release (NodePort + modest resources)"
+      log "healing: helm upgrade --install $release (NodePort + API_BASE_URL)"
       helm repo add dependency-track https://dependencytrack.github.io/helm-charts >/dev/null 2>&1 || true
       helm repo update >/dev/null
       helm upgrade --install "$release" dependency-track/dependency-track -n "$ns" --create-namespace \
         --set frontend.service.type=NodePort \
-        --set frontend.service.nodePort=31992 \
+        --set "frontend.service.nodePort=${fe_np}" \
         --set apiServer.service.type=NodePort \
-        --set apiServer.service.nodePort=30353 \
+        --set "apiServer.service.nodePort=${api_np}" \
+        --set "frontend.apiBaseUrl=${api_base}" \
         --set apiServer.resources.requests.cpu=100m \
-        --set apiServer.resources.requests.memory=512Mi
+        --set apiServer.resources.requests.memory=512Mi \
+        --set apiServer.resources.limits.memory=1536Mi
     else
-      log "suggested fix: run './paas/scripts/check.sh --fix' (or reinstall dtrack helm release)"
+      log "suggested fix: bash paas/scripts/install-dependency-track-lab.sh"
     fi
   else
     log "endpoints: OK"

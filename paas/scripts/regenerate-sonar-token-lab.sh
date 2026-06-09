@@ -51,12 +51,10 @@ fi
 echo ""
 
 TOKEN_NAME="paas-lab-$(date +%s)"
+# User token (admin): Jenkins analysis + PaaS Security UI (quality gate, projects/search).
+# GLOBAL_ANALYSIS_TOKEN only validates — it returns "Insufficient privileges" on browse APIs.
 RAW="$(curl -fsS -u "${SONAR_USER}:${SONAR_PASS}" -X POST \
-  "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}&type=GLOBAL_ANALYSIS_TOKEN" 2>/dev/null || true)"
-if [[ -z "${RAW}" || "${RAW}" == *"errors"* ]]; then
-  RAW="$(curl -fsS -u "${SONAR_USER}:${SONAR_PASS}" -X POST \
-    "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}" 2>/dev/null || true)"
-fi
+  "${SONAR_BASE%/}/api/user_tokens/generate?name=${TOKEN_NAME}" 2>/dev/null || true)"
 NEW_TOKEN="$(printf '%s' "${RAW}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
 
 if [[ -z "${NEW_TOKEN}" ]]; then
@@ -68,9 +66,18 @@ fi
 upsert_env SONAR_TOKEN "${NEW_TOKEN}"
 echo "OK: SONAR_TOKEN updated in ${ENV_FILE}"
 
-echo "==> Validate"
+echo "==> Validate (auth + browse)"
 curl -fsS -u "${NEW_TOKEN}:" "${SONAR_BASE%/}/api/authentication/validate"
 echo ""
+SEARCH="$(curl -sS -m 15 -u "${NEW_TOKEN}:" "${SONAR_BASE%/}/api/projects/search?ps=1" 2>/dev/null || true)"
+if echo "${SEARCH}" | grep -q '"errors"'; then
+  echo "WARN: projects/search still denied — token may lack Browse permission; use admin user token from Sonar UI"
+  echo "${SEARCH}" | head -c 300
+  echo ""
+elif echo "${SEARCH}" | grep -q '"paging"'; then
+  TOTAL="$(printf '%s' "${SEARCH}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('paging',{}).get('total','?'))" 2>/dev/null || echo "?")"
+  echo "OK: projects/search works (${TOTAL} project(s))"
+fi
 
 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
 kubectl rollout status deployment/frontend -n paas --timeout=300s

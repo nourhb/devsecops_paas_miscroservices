@@ -277,7 +277,9 @@ export const monitoringApi = {
 };
 export const securityApi = {
     getSecurity: async (projectId: string): Promise<SecurityMetrics> => {
-        const { data } = await apiClient.get<SecurityMetrics>(`/api/security/${projectId}`);
+        const { data } = await apiClient.get<SecurityMetrics>(`/api/security/${projectId}`, {
+            timeout: 90000
+        });
         return data;
     },
     getDependencyTrack: async (projectId: string): Promise<DependencyTrackMetricsResponse> => {

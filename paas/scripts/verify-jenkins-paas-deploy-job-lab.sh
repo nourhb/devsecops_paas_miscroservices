@@ -105,6 +105,15 @@ else
   exit 1
 fi
 
+SONAR_STEP5_MARKER="paas-artifacts/sonar-scanner.log"
+echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
+if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has ${SONAR_STEP5_MARKER}"
+else
+  echo "FAIL: missing ${SONAR_STEP5_MARKER} — run: bash paas/scripts/patch-jenkins-sonar-step5-lab.sh"
+  exit 1
+fi
+
 echo ""
 echo "==> Jenkins job config (needs JENKINS_USERNAME + JENKINS_API_TOKEN)"
 if [[ -z "${JENKINS_USERNAME:-}" || -z "${JENKINS_API_TOKEN:-}" ]]; then
@@ -140,8 +149,10 @@ elif jenkins_text_has_crane_fix "${CFG}"; then
   exit 1
 fi
 
-if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}"; then
-  echo "OK: Jenkins job has ${ENV_LOADER_MARKER}"
+if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}" \
+  || echo "${CFG}" | grep -qF 'env-decode-node-20260601' \
+  || echo "${CFG}" | grep -qF 'paasSourceBuildEnvShellSnippet'; then
+  echo "OK: Jenkins job has env-safe .env loader (Node)"
 else
   echo "FAIL: Jenkins job missing ${ENV_LOADER_MARKER} (builds fail on EMAIL_PASS with spaces)"
   echo "Fix: bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh"
@@ -159,6 +170,29 @@ if echo "${CFG}" | grep -qF "${COSIGN_DIGEST_MARKER}"; then
   echo "OK: Jenkins job has ${COSIGN_DIGEST_MARKER}"
 elif echo "${CFG}" | grep -qF 'digest ref unavailable (crane/triangulate); tag sign only'; then
   echo "FAIL: Jenkins job still has OLD Step 9 cosign (tag-only) — run fix-jenkins-paas-deploy-pipeline-lab.sh"
+  exit 1
+fi
+
+if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}"; then
+  echo "OK: Jenkins job has Sonar Step 5 fix (${SONAR_STEP5_MARKER})"
+else
+  echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/patch-jenkins-sonar-step5-lab.sh"
+  exit 1
+fi
+
+SONAR_LOGIN_MARKERS=( 'sonar-scanner-cli6-login-20260607' 'sonar.login' "printf 'sonar.login" )
+sonar_login_ok=0
+for m in "${SONAR_LOGIN_MARKERS[@]}"; do
+  if echo "${CFG}" | grep -qF "${m}"; then
+    sonar_login_ok=1
+    break
+  fi
+done
+if [[ "${sonar_login_ok}" -eq 1 ]]; then
+  echo "OK: Jenkins job has SonarScanner CLI 6 login (sonar.login)"
+else
+  echo "FAIL: Jenkins job missing sonar.login — scp Jenkinsfile or: bash paas/scripts/patch-jenkins-sonar-token-env-lab.sh"
+  echo "      Then: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full"
   exit 1
 fi
 

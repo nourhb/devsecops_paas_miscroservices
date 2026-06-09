@@ -85,8 +85,12 @@ export default function DeploymentDetailPage() {
     }
     const d = query.data;
     const live = query.isFetching && !query.isLoading;
-    const canCancelJenkins = ["PENDING", "DEPLOYING"].includes(d.status.toUpperCase()) && (!d.buildProvider || d.buildProvider === "jenkins");
-    const isFailed = d.status.toUpperCase() === "FAILED";
+    const statusU = d.status.toUpperCase();
+    const isDeployed = statusU === "DEPLOYED" || statusU === "SUCCESS";
+    const isDeploying = statusU === "DEPLOYING";
+    const isPending = statusU === "PENDING";
+    const canCancelJenkins = (isPending || isDeploying) && (!d.buildProvider || d.buildProvider === "jenkins");
+    const isFailed = statusU === "FAILED";
     const jenkinsHint = isFailed ? jenkinsScmCloneFailureHint(d.logs ?? "") : null;
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
@@ -136,6 +140,42 @@ export default function DeploymentDetailPage() {
         </div>
       </header>
 
+      {isDeployed && d.url ? (<Card className="border-success/40 bg-success/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-success flex flex-wrap items-center gap-2">
+              Your app is live
+              <Hint>{hints.deployment.deployedRun}</Hint>
+            </CardTitle>
+            <CardDescription className="text-foreground/90">
+              Open the URL below to run your deployed application.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <a href={d.url} target="_blank" rel="noopener noreferrer" className="break-all font-mono text-sm text-primary hover:underline">
+              {d.url}
+            </a>
+            <Button size="sm" asChild>
+              <a href={d.url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-2 h-4 w-4"/>
+                Run app
+              </a>
+            </Button>
+          </CardContent>
+        </Card>) : null}
+
+      {isDeploying ? (<Card className="border-warning/40 bg-warning/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-warning flex flex-wrap items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin"/>
+              Publishing to cluster
+              <Hint>{hints.deployment.deploying}</Hint>
+            </CardTitle>
+            <CardDescription className="text-foreground/90">
+              Jenkins may already show SUCCESS — this page stays on DEPLOYING until GitOps, Argo CD, and the live URL check finish.
+            </CardDescription>
+          </CardHeader>
+        </Card>) : null}
+
       {isFailed ? (<Card className="border-danger/50 bg-danger/10">
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-danger flex flex-wrap items-center gap-2">
@@ -156,7 +196,7 @@ export default function DeploymentDetailPage() {
           </CardHeader>
         </Card>) : null}
 
-      {d.url ? (<Card>
+      {d.url && !isDeployed ? (<Card>
           <CardHeader>
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               Live application

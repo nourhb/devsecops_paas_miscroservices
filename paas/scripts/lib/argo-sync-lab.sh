@@ -82,15 +82,23 @@ argo_wait_app_lab() {
   local ns="${ARGOCD_NAMESPACE:-argocd}"
   local deadline=$((SECONDS + timeout))
   while (( SECONDS < deadline )); do
-    local health sync
+    local health sync op
     health="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")"
     sync="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")"
+    op="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "")"
     if [[ "${health}" == "Healthy" && "${sync}" == "Synced" ]]; then
       echo "OK: ${app} Healthy+Synced"
       return 0
     fi
+    if [[ "${sync}" == "Unknown" && -n "${op}" && "${op}" != "Succeeded" && "${op}" != "Failed" ]]; then
+      echo "  … sync=${sync} health=${health} operation=${op}"
+    fi
     sleep 5
   done
-  echo "WARN: ${app} not Healthy+Synced within ${timeout}s (health=${health:-?} sync=${sync:-?})"
+  local health sync op
+  health="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "?")"
+  sync="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "?")"
+  op="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.operationState.phase}{" "}{.status.operationState.message}' 2>/dev/null || echo "")"
+  echo "WARN: ${app} not Healthy+Synced within ${timeout}s (health=${health} sync=${sync} op=${op})"
   return 1
 }

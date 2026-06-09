@@ -378,16 +378,17 @@ def shouldDeferAngularBuildToStep6(String appRoot, String dockerfilePath = 'Dock
     return false
   }
   try {
-    if (!readFile(pkgPath).contains('"@angular/core"')) {
-      return false
+    if (readFile(pkgPath).contains('"@angular/core"')) {
+      return true
     }
   } catch (Exception ignored) {
     return false
   }
-  if (isLegacyAngularProject(root)) {
+  def fw = detectProjectFramework(root)
+  if (fw in ['vite-react', 'spa'] && resolveCraneRuntimeStack(root, dockerfilePath) == 'nginx') {
     return true
   }
-  return resolveCraneRuntimeStack(root, dockerfilePath) == 'nginx'
+  return false
 }
 
 /** python | nginx | node — drives dockerless crane base image + entrypoint (not always repo Dockerfile RUN steps). */
@@ -411,7 +412,10 @@ def resolveCraneRuntimeStack(String appRoot, String dockerfilePath) {
       return 'nginx'
     }
   }
-  if (fw == 'angular' && (fileExists("${root}/nginx.conf") || fileExists('nginx.conf'))) {
+  if (fw == 'angular') {
+    return 'nginx'
+  }
+  if (fw in ['vite-react', 'spa']) {
     return 'nginx'
   }
   return 'node'
@@ -1644,6 +1648,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
   println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
   println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
+  println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -1711,7 +1716,7 @@ def runPaasDeploy = {
       def deferAngularToStep6 = shouldDeferAngularBuildToStep6(buildAppRoot, dfPath)
       if (deferAngularToStep6) {
         def nodeVer = resolveNodeVersion(buildAppRoot)
-        println "[build] Legacy/angular+nginx — skip Step 3 npm build (Step 6 builds dist with Node ${nodeVer} + --openssl-legacy-provider)"
+        println "[build] Angular/static SPA — skip Step 3 npm build (Step 6 builds dist with Node ${nodeVer} + nginx on port 80)"
       } else if (paasFastPipeline) {
         println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
       } else {

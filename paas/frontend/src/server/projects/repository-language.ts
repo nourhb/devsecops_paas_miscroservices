@@ -96,18 +96,18 @@ function detectFromPackageJson(raw: string): {
             detectionReason: "Detected from package.json dependency \"@angular/core\" (nginx static on port 80)."
         };
     }
-    if (names.includes("vue")) {
+    if (names.includes("vue") && !names.includes("express") && !names.includes("@nestjs/core")) {
         return {
             language: "Vue",
-            buildProfile: "node",
-            detectionReason: "Detected from package.json dependency \"vue\"."
+            buildProfile: "static",
+            detectionReason: "Detected from package.json dependency \"vue\" (static SPA → nginx on port 80)."
         };
     }
-    if (names.includes("react")) {
+    if (names.includes("react") && !names.includes("next") && !names.includes("express") && !names.includes("@nestjs/core")) {
         return {
             language: "React",
-            buildProfile: "node",
-            detectionReason: "Detected from package.json dependency \"react\"."
+            buildProfile: "static",
+            detectionReason: "Detected from package.json dependency \"react\" (static SPA → nginx on port 80)."
         };
     }
     if (names.includes("express")) {
@@ -117,11 +117,11 @@ function detectFromPackageJson(raw: string): {
             detectionReason: "Detected from package.json dependency \"express\"."
         };
     }
-    if (names.includes("vite") || names.includes("@vitejs/plugin-react")) {
+    if ((names.includes("vite") || names.includes("@vitejs/plugin-react")) && !names.includes("express") && !names.includes("@nestjs/core")) {
         return {
             language: "Vite",
-            buildProfile: "node",
-            detectionReason: "Detected from package.json Vite toolchain."
+            buildProfile: "static",
+            detectionReason: "Detected from package.json Vite toolchain (static build → nginx on port 80)."
         };
     }
     return {

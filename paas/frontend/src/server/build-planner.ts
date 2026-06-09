@@ -26,7 +26,25 @@ function detectProfile(input: BuildPlanInput): {
     const language = String(input.language ?? "").trim().toLowerCase();
     const repo = String(input.gitRepositoryUrl ?? "").trim().toLowerCase();
     const combined = `${language} ${repo}`.trim();
-    if (includesAny(combined, ["next", "node", "react", "vue", "angular", "javascript", "typescript", "nest"])) {
+    if (includesAny(combined, ["angular"])) {
+        return {
+            profile: "static",
+            detectionReason: language ? `Detected Angular from stack "${input.language}" (nginx static on port 80).` : "Detected Angular-style repository metadata (nginx static on port 80)."
+        };
+    }
+    if (includesAny(combined, ["next", "nestjs", "nest", "express"])) {
+        return {
+            profile: "node",
+            detectionReason: language ? `Detected server-side Node stack "${input.language}".` : "Detected Node server repository metadata."
+        };
+    }
+    if (includesAny(combined, ["react", "vue", "vite", "spa"]) && !includesAny(combined, ["nestjs", "nest", "express", "next"])) {
+        return {
+            profile: "static",
+            detectionReason: language ? `Detected static web app "${input.language}" (build → nginx on port 80).` : "Detected static SPA repository metadata (nginx on port 80)."
+        };
+    }
+    if (includesAny(combined, ["node", "javascript", "typescript"])) {
         return {
             profile: "node",
             detectionReason: language ? `Detected from stack "${input.language}".` : "Detected Node-style repository metadata."
