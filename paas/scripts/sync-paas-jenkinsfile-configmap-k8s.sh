@@ -12,6 +12,10 @@ if [[ ! -f "${JENKINSFILE}" ]]; then
   echo "ERROR: missing ${JENKINSFILE}" >&2
   exit 1
 fi
+if ! grep -qE 'multi-framework-2026061[01]' "${JENKINSFILE}"; then
+  echo "ERROR: Jenkinsfile missing multi-framework-20260611 (python/nginx/legacy Angular) — git pull on dev machine first" >&2
+  exit 1
+fi
 if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE}"; then
   echo "ERROR: Jenkinsfile missing crane-next16-202605-j48300-split — git pull origin main" >&2
   exit 1

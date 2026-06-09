@@ -30,6 +30,13 @@ MUTATE_FIX_MARKERS = (
 )
 ENV_SAFE_DOTENV_LOADER_MARKER = "env-safe-dotenv-loader-20260601"
 COSIGN_DIGEST_MARKER = "cosign-digest-crane-bin-20260602"
+SONAR_STEP5_MARKER = "paas-artifacts/sonar-scanner.log"
+SONAR_LOGIN_MARKER = "sonar.login"
+SONAR_LOGIN_JENKINSFILE_MARKER = "sonar-scanner-cli6-login-20260607"
+MULTI_FRAMEWORK_MARKERS = (
+    "multi-framework-20260611",
+    "multi-framework-20260610",
+)
 OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign only"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
 
@@ -90,6 +97,52 @@ def assert_jenkinsfile_cosign_digest_fix(groovy: str, path: Path) -> None:
         sys.exit(1)
 
 
+def assert_jenkinsfile_sonar_step5_fix(groovy: str, path: Path) -> None:
+    if SONAR_STEP5_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing {SONAR_STEP5_MARKER} "
+            "(Step 5 needs JAVA_HOME + returnStatus + scanner log).\n"
+            "  bash paas/scripts/patch-jenkins-sonar-step5-lab.sh\n"
+            "  or scp fixed Jenkinsfile from dev machine (~98522 bytes)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "LOG=/tmp/sonar-scanner" in groovy:
+        print(
+            f"ERROR: {path} still uses /tmp sonar log + returnStdout pattern.\n"
+            "  bash paas/scripts/patch-jenkins-sonar-step5-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if SONAR_LOGIN_MARKER not in groovy or SONAR_LOGIN_JENKINSFILE_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing SonarScanner CLI 6 auth ({SONAR_LOGIN_MARKER} / {SONAR_LOGIN_JENKINSFILE_MARKER}).\n"
+            "  bash paas/scripts/patch-jenkins-sonar-token-env-lab.sh\n"
+            "  or: bash paas/scripts/ultimate-paas-sanhome-lab.sh ONLY_FIX=1",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def assert_jenkinsfile_multi_framework_fix(groovy: str, path: Path) -> None:
+    if not any(m in groovy for m in MULTI_FRAMEWORK_MARKERS):
+        print(
+            f"ERROR: {path} missing one of {MULTI_FRAMEWORK_MARKERS} "
+            "(legacy Angular/Python need Node16 defer Step3 + crane runtime stack).\n"
+            "  git pull\n"
+            "  python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "shouldDeferAngularBuildToStep6" not in groovy or "resolveCraneRuntimeStack" not in groovy:
+        print(
+            f"ERROR: {path} has multi-framework marker but missing defer/crane helpers.\n"
+            "  git pull and re-sync Jenkins job",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def assert_jenkinsfile_mutate_fix(groovy: str, path: Path) -> None:
     if BROKEN_MUTATE_SNIPPET in groovy and 'require("./package.json")' in groovy:
         print(
@@ -133,6 +186,20 @@ def parse_compose_env_value(raw: str) -> str:
         inner = val[1:-1]
         return inner.replace("\\\\", "\\").replace("\\n", "\n").replace("\\$", "$")
     return val
+
+
+def read_compose_env_value(key: str, path: Path = DEFAULT_ENV) -> str:
+    """Read one key from docker-compose.env even when load_env_file skips host URLs."""
+    if not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, val = line.partition("=")
+        if k.strip() == key:
+            return parse_compose_env_value(val)
+    return ""
 
 
 def load_env_file(path: Path, *, skip_keys: frozenset[str] = _HOST_ENV_SKIP) -> None:
@@ -335,6 +402,28 @@ CDATA_SCRIPT_BLOCK = re.compile(
 )
 
 
+def existing_config_needs_full_push(existing_xml: str, groovy: str) -> bool:
+    """Merged CDATA updates can leave Jenkins on an old script — force full job XML when markers differ."""
+    if any(m in groovy for m in MULTI_FRAMEWORK_MARKERS):
+        if not any(m in existing_xml for m in MULTI_FRAMEWORK_MARKERS):
+            return True
+    checks = (
+        (ENV_SAFE_DOTENV_LOADER_MARKER, ("paasSourceBuildEnvShellSnippet", "env-decode-node-20260601")),
+        (SONAR_LOGIN_JENKINSFILE_MARKER, (SONAR_LOGIN_MARKER, "printf 'sonar.login")),
+        (COSIGN_DIGEST_MARKER, ()),
+        (SONAR_STEP5_MARKER, ()),
+    )
+    for primary, fallbacks in checks:
+        if primary not in groovy:
+            continue
+        if primary in existing_xml:
+            continue
+        if any(f in existing_xml for f in fallbacks):
+            continue
+        return True
+    return False
+
+
 def merge_groovy_into_existing_config_xml(existing_xml: str, groovy: str) -> str:
     """Replace only the Pipeline script CDATA — keeps Jenkins job parameters/plugins intact."""
     inner = esc_cdata(groovy)
@@ -419,9 +508,12 @@ class JenkinsClient:
 
 
 def lab_jenkins_base_url() -> str:
-    """Always NodePort on VM host; never docker-compose in-cluster service URL."""
-    base = os.environ.get("JENKINS_LAB_LOOPBACK", "http://127.0.0.1:30090").strip()
-    return base.rstrip("/")
+    """NodePort on VM host; on dev machines read JENKINS_PROBE_URL from docker-compose.env."""
+    for key in ("JENKINS_PROBE_URL", "JENKINS_LAB_LOOPBACK", "JENKINS_BASE_URL"):
+        base = (os.environ.get(key) or read_compose_env_value(key) or "").strip().rstrip("/")
+        if base and "jenkins-service" not in base and "svc.cluster.local" not in base:
+            return base
+    return "http://127.0.0.1:30090"
 
 
 def wait_for_jenkins_api(base: str, timeout_sec: int = 300) -> bool:
@@ -478,6 +570,8 @@ def main() -> int:
         assert_jenkinsfile_mutate_fix(groovy, jenkinsfile)
         assert_jenkinsfile_env_loader_fix(groovy, jenkinsfile)
         assert_jenkinsfile_cosign_digest_fix(groovy, jenkinsfile)
+        assert_jenkinsfile_sonar_step5_fix(groovy, jenkinsfile)
+        assert_jenkinsfile_multi_framework_fix(groovy, jenkinsfile)
 
     if not wait_for_jenkins_api(base):
         return 1
@@ -518,12 +612,23 @@ def main() -> int:
             print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode} — params + no concurrent builds)")
         else:
             cfg_code, existing_cfg = client.call(job_cfg)
-            if cfg_code == 200 and existing_cfg.strip():
+            if (
+                cfg_code == 200
+                and existing_cfg.strip()
+                and not existing_config_needs_full_push(existing_cfg, groovy)
+            ):
                 merged = merge_groovy_into_existing_config_xml(existing_cfg, groovy)
                 merged = ensure_job_parameters(merged)
                 xml = merged.encode("utf-8")
                 mode = "merged-cdata"
             else:
+                if cfg_code == 200 and existing_cfg.strip():
+                    print(
+                        "NOTE: using full-document (merged job missing required markers — "
+                        "use --force-full to avoid this check)",
+                        file=sys.stderr,
+                    )
+                xml = build_xml(groovy, minimal_params=minimal)
                 mode = "full-document"
             print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode})")
         extra = client.crumb_headers()
