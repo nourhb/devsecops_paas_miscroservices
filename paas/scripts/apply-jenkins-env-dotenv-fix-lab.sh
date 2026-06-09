@@ -20,19 +20,38 @@ fi
 echo "==> Jenkinsfile OK (${MARKER})"
 bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" || true
 
+upsert_env() {
+  local key="$1" val="$2"
+  [[ -f "${ENV_FILE}" ]] || return 0
+  if grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${val}|" "${ENV_FILE}"
+  else
+    echo "${key}=${val}" >> "${ENV_FILE}"
+  fi
+}
+echo "==> Disable PaaS inline Jenkins overwrite (use repo Jenkinsfile via ConfigMap + this script)"
+upsert_env JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER "false"
+ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || true
+
 if [[ -f "${ENV_FILE}" ]]; then
-  set -a
+  set +u
   # shellcheck disable=SC1090
-  . "${ENV_FILE}"
-  set +a
+  source "${ENV_FILE}" 2>/dev/null || true
+  set -u
 fi
 
-echo "==> Update Jenkins paas-deploy inline pipeline"
-python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force
+echo "==> Update Jenkins paas-deploy (full job config — not merge-only)"
+export JENKINSFILE
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+# Never use --force without --force-full here (merged-cdata drops markers Jenkins verify needs).
+
+echo "==> Verify Jenkins job contains env loader fix"
+if ! bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"; then
+  echo "ERROR: Jenkins job still outdated — see verify output above" >&2
+  exit 1
+fi
 
 echo ""
-echo "Verify next build console starts with:"
-echo "  [paas-jenkinsfile] marker=${MARKER}"
-echo "  [env] loaded N variable(s) for build (..., EMAIL_PASS=<redacted>, ...)"
-echo ""
-echo "Then trigger Deploy again from PaaS for sanhome."
+echo "OK. Trigger a NEW Deploy from PaaS (not Rebuild #271)."
+echo "Console must show: [paas-jenkinsfile] marker=${MARKER}"
+echo "Step 3 must show: [env] loaded N variable(s) ... EMAIL_PASS=<redacted>"

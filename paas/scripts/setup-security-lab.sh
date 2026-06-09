@@ -86,7 +86,12 @@ if [[ -n "${DT_BASE}" ]]; then
     echo "WARN: Set DEPENDENCY_TRACK_API_KEY in ${ENV_FILE}"
     echo "      UI: $(svc_url dependency-track dtrack-dependency-track-frontend 8080 2>/dev/null || echo dependency-track) → Administration → Access Management → Teams → API Keys"
   else
-    echo "OK: DEPENDENCY_TRACK_API_KEY already set"
+    DT_HTTP="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "X-Api-Key: ${CUR_DT}" "${DT_BASE%/}/api/v1/project" 2>/dev/null || echo 000)"
+    if [[ "${DT_HTTP}" == "200" ]]; then
+      echo "OK: DEPENDENCY_TRACK_API_KEY valid (HTTP 200)"
+    else
+      echo "WARN: DEPENDENCY_TRACK_API_KEY rejected (HTTP ${DT_HTTP}) — run: bash paas/scripts/regenerate-dependency-track-api-key-lab.sh"
+    fi
   fi
 else
   echo "WARN: Dependency-Track API not found"

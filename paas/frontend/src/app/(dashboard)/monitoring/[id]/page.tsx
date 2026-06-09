@@ -62,7 +62,7 @@ export default function MonitoringPage() {
     const params = useParams<{
         id: string;
     }>();
-    const projectId = params.id;
+  const projectId = params.id;
     const [logTab, setLogTab] = useState<"build" | "deploy" | "pod">("build");
     const [selectedPod, setSelectedPod] = useState<{
         namespace: string;
@@ -75,8 +75,8 @@ export default function MonitoringPage() {
         queryFn: () => monitoringApi.getSnapshot(projectId),
         refetchInterval: 20000
     });
-    const statusQuery = useQuery({
-        queryKey: ["status", projectId],
+  const statusQuery = useQuery({
+    queryKey: ["status", projectId],
         queryFn: () => pipelineApi.getStatus(projectId),
         refetchInterval: 20000
     });
@@ -90,7 +90,7 @@ export default function MonitoringPage() {
         queryFn: () => kubernetesApi.getPodLogs(selectedPod!.namespace, selectedPod!.name, selectedPod!.container || undefined),
         enabled: Boolean(selectedPod?.namespace && selectedPod?.name)
     });
-    const grafanaBaseUrl = process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3001";
+  const grafanaBaseUrl = process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3001";
     const grafanaUrl = `${grafanaBaseUrl.replace(/\/+$/, "")}/`;
     const snap = snapshotQuery.data;
     const phaseChartData = useMemo(() => {
@@ -228,7 +228,7 @@ export default function MonitoringPage() {
               <CardContent className="text-2xl font-semibold tabular-nums">{snap.runtime.memoryUsagePercent}%</CardContent>
               <CardDescription className="px-6 pb-4 text-xs">Same PromQL window as the CPU card.</CardDescription>
             </Card>
-            <Card>
+        <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   Deploy / build
@@ -242,8 +242,8 @@ export default function MonitoringPage() {
                 </div>
                 <p className="text-xs text-muted">Stored project row; not live Prometheus.</p>
               </CardContent>
-            </Card>
-            <Card>
+        </Card>
+        <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   Namespace &amp; image
@@ -281,8 +281,8 @@ export default function MonitoringPage() {
                     </LineChart>
                   </ResponsiveContainer>)}
               </CardContent>
-            </Card>
-            <Card>
+        </Card>
+        <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   Cluster memory — last hour
@@ -404,8 +404,8 @@ export default function MonitoringPage() {
                     {argoQuery.data?.unreachableReason ? <p className="text-xs text-warning">{argoQuery.data.unreachableReason}</p> : null}
                   </>)}
               </CardContent>
-            </Card>
-            <Card>
+        </Card>
+        <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   Workspace supply chain rollups
@@ -431,8 +431,8 @@ export default function MonitoringPage() {
                   <p className="text-xl font-semibold">{snap.runtime.runningApplications}</p>
                 </div>
               </CardContent>
-            </Card>
-          </section>
+        </Card>
+      </section>
 
           <Card>
             <CardHeader className="pb-2">
@@ -476,8 +476,8 @@ export default function MonitoringPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
+      <Card>
+        <CardHeader>
               <CardTitle className="text-base flex flex-wrap items-center gap-2">
                 Grafana
                 <Hint>{hints.monitoring.grafanaJump}</Hint>
@@ -485,16 +485,16 @@ export default function MonitoringPage() {
               <CardDescription>
                 Charts above use your configured Prometheus. Grafana remains the place for advanced dashboards and ad-hoc PromQL.
               </CardDescription>
-            </CardHeader>
-            <CardContent>
+        </CardHeader>
+        <CardContent>
               <Button asChild variant="outline">
                 <a href={grafanaUrl} target="_blank" rel="noreferrer">
                   <ExternalLink className="mr-2 h-4 w-4"/>
                   Open Grafana
                 </a>
               </Button>
-            </CardContent>
-          </Card>
+        </CardContent>
+      </Card>
         </>) : null}
     </div>);
 }

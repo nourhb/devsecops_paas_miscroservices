@@ -58,5 +58,9 @@ curl "${AUTH[@]}" \
   | python3 -m json.tool
 
 echo ""
+echo "==> lastBuild console (head — pipeline markers)"
+curl "${AUTH[@]}" "${BASE}/job/${JOB}/lastBuild/consoleText" 2>/dev/null | head -25 | grep -E 'paas-jenkinsfile|env-safe-dotenv|loaded.*variable' || echo "(markers not in first 25 lines — open full console in Jenkins)"
+
+echo ""
 echo "==> lastBuild console (tail)"
 curl "${AUTH[@]}" "${BASE}/job/${JOB}/lastBuild/consoleText" 2>/dev/null | tail -12 || echo "(no lastBuild yet)"

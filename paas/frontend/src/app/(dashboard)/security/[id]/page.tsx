@@ -1,20 +1,37 @@
 "use client";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Hint } from "@/components/hint";
+import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { projectApi, securityApi } from "@/lib/api";
 import { hints } from "@/lib/app-hints";
+import { queryHttpMessage } from "@/lib/query-http-message";
+import type { SecurityIntegrationProbeStatus } from "@/types";
 const SEVERITY_ROWS = [
     { key: "critical", label: "Critical", dotClassName: "bg-danger" },
     { key: "high", label: "High", dotClassName: "bg-orange-500" },
     { key: "medium", label: "Medium", dotClassName: "bg-yellow-500" },
     { key: "low", label: "Low", dotClassName: "bg-success" }
 ] as const;
+function probeBadgeVariant(status: SecurityIntegrationProbeStatus): "success" | "danger" | "warning" | "outline" {
+    if (status === "OK") {
+        return "success";
+    }
+    if (status === "FAIL") {
+        return "danger";
+    }
+    if (status === "WARN") {
+        return "warning";
+    }
+    return "outline";
+}
 export default function SecurityPage() {
     const params = useParams<{
         id: string;
@@ -26,7 +43,9 @@ export default function SecurityPage() {
     });
     const securityQuery = useQuery({
         queryKey: ["security", projectId],
-        queryFn: () => securityApi.getSecurity(projectId)
+        queryFn: () => securityApi.getSecurity(projectId),
+        retry: 1,
+        staleTime: 15000
     });
     const displayName = projectQuery.data?.projectName ?? projectId;
     const data = securityQuery.data;
@@ -52,15 +71,29 @@ export default function SecurityPage() {
     </div>);
     }
     if (securityQuery.isError || !data) {
-        return (<Card className="border-danger/30">
-      <CardHeader>
-        <CardTitle>Security data unavailable</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm text-muted">
-        Could not load Trivy, SonarQube, Dependency-Track, Cosign, or policy gate data for this project.
-      </CardContent>
-    </Card>);
+        const errMsg = securityQuery.isError
+            ? queryHttpMessage(securityQuery.error, "Could not load security data (integrations may be slow or misconfigured).")
+            : "No security payload returned.";
+        return (<div className="space-y-4">
+      <Card className="border-danger/30">
+        <CardHeader>
+          <CardTitle>Security data unavailable</CardTitle>
+          <CardDescription>{errMsg}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2 text-sm">
+          <Button variant="outline" size="sm" onClick={() => securityQuery.refetch()}>
+            Retry
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/pipeline/${projectId}`}>Open pipeline &amp; Jenkins logs</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>);
     }
+    const pipeline = data.pipelineVerification;
+    const buildCtx = data.buildContext;
+    const deployFailed = (buildCtx?.deploymentStatus || "").toUpperCase() === "FAILED";
     return (<div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
@@ -71,6 +104,71 @@ export default function SecurityPage() {
           Sonar Quality Gate: {data.qualityGateStatus}
         </Badge>
       </div>
+
+      {deployFailed ? (<Card className="border-danger/30 bg-danger/5">
+        <CardHeader>
+          <CardTitle className="text-base">Last deployment failed — security results may still apply</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm text-muted">
+          <p>
+            Status: <span className="font-medium text-foreground">{buildCtx?.deploymentStatus ?? "FAILED"}</span>
+            {buildCtx?.jenkinsBuildNumber != null ? ` · Jenkins build #${buildCtx.jenkinsBuildNumber}` : null}
+            {buildCtx?.jenkinsBuildResult ? ` · result=${buildCtx.jenkinsBuildResult}` : null}
+          </p>
+          {buildCtx?.deploymentFailureReason ? <p>Reason: {buildCtx.deploymentFailureReason}</p> : null}
+          {buildCtx?.deploymentFailureMessage ? <p className="font-mono text-xs break-all">{buildCtx.deploymentFailureMessage}</p> : null}
+        </CardContent>
+      </Card>) : null}
+
+      {data.integrationProbes?.length ? (<Card>
+        <CardHeader>
+          <CardTitle className="text-base">Tool-by-tool status</CardTitle>
+          <CardDescription>Live probes plus Jenkins Step 4/5/9 markers from the latest build logs.</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="pb-2 pr-4 font-medium">Tool</th>
+                <th className="pb-2 pr-4 font-medium">Configured</th>
+                <th className="pb-2 pr-4 font-medium">Status</th>
+                <th className="pb-2 font-medium">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.integrationProbes.map((probe) => (<tr key={probe.tool} className="border-t border-border">
+                  <td className="py-2 pr-4 font-medium">{probe.tool}</td>
+                  <td className="py-2 pr-4">{probe.configured ? "Yes" : "No"}</td>
+                  <td className="py-2 pr-4">
+                    <Badge variant={probeBadgeVariant(probe.status)}>{probe.status}</Badge>
+                  </td>
+                  <td className="py-2 text-muted">{probe.detail}</td>
+                </tr>))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>) : null}
+
+      <PipelineVerificationPanel jenkinsChecks={pipeline?.jenkinsChecks ?? []} deployChecks={pipeline?.deployChecks ?? []} buildComplete={pipeline?.buildComplete ?? null} artifactImage={pipeline?.artifactImage ?? null}/>
+
+      {data.securityLogExcerpt ? (<Card>
+        <CardHeader>
+          <CardTitle className="text-base">Security log excerpt</CardTitle>
+          <CardDescription>
+            Filtered from Jenkins / deployment logs (PAAS_STEP, Sonar, SCA, Cosign, Trivy). Open Pipeline for the full console.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-96 overflow-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+            {data.securityLogExcerpt}
+          </pre>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/pipeline/${projectId}`}>Full pipeline logs</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>) : null}
 
       <Card className={severityTotals === 0 && data.qualityGateStatus === "UNKNOWN" ? "border-warning/40 bg-warning/5" : undefined}>
         <CardHeader>

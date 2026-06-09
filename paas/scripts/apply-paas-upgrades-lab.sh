@@ -42,6 +42,6 @@ bash "${SCRIPT_DIR}/secure-env-files.sh" --fix
 
 echo ""
 echo "Next:"
-echo "  cd ~/gitops && git add apps && git commit -m 'chore: blue-green templates' && bash ${SCRIPT_DIR}/push-gitops-lab.sh"
-echo "  Set PAAS_DEPLOYMENT_STRATEGY=BlueGreen in docker-compose.env + bash ${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+echo "  bash ${SCRIPT_DIR}/push-gitops-lab.sh 'chore: blue-green helm templates'"
+echo "  bash ${SCRIPT_DIR}/set-lab-env-key.sh PAAS_DEPLOYMENT_STRATEGY BlueGreen sync"
 echo "  Trigger Deploy from PaaS for sanhome"

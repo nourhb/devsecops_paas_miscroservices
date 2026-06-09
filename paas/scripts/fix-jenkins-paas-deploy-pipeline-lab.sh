@@ -44,6 +44,18 @@ if ! grep -qF 'cosign-digest-crane-bin-20260602' "${JENKINSFILE_TO_PUSH}" 2>/dev
   echo "  git pull origin main && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh" >&2
   exit 1
 fi
+if ! grep -qF 'paas-artifacts/sonar-scanner.log' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "==> Sonar Step 5 fix missing — patch Jenkinsfile (JAVA_HOME + scanner log)"
+  export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
+  bash "${SCRIPT_DIR}/patch-jenkins-sonar-step5-lab.sh"
+  JENKINSFILE_TO_PUSH="${JENKINSFILE}"
+fi
+if ! grep -qF "printf 'sonar.login=%s" "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "==> SonarScanner CLI 6 needs sonar.login (fixes Not authorized on Step 5)"
+  export JENKINSFILE="${JENKINSFILE_TO_PUSH}"
+  bash "${SCRIPT_DIR}/patch-jenkins-sonar-token-env-lab.sh" || true
+  JENKINSFILE_TO_PUSH="${JENKINSFILE}"
+fi
 
 echo "==> 2. Wait for Jenkins API (pod may be Ready before :30090 accepts connections)"
 JENKINS_WAIT_URL="${JENKINS_LAB_LOOPBACK:-http://127.0.0.1:30090}"
