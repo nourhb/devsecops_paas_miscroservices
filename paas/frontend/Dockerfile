@@ -11,8 +11,10 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat openssl
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
+COPY jenkins/Jenkinsfile.paas-deploy /tmp/Jenkinsfile.paas-deploy
 COPY frontend .
-RUN mkdir -p public && npx prisma generate && npm run build
+ENV PAAS_JENKINSFILE=/tmp/Jenkinsfile.paas-deploy
+RUN node scripts/embed-jenkinsfile.mjs && mkdir -p public && npx prisma generate && npm run build
 
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
@@ -31,6 +33,7 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy
 COPY gitops/apps/simple-app /app/paas-bundled/paas/gitops/apps/simple-app
 

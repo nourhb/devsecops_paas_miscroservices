@@ -4,6 +4,12 @@ import { env } from "@/server/config/env";
 import { IntegrationError } from "@/server/http/errors";
 import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
 import { allowSimulation } from "@/server/integrations/integration-mode";
+import { syncJenkinsfileConfigMapFromEmbeddedIfNeeded } from "@/server/jenkins/jenkinsfile-configmap-sync";
+import {
+    jenkinsfileHasMultiFrameworkMarker,
+    readResolvedJenkinsfileGroovy,
+    resolveJenkinsfilePath
+} from "@/server/jenkins/jenkinsfile-source";
 import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-deploy-job-sync";
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
 const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
@@ -96,30 +102,8 @@ function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
 }
 function findMonorepoRoot(): string | null {
-    const override = env.PAAS_MONOREPO_ROOT.trim();
-    if (override) {
-        const abs = path.resolve(override);
-        if (jenkinsfileRelativePathExists(abs)) {
-            return abs;
-        }
-        throw new IntegrationError(`PAAS_MONOREPO_ROOT=${override} but Jenkinsfile.paas-deploy not found there.`);
-    }
-    let dir = process.cwd();
-    for (let i = 0; i < 10; i++) {
-        if (jenkinsfileRelativePathExists(dir)) {
-            return dir;
-        }
-        const parent = path.dirname(dir);
-        if (parent === dir) {
-            break;
-        }
-        dir = parent;
-    }
-    const bundled = path.resolve(BUNDLED_MONOREPO_ROOT);
-    if (jenkinsfileRelativePathExists(bundled)) {
-        return bundled;
-    }
-    return null;
+    const resolved = resolveJenkinsfilePath();
+    return resolved?.root ?? null;
 }
 export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: string): Promise<string> {
     const flag = env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER.trim();
@@ -146,16 +130,22 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     if (!trimmedJob || trimmedJob.includes("/")) {
         return "[jenkins-sync] Skipped: folder-qualified job name (use manual sync for nested jobs).";
     }
-    if (!root) {
+    const resolvedPath = resolveJenkinsfilePath();
+    if (!resolvedPath) {
         throw new IntegrationError("Jenkinsfile.paas-deploy not found (check PAAS_MONOREPO_ROOT or rebuild frontend image).");
     }
-    const jenkinsfilePath = path.join(root, ...JENKINSFILE_SEGMENTS);
-    if (!fs.existsSync(jenkinsfilePath)) {
-        throw new IntegrationError(`Missing Jenkinsfile for sync: ${jenkinsfilePath}`);
+    const cmLog = await syncJenkinsfileConfigMapFromEmbeddedIfNeeded();
+    const resolvedGroovy = readResolvedJenkinsfileGroovy();
+    if (!resolvedGroovy) {
+        throw new IntegrationError("Jenkinsfile.paas-deploy not readable (rebuild frontend image).");
     }
-    const localGroovy = fs.readFileSync(jenkinsfilePath, "utf-8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+    const jenkinsfilePath = resolvedGroovy.absPath;
+    const localGroovy = resolvedGroovy.groovy;
     if (/stage\s*\(\s*["']Step 1 — Validate parameters and checkout["']/m.test(localGroovy)) {
         throw new IntegrationError("Jenkinsfile.paas-deploy is an obsolete stub; use the current file from the repo.");
+    }
+    if (!jenkinsfileHasMultiFrameworkMarker(localGroovy)) {
+        throw new IntegrationError(`Jenkinsfile is missing multi-framework marker (python/nginx/legacy Angular). Rebuild and redeploy the PaaS frontend: bash paas/scripts/deploy-paas-frontend-k8s.sh`);
     }
     const { groovy, sourceLabel } = await resolveGroovyForJenkinsSync(jenkinsfilePath, localGroovy);
     if (!jenkinsfileHasCraneFix(localGroovy) || !jenkinsfileHasMutateCmdFix(localGroovy)) {
@@ -170,7 +160,7 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
             groovyScript: groovy,
             jenkinsfileLabel: path.basename(jenkinsfilePath)
         });
-        return `[jenkins-sync] OK — source: ${sourceLabel} → job "${trimmedJob}"\n${out}`.trim();
+        return `[jenkins-sync] OK — source: ${sourceLabel} (${resolvedPath.source}) → job "${trimmedJob}"\n${cmLog}\n${out}`.trim();
     }
     catch (err: unknown) {
         const detail = formatFetchErrorChain(err);

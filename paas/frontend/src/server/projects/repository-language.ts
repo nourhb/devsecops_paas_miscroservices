@@ -92,8 +92,8 @@ function detectFromPackageJson(raw: string): {
     if (names.includes("@angular/core")) {
         return {
             language: "Angular",
-            buildProfile: "node",
-            detectionReason: "Detected from package.json dependency \"@angular/core\"."
+            buildProfile: "static",
+            detectionReason: "Detected from package.json dependency \"@angular/core\" (nginx static on port 80)."
         };
     }
     if (names.includes("vue")) {
@@ -108,6 +108,20 @@ function detectFromPackageJson(raw: string): {
             language: "React",
             buildProfile: "node",
             detectionReason: "Detected from package.json dependency \"react\"."
+        };
+    }
+    if (names.includes("express")) {
+        return {
+            language: "Express",
+            buildProfile: "node",
+            detectionReason: "Detected from package.json dependency \"express\"."
+        };
+    }
+    if (names.includes("vite") || names.includes("@vitejs/plugin-react")) {
+        return {
+            language: "Vite",
+            buildProfile: "node",
+            detectionReason: "Detected from package.json Vite toolchain."
         };
     }
     return {
@@ -233,7 +247,7 @@ RUN npm install -g serve@14
 COPY --from=build /app /app
 ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -d build ] && [ -f build/index.html ]; then exec serve -s build -l 3000; elif [ -f package.json ]; then exec npm start; else exec sleep infinity; fi"]`;
+CMD ["sh", "-c", "if [ -f dist/main.js ]; then exec node dist/main.js; elif [ -d dist ] && [ -f dist/index.html ]; then exec serve -s dist -l 3000; elif [ -d build ] && [ -f build/index.html ]; then exec serve -s build -l 3000; elif [ -f server.js ]; then exec node server.js; elif [ -f package.json ]; then exec npm start; else exec sleep infinity; fi"]`;
         case "python":
             return `FROM python:3.12-slim
 WORKDIR /app
@@ -242,7 +256,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 8000
-CMD ["sh", "-c", "if [ -f manage.py ]; then python manage.py runserver 0.0.0.0:8000; else python -m http.server 8000; fi"]`;
+CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.0.0:8000; elif python -c 'import uvicorn' 2>/dev/null && [ -f main.py ]; then exec uvicorn main:app --host 0.0.0.0 --port 8000; elif [ -f app.py ]; then exec python app.py; else exec python -m http.server 8000; fi"]`;
         case "java":
             return `FROM eclipse-temurin:17-jdk-alpine AS build
 WORKDIR /app

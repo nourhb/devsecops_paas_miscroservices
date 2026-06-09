@@ -44,14 +44,22 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
   withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
     sh '''
       set +e
-      curl -sS --fail-with-body -X POST "${DT_BASE%/}/api/v1/bom" \
+      DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${DT_BASE%/}/api/v1/bom" \
         -H "X-Api-Key: ${DT_KEY}" \
         -F "autoCreate=true" \
         -F "projectName=${DT_PROJECT}" \
         -F "projectTags=${DT_PROJECT_TAG}" \
         -F "projectVersion=${DT_VERSION}" \
-        -F "bom=@sca/bom.json" \
-        || echo "[sca] Dependency-Track upload failed (non-fatal)"
+        -F "bom=@sca/bom.json" 2>&1)" || true
+      DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
+      DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
+      if [[ "${DT_HTTP}" == "200" || "${DT_HTTP}" == "201" || "${DT_HTTP}" == "202" ]]; then
+        echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) project=${DT_PROJECT} version=${DT_VERSION}"
+      else
+        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — rotate DEPENDENCY_TRACK_API_KEY if 401"
+        printf '%s\n' "${DT_BODY}" | head -c 800
+        echo ""
+      fi
     '''
   }
 }
@@ -313,25 +321,189 @@ def dockerfileHasProductionBuild(String dockerfilePath) {
     return false
   }
   def text = readFile file: dockerfilePath
-  return (text =~ /(?i)(next build|npm run build|npm run build:ci|yarn build|pnpm run build|pnpm build)/)
+  return (text =~ /(?i)(next build|npm run build|npm run build:ci|yarn build|pnpm run build|pnpm build|ng build|vite build)/)
+}
+
+/** Node major for legacy Angular / webpack 4 (OpenSSL ERR_OSSL_EVP_UNSUPPORTED on Node 17+). */
+def resolveNodeVersion(String appRoot = '.') {
+  def override = (env.JENKINS_PAAS_NODE_VERSION ?: '').trim()
+  if (override) {
+    return override
+  }
+  def root = (appRoot ?: '.').trim() ?: '.'
+  def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
+  if (fileExists(pkgPath)) {
+    try {
+      def pkg = readFile(pkgPath)
+      if (pkg.contains('"@angular/core"')) {
+        def m = (pkg =~ /"@angular\/core"\s*:\s*"\^?(\d+)/)
+        if (m.find()) {
+          def major = (m.group(1) as Integer)
+          if (major >= 17) { return '20.19.5' }
+          if (major >= 13) { return '18.20.4' }
+          return '16.20.2'
+        }
+        return '16.20.2'
+      }
+    } catch (Exception ignored) {}
+  }
+  return '20.19.5'
+}
+
+def isLegacyAngularProject(String appRoot = '.') {
+  def root = (appRoot ?: '.').trim() ?: '.'
+  def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
+  if (!fileExists(pkgPath)) {
+    return false
+  }
+  try {
+    def pkg = readFile(pkgPath)
+    if (!pkg.contains('"@angular/core"')) {
+      return false
+    }
+    def m = (pkg =~ /"@angular\/core"\s*:\s*"\^?(\d+)/)
+    if (m.find()) {
+      return (m.group(1) as Integer) < 13
+    }
+    return true
+  } catch (Exception ignored) {
+    return true
+  }
+}
+
+def shouldDeferAngularBuildToStep6(String appRoot, String dockerfilePath = 'Dockerfile') {
+  def root = (appRoot ?: '.').trim() ?: '.'
+  def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
+  if (!fileExists(pkgPath)) {
+    return false
+  }
+  try {
+    if (!readFile(pkgPath).contains('"@angular/core"')) {
+      return false
+    }
+  } catch (Exception ignored) {
+    return false
+  }
+  if (isLegacyAngularProject(root)) {
+    return true
+  }
+  return resolveCraneRuntimeStack(root, dockerfilePath) == 'nginx'
+}
+
+/** python | nginx | node — drives dockerless crane base image + entrypoint (not always repo Dockerfile RUN steps). */
+def resolveCraneRuntimeStack(String appRoot, String dockerfilePath) {
+  def root = (appRoot ?: '.').trim() ?: '.'
+  if (fileExists("${root}/requirements.txt") || fileExists("${root}/pyproject.toml")
+      || fileExists('requirements.txt') || fileExists('pyproject.toml')) {
+    return 'python'
+  }
+  def fw = detectProjectFramework(root)
+  if (fw == 'python') {
+    return 'python'
+  }
+  def df = (dockerfilePath ?: 'Dockerfile').trim()
+  if (fileExists(df)) {
+    def text = readFile(df)
+    if (text =~ /(?i)FROM\s+[^\n]*python/ || text =~ /(?i)(gunicorn|uvicorn|pip install)/) {
+      return 'python'
+    }
+    if (text =~ /(?i)FROM\s+[^\n]*nginx/) {
+      return 'nginx'
+    }
+  }
+  if (fw == 'angular' && (fileExists("${root}/nginx.conf") || fileExists('nginx.conf'))) {
+    return 'nginx'
+  }
+  return 'node'
+}
+
+def paasOpensslLegacyShellSnippet() {
+  return '''
+    _paas_openssl_legacy() {
+      case "${PAAS_FRAMEWORK:-}" in
+        angular|spa|node|vite-react)
+          case "$(node -v 2>/dev/null || echo v0)" in
+            v17*|v18*|v19*|v20*|v21*|v22*)
+              case "${NODE_OPTIONS:-}" in
+                *--openssl-legacy-provider*) ;;
+                *) export NODE_OPTIONS="${NODE_OPTIONS} --openssl-legacy-provider" ;;
+              esac
+              ;;
+          esac
+          ;;
+      esac
+    }
+    _paas_openssl_legacy
+'''
+}
+
+/** next | angular | nestjs | express | vite-react | spa | node | python | java | static | unknown */
+def detectProjectFramework(String appRoot = '.') {
+  def root = (appRoot ?: '.').trim() ?: '.'
+  if (fileExists("${root}/package.json")) {
+    try {
+      return sh(script: """
+        set -eu
+        cd '${root}'
+        node -e "
+          const p=require('./package.json');
+          const d={...(p.dependencies||{}),...(p.devDependencies||{})};
+          const s=p.scripts||{};
+          if (d.next) process.stdout.write('next');
+          else if (d['@angular/core']) process.stdout.write('angular');
+          else if (d['@nestjs/core']) process.stdout.write('nestjs');
+          else if (d.express) process.stdout.write('express');
+          else if (d.vite || d['@vitejs/plugin-react'] || d['react-scripts']) process.stdout.write('vite-react');
+          else if (d.react || d.vue) process.stdout.write('spa');
+          else if (s.build || s['build:ci'] || s.start) process.stdout.write('node');
+          else process.stdout.write('node');
+        "
+      """, returnStdout: true).trim()
+    } catch (Exception ignored) {
+      return 'node'
+    }
+  }
+  if (fileExists("${root}/requirements.txt") || fileExists("${root}/pyproject.toml")
+      || fileExists('requirements.txt') || fileExists('pyproject.toml')) {
+    return 'python'
+  }
+  if (fileExists("${root}/pom.xml") || fileExists('pom.xml')) {
+    return 'java'
+  }
+  return 'unknown'
 }
 
 def prependPath(String path) {
   env.PATH = "${path}:${env.PATH}"
 }
 
-def ensureNodeTool() {
-  if (commandExists("npm")) {
-    return
+def ensureNodeTool(String nodeVer = null) {
+  def targetVer = (nodeVer ?: resolveNodeVersion()).trim()
+  if (!targetVer) {
+    targetVer = '20.19.5'
   }
-  def nodeVer = "20.19.5"
   def cacheRoot = (env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
   if (!cacheRoot) {
     def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
     cacheRoot = base ? "${base}/.jenkins-paas-cache/node" : "${pwd()}/.paas-tools"
   }
-  def nodeDir = "${cacheRoot}/node-v${nodeVer}-linux-x64"
-  println "[tooling] npm missing on Jenkins node; portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_CACHE to override root; persists across workspaces)"
+  def nodeDir = "${cacheRoot}/node-v${targetVer}-linux-x64"
+  if (commandExists("npm")) {
+    def current = ''
+    try {
+      current = sh(script: 'node -v 2>/dev/null | sed "s/^v//"', returnStdout: true).trim()
+    } catch (Exception ignored) {}
+    if (current == targetVer) {
+      return
+    }
+    if (fileExists("${nodeDir}/bin/npm")) {
+      println "[tooling] Node on PATH is v${current ?: 'unknown'}; using portable v${targetVer} → ${nodeDir}"
+      prependPath("${nodeDir}/bin")
+      return
+    }
+  }
+  nodeVer = targetVer
+  println "[tooling] portable Node.js ${nodeVer} → ${nodeDir} (set JENKINS_PAAS_NODE_VERSION to override; JENKINS_PAAS_NODE_CACHE for cache root)"
   withEnv(["ENS_NODE_BOOT_VER=${nodeVer}", "ENS_NODE_BOOT_DIR=${nodeDir}"]) {
     sh '''#!/bin/sh
 set -eu
@@ -609,12 +781,13 @@ RUN if [ -f package.json ]; then \\
     fi
 ENV HOSTNAME=0.0.0.0 PORT=3000
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; elif [ -d build ] && [ -f build/index.html ]; then exec npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then exec npm start; else exec node server.js; fi"]
+CMD ["sh", "-c", "if [ -f dist/main.js ]; then exec node dist/main.js; elif [ -f server.js ]; then exec node server.js; elif [ -d dist ] && [ -f dist/index.html ]; then exec npx --yes serve@14 -s dist -l 3000; elif [ -d build ] && [ -f build/index.html ]; then exec npx --yes serve@14 -s build -l 3000; elif [ -f package.json ]; then exec npm start; else exec node server.js; fi"]
 '''
     return "Dockerfile"
   }
-  if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
-    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/python:3.12-bookworm-slim
+  if (fileExists("${appRoot}/requirements.txt") || fileExists("${appRoot}/pyproject.toml")
+      || fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+    writeFile file: "Dockerfile", text: '''FROM mirror.gcr.io/library/python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 COPY . .
@@ -623,7 +796,7 @@ RUN pip install --upgrade pip setuptools wheel \\
   elif [ -f pyproject.toml ]; then pip install .; \\
   else pip install pip; fi
 EXPOSE 8000
-CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.0.0:8000; fi; exec python3 -m http.server 8000"]
+CMD ["sh", "-c", "if [ -f manage.py ]; then exec python manage.py runserver 0.0.0.0:8000; elif python -c 'import uvicorn' 2>/dev/null && [ -f main.py ]; then exec uvicorn main:app --host 0.0.0.0 --port 8000; elif [ -f app.py ]; then exec python app.py; else exec python3 -m http.server 8000; fi"]
 '''
     return "Dockerfile"
   }
@@ -671,9 +844,16 @@ def detectAppRoot() {
   if (fileExists('package.json')) {
     return '.'
   }
-  for (def dir in ['server', 'frontend', 'client', 'app', 'web', 'backend']) {
+  for (def dir in ['server', 'frontend', 'client', 'app', 'web', 'backend', 'api', 'apps/web', 'apps/client']) {
     if (fileExists("${dir}/package.json")) {
       return dir
+    }
+  }
+  if (!fileExists('package.json')) {
+    for (def dir in ['server', 'backend', 'api', 'app']) {
+      if (fileExists("${dir}/requirements.txt") || fileExists("${dir}/pyproject.toml")) {
+        return dir
+      }
     }
   }
   return '.'
@@ -782,6 +962,181 @@ def paasShellKeepaliveHelper() {
 '''
 }
 
+def dockerlessPythonCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
+  println "[image] Step 6 — python crane path (pip at start + gunicorn/uvicorn; port 8000)"
+  sh """
+    set -eu
+    cd '${appRoot}'
+    mkdir -p paas-artifacts
+    cat > start-paas-python.sh <<'PAAS_PY'
+#!/bin/sh
+set -eu
+cd /app || exit 1
+export PYTHONUNBUFFERED=1
+export PORT=\${PORT:-8000}
+pip install --quiet --upgrade pip setuptools wheel 2>/dev/null || true
+if [ -f requirements.txt ]; then
+  pip install --quiet -r requirements.txt
+fi
+if [ -f gunicorn.conf.py ] && python -c "import main" 2>/dev/null; then
+  exec gunicorn -b 0.0.0.0:"\${PORT}" -c gunicorn.conf.py main:app
+fi
+if [ -f gunicorn.conf.py ]; then
+  exec gunicorn -b 0.0.0.0:"\${PORT}" -c gunicorn.conf.py
+fi
+if python -c "import uvicorn" 2>/dev/null && [ -f main.py ]; then
+  exec uvicorn main:app --host 0.0.0.0 --port "\${PORT}"
+fi
+if [ -f manage.py ]; then
+  exec python manage.py runserver 0.0.0.0:"\${PORT}"
+fi
+if [ -f main.py ]; then
+  exec python main.py
+fi
+if [ -f app.py ]; then
+  exec python app.py
+fi
+exec python3 -m http.server "\${PORT}"
+PAAS_PY
+    chmod +x start-paas-python.sh
+    tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
+      --exclude='./node_modules' --exclude='./__pycache__' \\
+      --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
+    echo "[image] python crane append → ${imageRef}"
+    _crane_ok=0
+    for _py_base in \\
+      mirror.gcr.io/library/python:3.12-slim \\
+      mirror.gcr.io/library/python:3.12-slim-bookworm \\
+      mirror.gcr.io/library/python:3.11-slim; do
+      echo "[image] python crane append try base=\${_py_base}"
+      if "${craneBin}" ${craneInsecure} append \\
+        -b "\${_py_base}" \\
+        -f paas-artifacts/app-layer.tar \\
+        -t "${imageRef}"; then
+        _crane_ok=1
+        break
+      fi
+    done
+    if [ "\${_crane_ok}" != 1 ]; then
+      echo "[image] ERROR: python crane append failed (tried 3.12-slim, 3.12-slim-bookworm, 3.11-slim on mirror.gcr.io)"
+      exit 1
+    fi
+    "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+      -t "${imageRef}" \\
+      --workdir=/app \\
+      --entrypoint=/app/start-paas-python.sh \\
+      --exposed-ports=8000/tcp
+    ARTIFACT_REF="${artifactImageRef}"
+    if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
+      "${craneBin}" ${craneInsecure} copy "${imageRef}" "\${ARTIFACT_REF}" || true
+    fi
+    mkdir -p paas-artifacts
+    REF="\${ARTIFACT_REF:-${artifactImageRef}}"
+    DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
+    if [ -n "\${DIGEST_REF}" ]; then
+      case "\${DIGEST_REF}" in
+        *@sha256:*) ;;
+        sha256:*)
+          REPO="\${REF%:*}"
+          DIGEST_REF="\${REPO}@\${DIGEST_REF}"
+          ;;
+      esac
+      echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}" >> paas-artifacts/cosign-meta.txt
+    fi
+  """
+}
+
+def dockerlessNginxCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot, String framework) {
+  def nodeVer = resolveNodeVersion(appRoot)
+  println "[image] Step 6 — nginx static crane path (angular/spa dist → port 80; Node ${nodeVer})"
+  ensureNodeTool(nodeVer)
+  withEnv(["PAAS_FRAMEWORK=${framework}"]) {
+    sh """
+      set -eu
+      cd '${appRoot}'
+      export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
+${paasShellKeepaliveHelper()}
+${paasOpensslLegacyShellSnippet()}
+      echo "[image] nginx build using node \$(node -v 2>/dev/null || echo missing)"
+      if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
+        if [ ! -d node_modules ] || [ ! -d node_modules/@angular ]; then
+          echo "[image] nginx path — npm install before ng build"
+          if [ -f package-lock.json ]; then
+            run_with_keepalive npm ci --no-audit --no-fund --prefer-offline || run_with_keepalive npm install --no-audit --no-fund
+          else
+            run_with_keepalive npm install --no-audit --no-fund
+          fi
+        fi
+        if [ ! -d dist ] && [ ! -d build ]; then
+          echo "[image] nginx path — npm build before static layer"
+          if node -e "const s=require('./package.json').scripts||{};process.exit(s['build:ci']?0:1)" 2>/dev/null; then
+            run_with_keepalive npm run build:ci
+          elif node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.build?0:1)" 2>/dev/null; then
+            run_with_keepalive npm run build
+          fi
+        fi
+      fi
+    """
+  }
+  sh """
+    set -eu
+    cd '${appRoot}'
+    mkdir -p paas-artifacts
+    STATIC_ROOT=""
+    for d in dist build public; do
+      if [ -f "\$d/index.html" ]; then STATIC_ROOT="\$d"; break; fi
+      if [ -d "\$d" ]; then
+        _idx=\$(find "\$d" -mindepth 1 -maxdepth 4 -name index.html 2>/dev/null | head -1)
+        if [ -n "\$_idx" ]; then STATIC_ROOT=\$(dirname "\$_idx"); break; fi
+      fi
+    done
+    if [ -z "\$STATIC_ROOT" ]; then
+      echo "[image] ERROR: nginx runtime but no dist/build with index.html"
+      exit 1
+    fi
+    echo "[image] nginx static root: \$STATIC_ROOT"
+    rm -rf paas-artifacts/_nginx_html paas-artifacts/_nginx_conf
+    mkdir -p paas-artifacts/_nginx_html
+    cp -a "\${STATIC_ROOT}/." paas-artifacts/_nginx_html/
+    tar -C paas-artifacts/_nginx_html --transform='s#^#usr/share/nginx/html/#' -cf paas-artifacts/app-layer.tar .
+    if [ -f nginx.conf ]; then
+      mkdir -p paas-artifacts/_nginx_conf/conf.d
+      cp nginx.conf paas-artifacts/_nginx_conf/conf.d/default.conf
+      tar -C paas-artifacts/_nginx_conf --transform='s#^#etc/nginx/#' -rf paas-artifacts/app-layer.tar .
+    fi
+    echo "[image] nginx crane append → ${imageRef}"
+    "${craneBin}" ${craneInsecure} append \\
+      -b mirror.gcr.io/library/nginx:stable-alpine \\
+      -f paas-artifacts/app-layer.tar \\
+      -t "${imageRef}"
+    "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+      -t "${imageRef}" \\
+      --cmd='nginx -g daemon off;' \\
+      --exposed-ports=80/tcp
+    ARTIFACT_REF="${artifactImageRef}"
+    if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
+      "${craneBin}" ${craneInsecure} copy "${imageRef}" "\${ARTIFACT_REF}" || true
+    fi
+    mkdir -p paas-artifacts
+    REF="\${ARTIFACT_REF:-${artifactImageRef}}"
+    DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
+    if [ -n "\${DIGEST_REF}" ]; then
+      case "\${DIGEST_REF}" in
+        *@sha256:*) ;;
+        sha256:*)
+          REPO="\${REF%:*}"
+          DIGEST_REF="\${REPO}@\${DIGEST_REF}"
+          ;;
+      esac
+      echo "\${DIGEST_REF}" > paas-artifacts/image-digest-ref.txt
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}"
+      echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}" >> paas-artifacts/cosign-meta.txt
+    fi
+  """
+}
+
 def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
   def appRoot = detectAppRoot()
   println "[image] PAAS app root for build layer: ${appRoot}"
@@ -851,13 +1206,30 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     }
   }
 
+  def dfPath = (dockerfilePath ?: 'Dockerfile').trim()
+  def imageStack = detectProjectFramework(appRoot)
+  def runtimeStack = resolveCraneRuntimeStack(appRoot, dfPath)
+  println "[image] detected framework=${imageStack} crane runtime=${runtimeStack} (app root: ${appRoot}, dockerfile: ${dfPath})"
+
+  if (runtimeStack == 'python') {
+    dockerlessPythonCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot)
+    return
+  }
+  if (fileExists("${appRoot}/package.json")) {
+    ensureNodeTool(resolveNodeVersion(appRoot))
+  }
+  if (runtimeStack == 'nginx') {
+    dockerlessNginxCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot, imageStack)
+    return
+  }
+
   println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
     set -eu
     cd '${appRoot}'
     export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
-    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] && [ ! -d node_modules/next ]; then
         echo "[image] crane-next16-202605-j48300: npm ci (prefer Step 3 with JENKINS_PAAS_FAST_PIPELINE=false)"
         npm config set progress true 2>/dev/null || true
@@ -907,8 +1279,10 @@ ${paasShellKeepaliveHelper()}
   sh """
     set -eu
     cd '${appRoot}'
+    export PAAS_FRAMEWORK='${imageStack}'
     export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
 ${paasShellKeepaliveHelper()}
+${paasOpensslLegacyShellSnippet()}
 ${paasForceFreshNextBuildShellSnippet()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ]; then
@@ -929,6 +1303,17 @@ ${paasSourceBuildEnvShellSnippet()}
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
         echo "[image] ERROR: Next.js build still missing .next/BUILD_ID"
         exit 1
+      fi
+    elif [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const s=require('./package.json').scripts||{};process.exit(s.build||s['build:ci']?0:1)" 2>/dev/null; then
+      if [ ! -d dist ] && [ ! -d build ] && [ ! -f .next/BUILD_ID ]; then
+        echo "[image] Step 6b — generic npm build (angular/react/vite/express/nest)"
+        if node -e "const s=require('./package.json').scripts||{};process.exit(s['build:ci']?0:1)" 2>/dev/null; then
+          run_with_keepalive npm run build:ci
+        else
+          run_with_keepalive npm run build
+        fi
+      else
+        echo "[image] Step 6b skip — dist/build/.next already present"
       fi
     fi
   """
@@ -951,8 +1336,17 @@ cd /app || exit 1
 export NODE_ENV=\${NODE_ENV:-production}
 export HOSTNAME=\${HOSTNAME:-0.0.0.0}
 export PORT=\${PORT:-3000}
+if [ -f dist/main.js ]; then
+  exec node dist/main.js
+fi
 if [ -f server.js ]; then
   exec node server.js
+fi
+if [ -f index.js ]; then
+  exec node index.js
+fi
+if [ -d dist ] && [ -f dist/index.html ]; then
+  exec npx --yes serve@14 -s dist -l "\${PORT}"
 fi
 if [ -d build ] && [ -f build/index.html ]; then
   exec npx --yes serve@14 -s build -l "\${PORT}"
@@ -1249,6 +1643,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
   println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
   println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
+  println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -1289,9 +1684,11 @@ def runPaasDeploy = {
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
     def buildAppRoot = detectAppRoot()
+    def buildFramework = detectProjectFramework(buildAppRoot)
     if (buildAppRoot != '.') {
       println "[build] Monorepo/subdir layout — app root: ${buildAppRoot}"
     }
+    println "[build] detected framework: ${buildFramework} (next/angular/nestjs/express/vite-react/spa/node/python)"
     materializeProjectBuildEnv(buildAppRoot)
     patchNextBuildEnvIntoConfig(buildAppRoot)
     if (projectBuildEnvPresent()) {
@@ -1310,10 +1707,15 @@ def runPaasDeploy = {
       }
     } else if (fileExists("${buildAppRoot}/package.json")) {
       patchNextStandaloneConfigIfNeeded(buildAppRoot)
-      if (paasFastPipeline) {
+      def dfPath = params.DOCKERFILE_PATH?.trim() ?: 'Dockerfile'
+      def deferAngularToStep6 = shouldDeferAngularBuildToStep6(buildAppRoot, dfPath)
+      if (deferAngularToStep6) {
+        def nodeVer = resolveNodeVersion(buildAppRoot)
+        println "[build] Legacy/angular+nginx — skip Step 3 npm build (Step 6 builds dist with Node ${nodeVer} + --openssl-legacy-provider)"
+      } else if (paasFastPipeline) {
         println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
       } else {
-      ensureNodeTool()
+      ensureNodeTool(resolveNodeVersion(buildAppRoot))
       if (commandExists("npm")) {
         def npmTimeoutMin = 180
         try {
@@ -1330,8 +1732,10 @@ def runPaasDeploy = {
             cd ''' + buildAppRoot + '''
             export CI=true
             export NEXT_TELEMETRY_DISABLED=1
+            export PAAS_FRAMEWORK=''' + buildFramework + '''
             export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
             export npm_config_maxsockets="${npm_config_maxsockets:-16}"
+''' + paasOpensslLegacyShellSnippet() + '''
             NPM_CACHE="${JENKINS_PAAS_NPM_CACHE:-}"
             if [ -z "${NPM_CACHE}" ] && [ -n "${JENKINS_HOME:-}" ]; then
               NPM_CACHE="${JENKINS_HOME}/.jenkins-paas-cache/npm"
@@ -1501,10 +1905,10 @@ def runPaasDeploy = {
                   fi
                 fi
               elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
-                echo "[build] npm run build (non-Next ou JENKINS_NEXT_BUILD_USE_NPM_SCRIPT=true — pour Next sans script build:ci, préférez retirer USE_NPM_SCRIPT pour --no-lint/--webpack)"
+                echo "[build] npm run build (${buildFramework}: angular/react/vite/express API with build script)"
                 run_with_keepalive npm run build
               else
-                echo "[build] Pas de script build — skip."
+                echo "[build] Pas de script build — skip (OK for Express API-only; runtime via npm start in image)."
               fi
             fi
           '''
@@ -1515,7 +1919,16 @@ def runPaasDeploy = {
       }
     } else if (fileExists("${buildAppRoot}/requirements.txt") || fileExists("${buildAppRoot}/pyproject.toml")) {
       if (commandExists("python3")) {
-        sh "cd '${buildAppRoot}' && python3 -m compileall . || true"
+        sh """
+          set -eu
+          cd '${buildAppRoot}'
+          python3 -m compileall . || true
+          if [ -f requirements.txt ]; then
+            python3 -m pip install --user -q -r requirements.txt || pip3 install --user -q -r requirements.txt || true
+          elif [ -f pyproject.toml ]; then
+            python3 -m pip install --user -q . || pip3 install --user -q . || true
+          fi
+        """
       } else {
         println "[build] Python project detected but python3 is not installed; compile skipped."
       }
@@ -1612,7 +2025,35 @@ def runPaasDeploy = {
             sh "mkdir -p sca && cp '${scaAppRoot}/sca/bom.json' sca/bom.json"
           }
         } else {
-          println "[sca] No package.json; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
+          def scaPyRoot = detectAppRoot()
+          if (fileExists("${scaPyRoot}/requirements.txt") || fileExists("${scaPyRoot}/pyproject.toml")) {
+            def pyScaRc = sh(script: """
+              set +e
+              cd '${scaPyRoot}'
+              mkdir -p sca
+              python3 -m pip install --user -q cyclonedx-bom 2>/dev/null || pip3 install --user -q cyclonedx-bom 2>/dev/null || true
+              if command -v cyclonedx-py >/dev/null 2>&1; then
+                if [ -f requirements.txt ]; then
+                  cyclonedx-py requirements -i requirements.txt -o sca/bom.json
+                else
+                  cyclonedx-py environment -o sca/bom.json
+                fi
+              else
+                python3 -m pip freeze > sca/requirements-freeze.txt 2>/dev/null || true
+              fi
+              test -f sca/bom.json && echo 0 || echo 1
+            """, returnStdout: true).trim().tokenize('\n').last()
+            if (pyScaRc == "0") {
+              paasStepOk(4, 'sca', 'sca/bom.json generated (cyclonedx-py)')
+              if (fileExists("${scaPyRoot}/sca/bom.json") && !fileExists("sca/bom.json")) {
+                sh "mkdir -p sca && cp '${scaPyRoot}/sca/bom.json' sca/bom.json"
+              }
+            } else {
+              paasStepWarn(4, 'sca', 'Python SBOM missing — pip install cyclonedx-bom or enable Docker for cdxgen')
+            }
+          } else {
+            println "[sca] No package.json or Python manifest; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
+          }
         }
         uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
         return
@@ -1677,7 +2118,7 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       nonFatalStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-bash-rc-fix-20260603 (sonar-project.properties; bash RC; no PIPESTATUS under /bin/sh)"
+      println "[paas-jenkinsfile] marker=sonar-scanner-cli6-login-20260607 (sonar.login+token; cluster URL; ws.timeout=300; retries)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -1688,6 +2129,7 @@ exit 0
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
         ensureNodeTool()
+        prependPath("/opt/java/openjdk/bin")
         withEnv([
           "SONAR_HOST_URL_PARAM=${sonarUrlParam}",
           "SONAR_TOKEN=${sonarToken}",
@@ -1698,13 +2140,14 @@ exit 0
           def sonarRc = sh(script: '''#!/bin/bash
             set +e
             pick_sonar_url() {
+              # Prefer in-cluster Sonar (faster than NodePort; NodePort can timeout on values.protobuf).
               for u in \
-                "${SONAR_HOST_URL_PARAM}" \
                 "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
-                "http://sonarqube.sonarqube.svc.cluster.local:9000"
+                "http://sonarqube.sonarqube.svc.cluster.local:9000" \
+                "${SONAR_HOST_URL_PARAM}"
               do
                 [ -z "$u" ] && continue
-                if curl -fsS -m 8 -u "${SONAR_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
+                if curl -fsS -m 15 -u "${SONAR_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
                   echo "$u"
                   return 0
                 fi
@@ -1717,8 +2160,7 @@ exit 0
             echo "[sonar] token validate: ${VALID:-<curl failed>}"
             if ! printf '%s' "${VALID}" | grep -q '"valid":true'; then
               echo "[sonar] token not valid from Jenkins agent — check SONAR_TOKEN and Sonar URL reachability"
-              echo 1
-              exit 0
+              exit 1
             fi
             curl -sS -u "${SONAR_TOKEN}:" -X POST \
               "${SONAR_HOST_URL%/}/api/projects/create?project=${SONAR_PROJECT_KEY}&name=${SONAR_PROJECT_KEY}" \
@@ -1736,6 +2178,7 @@ exit 0
             {
               printf 'sonar.host.url=%s\n' "${SONAR_HOST_URL}"
               printf 'sonar.token=%s\n' "${SONAR_TOKEN}"
+              printf 'sonar.login=%s\n' "${SONAR_TOKEN}"
               printf 'sonar.projectKey=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectName=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectVersion=%s\n' "${SONAR_VERSION}"
@@ -1743,12 +2186,56 @@ exit 0
               printf 'sonar.exclusions=%s\n' '**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js'
               printf 'sonar.qualitygate.wait=%s\n' 'false'
               printf 'sonar.scanner.analysisCacheEnabled=%s\n' 'false'
+              printf 'sonar.ws.timeout=%s\n' '300'
             } > "${SP}"
             chmod 600 "${SP}"
             echo "[sonar] wrote ${SP} (credentials in file; not echoed)"
-            LOG=/tmp/sonar-scanner-$$.log
-            npx --yes sonarqube-scanner@4.2.8 > "${LOG}" 2>&1
-            RC=$?
+            if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
+              export PATH="${JAVA_HOME}/bin:${PATH}"
+            fi
+            if ! command -v java >/dev/null 2>&1; then
+              for _jb in /opt/java/openjdk/bin/java /usr/lib/jvm/java-17-openjdk-amd64/bin/java; do
+                if [ -x "${_jb}" ]; then
+                  export PATH="$(dirname "${_jb}"):${PATH}"
+                  export JAVA_HOME="$(dirname "$(dirname "${_jb}")")"
+                  break
+                fi
+              done
+            fi
+            if ! command -v java >/dev/null 2>&1; then
+              echo "[sonar] ERROR: java not in PATH (sonarqube-scanner needs JRE). Jenkins image usually has JAVA_HOME — set JAVA_HOME on the Jenkins deployment or install openjdk-17-jre in the cicd/jenkins pod."
+              exit 1
+            fi
+            echo "[sonar] java: $(java -version 2>&1 | head -1)"
+            mkdir -p paas-artifacts
+            LOG=paas-artifacts/sonar-scanner.log
+            # SonarScanner CLI 6.x: token via env + -D (properties alone is not enough).
+            export SONAR_TOKEN="${SONAR_TOKEN}"
+            export SONAR_HOST_URL="${SONAR_HOST_URL}"
+            RC=1
+            for _sonar_try in 1 2 3; do
+              echo "[sonar] scanner attempt ${_sonar_try}/3"
+              npx --yes sonarqube-scanner@4.2.8 \
+                -Dsonar.host.url="${SONAR_HOST_URL}" \
+                -Dsonar.token="${SONAR_TOKEN}" \
+                -Dsonar.login="${SONAR_TOKEN}" \
+                -Dsonar.ws.timeout=300 \
+                > "${LOG}" 2>&1
+              RC=$?
+              if [ "${RC}" = "0" ]; then
+                break
+              fi
+              if grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
+                RC=0
+                break
+              fi
+              if grep -qE 'SocketTimeoutException|Read timed out|values\\.protobuf' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
+                echo "[sonar] WARN: Sonar API timeout — retry in 30s (bash paas/scripts/recover-sonarqube-lab.sh if persistent)"
+                sleep 30
+                continue
+              fi
+              break
+            done
             cat "${LOG}"
             if [ "${RC}" != "0" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
               echo "[sonar] scanner reported success despite exit ${RC} — treating as OK"
@@ -1756,15 +2243,19 @@ exit 0
             fi
             if [ "${RC}" != "0" ]; then
               echo "[sonar] scanner tail:"
-              tail -25 "${LOG}" 2>/dev/null || true
+              tail -40 "${LOG}" 2>/dev/null || true
             fi
-            rm -f "${LOG}" "${SP}"
-            echo ${RC}
-          ''', returnStdout: true).trim().tokenize('\n').last()
-          if (sonarRc != "0") {
-            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — see scanner tail above; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
-          } else {
+            rm -f "${SP}"
+            exit "${RC}"
+          ''', returnStatus: true)
+          def sonarLog = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
+          def sonarPassed = (sonarRc as Integer) == 0 \
+            || sonarLog.contains('EXECUTION SUCCESS') \
+            || sonarLog.contains('ANALYSIS SUCCESSFUL')
+          if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
+          } else {
+            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
           }
         }
         return
@@ -1791,7 +2282,9 @@ SP="${SONAR_WS}/sonar-project.properties"
 cat > "${SP}" <<SONARPROP
 sonar.host.url=${SONAR_SCAN_HOST_URL}
 sonar.token=${SONAR_SCAN_TOKEN}
+sonar.login=${SONAR_SCAN_TOKEN}
 sonar.projectKey=${SONAR_SCAN_PROJECT_KEY}
+sonar.ws.timeout=300
 sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
 sonar.projectVersion=${SONAR_SCAN_PROJECT_VERSION}
 sonar.sources=app,src,components,pages,lib
@@ -1847,8 +2340,8 @@ echo $?
         println "*** END : 6. Création de l'image Docker ***"
         return
       }
-      if (fileExists("package.json")) {
-        ensureNodeTool()
+      if (fileExists("${step6AppRoot}/package.json")) {
+        ensureNodeTool(resolveNodeVersion(step6AppRoot))
       }
       def craneBin = ensureCraneTool()
       println "[image] dockerless crane: durable-task timeout ${cranePushTimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
