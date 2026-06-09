@@ -8,11 +8,12 @@ import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import {
-    blueGreenDeploymentName,
-    resolveDeploymentStrategy
+    blueGreenDeploymentNameCandidates,
+    resolveDeploymentStrategy,
+    rollingDeploymentNameCandidates
 } from "@/server/gitops/gitops-blue-green";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
-import { waitForDeploymentReady } from "@/server/integrations/kubernetes-client";
+import { waitForAnyDeploymentReady } from "@/server/integrations/kubernetes-client";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
@@ -82,6 +83,39 @@ async function appendArgoSyncAndWait(
         }
     }
     return { argoSyncOk, shouldAbort: false };
+}
+
+async function runRollingGitOpsPromote(
+    sections: string[],
+    projectName: string,
+    destNamespace: string,
+    artifactRef: string,
+    gitopsOptions: { buildProfile: import("@/server/build-planner").BuildProfile; buildEnv: Record<string, string> | null },
+    label: string
+): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; workloadReady: boolean }> {
+    sections.push(`[deploy] strategy=Rolling${label ? ` ${label}` : ""}`);
+    const git = await commitHelmValuesGitHub(projectName, artifactRef, {
+        ...gitopsOptions,
+        forceRolling: true
+    });
+    sections.push(`[gitops] rolling committed ${git.ref}`);
+    sections.push(`PAAS_DEPLOY_VERIFY step=gitops_rolling status=OK detail=${git.ref}`);
+    sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+    const argo = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+    if (argo.shouldAbort) {
+        return { argoSyncOk: argo.argoSyncOk, shouldAbort: true, workloadReady: false };
+    }
+    const candidates = rollingDeploymentNameCandidates(projectName);
+    sections.push(`[deploy] waiting for workload (${candidates.join(" | ")}) in ${destNamespace}…`);
+    const ready = await waitForAnyDeploymentReady(destNamespace, candidates, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
+    sections.push(`[deploy] ${ready.message}`);
+    if (ready.ready) {
+        sections.push(`PAAS_DEPLOY_VERIFY step=workload_ready status=OK detail=${ready.deploymentName ?? "unknown"}`);
+    }
+    else {
+        sections.push(`PAAS_DEPLOY_VERIFY step=workload_ready status=FAIL detail=${ready.message.slice(0, 400)}`);
+    }
+    return { argoSyncOk: argo.argoSyncOk, shouldAbort: !ready.ready && env.PAAS_STRICT_INTEGRATIONS === "true", workloadReady: ready.ready };
 }
 
 async function persistFailure(deploymentId: string, projectId: string, fullLog: string, reason: DeploymentFailureReason, shortMessage: string): Promise<void> {
@@ -213,6 +247,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     };
     const blueGreen = blueGreenDeployEnabled();
     let argoSyncOk = false;
+    let workloadReady = false;
     try {
         if (blueGreen) {
             sections.push("[deploy] strategy=BlueGreen phase=inactive");
@@ -230,37 +265,48 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             }
             argoSyncOk = argoInactive.argoSyncOk;
             const inactiveSlot = gitInactive.blueGreen?.inactiveSlot ?? "green";
-            const inactiveDeploy = blueGreenDeploymentName(projectName, inactiveSlot);
-            sections.push(`[blue-green] waiting for ${inactiveDeploy} in ${destNamespace}…`);
-            const slotReady = await waitForDeploymentReady(destNamespace, inactiveDeploy, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
+            const slotCandidates = blueGreenDeploymentNameCandidates(projectName, inactiveSlot);
+            sections.push(`[blue-green] waiting for inactive slot (${slotCandidates.join(" | ")}) in ${destNamespace}…`);
+            const slotReady = await waitForAnyDeploymentReady(destNamespace, slotCandidates, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
             sections.push(`[blue-green] ${slotReady.message}`);
             if (!slotReady.ready) {
-                const msg = `Inactive slot deployment not ready: ${slotReady.message}`;
-                sections.push(`PAAS_DEPLOY_VERIFY step=blue_green_inactive status=FAIL detail=${msg.slice(0, 400)}`);
-                await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
-                return;
+                sections.push(`PAAS_DEPLOY_VERIFY step=blue_green_inactive status=WARN detail=${slotReady.message.slice(0, 400)}`);
+                sections.push("[blue-green] inactive slot failed — falling back to Rolling deploy");
+                const rolling = await runRollingGitOpsPromote(sections, projectName, destNamespace, artifactRef, gitopsOptions, "(fallback after BlueGreen failure)");
+                argoSyncOk = rolling.argoSyncOk;
+                workloadReady = rolling.workloadReady;
+                if (rolling.shouldAbort) {
+                    await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, `Workload not ready after Rolling fallback: ${slotReady.message}`);
+                    return;
+                }
             }
-            sections.push("PAAS_DEPLOY_VERIFY step=blue_green_inactive status=OK");
-            sections.push("[deploy] strategy=BlueGreen phase=flip");
-            const gitFlip = await commitHelmValuesGitHub(projectName, artifactRef, {
-                ...gitopsOptions,
-                blueGreenPhase: "flip"
-            });
-            sections.push(`[gitops] traffic switch committed ${gitFlip.ref} active=${gitFlip.blueGreen?.activeSlot ?? "?"}`);
-            sections.push(`PAAS_DEPLOY_VERIFY step=gitops_flip status=OK detail=${gitFlip.ref}`);
+            else {
+                sections.push("PAAS_DEPLOY_VERIFY step=blue_green_inactive status=OK");
+                workloadReady = true;
+                sections.push("[deploy] strategy=BlueGreen phase=flip");
+                const gitFlip = await commitHelmValuesGitHub(projectName, artifactRef, {
+                    ...gitopsOptions,
+                    blueGreenPhase: "flip"
+                });
+                sections.push(`[gitops] traffic switch committed ${gitFlip.ref} active=${gitFlip.blueGreen?.activeSlot ?? "?"}`);
+                sections.push(`PAAS_DEPLOY_VERIFY step=gitops_flip status=OK detail=${gitFlip.ref}`);
+                sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+                const argoFlip = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+                if (argoFlip.shouldAbort) {
+                    await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green traffic switch.");
+                    return;
+                }
+                argoSyncOk = argoFlip.argoSyncOk;
+            }
         }
         else {
-            const git = await commitHelmValuesGitHub(projectName, artifactRef, gitopsOptions);
-            sections.push(`[gitops] committed ${git.ref}`);
-            const bootstrapNote = git.chartBootstrapped ? " chart_bootstrapped=apps/simple-app" : "";
-            sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=OK detail=committed ${git.ref}${bootstrapNote}`);
-            sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-            const argoRolling = await appendArgoSyncAndWait(sections, projectName, destNamespace);
-            if (argoRolling.shouldAbort) {
+            const rolling = await runRollingGitOpsPromote(sections, projectName, destNamespace, artifactRef, gitopsOptions, "");
+            if (rolling.shouldAbort) {
                 await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD application did not become Healthy and Synced in time.");
                 return;
             }
-            argoSyncOk = argoRolling.argoSyncOk;
+            argoSyncOk = rolling.argoSyncOk;
+            workloadReady = rolling.workloadReady;
         }
     }
     catch (e) {
@@ -269,15 +315,6 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=FAIL detail=${msg.slice(0, 400)}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
         return;
-    }
-    if (blueGreen) {
-        sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-        const argoFlip = await appendArgoSyncAndWait(sections, projectName, destNamespace);
-        if (argoFlip.shouldAbort) {
-            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green traffic switch.");
-            return;
-        }
-        argoSyncOk = argoFlip.argoSyncOk;
     }
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
@@ -310,11 +347,14 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         }
     }
     const probeConfigured = Boolean(labIp || env.APPS_PUBLIC_URL_TEMPLATE.trim());
-    if (probeConfigured && !urlReachable) {
+    if (probeConfigured && !urlReachable && !workloadReady) {
         const msg = `Application URL not reachable (${appUrl}). Check pod logs (kubectl logs), Argo CD sync, and Traefik ingress for ${projectName}.`;
         sections.push(`[deploy] FAILED: ${msg}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
         return;
+    }
+    if (probeConfigured && !urlReachable && workloadReady) {
+        sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} unreachable but workload ready — marking DEPLOYED`);
     }
     const okLog = tail(sections.join("\n"));
     await prisma.deployment.update({

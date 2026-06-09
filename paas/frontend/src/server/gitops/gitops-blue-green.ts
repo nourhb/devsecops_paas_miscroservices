@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
-import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
+import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
 
 export type DeploymentStrategy = "Rolling" | "BlueGreen";
 export type BlueGreenSlot = "blue" | "green";
@@ -15,6 +16,29 @@ export function resolveDeploymentStrategy(doc?: Record<string, unknown> | null):
 
 export function inactiveSlot(active: BlueGreenSlot): BlueGreenSlot {
     return active === "blue" ? "green" : "blue";
+}
+
+/** Argo CD Helm release name for a PaaS project application. */
+export function helmReleaseName(projectName: string): string {
+    const prefix = env.ARGOCD_APP_PREFIX.trim() || "paas";
+    return `${prefix}-${sanitizeDeployImageName(projectName)}`;
+}
+
+/** Chart name candidates — Helm fullname is {release}-{chartName}-{slot?}. */
+export function helmChartNameCandidates(projectName: string): string[] {
+    const slug = sanitizeDeployImageName(projectName);
+    const dir = gitopsChartShortNameForProject(projectName);
+    return [...new Set(["simple-app", dir, slug].filter(Boolean))];
+}
+
+export function blueGreenDeploymentNameCandidates(projectName: string, slot: BlueGreenSlot): string[] {
+    const release = helmReleaseName(projectName);
+    return helmChartNameCandidates(projectName).map((chart) => `${release}-${chart}-${slot}`);
+}
+
+export function rollingDeploymentNameCandidates(projectName: string): string[] {
+    const release = helmReleaseName(projectName);
+    return helmChartNameCandidates(projectName).map((chart) => `${release}-${chart}`);
 }
 
 function slotImageBlock(doc: Record<string, unknown>, slot: BlueGreenSlot): Record<string, unknown> {
@@ -87,13 +111,10 @@ export function ensureBlueGreenValuesStructure(
     }
 
     doc.activeSlot = active;
-    // Keep legacy `image` in sync with active slot for scripts that only read .Values.image
-    const activeBlock = slotImageBlock(doc, active);
-    const activeImg = activeBlock.image as Record<string, unknown>;
     doc.image = {
-        repository: activeImg.repository ?? repo,
-        tag: activeImg.tag ?? "",
-        digest: activeImg.digest ?? "",
+        repository: (slotImageBlock(doc, active).image as Record<string, unknown>).repository ?? repo,
+        tag: ((slotImageBlock(doc, active).image as Record<string, unknown>).tag as string) ?? "",
+        digest: ((slotImageBlock(doc, active).image as Record<string, unknown>).digest as string) ?? "",
         pullPolicy: "IfNotPresent"
     };
 
@@ -133,9 +154,28 @@ export function flipBlueGreenActiveSlot(doc: Record<string, unknown>): BlueGreen
     return next;
 }
 
+/** Primary name (first candidate) — prefer simple-app for legacy charts. */
 export function blueGreenDeploymentName(projectName: string, slot: BlueGreenSlot): string {
-    const prefix = env.ARGOCD_APP_PREFIX.trim() || "paas";
-    const release = `${prefix}-${projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
-    const chart = projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    return `${release}-${chart}-${slot}`;
+    const candidates = blueGreenDeploymentNameCandidates(projectName, slot);
+    const release = helmReleaseName(projectName);
+    const legacy = `${release}-simple-app-${slot}`;
+    if (candidates.includes(legacy)) {
+        return legacy;
+    }
+    return candidates[0];
+}
+
+/** Force Rolling strategy in values.yaml (clears blue/green slot blocks). */
+export function applyRollingImage(doc: Record<string, unknown>, projectName: string, imageTag: string): void {
+    doc.deploymentStrategy = "Rolling";
+    delete doc.activeSlot;
+    delete doc.blue;
+    delete doc.green;
+    const { repository, tag, digest } = splitImageRef(imageTag);
+    doc.image = {
+        repository: repository || buildDeployImageRepository(projectName),
+        tag,
+        digest,
+        pullPolicy: "IfNotPresent"
+    };
 }

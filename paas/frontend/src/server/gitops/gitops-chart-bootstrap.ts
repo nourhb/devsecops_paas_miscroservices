@@ -169,7 +169,7 @@ export function patchDeploymentForProfile(yaml: string, profileSpec: DeployProfi
     out = out.replace(/value:\s*\{\{\s*\.Values\.service\.targetPort[^}]+\}\}/g, `value: {{ .Values.service.targetPort | default ${port} | quote }}`);
     return out;
 }
-export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectName: string, buildProfile: BuildProfile = "node"): void {
+export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectName: string, buildProfile: BuildProfile = "node", forceRolling = false): void {
     const profileSpec = resolveDeployProfileSpec(buildProfile);
     if (!doc.imagePullSecrets) {
         doc.imagePullSecrets = [{ name: "harbor-regcred" }];
@@ -181,14 +181,14 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     service.targetPort = profileSpec.containerPort;
     if (!doc.resources || typeof doc.resources !== "object" || doc.resources === null) {
         doc.resources = {
-            limits: { cpu: "500m", memory: "768Mi" },
-            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "300m", memory: "384Mi" },
+            requests: { cpu: "50m", memory: "128Mi" }
         };
     }
     if (!Array.isArray(doc.env)) {
         doc.env = [];
     }
-    if (!doc.deploymentStrategy && resolveDeploymentStrategy(null) === "BlueGreen") {
+    if (!doc.deploymentStrategy && !forceRolling && resolveDeploymentStrategy(null) === "BlueGreen") {
         doc.deploymentStrategy = "BlueGreen";
         doc.activeSlot = doc.activeSlot === "green" ? "green" : "blue";
     }

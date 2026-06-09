@@ -3,6 +3,7 @@ import { env } from "@/server/config/env";
 import type { BuildProfile } from "@/server/build-planner";
 import {
     applyBlueGreenInactiveImage,
+    applyRollingImage,
     flipBlueGreenActiveSlot,
     inactiveSlot,
     resolveDeploymentStrategy,
@@ -75,8 +76,13 @@ function applyImageToValuesDoc(
     doc: Record<string, unknown>,
     projectName: string,
     imageTag: string,
-    blueGreenPhase?: "inactive" | "flip"
+    blueGreenPhase?: "inactive" | "flip",
+    forceRolling?: boolean
 ): void {
+    if (forceRolling) {
+        applyRollingImage(doc, projectName, imageTag);
+        return;
+    }
     const strategy = resolveDeploymentStrategy(doc);
     if (strategy !== "BlueGreen") {
         setImageTag(doc, imageTag);
@@ -105,6 +111,8 @@ export async function commitHelmValuesGitHub(projectName: string, imageTag: stri
     buildEnv?: Record<string, string> | null;
     /** BlueGreen: deploy image to inactive slot, or flip traffic to that slot. */
     blueGreenPhase?: "inactive" | "flip";
+    /** Override BlueGreen — single Rolling deployment (used when blue/green verification fails). */
+    forceRolling?: boolean;
 }): Promise<{
     committed: boolean;
     ref: string;
@@ -127,6 +135,7 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
     buildProfile?: BuildProfile;
     buildEnv?: Record<string, string> | null;
     blueGreenPhase?: "inactive" | "flip";
+    forceRolling?: boolean;
 }): Promise<{
     committed: boolean;
     ref: string;
@@ -138,6 +147,8 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
 }> {
     const buildProfile = options?.buildProfile ?? "node";
     const buildEnv = options?.buildEnv ?? null;
+    const forceRolling = options?.forceRolling === true;
+    const bgPhase = forceRolling ? undefined : options?.blueGreenPhase;
     if (!env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
         if (allowSimulation()) {
             return { committed: true, ref: `simulated:refs/heads/main:${projectName}:${imageTag}`, chartBootstrapped: false };
@@ -167,10 +178,11 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         }
         throw new IntegrationError(`GitHub GET ${path} failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const bgPhase = options?.blueGreenPhase;
     const message = bootstrap.bootstrapped
         ? `chore(gitops): bootstrap ${projectName} Helm chart and bump ${imageTag}`
-        : bgPhase === "flip"
+        : forceRolling
+            ? `chore(gitops): ${projectName} rolling deploy ${imageTag} (fallback)`
+            : bgPhase === "flip"
             ? `chore(gitops): ${projectName} blue-green traffic switch`
             : bgPhase === "inactive"
                 ? `chore(gitops): ${projectName} blue-green deploy ${imageTag} (inactive slot)`
@@ -192,9 +204,12 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
                 pullPolicy: "IfNotPresent"
             }
         };
-        applyDeployValuesDefaults(doc, projectName, buildProfile);
+        applyDeployValuesDefaults(doc, projectName, buildProfile, forceRolling);
         mergeBuildEnvIntoHelmValues(doc, buildEnv);
-        if (bgPhase !== "flip") {
+        if (forceRolling) {
+            applyImageToValuesDoc(doc, projectName, imageTag, undefined, true);
+        }
+        else if (bgPhase !== "flip") {
             applyImageToValuesDoc(doc, projectName, imageTag, bgPhase ?? (resolveDeploymentStrategy(doc) === "BlueGreen" ? "inactive" : undefined));
         }
         else {
@@ -219,8 +234,8 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
         if (!doc || typeof doc !== "object") {
             throw new IntegrationError(`Values file ${path} is not a YAML object.`);
         }
-        applyImageToValuesDoc(doc, projectName, imageTag, bgPhase);
-        applyDeployValuesDefaults(doc, projectName, buildProfile);
+        applyImageToValuesDoc(doc, projectName, imageTag, bgPhase, forceRolling);
+        applyDeployValuesDefaults(doc, projectName, buildProfile, forceRolling);
         mergeBuildEnvIntoHelmValues(doc, buildEnv);
         return { sha: meta.sha, contentYaml: stringifyYaml(doc) };
     }
