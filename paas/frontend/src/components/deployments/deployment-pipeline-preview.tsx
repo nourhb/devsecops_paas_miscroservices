@@ -43,6 +43,7 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
     });
     const deployChecks = deploymentLogs ? parsePipelineVerificationLogs(deploymentLogs).deployChecks : [];
     const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined, deployChecks, deploymentStatus);
+    const jenkinsChecks = data?.jenkinsChecks ?? [];
     const stages: JenkinsPipelineStageRow[] = displayStages;
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;
@@ -108,6 +109,17 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
                 const ui = jenkinsStageRowUi(stage.status);
                 const idxLabel = jenkinsStageStepIndexLabel(stage.name, idx);
                 const title = shortJenkinsStageTitle(stage.name);
+                const stepNum = idx + 1;
+                const stepCheck = jenkinsChecks.filter((c) => c.step === stepNum).at(-1);
+                const checkHint = stepCheck
+                    ? stepCheck.level === "SKIP"
+                        ? `Skipped: ${stepCheck.message}`
+                        : stepCheck.level === "WARN"
+                            ? stepCheck.message
+                            : stepCheck.level === "FAIL"
+                                ? stepCheck.message
+                                : null
+                    : null;
                 return (<div key={`${idx}-${stage.name}`} className="flex min-w-[5.5rem] max-w-[7.5rem] shrink-0 flex-col items-center gap-1.5 text-center">
                     <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-xs font-semibold tabular-nums", ui.chipClass)}>
                       {idxLabel}
@@ -115,7 +127,9 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
                     <p className="line-clamp-3 text-[10px] font-medium leading-snug text-foreground" title={stage.name}>
                       {title}
                     </p>
-                    <span className="text-[9px] text-muted tabular-nums">{formatStageDurationMs(stage.durationMs)}</span>
+                    {checkHint ? (<span className="line-clamp-2 text-[8px] leading-tight text-warning" title={checkHint}>
+                        {checkHint}
+                      </span>) : (<span className="text-[9px] text-muted tabular-nums">{formatStageDurationMs(stage.durationMs)}</span>)}
                   </div>);
             })}
               </div>

@@ -132,13 +132,14 @@ function usesSharedJenkinsBuildJob(): boolean {
     return Boolean(env.JENKINS_BUILD_JOB_NAME.trim());
 }
 export { usesSharedJenkinsDeployJob };
-/** Shared paas-deploy runs one build at a time on the built-in agent — queue parallel UI deploys. */
+/** Cap parallel UI deploys; defaults to JENKINS_NUM_EXECUTORS when shared paas-deploy runs concurrent builds. */
 export function effectiveMaxConcurrentJenkinsDeploys(configured: number): number {
     if (configured > 0) {
         return configured;
     }
     if (usesSharedJenkinsDeployJob()) {
-        return 1;
+        const executors = env.JENKINS_NUM_EXECUTORS;
+        return executors > 0 ? executors : 8;
     }
     return 0;
 }

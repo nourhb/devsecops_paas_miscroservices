@@ -35,10 +35,12 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
   def dtName = (dtProjectName ?: projId).trim()
   if (!dtBase || !dtKey) {
     println "[sca] Dependency-Track non configuré (DEPENDENCY_TRACK_BASE_URL / API_KEY); pas d'upload SBOM."
+    paasStepWarn(4, 'dependency-track', 'DEPENDENCY_TRACK_BASE_URL or API_KEY missing on Jenkins job')
     return
   }
   if (!fileExists("sca/bom.json")) {
     println "[sca] Pas de sca/bom.json; upload Dependency-Track ignoré."
+    paasStepWarn(4, 'dependency-track', 'sca/bom.json missing — SBOM not uploaded')
     return
   }
   withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
@@ -55,10 +57,12 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
       if [[ "${DT_HTTP}" == "200" || "${DT_HTTP}" == "201" || "${DT_HTTP}" == "202" ]]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) project=${DT_PROJECT} version=${DT_VERSION}"
+        echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
       else
         echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — rotate DEPENDENCY_TRACK_API_KEY if 401"
         printf '%s\n' "${DT_BODY}" | head -c 800
         echo ""
+        echo "PAAS_STEP_WARN step=4 id=dependency-track msg=Dependency-Track upload HTTP ${DT_HTTP:-?}"
       fi
     '''
   }
@@ -110,6 +114,16 @@ function dotenvLine(key, value) {
   return key + '="' + escaped + '"';
 }
 const secretKey = (k) => /pass|secret|token|private|credential/i.test(k) && !/^NEXT_PUBLIC_/i.test(k);
+let pkg = null;
+try { pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); } catch (_) {}
+const usesNext = Boolean(pkg && (pkg.dependencies?.next || pkg.devDependencies?.next));
+if (usesNext && envMap.NODE_OPTIONS) {
+  envMap.NODE_OPTIONS = String(envMap.NODE_OPTIONS)
+    .split(/\\s+/)
+    .filter((f) => f && f !== '--openssl-legacy-provider')
+    .join(' ')
+    .trim();
+}
 const lines = Object.entries(envMap || {})
   .filter(([k, v]) => k && v != null && String(v).trim() !== '')
   .map(([k, v]) => dotenvLine(k, v));
@@ -436,7 +450,20 @@ def resolveCraneRuntimeStack(String appRoot, String dockerfilePath) {
 
 def paasOpensslLegacyShellSnippet() {
   return '''
+    _paas_is_nextjs() {
+      case "${PAAS_FRAMEWORK:-}" in next) return 0 ;; esac
+      [ -f package.json ] && grep -qE '"next"[[:space:]]*:' package.json 2>/dev/null
+    }
+    _paas_sanitize_node_options() {
+      # Next.js 13+ / Turbopack workers reject --openssl-legacy-provider in NODE_OPTIONS (ERR_WORKER_INVALID_EXEC_ARGV).
+      if _paas_is_nextjs; then
+        export NODE_OPTIONS="$(printf '%s' "${NODE_OPTIONS:-}" | tr ' ' '\\n' | grep -v '^--openssl-legacy-provider$' | tr '\\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      fi
+    }
     _paas_openssl_legacy() {
+      if _paas_is_nextjs; then
+        return 0
+      fi
       case "${PAAS_FRAMEWORK:-}" in
         angular|spa|node|vite-react)
           case "$(node -v 2>/dev/null || echo v0)" in
@@ -450,6 +477,7 @@ def paasOpensslLegacyShellSnippet() {
           ;;
       esac
     }
+    _paas_sanitize_node_options
     _paas_openssl_legacy
 '''
 }
@@ -1682,25 +1710,10 @@ def runPaasDeploy = {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
-  def paasFastPipeline = false
-  def paramFast = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim().toLowerCase()
-  if (paramFast == 'true') {
-    paasFastPipeline = true
-  } else if (paramFast == 'false') {
-    paasFastPipeline = false
-  } else {
-    try {
-      def p = params.JENKINS_PAAS_FAST_PIPELINE
-      paasFastPipeline = (p == true) || "${p ?: ''}".trim().equalsIgnoreCase("true")
-    }
-    catch (ignored) {
-      paasFastPipeline = false
-    }
-    if (!paasFastPipeline) {
-      paasFastPipeline = (env.JENKINS_PAAS_FAST_PIPELINE ?: "").trim().equalsIgnoreCase("true")
-    }
-  }
+  // Security steps 4–5 always run unless PaaS explicitly passes JENKINS_PAAS_FAST_PIPELINE=true (ignore stale agent env).
+  def paasFastPipeline = "${params.JENKINS_PAAS_FAST_PIPELINE ?: 'false'}".trim().equalsIgnoreCase('true')
   env.JENKINS_PAAS_FAST_PIPELINE = paasFastPipeline ? "true" : "false"
+  println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${params.JENKINS_PAAS_FAST_PIPELINE} effective=${paasFastPipeline}"
   if (env.PROJECT_BUILD_ENV_B64?.trim()) {
     println "[env] PROJECT_BUILD_ENV_B64 length=${env.PROJECT_BUILD_ENV_B64.trim().length()} (Application environment + public URL)"
   } else {
@@ -2144,10 +2157,13 @@ def runPaasDeploy = {
               paasStepWarn(4, 'sca', 'Python SBOM missing — pip install cyclonedx-bom or enable Docker for cdxgen')
             }
           } else {
-            println "[sca] No package.json or Python manifest; dockerless SCA cannot run OWASP Dependency-Check here — use an agent with Docker."
+            paasStepWarn(4, 'sca', 'No package.json or Python manifest — enable Docker on Jenkins agent for full OWASP scan')
           }
         }
         uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
+        if (!fileExists('sca/bom.json')) {
+          paasStepWarn(4, 'sca', 'No sca/bom.json after SCA — check cyclonedx/cdxgen logs')
+        }
         return
       }
       def nvdArg = env.NVD_API_KEY?.trim() ? "--nvdApiKey ${env.NVD_API_KEY}" : "--noupdate"
@@ -2215,6 +2231,7 @@ exit 0
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
       if (!sonarUrlParam || !sonarToken) {
+        paasStepWarn(5, 'sonar', 'SONAR_HOST_URL or SONAR_TOKEN missing on Jenkins job — set in PaaS env and redeploy frontend')
         println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
         return
       }

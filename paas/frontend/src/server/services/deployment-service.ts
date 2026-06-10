@@ -138,7 +138,7 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
         });
         if (activeCount >= maxConcurrent) {
             const sharedHint = usesSharedJenkinsDeployJob()
-                ? " Jenkins uses one shared paas-deploy job — deploy projects one at a time or set PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS=0 to disable this limit."
+                ? ` Raise PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS or JENKINS_NUM_EXECUTORS (current cap ${maxConcurrent}) and run paas/scripts/scale-jenkins-concurrency-lab.sh on the lab VM.`
                 : "";
             throw new ApiError(429, "Too many deployments are already running.", {
                 details: `${activeCount} deployment(s) are active (limit ${maxConcurrent}). Wait for one to finish.${sharedHint}`

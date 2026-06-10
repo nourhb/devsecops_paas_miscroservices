@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# One-shot: full security pipeline + build env + frontend for UI-only users.
+# One-shot: full security pipeline + DT/Sonar keys + parallel Jenkins + PaaS frontend.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
+EXECUTORS="${JENKINS_NUM_EXECUTORS:-8}"
 
 upsert() {
   local key="$1" val="$2"
@@ -17,20 +18,67 @@ upsert() {
 }
 
 cd "${REPO_ROOT}"
-git pull origin main 2>/dev/null || true
+git pull origin main
 
 echo "==> Full pipeline (no fast skip)"
 upsert JENKINS_PAAS_FAST_PIPELINE "false"
 upsert PAAS_ALLOW_FAST_PIPELINE "false"
+upsert JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER "true"
+upsert JENKINS_NUM_EXECUTORS "${EXECUTORS}"
+upsert JENKINS_PAAS_CONCURRENT_BUILDS "true"
+upsert PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS "${EXECUTORS}"
 
-echo "==> Sync Jenkinsfile + redeploy PaaS frontend (build env + security triggers)"
+echo "==> Dependency-Track API key (fixes DEPENDENCY_TRACK_API_KEY=MISSING)"
+if [[ -x "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" ]]; then
+  REGENERATE_DT_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" || {
+    echo "WARN: Could not auto-generate DT API key — run: bash paas/scripts/regenerate-dependency-track-api-key-lab.sh"
+  }
+else
+  echo "WARN: regenerate-dependency-track-api-key-lab.sh missing — git pull again"
+fi
+
+echo "==> Sync Jenkinsfile ConfigMap"
 bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh"
+
+echo "==> Jenkins job: SONAR_*, DEPENDENCY_TRACK_*, concurrent builds"
+if [[ -x "${SCRIPT_DIR}/ensure-jenkins-security-params-lab.sh" ]]; then
+  bash "${SCRIPT_DIR}/ensure-jenkins-security-params-lab.sh"
+else
+  bash "${SCRIPT_DIR}/fix-jenkins-paas-deploy-pipeline-lab.sh"
+  python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+fi
+
+export JENKINS_NUM_EXECUTORS="${EXECUTORS}"
+export JENKINS_PAAS_CONCURRENT_BUILDS=true
+if [[ -x "${SCRIPT_DIR}/scale-jenkins-concurrency-lab.sh" ]]; then
+  SCALE_JENKINS_SKIP_FRONTEND=1 bash "${SCRIPT_DIR}/scale-jenkins-concurrency-lab.sh"
+else
+  echo "==> Jenkins executors (inline — scale-jenkins-concurrency-lab.sh not found yet)"
+  python3 "${SCRIPT_DIR}/jenkins-configure-lab.py" || true
+  python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+fi
+
+echo "==> Redeploy PaaS frontend (env + Jenkinsfile mount)"
 bash "${SCRIPT_DIR}/deploy-paas-frontend-k8s.sh"
+
+echo ""
+echo "==> Verify pod security env"
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}" 2>/dev/null || true
+set +a
+for v in SONAR_TOKEN DEPENDENCY_TRACK_API_KEY JENKINS_PAAS_FAST_PIPELINE PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS; do
+  val="$(kubectl exec -n paas deploy/frontend -- printenv "${v}" 2>/dev/null || true)"
+  if [[ -n "${val}" ]]; then
+    echo "  ${v}=set"
+  else
+    echo "  ${v}=MISSING"
+  fi
+done
 
 echo ""
 echo "OK. From PaaS UI only:"
 echo "  1. Edit project → Application environment (.env) → Save"
-echo "  2. Deploy (full pipeline: Steps 4–5 Sonar/SCA run; results on Security + Pipeline pages)"
+echo "  2. Deploy (Steps 4–5 SCA/SAST; up to ${EXECUTORS} projects in parallel)"
 echo ""
-echo "Check pod env:"
-echo "  kubectl exec -n paas deploy/frontend -- printenv JENKINS_PAAS_FAST_PIPELINE PAAS_ALLOW_FAST_PIPELINE | head"
+echo "More executors: JENKINS_NUM_EXECUTORS=12 bash paas/scripts/enable-full-pipeline-ui-lab.sh"

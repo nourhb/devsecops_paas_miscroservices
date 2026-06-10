@@ -108,14 +108,15 @@ HTTP="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "X-Api-Key: ${NEW_KEY}"
 [[ "${HTTP}" == "200" ]] || { echo "FAIL: new key still rejected (HTTP ${HTTP})" >&2; exit 1; }
 echo "OK: /api/v1/project HTTP 200"
 
-ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
-kubectl rollout status deployment/frontend -n paas --timeout=300s
-
-set -a
-# shellcheck disable=SC1090
-source "${ENV_FILE}" 2>/dev/null || true
-set +a
-python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full || true
+if [[ "${REGENERATE_DT_SKIP_DEPLOY:-}" != "1" ]]; then
+  ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+  kubectl rollout status deployment/frontend -n paas --timeout=300s
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}" 2>/dev/null || true
+  set +a
+  python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full || true
+fi
 
 echo ""
 echo "Done. Re-run Step 4 for sanhome (new Jenkins build — SBOM upload uses the new key):"

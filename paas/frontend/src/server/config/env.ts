@@ -92,8 +92,10 @@ const envSchema = z.object({
     /** Max wait to resolve the correct shared paas-deploy build for a project before failing (ms). */
     PAAS_JENKINS_BUILD_RESOLVE_MAX_MS: z.coerce.number().int().min(60_000).default(900_000),
     PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS: z.coerce.number().int().min(0).default(0),
+    /** Built-in Jenkins executors (lab default 8). PaaS parallel deploy cap follows this when PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS=0. */
+    JENKINS_NUM_EXECUTORS: z.coerce.number().int().min(1).max(64).default(8),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
-    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
+    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("true"),
     JENKINSFILE_SYNC_RAW_URL: z.string().default(""),
     JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
     /** When false (default), PaaS UI always triggers full security pipeline (SCA/SAST/ZAP). */
@@ -354,6 +356,7 @@ const parsed = envSchema.safeParse({
     JENKINS_DEPLOY_POLL_MAX_MS: process.env.JENKINS_DEPLOY_POLL_MAX_MS,
     PAAS_JENKINS_BUILD_RESOLVE_MAX_MS: process.env.PAAS_JENKINS_BUILD_RESOLVE_MAX_MS,
     PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS: process.env.PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS,
+    JENKINS_NUM_EXECUTORS: process.env.JENKINS_NUM_EXECUTORS,
     JENKINS_HTTP_TIMEOUT_MS: process.env.JENKINS_HTTP_TIMEOUT_MS,
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER,
     JENKINSFILE_SYNC_RAW_URL: process.env.JENKINSFILE_SYNC_RAW_URL,

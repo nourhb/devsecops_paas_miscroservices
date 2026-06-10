@@ -367,7 +367,10 @@ def merge_missing_parameter_definitions(existing_xml: str) -> str:
 
 def ensure_job_parameters(existing_xml: str) -> str:
     out = merge_missing_parameter_definitions(existing_xml)
-    return merge_env_param_defaults(out)
+    out = merge_env_param_defaults(out)
+    if concurrent_builds_enabled():
+        out = strip_disable_concurrent_builds(out)
+    return out
 
 
 def merge_env_param_defaults(existing_xml: str) -> str:
@@ -433,6 +436,28 @@ def merge_groovy_into_existing_config_xml(existing_xml: str, groovy: str) -> str
     return build_xml(groovy, minimal_params=False).decode("utf-8")
 
 
+def concurrent_builds_enabled() -> bool:
+    raw = (os.environ.get("JENKINS_PAAS_CONCURRENT_BUILDS") or "true").strip().lower()
+    return raw not in ("false", "0", "no", "off")
+
+
+def disable_concurrent_block_xml() -> str:
+    return (
+        "    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
+        "      <abortPrevious>false</abortPrevious>\n"
+        "    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
+    )
+
+
+def strip_disable_concurrent_builds(xml: str) -> str:
+    return re.sub(
+        r"\s*<org\.jenkinsci\.plugins\.workflow\.job\.properties\.DisableConcurrentBuildsJobProperty>[\s\S]*?</org\.jenkinsci\.plugins\.workflow\.job\.properties\.DisableConcurrentBuildsJobProperty>\s*",
+        "\n",
+        xml,
+        count=1,
+    )
+
+
 def build_xml(groovy: str, minimal_params: bool) -> bytes:
     if minimal_params:
         params = [
@@ -452,10 +477,8 @@ def build_xml(groovy: str, minimal_params: bool) -> bytes:
         "  <description>paas-deploy (create_jenkins_paas_deploy_job.py)</description>\n"
         "  <keepDependencies>false</keepDependencies>\n"
         "  <properties>\n"
-        "    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
-        "      <abortPrevious>false</abortPrevious>\n"
-        "    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>\n"
-        "    <hudson.model.ParametersDefinitionProperty>\n"
+        + (disable_concurrent_block_xml() if not concurrent_builds_enabled() else "")
+        + "    <hudson.model.ParametersDefinitionProperty>\n"
         "      <parameterDefinitions>\n"
         f"{pxml}\n"
         "      </parameterDefinitions>\n"
