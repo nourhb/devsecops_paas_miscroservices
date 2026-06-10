@@ -79,10 +79,6 @@ function applyImageToValuesDoc(
     blueGreenPhase?: "inactive" | "flip",
     forceRolling?: boolean
 ): void {
-    if (forceRolling) {
-        applyRollingImage(doc, projectName, imageTag);
-        return;
-    }
     if (forceRolling || resolveDeploymentStrategy(null) === "Rolling") {
         applyRollingImage(doc, projectName, imageTag);
         return;

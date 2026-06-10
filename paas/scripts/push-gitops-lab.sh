@@ -37,6 +37,10 @@ load_token() {
 load_token
 AUTH_URL="https://${GITHUB_TOKEN}@${REMOTE_HOST}"
 
+# shellcheck source=lib/gitops-ensure-main.sh
+source "${SCRIPT_DIR}/lib/gitops-ensure-main.sh"
+gitops_ensure_on_main "${GITOPS}" "${BRANCH}" "${AUTH_URL}"
+
 pushd "${GITOPS}" >/dev/null
 
 if [[ -n "${COMMIT_MSG}" ]]; then
@@ -61,6 +65,9 @@ fi
 echo "==> git fetch + pull --rebase origin/${BRANCH}"
 git fetch "${AUTH_URL}" "${BRANCH}" 2>/dev/null || git fetch origin "${BRANCH}"
 if git rev-parse "origin/${BRANCH}" >/dev/null 2>&1; then
+  if [[ -d .git/rebase-merge || -d .git/rebase-apply ]]; then
+    git rebase --abort 2>/dev/null || rm -rf .git/rebase-merge .git/rebase-apply
+  fi
   git pull --rebase "${AUTH_URL}" "${BRANCH}" 2>/dev/null || git pull --rebase origin "${BRANCH}"
 else
   echo "WARN: no origin/${BRANCH} yet — first push"

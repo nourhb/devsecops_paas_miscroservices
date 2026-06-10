@@ -14,7 +14,11 @@ import {
     rollingDeploymentNameCandidates
 } from "@/server/gitops/gitops-blue-green";
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
-import { waitForAnyDeploymentReady } from "@/server/integrations/kubernetes-client";
+import {
+    deleteStaleBlueGreenDeployments,
+    remediateRollingDeployments,
+    waitForAnyDeploymentReady
+} from "@/server/integrations/kubernetes-client";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
@@ -86,12 +90,47 @@ async function appendArgoSyncAndWait(
     return { argoSyncOk, shouldAbort: false };
 }
 
+async function reconcileClusterWorkload(
+    sections: string[],
+    destNamespace: string,
+    projectName: string,
+    artifactRef: string,
+    containerPort: number
+): Promise<void> {
+    if (env.KUBERNETES_ENABLED !== "true") {
+        return;
+    }
+    const removed = await deleteStaleBlueGreenDeployments(destNamespace);
+    if (removed.length > 0) {
+        sections.push(`[deploy] removed stale blue/green deployments: ${removed.join(", ")}`);
+    }
+    const candidates = rollingDeploymentNameCandidates(projectName);
+    const patched = await remediateRollingDeployments(destNamespace, candidates, artifactRef, containerPort);
+    if (patched.length > 0) {
+        sections.push(`[deploy] cluster remediate image+port=${containerPort} on: ${patched.join(", ")}`);
+    }
+}
+
+async function waitForRollingWorkload(
+    sections: string[],
+    destNamespace: string,
+    projectName: string,
+    timeoutMs: number
+): Promise<{ ready: boolean; message: string; deploymentName: string | null }> {
+    const candidates = rollingDeploymentNameCandidates(projectName);
+    sections.push(`[deploy] waiting for workload (${candidates.join(" | ")}) in ${destNamespace}…`);
+    const ready = await waitForAnyDeploymentReady(destNamespace, candidates, timeoutMs);
+    sections.push(`[deploy] ${ready.message}`);
+    return ready;
+}
+
 async function runRollingGitOpsPromote(
     sections: string[],
     projectName: string,
     destNamespace: string,
     artifactRef: string,
     gitopsOptions: { buildProfile: import("@/server/build-planner").BuildProfile; buildEnv: Record<string, string> | null },
+    containerPort: number,
     label: string
 ): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; workloadReady: boolean }> {
     sections.push(`[deploy] strategy=Rolling${label ? ` ${label}` : ""}`);
@@ -106,10 +145,19 @@ async function runRollingGitOpsPromote(
     if (argo.shouldAbort) {
         return { argoSyncOk: argo.argoSyncOk, shouldAbort: true, workloadReady: false };
     }
-    const candidates = rollingDeploymentNameCandidates(projectName);
-    sections.push(`[deploy] waiting for workload (${candidates.join(" | ")}) in ${destNamespace}…`);
-    const ready = await waitForAnyDeploymentReady(destNamespace, candidates, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
-    sections.push(`[deploy] ${ready.message}`);
+    await reconcileClusterWorkload(sections, destNamespace, projectName, artifactRef, containerPort);
+    let ready = await waitForRollingWorkload(sections, destNamespace, projectName, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS);
+    if (!ready.ready) {
+        sections.push("[deploy] workload not ready — retry cluster reconcile + shorter wait");
+        await reconcileClusterWorkload(sections, destNamespace, projectName, artifactRef, containerPort);
+        await appendArgoSyncAndWait(sections, projectName, destNamespace);
+        ready = await waitForRollingWorkload(
+            sections,
+            destNamespace,
+            projectName,
+            Math.max(60000, Math.floor(env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS / 2))
+        );
+    }
     if (ready.ready) {
         sections.push(`PAAS_DEPLOY_VERIFY step=workload_ready status=OK detail=${ready.deploymentName ?? "unknown"}`);
     }
@@ -201,7 +249,8 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         "",
         "--- GitOps (Helm values) + Argo CD ---",
         `[image] ${artifactRef}`,
-        `[build-profile] ${buildPlan.profile}`
+        `[build-profile] ${buildPlan.profile}`,
+        `[deploy-profile] port=${deployProfile.containerPort} (${deployProfile.profile})`
     ];
     await prisma.deployment.update({
         where: { id: deploymentId },
@@ -279,7 +328,15 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             if (!slotReady.ready) {
                 sections.push(`PAAS_DEPLOY_VERIFY step=blue_green_inactive status=WARN detail=${slotReady.message.slice(0, 400)}`);
                 sections.push("[blue-green] inactive slot failed — falling back to Rolling deploy");
-                const rolling = await runRollingGitOpsPromote(sections, projectName, destNamespace, artifactRef, gitopsOptions, "(fallback after BlueGreen failure)");
+                const rolling = await runRollingGitOpsPromote(
+                    sections,
+                    projectName,
+                    destNamespace,
+                    artifactRef,
+                    gitopsOptions,
+                    deployProfile.containerPort,
+                    "(fallback after BlueGreen failure)"
+                );
                 argoSyncOk = rolling.argoSyncOk;
                 workloadReady = rolling.workloadReady;
                 if (rolling.shouldAbort) {
@@ -307,7 +364,15 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             }
         }
         else {
-            const rolling = await runRollingGitOpsPromote(sections, projectName, destNamespace, artifactRef, gitopsOptions, "");
+            const rolling = await runRollingGitOpsPromote(
+                sections,
+                projectName,
+                destNamespace,
+                artifactRef,
+                gitopsOptions,
+                deployProfile.containerPort,
+                ""
+            );
             if (rolling.shouldAbort) {
                 await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD application did not become Healthy and Synced in time.");
                 return;

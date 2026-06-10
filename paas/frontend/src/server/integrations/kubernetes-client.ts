@@ -680,6 +680,82 @@ export async function waitForAnyDeploymentReady(
     };
 }
 
+/** Remove legacy blue/green Deployments that block capacity or confuse Service selectors. */
+export async function deleteStaleBlueGreenDeployments(namespace: string): Promise<string[]> {
+    const api = getAppsV1Api();
+    if (!api) {
+        return [];
+    }
+    const deleted: string[] = [];
+    try {
+        const { body } = await api.listNamespacedDeployment(namespace);
+        for (const dep of body.items ?? []) {
+            const name = dep.metadata?.name ?? "";
+            if (!name.endsWith("-blue") && !name.endsWith("-green")) {
+                continue;
+            }
+            try {
+                await api.deleteNamespacedDeployment(name, namespace);
+                deleted.push(name);
+            }
+            catch {
+                // best-effort
+            }
+        }
+    }
+    catch {
+        // best-effort
+    }
+    return deleted;
+}
+
+/** Force image + containerPort on rolling Deployments when Argo/GitOps drift leaves pods unhealthy. */
+export async function remediateRollingDeployments(
+    namespace: string,
+    deploymentNames: string[],
+    imageRef: string,
+    containerPort: number
+): Promise<string[]> {
+    const api = getAppsV1Api();
+    if (!api) {
+        return [];
+    }
+    const patched: string[] = [];
+    const names = [...new Set(deploymentNames.map((n) => n.trim()).filter(Boolean))];
+    for (const name of names) {
+        try {
+            const { body: dep } = await api.readNamespacedDeployment(name, namespace);
+            const containers = dep.spec?.template?.spec?.containers ?? [];
+            if (containers.length === 0) {
+                continue;
+            }
+            const container = containers[0];
+            container.image = imageRef;
+            if (!container.ports?.length) {
+                container.ports = [{ name: "http", containerPort, protocol: "TCP" }];
+            }
+            else {
+                container.ports[0].containerPort = containerPort;
+                container.ports[0].name = container.ports[0].name || "http";
+            }
+            const envVars = container.env ?? [];
+            const portEnv = envVars.find((entry) => entry.name === "PORT");
+            if (portEnv) {
+                portEnv.value = String(containerPort);
+            }
+            await api.replaceNamespacedDeployment(name, namespace, dep);
+            patched.push(name);
+        }
+        catch (e) {
+            const msg = kubernetesErrorMessage(e);
+            if (!/404|not found/i.test(msg)) {
+                // ignore missing deployment names in candidate list
+            }
+        }
+    }
+    return patched;
+}
+
 export async function getClusterNodeCount(): Promise<number | null> {
     const api = getCoreV1Api();
     if (!api) {
