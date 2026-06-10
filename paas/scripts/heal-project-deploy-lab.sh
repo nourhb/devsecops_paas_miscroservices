@@ -23,6 +23,13 @@ URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
 source "${SCRIPT_DIR}/lib/argo-sync-lab.sh"
 # shellcheck source=lib/gitops-ensure-main.sh
 source "${SCRIPT_DIR}/lib/gitops-ensure-main.sh"
+# shellcheck source=lib/patch-nginx-deploy-lab.sh
+source "${SCRIPT_DIR}/lib/patch-nginx-deploy-lab.sh"
+# shellcheck source=lib/patch-python-deploy-lab.sh
+source "${SCRIPT_DIR}/lib/patch-python-deploy-lab.sh"
+
+ARGO_WAIT_SECONDS="${ARGO_WAIT_SECONDS:-45}"
+ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-120s}"
 
 if [[ -z "${TARGET_PORT}" ]]; then
   case "${PROJECT_NAME}" in
@@ -95,6 +102,17 @@ doc["resources"] = {
     "limits": {"cpu": "200m", "memory": "256Mi"},
     "requests": {"cpu": "25m", "memory": "64Mi"},
 }
+if port == 8000:
+    doc["probes"] = {
+        "readiness": {"initialDelaySeconds": 30, "periodSeconds": 10, "failureThreshold": 12},
+        "liveness": {"initialDelaySeconds": 90, "periodSeconds": 20, "failureThreshold": 6},
+    }
+elif port == 80:
+    doc["probes"] = {
+        "type": "tcp",
+        "readiness": {"initialDelaySeconds": 3, "periodSeconds": 5, "failureThreshold": 6},
+        "liveness": {"initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 6},
+    }
 Path(path).write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False), encoding="utf-8")
 print(f"OK values: Rolling image={repo}:{tag} service.targetPort={port}")
 PY
@@ -113,7 +131,7 @@ kubectl patch application "${APP}" -n argocd --type json \
   -p='[{"op": "remove", "path": "/operation"}]' 2>/dev/null || true
 kubectl annotate application "${APP}" -n argocd argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
 argo_sync_app_lab "${APP}" || true
-argo_wait_app_lab "${APP}" 180 || true
+argo_wait_sync_lab "${APP}" "${ARGO_WAIT_SECONDS}" || true
 
 echo "==> Force rolling deployment image + port"
 for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
@@ -128,18 +146,32 @@ for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name
     kubectl patch deployment "${dep}" -n "${NS}" --type=json \
       -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/${env_idx}/value\",\"value\":\"${TARGET_PORT}\"}]" 2>/dev/null || true
   fi
+  if [[ "${TARGET_PORT}" == "8000" ]]; then
+    kubectl patch deployment "${dep}" -n "${NS}" --type=json \
+      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":30},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":12},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":90}]' 2>/dev/null || true
+  fi
 done
 
+if [[ "${TARGET_PORT}" == "80" ]]; then
+  echo "==> Nginx config override (fixes invalid repo nginx.conf in existing images)"
+  patch_nginx_deploy_lab "${NS}" || true
+fi
+
+if [[ "${TARGET_PORT}" == "8000" ]]; then
+  echo "==> Python start override (gunicorn>=22 for Python 3.12)"
+  patch_python_deploy_lab "${NS}" "${TARGET_PORT}" || true
+fi
+
 echo "==> Wait rollout"
-kubectl rollout status deployment -n "${NS}" --timeout=300s 2>/dev/null || true
+kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || true
 
 echo "==> Pods"
 kubectl get deploy,pods -n "${NS}" -o wide 2>/dev/null || true
 echo "==> Recent pod events / logs"
-BAD_POD="$(kubectl get pods -n "${NS}" --field-selector=status.phase!=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+kubectl logs -n "${NS}" -l "app.kubernetes.io/instance=${APP}" --tail=40 2>/dev/null || true
+BAD_POD="$(kubectl get pods -n "${NS}" -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==false)]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1 || true)"
 if [[ -n "${BAD_POD}" ]]; then
-  kubectl describe pod "${BAD_POD}" -n "${NS}" 2>/dev/null | tail -25 || true
-  kubectl logs "${BAD_POD}" -n "${NS}" --tail=30 2>/dev/null || true
+  kubectl describe pod "${BAD_POD}" -n "${NS}" 2>/dev/null | tail -20 || true
 fi
 
 HTTP="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" 2>/dev/null || echo '?')"

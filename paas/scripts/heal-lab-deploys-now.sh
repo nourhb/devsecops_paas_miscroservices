@@ -11,10 +11,17 @@ git pull origin main 2>/dev/null || true
 echo "==> Fix gitops repo (stuck rebase / detached HEAD)"
 bash "${SCRIPT_DIR}/recover-gitops-lab.sh" || true
 
-echo "==> Push Rolling + targetPort for all GitOps apps"
-bash "${SCRIPT_DIR}/fix-lab-rolling-deploy-now.sh" || {
-  echo "WARN: fix-lab-rolling-deploy-now had errors — continuing with per-project heal"
-}
+echo "==> Sync Jenkinsfile ConfigMap (new builds use fixed nginx/python crane path)"
+bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" 2>/dev/null || true
+
+if [[ "${SKIP_GITOPS_BULK_PATCH:-1}" != "1" ]]; then
+  echo "==> Push Rolling + targetPort for all GitOps apps (SKIP_GITOPS_BULK_PATCH=0)"
+  SKIP_FRONTEND_REDEPLOY=1 bash "${SCRIPT_DIR}/fix-lab-rolling-deploy-now.sh" || {
+    echo "WARN: fix-lab-rolling-deploy-now had errors — continuing with per-project heal"
+  }
+else
+  echo "==> SKIP_GITOPS_BULK_PATCH=1 — per-project heal only (fast)"
+fi
 
 heal() {
   local project="$1"

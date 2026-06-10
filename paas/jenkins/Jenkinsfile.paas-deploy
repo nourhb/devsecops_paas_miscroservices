@@ -967,29 +967,50 @@ def paasShellKeepaliveHelper() {
 }
 
 def dockerlessPythonCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
-  println "[image] Step 6 — python crane path (pip at start + gunicorn/uvicorn; port 8000)"
+  println "[image] Step 6 — python crane path (gunicorn>=22 / flask; port 8000; marker=python-gunicorn22-20260610)"
   sh """
     set -eu
     cd '${appRoot}'
     mkdir -p paas-artifacts
+    VENDOR_DIR="_paas_vendor"
+    rm -rf "\${VENDOR_DIR}"
+    if command -v python3 >/dev/null 2>&1 && [ -f requirements.txt ]; then
+      echo "[image] pre-vendor python deps (faster pod start)"
+      python3 -m pip install -q -t "\${VENDOR_DIR}" -r requirements.txt 2>/dev/null || true
+      python3 -m pip install -q -t "\${VENDOR_DIR}" 'gunicorn>=22' 'flask>=2' 2>/dev/null || true
+    fi
     cat > start-paas-python.sh <<'PAAS_PY'
 #!/bin/sh
 set -eu
 cd /app || exit 1
 export PYTHONUNBUFFERED=1
 export PORT=\${PORT:-8000}
-pip install --quiet --upgrade pip setuptools wheel 2>/dev/null || true
-if [ -f requirements.txt ]; then
-  pip install --quiet -r requirements.txt
+export PYTHONPATH="/app/_paas_vendor:\${PYTHONPATH:-}"
+install_deps() {
+  pip install --quiet --upgrade pip setuptools wheel 2>/dev/null || true
+  if [ -f requirements.txt ]; then
+    pip install --quiet -r requirements.txt
+  fi
+  pip install --quiet 'gunicorn>=22' 'flask>=2' 2>/dev/null || true
+}
+if ! python3 -c "import flask" 2>/dev/null && ! python3 -c "import django" 2>/dev/null; then
+  install_deps
 fi
-if [ -f gunicorn.conf.py ] && python -c "import main" 2>/dev/null; then
-  exec gunicorn -b 0.0.0.0:"\${PORT}" -c gunicorn.conf.py main:app
+run_gunicorn() {
+  _target="\${1:-main:app}"
+  if ! python3 -c "import gunicorn" 2>/dev/null; then
+    install_deps
+  fi
+  if [ -f gunicorn.conf.py ]; then
+    exec python3 -m gunicorn -b "0.0.0.0:\${PORT}" -c gunicorn.conf.py "\${_target}"
+  fi
+  exec python3 -m gunicorn -b "0.0.0.0:\${PORT}" "\${_target}"
+}
+if [ -f main.py ] && python3 -c "import main" 2>/dev/null; then
+  run_gunicorn main:app
 fi
-if [ -f gunicorn.conf.py ]; then
-  exec gunicorn -b 0.0.0.0:"\${PORT}" -c gunicorn.conf.py
-fi
-if python -c "import uvicorn" 2>/dev/null && [ -f main.py ]; then
-  exec uvicorn main:app --host 0.0.0.0 --port "\${PORT}"
+if python3 -c "import uvicorn" 2>/dev/null && [ -f main.py ]; then
+  exec python3 -m uvicorn main:app --host 0.0.0.0 --port "\${PORT}"
 fi
 if [ -f manage.py ]; then
   exec python manage.py runserver 0.0.0.0:"\${PORT}"
@@ -1009,9 +1030,9 @@ PAAS_PY
     echo "[image] python crane append → ${imageRef}"
     _crane_ok=0
     for _py_base in \\
+      mirror.gcr.io/library/python:3.11-slim \\
       mirror.gcr.io/library/python:3.12-slim \\
-      mirror.gcr.io/library/python:3.12-slim-bookworm \\
-      mirror.gcr.io/library/python:3.11-slim; do
+      mirror.gcr.io/library/python:3.12-slim-bookworm; do
       echo "[image] python crane append try base=\${_py_base}"
       if "${craneBin}" ${craneInsecure} append \\
         -b "\${_py_base}" \\
@@ -1105,11 +1126,19 @@ ${paasOpensslLegacyShellSnippet()}
     mkdir -p paas-artifacts/_nginx_html
     cp -a "\${STATIC_ROOT}/." paas-artifacts/_nginx_html/
     tar -C paas-artifacts/_nginx_html --transform='s#^#usr/share/nginx/html/#' -cf paas-artifacts/app-layer.tar .
-    if [ -f nginx.conf ]; then
-      mkdir -p paas-artifacts/_nginx_conf/conf.d
-      cp nginx.conf paas-artifacts/_nginx_conf/conf.d/default.conf
-      tar -C paas-artifacts/_nginx_conf --transform='s#^#etc/nginx/#' -rf paas-artifacts/app-layer.tar .
-    fi
+    mkdir -p paas-artifacts/_nginx_conf/conf.d
+    cat > paas-artifacts/_nginx_conf/conf.d/default.conf <<'NGINX_PAAS'
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+NGINX_PAAS
+    tar -C paas-artifacts/_nginx_conf --transform='s#^#etc/nginx/#' -rf paas-artifacts/app-layer.tar .
     echo "[image] nginx crane append → ${imageRef}"
     "${craneBin}" ${craneInsecure} append \\
       -b mirror.gcr.io/library/nginx:stable-alpine \\
@@ -1117,7 +1146,9 @@ ${paasOpensslLegacyShellSnippet()}
       -t "${imageRef}"
     "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
       -t "${imageRef}" \\
-      --cmd='nginx -g daemon off;' \\
+      --cmd=nginx \\
+      --cmd=-g \\
+      --cmd='daemon off;' \\
       --exposed-ports=80/tcp
     ARTIFACT_REF="${artifactImageRef}"
     if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then

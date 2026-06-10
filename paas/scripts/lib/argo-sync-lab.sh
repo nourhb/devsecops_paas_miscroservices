@@ -76,6 +76,26 @@ argo_sync_app_lab() {
   return 1
 }
 
+# Return once Argo reports Synced (do not wait for Healthy — pods may still be starting).
+argo_wait_sync_lab() {
+  local app="$1"
+  local timeout="${2:-45}"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  local deadline=$((SECONDS + timeout))
+  while (( SECONDS < deadline )); do
+    local health sync
+    health="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")"
+    sync="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")"
+    if [[ "${sync}" == "Synced" ]]; then
+      echo "OK: ${app} Synced (health=${health:-?})"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "WARN: ${app} not Synced within ${timeout}s" >&2
+  return 1
+}
+
 argo_wait_app_lab() {
   local app="$1"
   local timeout="${2:-300}"

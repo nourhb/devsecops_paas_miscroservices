@@ -157,6 +157,26 @@ function readBundledBootstrapChartFile(rel: string): string | null {
 export function patchDeploymentForNodeWorkload(yaml: string): string {
     return patchDeploymentForProfile(yaml, resolveDeployProfileSpec("node"));
 }
+function probeDefaultsForProfile(profile: BuildProfile): Record<string, unknown> {
+    switch (profile) {
+        case "python":
+            return {
+                readiness: { initialDelaySeconds: 30, periodSeconds: 10, failureThreshold: 12 },
+                liveness: { initialDelaySeconds: 90, periodSeconds: 20, failureThreshold: 6 },
+            };
+        case "static":
+            return {
+                type: "tcp",
+                readiness: { initialDelaySeconds: 3, periodSeconds: 5, failureThreshold: 6 },
+                liveness: { initialDelaySeconds: 10, periodSeconds: 15, failureThreshold: 6 },
+            };
+        default:
+            return {
+                readiness: { initialDelaySeconds: 5, periodSeconds: 10, failureThreshold: 6 },
+                liveness: { initialDelaySeconds: 15, periodSeconds: 20, failureThreshold: 6 },
+            };
+    }
+}
 export function patchDeploymentForProfile(yaml: string, profileSpec: DeployProfileSpec): string {
     const port = profileSpec.containerPort;
     let out = yaml
@@ -179,6 +199,9 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         : {};
     doc.service = service;
     service.targetPort = profileSpec.containerPort;
+    if (!doc.probes || typeof doc.probes !== "object" || doc.probes === null) {
+        doc.probes = probeDefaultsForProfile(buildProfile);
+    }
     if (!doc.resources || typeof doc.resources !== "object" || doc.resources === null) {
         doc.resources = {
             limits: { cpu: "300m", memory: "384Mi" },

@@ -60,18 +60,33 @@ spec:
             - name: {{ .name }}
               value: {{ .value | quote }}
             {{- end }}
+          {{- $probes := $root.Values.probes | default dict }}
+          {{- $readiness := $probes.readiness | default dict }}
+          {{- $liveness := $probes.liveness | default dict }}
           readinessProbe:
-            httpGet:
-              path: /
+            {{- if eq (default "http" $probes.type) "tcp" }}
+            tcpSocket:
               port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            {{- else }}
+            httpGet:
+              path: {{ default "/" $readiness.path }}
+              port: http
+            {{- end }}
+            initialDelaySeconds: {{ default 5 $readiness.initialDelaySeconds }}
+            periodSeconds: {{ default 10 $readiness.periodSeconds }}
+            failureThreshold: {{ default 3 $readiness.failureThreshold }}
           livenessProbe:
-            httpGet:
-              path: /
+            {{- if eq (default "http" $probes.type) "tcp" }}
+            tcpSocket:
               port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            {{- else }}
+            httpGet:
+              path: {{ default "/" $liveness.path }}
+              port: http
+            {{- end }}
+            initialDelaySeconds: {{ default 15 $liveness.initialDelaySeconds }}
+            periodSeconds: {{ default 20 $liveness.periodSeconds }}
+            failureThreshold: {{ default 3 $liveness.failureThreshold }}
           {{- with $root.Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
