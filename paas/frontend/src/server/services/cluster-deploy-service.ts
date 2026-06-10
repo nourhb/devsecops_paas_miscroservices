@@ -5,6 +5,7 @@ import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { buildMetadataLines, formatArtifactReference } from "@/server/build-metadata";
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
+import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
 import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import {
@@ -115,7 +116,12 @@ async function runRollingGitOpsPromote(
     else {
         sections.push(`PAAS_DEPLOY_VERIFY step=workload_ready status=FAIL detail=${ready.message.slice(0, 400)}`);
     }
-    return { argoSyncOk: argo.argoSyncOk, shouldAbort: !ready.ready && env.PAAS_STRICT_INTEGRATIONS === "true", workloadReady: ready.ready };
+    const lenient = env.PAAS_STRICT_INTEGRATIONS !== "true";
+    return {
+        argoSyncOk: argo.argoSyncOk,
+        shouldAbort: !ready.ready && !lenient,
+        workloadReady: ready.ready
+    };
 }
 
 async function persistFailure(deploymentId: string, projectId: string, fullLog: string, reason: DeploymentFailureReason, shortMessage: string): Promise<void> {
@@ -168,6 +174,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         }
     });
     const buildPlan = resolveBuildPlan(projectRow ?? { language: "custom" });
+    const deployProfile = resolveDeployProfileFromProject(projectRow ?? {});
     const artifactRef = formatArtifactReference(imageRef, input.artifactDigest) ?? imageRef;
     const buildSection = [
         ...buildMetadataLines({
@@ -242,7 +249,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         sections.push(`[k8s] WARN: ${warning}`);
     }
     const gitopsOptions = {
-        buildProfile: buildPlan.profile,
+        buildProfile: deployProfile.profile,
         buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
     };
     const blueGreen = blueGreenDeployEnabled();
@@ -348,12 +355,13 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     }
     const probeConfigured = Boolean(labIp || env.APPS_PUBLIC_URL_TEMPLATE.trim());
     if (probeConfigured && !urlReachable && !workloadReady) {
-        const msg = `Application URL not reachable (${appUrl}). Check pod logs (kubectl logs), Argo CD sync, and Traefik ingress for ${projectName}.`;
+        const healHint = `bash paas/scripts/heal-project-deploy-lab.sh ${projectName} ${input.runNumber ?? "?"}`;
+        const msg = `Pods not ready and URL not reachable (${appUrl}). On the lab VM run: ${healHint}`;
         sections.push(`[deploy] FAILED: ${msg}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
         return;
     }
-    if (probeConfigured && !urlReachable && workloadReady) {
+    else if (probeConfigured && !urlReachable && workloadReady) {
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} unreachable but workload ready — marking DEPLOYED`);
     }
     const okLog = tail(sections.join("\n"));

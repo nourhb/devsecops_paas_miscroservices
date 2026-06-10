@@ -188,7 +188,14 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     if (!Array.isArray(doc.env)) {
         doc.env = [];
     }
-    if (!doc.deploymentStrategy && !forceRolling && resolveDeploymentStrategy(null) === "BlueGreen") {
+    const platformRolling = forceRolling || resolveDeploymentStrategy(null) === "Rolling";
+    if (platformRolling) {
+        doc.deploymentStrategy = "Rolling";
+        delete doc.activeSlot;
+        delete doc.blue;
+        delete doc.green;
+    }
+    else if (!doc.deploymentStrategy) {
         doc.deploymentStrategy = "BlueGreen";
         doc.activeSlot = doc.activeSlot === "green" ? "green" : "blue";
     }

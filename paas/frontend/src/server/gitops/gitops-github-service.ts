@@ -83,6 +83,10 @@ function applyImageToValuesDoc(
         applyRollingImage(doc, projectName, imageTag);
         return;
     }
+    if (forceRolling || resolveDeploymentStrategy(null) === "Rolling") {
+        applyRollingImage(doc, projectName, imageTag);
+        return;
+    }
     const strategy = resolveDeploymentStrategy(doc);
     if (strategy !== "BlueGreen") {
         setImageTag(doc, imageTag);
