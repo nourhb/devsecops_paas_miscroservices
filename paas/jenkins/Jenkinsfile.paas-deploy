@@ -284,8 +284,16 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
   sh """
     set -eu
     cd '${appRoot}'
-    if ! node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.firebase||d['@firebase/app']?0:1)" 2>/dev/null; then
-      echo "[env] verify: not a Firebase package.json — skip bundle check"
+    IS_FIREBASE=0
+    if node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.firebase||d['@firebase/app']?0:1)" 2>/dev/null; then
+      IS_FIREBASE=1
+    fi
+    HAS_NEXT_PUBLIC=0
+    if grep -qE '^NEXT_PUBLIC_' .env .env.production 2>/dev/null; then
+      HAS_NEXT_PUBLIC=1
+    fi
+    if [ "\$IS_FIREBASE" != "1" ] && [ "\$HAS_NEXT_PUBLIC" != "1" ]; then
+      echo "[env] verify: no NEXT_PUBLIC_* in project env — skip bundle check"
       exit 0
     fi
     if [ ! -d .next ]; then
@@ -310,6 +318,11 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
     if grep -Rq 'NEXT_PUBLIC_FIREBASE' .next/static/chunks 2>/dev/null; then
       echo "[env] verify OK: NEXT_PUBLIC_FIREBASE references found in client chunks"
       exit 0
+    fi
+    if [ "\$HAS_NEXT_PUBLIC" = "1" ]; then
+      FIRST_KEY=\$(grep -hE '^NEXT_PUBLIC_[A-Z0-9_]+=' .env .env.production 2>/dev/null | head -1 | cut -d= -f1)
+      echo "[env] ERROR: \${FIRST_KEY} from Application environment not found in .next — check PROJECT_BUILD_ENV_B64 and next build logs"
+      exit 1
     fi
     echo "[env] ERROR: Firebase app but no NEXT_PUBLIC_* in build output — check PROJECT_BUILD_ENV_B64 and next build logs"
     exit 1
@@ -1670,17 +1683,29 @@ def runPaasDeploy = {
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
   def paasFastPipeline = false
-  try {
-    def p = params.JENKINS_PAAS_FAST_PIPELINE
-    paasFastPipeline = (p == true) || "${p ?: ''}".trim().equalsIgnoreCase("true")
-  }
-  catch (ignored) {
+  def paramFast = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim().toLowerCase()
+  if (paramFast == 'true') {
+    paasFastPipeline = true
+  } else if (paramFast == 'false') {
     paasFastPipeline = false
-  }
-  if (!paasFastPipeline) {
-    paasFastPipeline = (env.JENKINS_PAAS_FAST_PIPELINE ?: "").trim().equalsIgnoreCase("true")
+  } else {
+    try {
+      def p = params.JENKINS_PAAS_FAST_PIPELINE
+      paasFastPipeline = (p == true) || "${p ?: ''}".trim().equalsIgnoreCase("true")
+    }
+    catch (ignored) {
+      paasFastPipeline = false
+    }
+    if (!paasFastPipeline) {
+      paasFastPipeline = (env.JENKINS_PAAS_FAST_PIPELINE ?: "").trim().equalsIgnoreCase("true")
+    }
   }
   env.JENKINS_PAAS_FAST_PIPELINE = paasFastPipeline ? "true" : "false"
+  if (env.PROJECT_BUILD_ENV_B64?.trim()) {
+    println "[env] PROJECT_BUILD_ENV_B64 length=${env.PROJECT_BUILD_ENV_B64.trim().length()} (Application environment + public URL)"
+  } else {
+    paasStepWarn(1, 'build-env', 'No PROJECT_BUILD_ENV_B64 from PaaS — save Application environment in Edit project and redeploy frontend if needed')
+  }
   if (paasFastPipeline) {
     env.JENKINS_SKIP_NEXT_BUILD = "true"
     println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Next.js production build still runs before crane tar when using dockerless push (Dockerfile is not executed)."

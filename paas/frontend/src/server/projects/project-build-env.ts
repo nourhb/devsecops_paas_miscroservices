@@ -92,11 +92,10 @@ export function normalizeBuildEnvInput(raw: unknown): Record<string, string> | n
     return Object.keys(out).length > 0 ? out : null;
 }
 
-export function encodeBuildEnvForJenkins(buildEnv: Record<string, string> | null | undefined): string {
-    if (!buildEnv || Object.keys(buildEnv).length === 0) {
-        return "";
-    }
-    return Buffer.from(JSON.stringify(buildEnv), "utf8").toString("base64");
+/** Always includes pipeline public URL defaults + project Application environment. */
+export function encodeBuildEnvForJenkins(projectName: string, buildEnv: Record<string, string> | null | undefined): string {
+    const merged = augmentBuildEnvForPipeline(projectName, buildEnv);
+    return Buffer.from(JSON.stringify(merged), "utf8").toString("base64");
 }
 
 export function mergeBuildEnvIntoHelmValues(doc: Record<string, unknown>, buildEnv: Record<string, string> | null | undefined): void {

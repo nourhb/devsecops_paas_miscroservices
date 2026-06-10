@@ -414,8 +414,8 @@ async function buildIntegrationHints(project: Project, sonarStatus: string, dtPr
             hints.push("Dependency-Track: Step 4 ran but no project linked yet — check Jenkins console for [sca] upload errors.");
         }
     }
-    if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
-        hints.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps.");
+    if (env.JENKINS_PAAS_FAST_PIPELINE === "true" && env.PAAS_ALLOW_FAST_PIPELINE === "true") {
+        hints.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps — set PAAS_ALLOW_FAST_PIPELINE=false (default) and redeploy from PaaS.");
     }
     if (hints.length === 0) {
         return "Security integrations reachable.";
