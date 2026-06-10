@@ -20,6 +20,14 @@ upsert() {
 cd "${REPO_ROOT}"
 git pull origin main
 
+echo "==> Postgres (login requires postgres.paas.svc.cluster.local:5432)"
+if ! bash "${SCRIPT_DIR}/check-paas-lab-health.sh" 2>/dev/null | grep -q "OK: postgres"; then
+  echo "WARN: Postgres not ready — recovering before frontend redeploy"
+  bash "${SCRIPT_DIR}/deploy-paas-postgres-lab.sh" || bash "${SCRIPT_DIR}/recover-paas-after-k3s-restart.sh"
+else
+  echo "OK: Postgres already running"
+fi
+
 echo "==> Full pipeline (no fast skip — force false in env + Jenkins job)"
 upsert JENKINS_PAAS_FAST_PIPELINE "false"
 upsert PAAS_ALLOW_FAST_PIPELINE "false"
