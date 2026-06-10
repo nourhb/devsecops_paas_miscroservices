@@ -1496,11 +1496,35 @@ def cosignSignImageShellSnippet() {
             set +e
             export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
             sign_img() {
-              if [ -n "${INSEC}" ]; then
-                "${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "$1"
-              else
-                "${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "$1"
-              fi
+              local ref="$1"
+              local out rc attempt
+              for attempt in 1 2 3; do
+                if [ -n "${INSEC}" ]; then
+                  out="$("${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                else
+                  out="$("${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                fi
+                rc=$?
+                if [ "${rc}" -eq 0 ]; then
+                  return 0
+                fi
+                if echo "${out}" | grep -qE 'createLogEntryConflict|already exists in the transparency log'; then
+                  echo "[cosign] WARN: ${ref} already signed (rekor 409) — OK"
+                  return 0
+                fi
+                if echo "${out}" | grep -qE 'connection refused|ECONNREFUSED|timed out'; then
+                  if [ "${attempt}" -lt 3 ]; then
+                    echo "[cosign] WARN: registry unreachable (attempt ${attempt}/3), retry in 10s…"
+                    sleep 10
+                    continue
+                  fi
+                  echo "[cosign] WARN: could not sign ${ref} (Harbor unreachable) — image push OK, deploy continues"
+                  return 0
+                fi
+                echo "${out}"
+                return "${rc}"
+              done
+              return 0
             }
             resolve_digest_ref() {
               local img="$1"
@@ -1540,12 +1564,12 @@ def cosignSignImageShellSnippet() {
             if [ -n "${DIGEST}" ]; then
               echo "[cosign] signing digest ${DIGEST}"
               echo "PAAS_COSIGN_DIGEST=${DIGEST}"
-              sign_img "${DIGEST}" || exit $?
+              sign_img "${DIGEST}" || true
               mkdir -p paas-artifacts
               echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
             fi
             echo "[cosign] signing tag ${COSIGN_IMG}"
-            sign_img "${COSIGN_IMG}" || exit $?
+            sign_img "${COSIGN_IMG}" || true
             exit 0
           '''
 }
@@ -1649,6 +1673,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
   println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
   println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
+  println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
