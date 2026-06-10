@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lab Jenkins: 2 executors, clear queue, stop running builds, disable concurrent paas-deploy."""
+"""Lab Jenkins: scale executors, clear queue, enable concurrent paas-deploy builds."""
 from __future__ import annotations
 
 import base64
@@ -17,49 +17,53 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 JOB = os.environ.get("JOB_NAME", "paas-deploy")
 
-GROOVY = r"""
+NUM_EXECUTORS = int(os.environ.get("JENKINS_NUM_EXECUTORS", "8"))
+CONCURRENT_BUILDS = (os.environ.get("JENKINS_PAAS_CONCURRENT_BUILDS", "true").strip().lower() not in ("false", "0", "no", "off"))
+
+GROOVY = f"""
 import jenkins.model.Jenkins
 
 def j = Jenkins.instance
+def numExec = {NUM_EXECUTORS}
 println "=== Before ==="
-j.computers.each { c ->
-  println "computer ${c.displayName} name='${c.name}' executors=${c.numExecutors} busy=${c.countBusy()} idle=${c.countIdle()}"
-}
-println "queue=${j.queue.items.size()}"
+j.computers.each {{ c ->
+  println "computer ${{c.displayName}} name='${{c.name}}' executors=${{c.numExecutors}} busy=${{c.countBusy()}} idle=${{c.countIdle()}}"
+}}
+println "queue=${{j.queue.items.size()}}"
 
-j.setNumExecutors(2)
-j.computers.each { c ->
-  if (c.name == "" || c.name == "built-in" || (c.displayName ?: "").contains("Built-In")) {
-    c.setNumExecutors(2)
-  }
-}
+j.setNumExecutors(numExec)
+j.computers.each {{ c ->
+  if (c.name == "" || c.name == "built-in" || (c.displayName ?: "").contains("Built-In")) {{
+    c.setNumExecutors(numExec)
+  }}
+}}
 
-def job = j.getItemByFullName(""" + f'"{JOB}"' + r""")
-if (job != null) {
-  job.setConcurrentBuild(false)
+def job = j.getItemByFullName("{JOB}")
+if (job != null) {{
+  job.setConcurrentBuild({str(CONCURRENT_BUILDS).lower()})
   def stopped = []
-  job.builds.findAll { it.isBuilding() }.each { b ->
-    try {
+  job.builds.findAll {{ it.isBuilding() }}.each {{ b ->
+    try {{
       b.doStop()
       stopped << b.number
-    } catch (Exception e) {
-      println "WARN stop #${b.number}: ${e.message}"
-    }
-  }
-  println "stopped builds: ${stopped}"
+    }} catch (Exception e) {{
+      println "WARN stop #${{b.number}}: ${{e.message}}"
+    }}
+  }}
+  println "stopped builds: ${{stopped}}"
   job.save()
-} else {
+}} else {{
   println "WARN: job not found"
-}
+}}
 
-j.queue.items.each { it.cancel() }
+j.queue.items.each {{ it.cancel() }}
 j.save()
 
 println "=== After ==="
-println "numExecutors=${j.getNumExecutors()} queue=${j.queue.items.size()}"
-j.computers.each { c ->
-  println "computer ${c.displayName} executors=${c.numExecutors} busy=${c.countBusy()} idle=${c.countIdle()}"
-}
+println "numExecutors=${{j.getNumExecutors()}} concurrentBuilds={str(CONCURRENT_BUILDS).lower()} queue=${{j.queue.items.size()}}"
+j.computers.each {{ c ->
+  println "computer ${{c.displayName}} executors=${{c.numExecutors}} busy=${{c.countBusy()}} idle=${{c.countIdle()}}"
+}}
 """
 
 

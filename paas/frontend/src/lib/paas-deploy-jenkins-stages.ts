@@ -59,7 +59,7 @@ function checkLevelToStageStatus(level: PipelineStepCheckLevel): string {
         case "WARN":
             return "UNSTABLE";
         case "SKIP":
-            return "NOT_EXECUTED";
+            return "UNSTABLE";
         case "FAIL":
             return "FAILURE";
         default:
@@ -81,13 +81,13 @@ export function applyJenkinsChecksToDisplayStages(stages: PaasDeployDisplayStage
         const allSkip = stepChecks.every((check) => check.level === "SKIP");
         const worst = hasFail
             ? "FAIL"
+            : hasOk
+                ? "OK"
             : allSkip && !hasOk
                 ? "SKIP"
-                : stepChecks.some((check) => check.level === "WARN") && !hasOk
+                : stepChecks.some((check) => check.level === "WARN")
                     ? "WARN"
-                    : hasOk
-                        ? "OK"
-                        : "WARN";
+                    : "WARN";
         return {
             ...stage,
             status: checkLevelToStageStatus(worst),

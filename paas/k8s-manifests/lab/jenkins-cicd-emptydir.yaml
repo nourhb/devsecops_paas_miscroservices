@@ -29,14 +29,14 @@ spec:
             - containerPort: 8080
           env:
             - name: JAVA_OPTS
-              value: "-Xms256m -Xmx768m -Djenkins.install.runSetupWizard=false -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
+              value: "-Xms512m -Xmx1536m -Djenkins.install.runSetupWizard=false -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400"
           resources:
             requests:
-              cpu: 100m
-              memory: 512Mi
-            limits:
-              cpu: 500m
+              cpu: 250m
               memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
           volumeMounts:
             - name: jenkins-storage
               mountPath: /var/jenkins_home
