@@ -11,7 +11,7 @@ GITOPS="${GITOPS:-${HOME}/gitops}"
 PAAS_NS="${PAAS_NAMESPACE:-paas}"
 
 echo "==> Set PAAS_DEPLOYMENT_STRATEGY=Rolling on PaaS frontend"
-if [[ -x "${SCRIPT_DIR}/set-lab-env-key.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/set-lab-env-key.sh" ]]; then
   bash "${SCRIPT_DIR}/set-lab-env-key.sh" PAAS_DEPLOYMENT_STRATEGY Rolling sync || true
 else
   echo "WARN: set-lab-env-key.sh missing — set PAAS_DEPLOYMENT_STRATEGY=Rolling manually in frontend env"
