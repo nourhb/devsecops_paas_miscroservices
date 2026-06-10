@@ -31,7 +31,6 @@ function readIfExists(absPath: string): string | null {
 
 function readEmbeddedModuleGroovy(): string | null {
     try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const mod = require("./embedded-jenkinsfile") as { EMBEDDED_JENKINSFILE_GROOVY?: string };
         const groovy = mod.EMBEDDED_JENKINSFILE_GROOVY?.trim();
         if (groovy && jenkinsfileHasMultiFrameworkMarker(groovy)) {
