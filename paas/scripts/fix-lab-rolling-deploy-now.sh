@@ -50,6 +50,18 @@ for values in apps.glob("*/values.yaml"):
     if not svc.get("targetPort"):
         svc["targetPort"] = guess_port(project)
     doc["service"] = svc
+    port = int(svc.get("targetPort") or guess_port(project))
+    if port == 8000:
+        doc["probes"] = {
+            "readiness": {"initialDelaySeconds": 30, "periodSeconds": 10, "failureThreshold": 12},
+            "liveness": {"initialDelaySeconds": 90, "periodSeconds": 20, "failureThreshold": 6},
+        }
+    elif port == 80:
+        doc["probes"] = {
+            "type": "tcp",
+            "readiness": {"initialDelaySeconds": 3, "periodSeconds": 5, "failureThreshold": 6},
+            "liveness": {"initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 6},
+        }
     values.write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False))
     print(f"OK: {values} → Rolling targetPort={svc.get('targetPort')}")
 PY
@@ -62,8 +74,12 @@ else
   exit 1
 fi
 
-echo "==> Redeploy PaaS frontend (embeds deploy fallback fix)"
-bash "${SCRIPT_DIR}/deploy-paas-frontend-k8s.sh"
+if [[ "${SKIP_FRONTEND_REDEPLOY:-0}" == "1" ]]; then
+  echo "==> SKIP_FRONTEND_REDEPLOY=1 — skipping frontend rebuild"
+else
+  echo "==> Redeploy PaaS frontend (embeds deploy fallback fix)"
+  bash "${SCRIPT_DIR}/deploy-paas-frontend-k8s.sh"
+fi
 
 echo "==> Sync all ${ARGOCD_APP_PREFIX}-* Argo applications"
 while IFS= read -r app; do
