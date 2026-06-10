@@ -96,6 +96,8 @@ const envSchema = z.object({
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
     JENKINSFILE_SYNC_RAW_URL: z.string().default(""),
     JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
+    /** When false (default), PaaS UI always triggers full security pipeline (SCA/SAST/ZAP). */
+    PAAS_ALLOW_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
     JENKINS_SH_KEEPALIVE: z.enum(["true", "false"]).default("true"),
     PAAS_MONOREPO_ROOT: z.string().default(""),
     HARBOR_REGISTRY: z.string().default(""),
@@ -356,6 +358,7 @@ const parsed = envSchema.safeParse({
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: process.env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER,
     JENKINSFILE_SYNC_RAW_URL: process.env.JENKINSFILE_SYNC_RAW_URL,
     JENKINS_PAAS_FAST_PIPELINE: process.env.JENKINS_PAAS_FAST_PIPELINE,
+    PAAS_ALLOW_FAST_PIPELINE: process.env.PAAS_ALLOW_FAST_PIPELINE,
     JENKINS_SH_KEEPALIVE: process.env.JENKINS_SH_KEEPALIVE,
     PAAS_MONOREPO_ROOT: process.env.PAAS_MONOREPO_ROOT,
     HARBOR_REGISTRY: resolvedHarborRegistryHost(),

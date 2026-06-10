@@ -216,10 +216,11 @@ function appendRegistryParameters(q: URLSearchParams): void {
     if (env.HELM_OCI_PLAIN_HTTP === "true") {
         q.set("HELM_OCI_PLAIN_HTTP", "true");
     }
-    if (env.JENKINS_PAAS_FAST_PIPELINE === "true") {
+    // UI deploys always run full security pipeline (SCA, SAST, ZAP) unless explicitly allowed.
+    if (env.PAAS_ALLOW_FAST_PIPELINE === "true" && env.JENKINS_PAAS_FAST_PIPELINE === "true") {
         q.set("JENKINS_PAAS_FAST_PIPELINE", "true");
     }
-    else if (env.JENKINS_PAAS_FAST_PIPELINE === "false") {
+    else {
         q.set("JENKINS_PAAS_FAST_PIPELINE", "false");
     }
     if (env.JENKINS_SH_KEEPALIVE === "true") {
@@ -243,13 +244,12 @@ function redactJenkinsUrl(url: string): string {
 function jenkinsIntegrationFetch(url: string, init?: RequestInit): Promise<Response> {
     return integrationFetch(url, init ?? {}, env.JENKINS_HTTP_TIMEOUT_MS);
 }
-function buildEnvParamSummary(buildEnv: Record<string, string> | null | undefined): string {
-    if (!buildEnv || Object.keys(buildEnv).length === 0) {
-        return "[jenkins] PROJECT_BUILD_ENV_B64: not sent (no build env on project — save Application environment in Edit project)";
-    }
-    const keys = Object.keys(buildEnv);
+function buildEnvParamSummary(projectName: string, buildEnv: Record<string, string> | null | undefined): string {
+    const merged = augmentBuildEnvForPipeline(projectName, buildEnv);
+    const keys = Object.keys(merged);
     const publicCount = keys.filter((k) => k.startsWith("NEXT_PUBLIC_")).length;
-    return `[jenkins] PROJECT_BUILD_ENV_B64: ${keys.length} key(s), ${publicCount} NEXT_PUBLIC_* (POST body)`;
+    const customCount = buildEnv ? Object.keys(buildEnv).length : 0;
+    return `[jenkins] PROJECT_BUILD_ENV_B64: ${keys.length} key(s) (${customCount} from project + auto public URL), ${publicCount} NEXT_PUBLIC_*`;
 }
 async function jenkinsPostBuildWithParameters(base: string, jobPath: string, params: URLSearchParams, headers: Record<string, string>): Promise<Response> {
     const triggerUrl = `${base}/${jobPath}/buildWithParameters`;
@@ -699,10 +699,7 @@ export class JenkinsClient {
                     appendSharedJobAgentLabel(q);
                     appendRegistryParameters(q);
                 }
-                const buildEnvB64 = encodeBuildEnvForJenkins(augmentBuildEnvForPipeline(projectName, buildParams.buildEnv));
-                if (buildEnvB64) {
-                    q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
-                }
+                q.set("PROJECT_BUILD_ENV_B64", encodeBuildEnvForJenkins(projectName, buildParams.buildEnv));
                 triggerUrl = `${base}/${jobPath}/buildWithParameters`;
                 triggerRes = await jenkinsPostBuildWithParameters(base, jobPath, q, headers);
             }
@@ -739,7 +736,7 @@ export class JenkinsClient {
                 }
             }
             const log = [
-                buildEnvParamSummary(buildParams.buildEnv),
+                buildEnvParamSummary(projectName, buildParams.buildEnv),
                 `[jenkins] Triggered: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",
@@ -808,10 +805,7 @@ export class JenkinsClient {
             q.set(env.JENKINS_DEPLOY_GIT_CREDENTIALS_ID_PARAMETER, (deployParams.gitCredentialsId ?? "").trim());
             appendSharedJobAgentLabel(q);
             appendRegistryParameters(q);
-            const buildEnvB64 = encodeBuildEnvForJenkins(augmentBuildEnvForPipeline(projectName, deployParams.buildEnv));
-            if (buildEnvB64) {
-                q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
-            }
+            q.set("PROJECT_BUILD_ENV_B64", encodeBuildEnvForJenkins(projectName, deployParams.buildEnv));
             const triggerUrl = `${base}/${jobPath}/buildWithParameters`;
             const baselineBeforeTrigger = await fetchJenkinsLastBuildNumber(base, jobPath, headers);
             const triggerRes = await jenkinsPostBuildWithParameters(base, jobPath, q, headers);
@@ -848,7 +842,7 @@ export class JenkinsClient {
                 }
             }
             const log = [
-                buildEnvParamSummary(deployParams.buildEnv),
+                buildEnvParamSummary(projectName, deployParams.buildEnv),
                 `[jenkins] Deploy trigger: ${redactJenkinsUrl(triggerUrl)}`,
                 `[jenkins] HTTP ${triggerRes.status}`,
                 baselineBeforeTrigger != null ? `[jenkins] Baseline before trigger: #${baselineBeforeTrigger}` : "[jenkins] No prior build",

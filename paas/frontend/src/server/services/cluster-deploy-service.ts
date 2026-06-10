@@ -3,6 +3,7 @@ import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
+import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
 import { buildMetadataLines, formatArtifactReference } from "@/server/build-metadata";
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
@@ -439,14 +440,11 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} unreachable but workload ready — marking DEPLOYED`);
     }
     const okLog = tail(sections.join("\n"));
-    await prisma.deployment.update({
-        where: { id: deploymentId },
-        data: {
-            status: DeploymentJobStatus.DEPLOYED,
-            logs: okLog,
-            url: appUrl,
-            ...clearDeploymentFailureFields()
-        }
+    await prismaDeploymentUpdate(deploymentId, {
+        status: DeploymentJobStatus.DEPLOYED,
+        logs: okLog,
+        url: appUrl,
+        ...clearDeploymentFailureFields()
     });
     await updateProject(projectId, {
         lastDeploymentStatus: "DEPLOYED",
