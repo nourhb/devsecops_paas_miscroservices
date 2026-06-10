@@ -27,7 +27,7 @@ if [[ -f "${ENV_FILE}" && -z "${GITHUB_TOKEN:-}" ]]; then
   [[ -n "${tok}" ]] && export GITHUB_TOKEN="${tok}"
 fi
 
-echo "==> Set image.tag=${TAG} in ${VALUES}"
+echo "==> Set image.tag=${TAG} + Rolling + targetPort in ${VALUES}"
 python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" <<'PY'
 import sys
 from pathlib import Path
@@ -38,19 +38,22 @@ except ImportError:
     raise
 path, tag, node_ip, name = sys.argv[1:5]
 repo = f"{node_ip}:30002/paas/{name}"
+port = 80 if "angular" in name.lower() else (8000 if "python" in name.lower() or "docker-demo" in name.lower() else 3000)
 doc = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-for slot in ("blue", "green"):
-    block = doc.setdefault(slot, {})
-    img = block.setdefault("image", {})
-    img["repository"] = repo
-    img["tag"] = str(tag)
+doc["deploymentStrategy"] = "Rolling"
+for k in ("activeSlot", "blue", "green"):
+    doc.pop(k, None)
 img = doc.get("image") if isinstance(doc.get("image"), dict) else {}
-img.setdefault("repository", repo)
+img["repository"] = repo
 img["tag"] = str(tag)
-img.setdefault("pullPolicy", "IfNotPresent")
+img["digest"] = ""
+img["pullPolicy"] = "IfNotPresent"
 doc["image"] = img
+svc = doc.get("service") if isinstance(doc.get("service"), dict) else {}
+svc["targetPort"] = port
+doc["service"] = svc
 Path(path).write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False), encoding="utf-8")
-print(f"image: {repo}:{tag} (blue+green+top-level)")
+print(f"image: {repo}:{tag} Rolling targetPort={port}")
 PY
 
 echo "==> Git commit + push"
