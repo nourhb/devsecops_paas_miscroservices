@@ -646,7 +646,7 @@ export async function waitForAnyDeploymentReady(
     let lastStatus = "waiting";
     let tracked: string | null = null;
     while (Date.now() < deadline) {
-        const probeList = tracked ? [tracked] : names;
+        const probeList: string[] = tracked ? [tracked] : names;
         for (const name of probeList) {
             try {
                 const { body: deployment } = await api.readNamespacedDeployment(name, namespace);
