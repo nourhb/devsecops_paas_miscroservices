@@ -41,6 +41,13 @@ upsert JENKINS_NUM_EXECUTORS "${EXECUTORS}"
 upsert JENKINS_PAAS_CONCURRENT_BUILDS "true"
 upsert PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS "${EXECUTORS}"
 
+echo "==> Sonar token (fixes Step 5 token validate: valid=false)"
+if [[ -x "${SCRIPT_DIR}/regenerate-sonar-token-lab.sh" ]]; then
+  bash "${SCRIPT_DIR}/regenerate-sonar-token-lab.sh" || {
+    echo "WARN: Sonar token regen failed — run: bash paas/scripts/regenerate-sonar-token-lab.sh"
+  }
+fi
+
 echo "==> Dependency-Track API key (fixes DEPENDENCY_TRACK_API_KEY=MISSING)"
 if [[ -x "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" ]]; then
   REGENERATE_DT_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" || {
