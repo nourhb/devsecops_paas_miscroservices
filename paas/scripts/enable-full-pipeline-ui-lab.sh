@@ -20,9 +20,14 @@ upsert() {
 cd "${REPO_ROOT}"
 git pull origin main
 
-echo "==> Full pipeline (no fast skip)"
+echo "==> Full pipeline (no fast skip — force false in env + Jenkins job)"
 upsert JENKINS_PAAS_FAST_PIPELINE "false"
 upsert PAAS_ALLOW_FAST_PIPELINE "false"
+# Fix common lab mistake: true left in env from older scripts
+sed -i 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || \
+  sed -i '' 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || true
+sed -i 's/^PAAS_ALLOW_FAST_PIPELINE=true/PAAS_ALLOW_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || \
+  sed -i '' 's/^PAAS_ALLOW_FAST_PIPELINE=true/PAAS_ALLOW_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || true
 upsert JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER "true"
 upsert JENKINS_NUM_EXECUTORS "${EXECUTORS}"
 upsert JENKINS_PAAS_CONCURRENT_BUILDS "true"
@@ -67,14 +72,18 @@ set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
-for v in SONAR_TOKEN DEPENDENCY_TRACK_API_KEY JENKINS_PAAS_FAST_PIPELINE PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS; do
+for v in SONAR_TOKEN DEPENDENCY_TRACK_API_KEY JENKINS_PAAS_FAST_PIPELINE PAAS_ALLOW_FAST_PIPELINE PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS; do
   val="$(kubectl exec -n paas deploy/frontend -- printenv "${v}" 2>/dev/null || true)"
   if [[ -n "${val}" ]]; then
-    echo "  ${v}=set"
+    echo "  ${v}=${val}"
   else
     echo "  ${v}=MISSING"
   fi
 done
+if [[ "$(kubectl exec -n paas deploy/frontend -- printenv JENKINS_PAAS_FAST_PIPELINE 2>/dev/null || true)" == "true" ]]; then
+  echo "ERROR: frontend pod still has JENKINS_PAAS_FAST_PIPELINE=true — fix ${ENV_FILE} and re-run this script" >&2
+  exit 1
+fi
 
 echo ""
 echo "OK. From PaaS UI only:"

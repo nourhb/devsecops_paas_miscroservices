@@ -29,4 +29,18 @@ for p in SONAR_HOST_URL SONAR_TOKEN DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_A
     exit 1
   fi
 done
+FAST_DEF="$(printf '%s' "${CFG}" | python3 -c "
+import re, sys
+xml = sys.stdin.read()
+m = re.search(
+    r'<hudson\\.model\\.StringParameterDefinition>[\\s\\S]*?<name>JENKINS_PAAS_FAST_PIPELINE</name>[\\s\\S]*?<defaultValue>([^<]*)</defaultValue>',
+    xml,
+)
+print((m.group(1) if m else '').strip())
+" 2>/dev/null || true)"
+if [[ "${FAST_DEF}" == "true" ]]; then
+  echo "FAIL: JENKINS_PAAS_FAST_PIPELINE job default is true — re-run: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full" >&2
+  exit 1
+fi
+echo "OK: JENKINS_PAAS_FAST_PIPELINE default=${FAST_DEF:-false}"
 echo "Done. Trigger a new deploy so Steps 4–5 receive credentials."

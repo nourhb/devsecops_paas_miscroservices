@@ -217,13 +217,8 @@ function appendRegistryParameters(q: URLSearchParams): void {
     if (env.HELM_OCI_PLAIN_HTTP === "true") {
         q.set("HELM_OCI_PLAIN_HTTP", "true");
     }
-    // UI deploys always run full security pipeline (SCA, SAST, ZAP) unless explicitly allowed.
-    if (env.PAAS_ALLOW_FAST_PIPELINE === "true" && env.JENKINS_PAAS_FAST_PIPELINE === "true") {
-        q.set("JENKINS_PAAS_FAST_PIPELINE", "true");
-    }
-    else {
-        q.set("JENKINS_PAAS_FAST_PIPELINE", "false");
-    }
+    // UI deploys always run full security pipeline (SCA, SAST, ZAP). Never honor fast-pipeline env on lab.
+    q.set("JENKINS_PAAS_FAST_PIPELINE", "false");
     if (env.JENKINS_SH_KEEPALIVE === "true") {
         q.set("JENKINS_SH_KEEPALIVE", "true");
     }

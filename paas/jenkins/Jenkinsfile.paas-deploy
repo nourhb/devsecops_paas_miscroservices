@@ -1710,10 +1710,14 @@ def runPaasDeploy = {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
-  // Security steps 4–5 always run unless PaaS explicitly passes JENKINS_PAAS_FAST_PIPELINE=true (ignore stale agent env).
-  def paasFastPipeline = "${params.JENKINS_PAAS_FAST_PIPELINE ?: 'false'}".trim().equalsIgnoreCase('true')
-  env.JENKINS_PAAS_FAST_PIPELINE = paasFastPipeline ? "true" : "false"
-  println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${params.JENKINS_PAAS_FAST_PIPELINE} effective=${paasFastPipeline}"
+  // PaaS UI always runs full security (Steps 4–5, 8, 10). Ignore job/env fast-pipeline flags.
+  def paasFastPipeline = false
+  def fastParam = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim()
+  env.JENKINS_PAAS_FAST_PIPELINE = "false"
+  println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${fastParam} effective=false (security steps always run)"
+  if (fastParam.equalsIgnoreCase('true')) {
+    println "[paas] WARN: JENKINS_PAAS_FAST_PIPELINE=true was requested but ignored — run bash paas/scripts/enable-full-pipeline-ui-lab.sh if job default is stale"
+  }
   if (env.PROJECT_BUILD_ENV_B64?.trim()) {
     println "[env] PROJECT_BUILD_ENV_B64 length=${env.PROJECT_BUILD_ENV_B64.trim().length()} (Application environment + public URL)"
   } else {
