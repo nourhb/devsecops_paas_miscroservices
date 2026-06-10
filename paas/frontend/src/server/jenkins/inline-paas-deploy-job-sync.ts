@@ -131,6 +131,30 @@ function mergeMissingParameterDefinitions(xml: string): string {
         .join("\n");
     return xml.replace(closeRe, `\n${blocks}\n${m[1]}</parameterDefinitions>`);
 }
+const FORCED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
+    JENKINS_PAAS_FAST_PIPELINE: "false"
+};
+function forceParameterDefaults(xml: string): string {
+    let out = xml;
+    for (const [name, defaultValue] of Object.entries(FORCED_PARAMETER_DEFAULTS)) {
+        const nameToken = `<name>${escapeXmlText(name)}</name>`;
+        const blockRe = new RegExp(`(<hudson\\.model\\.StringParameterDefinition>[\\s\\S]*?${nameToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?<defaultValue>)([\\s\\S]*?)(</defaultValue>)`, "i");
+        const bm = blockRe.exec(out);
+        if (!bm) {
+            continue;
+        }
+        const current = bm[2]
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .trim();
+        if (current === defaultValue) {
+            continue;
+        }
+        out = out.slice(0, bm.index) + bm[1] + escapeXmlText(defaultValue) + bm[3] + out.slice(bm.index + bm[0].length);
+    }
+    return out;
+}
 function mergeEnvBackedParameterDefaults(xml: string): string {
     let out = xml;
     for (const [name, defaultValue] of getParameterDefinitions()) {
@@ -170,7 +194,8 @@ function ensureParameterizedJobXml(xml: string): string {
         }
     }
     out = mergeMissingParameterDefinitions(out);
-    return mergeEnvBackedParameterDefaults(out);
+    out = mergeEnvBackedParameterDefaults(out);
+    return forceParameterDefaults(out);
 }
 function escapeCdata(s: string): string {
     return s.replace(/]]>/g, "]]]]><![CDATA[>");

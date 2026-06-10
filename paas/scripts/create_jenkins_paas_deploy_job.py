@@ -365,9 +365,27 @@ def merge_missing_parameter_definitions(existing_xml: str) -> str:
     return existing_xml[: m.start()] + f"\n{blocks}\n{m.group(1)}</parameterDefinitions>" + existing_xml[m.end() :]
 
 
+def force_job_parameter_default(existing_xml: str, param_name: str, value: str) -> str:
+    """Always set job parameter default (merged XML updates used to leave JENKINS_PAAS_FAST_PIPELINE=true)."""
+    name_token = f"<name>{esc_xml(param_name)}</name>"
+    pattern = re.compile(
+        rf"(<hudson\.model\.StringParameterDefinition>[\s\S]*?{re.escape(name_token)}[\s\S]*?"
+        rf"<defaultValue>)([\s\S]*?)(</defaultValue>)",
+        re.IGNORECASE,
+    )
+    m = pattern.search(existing_xml)
+    if not m:
+        return existing_xml
+    current = m.group(2).strip()
+    if current == esc_xml(value):
+        return existing_xml
+    return existing_xml[: m.start(2)] + esc_xml(value) + existing_xml[m.end(2) :]
+
+
 def ensure_job_parameters(existing_xml: str) -> str:
     out = merge_missing_parameter_definitions(existing_xml)
     out = merge_env_param_defaults(out)
+    out = force_job_parameter_default(out, "JENKINS_PAAS_FAST_PIPELINE", "false")
     if concurrent_builds_enabled():
         out = strip_disable_concurrent_builds(out)
     return out
