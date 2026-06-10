@@ -79,7 +79,7 @@ export function resolveBuildEnvFromStorage(stored: unknown): Record<string, stri
 export function buildEnvJenkinsTriggerLog(stored: unknown, resolved?: Record<string, string> | null): string {
     const envMap = resolved ?? resolveBuildEnvFromStorage(stored);
     if (!hasBuildEnvStored(stored)) {
-        return "[build-env] None configured — add Application environment (.env) in Edit project. NEXT_PUBLIC_* (Firebase) must be present before Jenkins runs next build.";
+        return "[build-env] No custom keys — PaaS still sends auto NEXT_PUBLIC_APP_URL / APP_BASE_URL; add Application environment in Edit project for Firebase/API keys.";
     }
     if (!envMap || Object.keys(envMap).length === 0) {
         return "[build-env] WARN: Secrets are stored but decryption failed. Set JWT_SECRET (32+ chars) in docker-compose.env, redeploy frontend, re-save build env in Edit project.";
