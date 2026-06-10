@@ -709,6 +709,99 @@ export async function deleteStaleBlueGreenDeployments(namespace: string): Promis
     return deleted;
 }
 
+const PAAS_NGINX_CM = "paas-nginx-override";
+const PAAS_NGINX_DEFAULT_CONF = `server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}`;
+
+async function ensurePaasNginxConfigMap(namespace: string): Promise<void> {
+    const api = getCoreV1Api();
+    if (!api) {
+        return;
+    }
+    const body: k8s.V1ConfigMap = {
+        metadata: { name: PAAS_NGINX_CM, namespace },
+        data: { "default.conf": PAAS_NGINX_DEFAULT_CONF }
+    };
+    try {
+        await api.readNamespacedConfigMap(PAAS_NGINX_CM, namespace);
+        await api.replaceNamespacedConfigMap(PAAS_NGINX_CM, namespace, body);
+    }
+    catch {
+        try {
+            await api.createNamespacedConfigMap(namespace, body);
+        }
+        catch {
+            // best-effort
+        }
+    }
+}
+
+function applyProbeRemediation(container: k8s.V1Container, containerPort: number): void {
+    if (containerPort === 8000) {
+        container.readinessProbe = {
+            ...(container.readinessProbe ?? {}),
+            httpGet: container.readinessProbe?.httpGet ?? { path: "/", port: "http" },
+            initialDelaySeconds: 30,
+            periodSeconds: 10,
+            failureThreshold: 12
+        };
+        container.livenessProbe = {
+            ...(container.livenessProbe ?? {}),
+            httpGet: container.livenessProbe?.httpGet ?? { path: "/", port: "http" },
+            initialDelaySeconds: 90,
+            periodSeconds: 20,
+            failureThreshold: 6
+        };
+        return;
+    }
+    if (containerPort === 80) {
+        container.readinessProbe = {
+            tcpSocket: { port: "http" },
+            initialDelaySeconds: 3,
+            periodSeconds: 5,
+            failureThreshold: 6
+        };
+        container.livenessProbe = {
+            tcpSocket: { port: "http" },
+            initialDelaySeconds: 10,
+            periodSeconds: 15,
+            failureThreshold: 6
+        };
+    }
+}
+
+function applyStaticNginxRemediation(podSpec: k8s.V1PodSpec, container: k8s.V1Container): void {
+    container.command = ["nginx"];
+    container.args = ["-g", "daemon off;"];
+    const volumes = podSpec.volumes ?? [];
+    if (!volumes.some((v) => v.name === "paas-nginx-conf")) {
+        volumes.push({ name: "paas-nginx-conf", configMap: { name: PAAS_NGINX_CM } });
+    }
+    podSpec.volumes = volumes;
+    const mounts = container.volumeMounts ?? [];
+    if (!mounts.some((m) => m.name === "paas-nginx-conf")) {
+        mounts.push({
+            name: "paas-nginx-conf",
+            mountPath: "/etc/nginx/conf.d/default.conf",
+            subPath: "default.conf"
+        });
+    }
+    container.volumeMounts = mounts;
+}
+
+function applyPythonStartRemediation(container: k8s.V1Container, containerPort: number): void {
+    const start = `pip install -q --root-user-action=ignore 'gunicorn>=22' 'flask>=2' 2>/dev/null || true; cd /app && exec python3 -m gunicorn -b 0.0.0.0:${containerPort} main:app`;
+    container.command = ["/bin/sh", "-c"];
+    container.args = [start];
+}
+
 /** Force image + containerPort on rolling Deployments when Argo/GitOps drift leaves pods unhealthy. */
 export async function remediateRollingDeployments(
     namespace: string,
@@ -720,13 +813,17 @@ export async function remediateRollingDeployments(
     if (!api) {
         return [];
     }
+    if (containerPort === 80) {
+        await ensurePaasNginxConfigMap(namespace);
+    }
     const patched: string[] = [];
     const names = [...new Set(deploymentNames.map((n) => n.trim()).filter(Boolean))];
     for (const name of names) {
         try {
             const { body: dep } = await api.readNamespacedDeployment(name, namespace);
-            const containers = dep.spec?.template?.spec?.containers ?? [];
-            if (containers.length === 0) {
+            const podSpec = dep.spec?.template?.spec;
+            const containers = podSpec?.containers ?? [];
+            if (!podSpec || containers.length === 0) {
                 continue;
             }
             const container = containers[0];
@@ -742,6 +839,13 @@ export async function remediateRollingDeployments(
             const portEnv = envVars.find((entry) => entry.name === "PORT");
             if (portEnv) {
                 portEnv.value = String(containerPort);
+            }
+            applyProbeRemediation(container, containerPort);
+            if (containerPort === 80) {
+                applyStaticNginxRemediation(podSpec, container);
+            }
+            else if (containerPort === 8000) {
+                applyPythonStartRemediation(container, containerPort);
             }
             await api.replaceNamespacedDeployment(name, namespace, dep);
             patched.push(name);

@@ -1,4 +1,4 @@
-import { encodeBuildEnvForJenkins } from "@/server/projects/project-build-env";
+import { augmentBuildEnvForPipeline, encodeBuildEnvForJenkins } from "@/server/projects/project-build-env";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
@@ -699,7 +699,7 @@ export class JenkinsClient {
                     appendSharedJobAgentLabel(q);
                     appendRegistryParameters(q);
                 }
-                const buildEnvB64 = encodeBuildEnvForJenkins(buildParams.buildEnv);
+                const buildEnvB64 = encodeBuildEnvForJenkins(augmentBuildEnvForPipeline(projectName, buildParams.buildEnv));
                 if (buildEnvB64) {
                     q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
                 }
@@ -808,7 +808,7 @@ export class JenkinsClient {
             q.set(env.JENKINS_DEPLOY_GIT_CREDENTIALS_ID_PARAMETER, (deployParams.gitCredentialsId ?? "").trim());
             appendSharedJobAgentLabel(q);
             appendRegistryParameters(q);
-            const buildEnvB64 = encodeBuildEnvForJenkins(deployParams.buildEnv);
+            const buildEnvB64 = encodeBuildEnvForJenkins(augmentBuildEnvForPipeline(projectName, deployParams.buildEnv));
             if (buildEnvB64) {
                 q.set("PROJECT_BUILD_ENV_B64", buildEnvB64);
             }

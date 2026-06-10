@@ -31,6 +31,17 @@ async function probeSingleUrl(url: string, perAttemptMs: number): Promise<{
             }, { timeoutMs: perAttemptMs, bypassHostRemap: url.includes(".svc.cluster.local") });
             lastStatus = response.status;
             if (response.status >= 200 && response.status < 400) {
+                if (method === "GET") {
+                    const body = await response.text().catch(() => "");
+                    if (/Application error: a client-side exception has occurred/i.test(body)) {
+                        lastError = "client_side_exception";
+                        continue;
+                    }
+                    if (/Template parse errors:/i.test(body)) {
+                        lastError = "angular_template_error";
+                        continue;
+                    }
+                }
                 return { ok: true, statusCode: response.status, error: "" };
             }
             if (response.status === 404) {
