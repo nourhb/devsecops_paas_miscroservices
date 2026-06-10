@@ -19,6 +19,7 @@ import {
     remediateRollingDeployments,
     waitForAnyDeploymentReady
 } from "@/server/integrations/kubernetes-client";
+import { augmentBuildEnvForPipeline } from "@/server/projects/project-build-env";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
@@ -107,7 +108,8 @@ async function reconcileClusterWorkload(
     const candidates = rollingDeploymentNameCandidates(projectName);
     const patched = await remediateRollingDeployments(destNamespace, candidates, artifactRef, containerPort);
     if (patched.length > 0) {
-        sections.push(`[deploy] cluster remediate image+port=${containerPort} on: ${patched.join(", ")}`);
+        const profileNote = containerPort === 80 ? " nginx" : containerPort === 8000 ? " python" : "";
+        sections.push(`[deploy] cluster auto-heal image+port=${containerPort}${profileNote} on: ${patched.join(", ")}`);
     }
 }
 
@@ -299,7 +301,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     }
     const gitopsOptions = {
         buildProfile: deployProfile.profile,
-        buildEnv: resolveBuildEnvFromStorage(projectRow?.buildEnv)
+        buildEnv: augmentBuildEnvForPipeline(projectName, resolveBuildEnvFromStorage(projectRow?.buildEnv))
     };
     const blueGreen = blueGreenDeployEnabled();
     let argoSyncOk = false;
@@ -391,6 +393,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     let urlReachable = false;
+    let reachabilityError: string | undefined;
     const postArgoDelayMs = Math.max(0, Number(process.env.PAAS_DEPLOY_POST_ARGO_PROBE_DELAY_MS ?? "15000") || 0);
     if (postArgoDelayMs > 0 && (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true")) {
         sections.push(`[deploy] Waiting ${postArgoDelayMs}ms after Argo CD before HTTP probe…`);
@@ -408,6 +411,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
             projectName
         });
         urlReachable = reachability.reachable;
+        reachabilityError = reachability.error;
         if (reachability.reachable) {
             const viaNote = reachability.via === "in_cluster"
                 ? " (verified via in-cluster Service; public ingress may still propagate)"
@@ -420,13 +424,18 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     }
     const probeConfigured = Boolean(labIp || env.APPS_PUBLIC_URL_TEMPLATE.trim());
     if (probeConfigured && !urlReachable && !workloadReady) {
-        const healHint = `bash paas/scripts/heal-project-deploy-lab.sh ${projectName} ${input.runNumber ?? "?"}`;
-        const msg = `Pods not ready and URL not reachable (${appUrl}). On the lab VM run: ${healHint}`;
+        const msg = `Pods not ready and URL not reachable (${appUrl}). Cluster auto-heal was applied; retry Deploy from PaaS or fix the application build.`;
         sections.push(`[deploy] FAILED: ${msg}`);
         await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
         return;
     }
     else if (probeConfigured && !urlReachable && workloadReady) {
+        if (reachabilityError === "client_side_exception" || reachabilityError === "angular_template_error") {
+            const msg = `Application returned HTTP 200 but has client-side errors (${reachabilityError}). Fix app source or set NEXT_PUBLIC_* in Edit project → Application environment, then Deploy again.`;
+            sections.push(`[deploy] FAILED: ${msg}`);
+            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.UNKNOWN, msg);
+            return;
+        }
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} unreachable but workload ready — marking DEPLOYED`);
     }
     const okLog = tail(sections.join("\n"));

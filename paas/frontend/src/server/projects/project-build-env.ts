@@ -1,4 +1,24 @@
+import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
+
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,119}$/;
+
+/** Inject canonical public URL for Next.js / client bundles when not set in project build env. */
+export function augmentBuildEnvForPipeline(projectName: string, buildEnv: Record<string, string> | null | undefined): Record<string, string> {
+    const merged = { ...(buildEnv ?? {}) };
+    const publicUrl = buildAppPublicUrl(projectName).replace(/\/+$/, "");
+    const defaults: Record<string, string> = {
+        APP_BASE_URL: publicUrl,
+        NEXT_PUBLIC_APP_URL: publicUrl,
+        NEXT_PUBLIC_SITE_URL: publicUrl,
+        PUBLIC_URL: publicUrl
+    };
+    for (const [key, value] of Object.entries(defaults)) {
+        if (!String(merged[key] ?? "").trim()) {
+            merged[key] = value;
+        }
+    }
+    return merged;
+}
 
 function stripEnvValueQuotes(value: string): string {
     const trimmed = value.trim();

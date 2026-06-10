@@ -1121,6 +1121,12 @@ ${paasOpensslLegacyShellSnippet()}
       echo "[image] ERROR: nginx runtime but no dist/build with index.html"
       exit 1
     fi
+    if [ -f package.json ] && grep -q '@angular/core' package.json 2>/dev/null; then
+      if ! find "\$STATIC_ROOT" -name '*.js' -size +512c 2>/dev/null | head -1 | grep -q .; then
+        echo "[image] ERROR: angular build produced no JS bundles under \$STATIC_ROOT — fix ng build / source errors"
+        exit 1
+      fi
+    fi
     echo "[image] nginx static root: \$STATIC_ROOT"
     rm -rf paas-artifacts/_nginx_html paas-artifacts/_nginx_conf
     mkdir -p paas-artifacts/_nginx_html
