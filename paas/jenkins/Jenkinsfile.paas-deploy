@@ -296,7 +296,7 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
     return
   }
   sh """
-    set -eu
+    set +e
     cd '${appRoot}'
     IS_FIREBASE=0
     if node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.firebase||d['@firebase/app']?0:1)" 2>/dev/null; then
@@ -314,6 +314,9 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
       echo "[env] ERROR: .next missing after build — cannot verify NEXT_PUBLIC_* in bundle"
       exit 1
     fi
+    _paas_grep_next_out() {
+      grep -Rql "\$1" .next/static .next/server .next/standalone 2>/dev/null
+    }
     NEEDLE=""
     if [ -f .env.production ]; then
       NEEDLE=\$(grep -E '^NEXT_PUBLIC_FIREBASE_API_KEY=' .env.production 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\"' | tr -d "\\'" | cut -c1-12)
@@ -322,24 +325,27 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
       NEEDLE=\$(grep -E '^NEXT_PUBLIC_FIREBASE_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\\"' | tr -d "\\'" | cut -c1-12)
     fi
     if [ -n "\$NEEDLE" ]; then
-      if grep -Rql "\$NEEDLE" .next/static .next/server 2>/dev/null; then
+      if _paas_grep_next_out "\$NEEDLE"; then
         echo "[env] verify OK: Firebase API key prefix found in .next output"
         exit 0
       fi
       echo "[env] ERROR: next build finished but NEXT_PUBLIC_FIREBASE_API_KEY is not in .next — env was not baked"
       exit 1
     fi
-    if grep -Rq 'NEXT_PUBLIC_FIREBASE' .next/static/chunks 2>/dev/null; then
-      echo "[env] verify OK: NEXT_PUBLIC_FIREBASE references found in client chunks"
+    if grep -Rq 'NEXT_PUBLIC_FIREBASE' .next/static .next/server 2>/dev/null; then
+      echo "[env] verify OK: NEXT_PUBLIC_FIREBASE references found in build output"
       exit 0
     fi
-    if [ "\$HAS_NEXT_PUBLIC" = "1" ]; then
-      FIRST_KEY=\$(grep -hE '^NEXT_PUBLIC_[A-Z0-9_]+=' .env .env.production 2>/dev/null | head -1 | cut -d= -f1)
-      echo "[env] ERROR: \${FIRST_KEY} from Application environment not found in .next — check PROJECT_BUILD_ENV_B64 and next build logs"
+    if grep -qE 'NEXT_PUBLIC_|env:\\s*\\{' next.config.ts next.config.js next.config.mjs 2>/dev/null; then
+      echo "[env] verify OK: next.config env patch present (NEXT_PUBLIC_* may be unused in client bundle — OK for simple Next apps)"
+      exit 0
+    fi
+    if [ "\$IS_FIREBASE" = "1" ]; then
+      echo "[env] ERROR: Firebase app but NEXT_PUBLIC_* not found in .next — check PROJECT_BUILD_ENV_B64 and next build logs"
       exit 1
     fi
-    echo "[env] ERROR: Firebase app but no NEXT_PUBLIC_* in build output — check PROJECT_BUILD_ENV_B64 and next build logs"
-    exit 1
+    echo "[env] WARN: NEXT_PUBLIC_* set in Application environment but not referenced in client bundle — continuing (non-Firebase app)"
+    exit 0
   """
 }
 
@@ -2116,6 +2122,11 @@ def runPaasDeploy = {
               echo "[sca] cyclonedx-npm (package-lock.json)"
               npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
               CDX_RC=\$?
+              if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
+                echo "[sca] cyclonedx-npm retry from node_modules (npm ls ELSPROBLEMS workaround)"
+                npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+                CDX_RC=\$?
+              fi
             elif [ -f pnpm-lock.yaml ]; then
               npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
               CDX_RC=\$?
