@@ -37,16 +37,16 @@ export class SecurityGateError extends ApiError {
         super(422, message);
     }
 }
-export class ServiceUnavailableError extends ApiError {
-    constructor(message = "Service temporarily unavailable") {
-        super(503, message);
-    }
-}
 export class IntegrationError extends ApiError {
     constructor(message: string, options?: {
         details?: string;
         data?: Record<string, unknown>;
     }) {
         super(502, message, options);
+    }
+}
+export class ServiceUnavailableError extends ApiError {
+    constructor(message = "Service temporarily unavailable") {
+        super(503, message);
     }
 }

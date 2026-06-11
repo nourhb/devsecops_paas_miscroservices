@@ -28,10 +28,14 @@ else
   echo "OK: Postgres already running"
 fi
 
+echo "==> Session stability (HTTP lab — stop random logouts)"
+upsert APP_BASE_URL "http://192.168.56.129:30100"
+upsert SESSION_COOKIE_SECURE "false"
+upsert JWT_EXPIRES_IN "24h"
+
 echo "==> Full pipeline (no fast skip — force false in env + Jenkins job)"
 upsert JENKINS_PAAS_FAST_PIPELINE "false"
 upsert PAAS_ALLOW_FAST_PIPELINE "false"
-upsert JWT_EXPIRES_IN "24h"
 # Fix common lab mistake: true left in env from older scripts
 sed -i 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || \
   sed -i '' 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || true
