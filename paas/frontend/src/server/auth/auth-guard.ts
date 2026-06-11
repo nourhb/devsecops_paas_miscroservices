@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
+import * as jwt from "jsonwebtoken";
 import { getAuthUserById } from "@/server/auth/auth-service";
 import { verifyToken } from "@/server/security/jwt";
 import { getSessionCookieName } from "@/server/auth/session-cookie";
-import { ForbiddenError, UnauthorizedError } from "@/server/http/errors";
+import { isTransientDbError, withPrismaRetry } from "@/server/db/prisma-retry";
+import { ForbiddenError, ServiceUnavailableError, UnauthorizedError } from "@/server/http/errors";
 import type { UserRole } from "@/types";
 export interface AuthContext {
     userId: string;
@@ -16,6 +18,11 @@ function resolveToken(request: NextRequest) {
     }
     return request.cookies.get(getSessionCookieName())?.value?.trim() || "";
 }
+function isJwtAuthError(error: unknown): boolean {
+    return error instanceof jwt.TokenExpiredError
+        || error instanceof jwt.JsonWebTokenError
+        || error instanceof jwt.NotBeforeError;
+}
 export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[]): Promise<AuthContext> {
     const token = resolveToken(request);
     if (!token) {
@@ -23,7 +30,7 @@ export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[
     }
     try {
         const payload = verifyToken(token);
-        const user = await getAuthUserById(payload.userId);
+        const user = await withPrismaRetry(() => getAuthUserById(payload.userId));
         if (!user) {
             throw new UnauthorizedError("Your session is no longer valid (account missing\u2014often after a database reset). Sign out and sign in again.");
         }
@@ -44,6 +51,12 @@ export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[
         if (error instanceof UnauthorizedError) {
             throw error;
         }
-        throw new UnauthorizedError("Invalid or expired token");
+        if (isTransientDbError(error)) {
+            throw new ServiceUnavailableError("Database temporarily unavailable. Wait a few seconds and refresh — your session is still valid.");
+        }
+        if (isJwtAuthError(error)) {
+            throw new UnauthorizedError("Invalid or expired token");
+        }
+        throw error;
     }
 }

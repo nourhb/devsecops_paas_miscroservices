@@ -31,6 +31,7 @@ fi
 echo "==> Full pipeline (no fast skip — force false in env + Jenkins job)"
 upsert JENKINS_PAAS_FAST_PIPELINE "false"
 upsert PAAS_ALLOW_FAST_PIPELINE "false"
+upsert JWT_EXPIRES_IN "24h"
 # Fix common lab mistake: true left in env from older scripts
 sed -i 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || \
   sed -i '' 's/^JENKINS_PAAS_FAST_PIPELINE=true/JENKINS_PAAS_FAST_PIPELINE=false/' "${ENV_FILE}" 2>/dev/null || true
