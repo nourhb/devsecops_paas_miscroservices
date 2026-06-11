@@ -43,14 +43,8 @@ export function AuthProvider({ children }: {
             authStorage.clear();
             setUser(null);
         })
-            .catch((err: unknown) => {
+            .catch(() => {
             if (cancelled) {
-                return;
-            }
-            const status = typeof err === "object" && err !== null && "response" in err
-                ? (err as { response?: { status?: number } }).response?.status
-                : undefined;
-            if (status === 503) {
                 return;
             }
             authStorage.clear();
@@ -61,8 +55,20 @@ export function AuthProvider({ children }: {
                 setLoading(false);
             }
         });
+        const refreshInterval = window.setInterval(() => {
+            authApi.session()
+                .then((session) => {
+                    if (session.authenticated && session.user) {
+                        authStorage.setUser(session.user);
+                        setUser(session.user);
+                    }
+                })
+                .catch(() => {
+                });
+        }, 10 * 60 * 1000);
         return () => {
             cancelled = true;
+            window.clearInterval(refreshInterval);
         };
     }, []);
     const login = useCallback(async (payload: LoginRequest) => {

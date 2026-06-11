@@ -1,16 +1,17 @@
 import { NextRequest } from "next/server";
-import * as jwt from "jsonwebtoken";
 import { getAuthUserById } from "@/server/auth/auth-service";
 import { verifyToken } from "@/server/security/jwt";
 import { getSessionCookieName } from "@/server/auth/session-cookie";
-import { isTransientDbError, withPrismaRetry } from "@/server/db/prisma-retry";
+import { withPrismaRetry } from "@/server/db/prisma-retry";
 import { ForbiddenError, ServiceUnavailableError, UnauthorizedError } from "@/server/http/errors";
 import type { UserRole } from "@/types";
+
 export interface AuthContext {
     userId: string;
     email: string;
     role: UserRole;
 }
+
 function resolveToken(request: NextRequest) {
     const authHeader = request.headers.get("authorization");
     if (authHeader?.startsWith("Bearer ")) {
@@ -18,11 +19,12 @@ function resolveToken(request: NextRequest) {
     }
     return request.cookies.get(getSessionCookieName())?.value?.trim() || "";
 }
-function isJwtAuthError(error: unknown): boolean {
-    return error instanceof jwt.TokenExpiredError
-        || error instanceof jwt.JsonWebTokenError
-        || error instanceof jwt.NotBeforeError;
+
+function isTransientDbError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    return /can't reach database server|connection refused|ECONNREFUSED|ETIMEDOUT|P1001|P1017|Connection terminated|connection pool/i.test(msg);
 }
+
 export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[]): Promise<AuthContext> {
     const token = resolveToken(request);
     if (!token) {
@@ -45,18 +47,12 @@ export async function requireAuth(request: NextRequest, allowedRoles?: UserRole[
         };
     }
     catch (error) {
-        if (error instanceof ForbiddenError) {
-            throw error;
-        }
-        if (error instanceof UnauthorizedError) {
+        if (error instanceof ForbiddenError || error instanceof UnauthorizedError) {
             throw error;
         }
         if (isTransientDbError(error)) {
-            throw new ServiceUnavailableError("Database temporarily unavailable. Wait a few seconds and refresh — your session is still valid.");
+            throw new ServiceUnavailableError("Database is temporarily unavailable. Retry in a few seconds.");
         }
-        if (isJwtAuthError(error)) {
-            throw new UnauthorizedError("Invalid or expired token");
-        }
-        throw error;
+        throw new UnauthorizedError("Invalid or expired token");
     }
 }
