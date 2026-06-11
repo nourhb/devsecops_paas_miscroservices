@@ -29,13 +29,20 @@ apiClient.interceptors.request.use((config) => {
     return config;
 });
 apiClient.interceptors.response.use((response) => response, (error) => {
-    if (error.response?.status === 401) {
-        authStorage.clear();
-        if (typeof window !== "undefined") {
-            const requestUrl = String(error.config?.url || "");
-            const publicPaths = new Set(["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"]);
-            if (!requestUrl.includes("/api/auth/session") && !publicPaths.has(window.location.pathname)) {
-                window.location.href = "/login";
+    const status = error.response?.status;
+    if (status === 503) {
+        return Promise.reject(error);
+    }
+    if (status === 401) {
+        const requestUrl = String(error.config?.url || "");
+        const isAuthAttempt = /\/api\/auth\/(login|register|session)/.test(requestUrl);
+        if (!isAuthAttempt) {
+            authStorage.clear();
+            if (typeof window !== "undefined") {
+                const publicPaths = new Set(["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"]);
+                if (!publicPaths.has(window.location.pathname)) {
+                    window.location.href = "/login";
+                }
             }
         }
     }

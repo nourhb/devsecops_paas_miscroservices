@@ -1,8 +1,8 @@
 import { prisma } from "@/server/db/prisma";
 
-function isTransientDbError(error: unknown): boolean {
+export function isTransientDbError(error: unknown): boolean {
     const msg = error instanceof Error ? error.message : String(error);
-    return /can't reach database server|connection refused|ECONNREFUSED|ETIMEDOUT|P1001|P1017|Connection terminated/i.test(msg);
+    return /can't reach database server|connection refused|ECONNREFUSED|ETIMEDOUT|P1001|P1017|P2024|Connection terminated|connection pool|Timed out fetching a new connection/i.test(msg);
 }
 
 /** Retry Prisma writes when Postgres is briefly unreachable (common during pod rollout). */

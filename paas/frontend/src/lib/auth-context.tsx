@@ -43,8 +43,14 @@ export function AuthProvider({ children }: {
             authStorage.clear();
             setUser(null);
         })
-            .catch(() => {
+            .catch((err: unknown) => {
             if (cancelled) {
+                return;
+            }
+            const status = typeof err === "object" && err !== null && "response" in err
+                ? (err as { response?: { status?: number } }).response?.status
+                : undefined;
+            if (status === 503) {
                 return;
             }
             authStorage.clear();
