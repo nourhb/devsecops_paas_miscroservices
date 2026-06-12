@@ -1,6 +1,6 @@
 import { augmentBuildEnvForPipeline, encodeBuildEnvForJenkins } from "@/server/projects/project-build-env";
 import { env } from "@/server/config/env";
-import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
@@ -904,14 +904,30 @@ export class JenkinsClient {
             return false;
         }
         const imageParam = await this.getBuildParameterValue(projectName, projectId, buildNumber, env.JENKINS_DEPLOY_IMAGE_NAME_PARAMETER, "deploy");
-        if (imageParam?.trim()) {
-            const expected = buildDeployImageRepository(projectName).toLowerCase();
-            const actual = imageParam.trim().toLowerCase();
-            if (actual !== expected && !actual.startsWith(`${expected}:`) && !actual.startsWith(`${expected}@`)) {
-                return false;
-            }
+        if (imageParam?.trim() && !deployImageRepositoryMatchesProject(imageParam, projectName)) {
+            return false;
         }
         return true;
+    }
+    async confirmDeployBuildBelongsToProjectViaConsole(projectName: string, projectId: string, buildNumber: number): Promise<{
+        belongs: boolean;
+        jenkinsChecks: PipelineStepCheck[];
+        buildComplete: JenkinsWorkflowDescribeResult["buildComplete"];
+        result: string | null;
+    }> {
+        const console = await this.getBuildConsoleText(projectName, projectId, buildNumber, "deploy");
+        if (!console?.trim()) {
+            return { belongs: false, jenkinsChecks: [], buildComplete: null, result: null };
+        }
+        const parsed = parsePipelineVerificationLogs(console);
+        const belongs = parsed.buildComplete?.project === projectId
+            || /\[params\]\s+project=([^\s]+)/i.exec(console)?.[1]?.trim() === projectId;
+        return {
+            belongs,
+            jenkinsChecks: parsed.jenkinsChecks,
+            buildComplete: parsed.buildComplete,
+            result: parsed.buildComplete?.result?.toUpperCase() ?? null
+        };
     }
     async getLastBuildSummary(projectName: string, projectId: string, kind: JenkinsJobKind = "build"): Promise<{
         number: number;
@@ -993,12 +1009,19 @@ export class JenkinsClient {
             return [];
         }
     }
-    async getBuildConsoleHead(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "deploy", maxChars = 16_000): Promise<string | null> {
+    async getBuildConsoleHead(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "deploy", maxChars = 24_000): Promise<string | null> {
         const text = await this.getBuildConsoleText(projectName, projectId, buildNumber, kind);
         if (!text) {
             return null;
         }
         return text.slice(0, maxChars);
+    }
+    async getBuildConsoleTail(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "deploy", maxChars = 12_000): Promise<string | null> {
+        const text = await this.getBuildConsoleText(projectName, projectId, buildNumber, kind);
+        if (!text) {
+            return null;
+        }
+        return text.length > maxChars ? text.slice(-maxChars) : text;
     }
     async resolveDeployBuildProjectId(projectName: string, projectId: string, buildNumber: number, kind: JenkinsJobKind = "deploy"): Promise<string | null> {
         const paramName = env.JENKINS_DEPLOY_PROJECT_ID_PARAMETER;
@@ -1007,16 +1030,22 @@ export class JenkinsClient {
             return fromParam;
         }
         const head = await this.getBuildConsoleHead(projectName, projectId, buildNumber, kind);
-        if (!head) {
-            return null;
+        if (head) {
+            const paramsLine = head.match(/\[params\]\s+project=([^\s]+)/i);
+            if (paramsLine?.[1]?.trim()) {
+                return paramsLine[1].trim();
+            }
+            const completeHead = head.match(/PAAS_BUILD_COMPLETE\s+result=\S+\s+image=\S+\s+project=([^\s]+)/i);
+            if (completeHead?.[1]?.trim()) {
+                return completeHead[1].trim();
+            }
         }
-        const paramsLine = head.match(/\[params\]\s+project=([^\s]+)/i);
-        if (paramsLine?.[1]?.trim()) {
-            return paramsLine[1].trim();
-        }
-        const complete = head.match(/PAAS_BUILD_COMPLETE\s+result=\S+\s+image=\S+\s+project=([^\s]+)/i);
-        if (complete?.[1]?.trim()) {
-            return complete[1].trim();
+        const tail = await this.getBuildConsoleTail(projectName, projectId, buildNumber, kind);
+        if (tail) {
+            const completeTail = tail.match(/PAAS_BUILD_COMPLETE\s+result=\S+\s+image=\S+\s+project=([^\s]+)/i);
+            if (completeTail?.[1]?.trim()) {
+                return completeTail[1].trim();
+            }
         }
         return null;
     }
@@ -1412,28 +1441,35 @@ export class JenkinsClient {
         let building = false;
         let result: string | null = null;
         if (usesSharedJenkinsDeployJob()) {
+            const preferred = bn;
             const resolved = await this.resolveSharedDeployBuildNumber(projectName, projectId, bn, {
                 afterMs: Date.now() - 3_600_000
             });
             if (resolved != null) {
                 bn = resolved;
             }
-            else if (bn != null) {
-                return withUrl({
-                    configured: true,
-                    jobUrlPath: jobPath,
-                    displayJobName,
-                    buildNumber: null,
-                    building: true,
-                    result: null,
-                    runStatus: null,
-                    stages: syntheticStagesWhenWfapiUnavailable({ configured: true, building: true, result: null }).map(({ name, status, durationMs }) => ({
-                        name,
-                        status,
-                        durationMs
-                    })),
-                    wfapiHint: `Waiting for Jenkins build for "${projectName}" on shared paas-deploy (build #${bn} belongs to another project).`
-                });
+            else if (preferred != null) {
+                const consoleConfirm = await this.confirmDeployBuildBelongsToProjectViaConsole(projectName, projectId, preferred);
+                if (consoleConfirm.belongs) {
+                    bn = preferred;
+                }
+                else {
+                    return withUrl({
+                        configured: true,
+                        jobUrlPath: jobPath,
+                        displayJobName,
+                        buildNumber: null,
+                        building: true,
+                        result: null,
+                        runStatus: null,
+                        stages: syntheticStagesWhenWfapiUnavailable({ configured: true, building: true, result: null }).map(({ name, status, durationMs }) => ({
+                            name,
+                            status,
+                            durationMs
+                        })),
+                        wfapiHint: `Waiting for Jenkins build for "${projectName}" on shared paas-deploy (build #${preferred} belongs to another project).`
+                    });
+                }
             }
             else {
                 return withUrl({

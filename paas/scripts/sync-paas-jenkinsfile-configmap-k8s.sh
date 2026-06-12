@@ -41,6 +41,10 @@ fi
 if ! grep -qF 'pick_sonar_url' "${JENKINSFILE}"; then
   echo "WARN: Jenkinsfile missing in-cluster Sonar URL probe — Step 5 may fail from Jenkins pod"
 fi
+if ! grep -qF 'nginx-conf-writefile-20260611' "${JENKINSFILE}"; then
+  echo "ERROR: Jenkinsfile missing nginx-conf-writefile-20260611 (SPA/Angular Step 6 MissingPropertyException uri fix) — git pull" >&2
+  exit 1
+fi
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 

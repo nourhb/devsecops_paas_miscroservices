@@ -47,6 +47,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable paas-lab-recover.service
+systemctl start paas-lab-recover.service || true
 
 if systemctl list-unit-files k3s.service >/dev/null 2>&1; then
   systemctl enable k3s.service 2>/dev/null || true

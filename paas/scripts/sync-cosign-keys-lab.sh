@@ -95,16 +95,11 @@ if command -v kubectl >/dev/null 2>&1 && kubectl get ns cicd >/dev/null 2>&1; th
 fi
 
 if kubectl get crd clusterpolicies.kyverno.io >/dev/null 2>&1; then
-  python3 - "${KEYDIR}/cosign.pub" "${REPO_ROOT}/paas/k8s-manifests/kyverno/require-signed-images.yaml" <<'PY'
-import pathlib, sys
-pub = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").strip()
-body = "\n".join(line for line in pub.splitlines() if "BEGIN" not in line and "END" not in line).strip()
-tpl = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
-out = tpl.replace("REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY", body)
-pathlib.Path(sys.argv[2]).parent.joinpath(".require-signed-images.lab.yaml").write_text(out, encoding="utf-8")
-PY
-  kubectl apply -f "${REPO_ROOT}/paas/k8s-manifests/kyverno/.require-signed-images.lab.yaml" 2>/dev/null || true
-  echo "OK: Kyverno require-signed-images updated"
+  if bash "${SCRIPT_DIR}/apply-kyverno-policies-lab.sh"; then
+    echo "OK: Kyverno require-signed-images updated"
+  else
+    echo "WARN: Kyverno policy apply failed — run: bash paas/scripts/ensure-kyverno-lab.sh"
+  fi
 fi
 
 if [[ "${SYNC_FRONTEND}" == "1" ]]; then
@@ -118,8 +113,8 @@ if [[ "${SYNC_FRONTEND}" == "1" ]]; then
 fi
 
 if [[ "${SYNC_JENKINS}" == "1" ]]; then
-  # create_jenkins_paas_deploy_job.py loads docker-compose.env itself — do not `source` PEM keys.
-  python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+  # Params-only: sync COSIGN_* job defaults without replacing Pipeline script (stale repo Jenkinsfile).
+  python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
 fi
 
 if kubectl get deployment frontend -n paas >/dev/null 2>&1; then

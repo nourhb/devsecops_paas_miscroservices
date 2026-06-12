@@ -7,6 +7,8 @@ import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syncJenkinsfileConfigMapFromEmbeddedIfNeeded } from "@/server/jenkins/jenkinsfile-configmap-sync";
 import {
     jenkinsfileHasMultiFrameworkMarker,
+    jenkinsfileHasNginxConfWritefileFix,
+    NGINX_CONF_WRITEFILE_MARKER,
     readResolvedJenkinsfileGroovy,
     resolveJenkinsfilePath
 } from "@/server/jenkins/jenkinsfile-source";
@@ -67,7 +69,9 @@ async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: strin
     groovy: string;
     sourceLabel: string;
 }> {
-    if (jenkinsfileHasCraneFix(localGroovy) && jenkinsfileHasMutateCmdFix(localGroovy)) {
+    if (jenkinsfileHasCraneFix(localGroovy) &&
+        jenkinsfileHasMutateCmdFix(localGroovy) &&
+        jenkinsfileHasNginxConfWritefileFix(localGroovy)) {
         return { groovy: localGroovy, sourceLabel: localPath };
     }
     const rawUrl = env.JENKINSFILE_SYNC_RAW_URL.trim() || DEFAULT_JENKINSFILE_RAW_URL;
@@ -96,6 +100,9 @@ function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath:
     }
     if (!groovy.includes(ENV_SAFE_DOTENV_LOADER_MARKER)) {
         throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${ENV_SAFE_DOTENV_LOADER_MARKER} — EMAIL_PASS with spaces breaks . ./.env). Run: bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh`);
+    }
+    if (!jenkinsfileHasNginxConfWritefileFix(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${NGINX_CONF_WRITEFILE_MARKER} — SPA/Angular Step 6 fails with MissingPropertyException: uri). Rebuild the PaaS frontend image (npm run build embeds Jenkinsfile) or run fix-jenkins-paas-deploy-pipeline-lab.sh`);
     }
 }
 function jenkinsfileRelativePathExists(root: string): boolean {
@@ -146,6 +153,9 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     }
     if (!jenkinsfileHasMultiFrameworkMarker(localGroovy)) {
         throw new IntegrationError(`Jenkinsfile is missing multi-framework marker (python/nginx/legacy Angular). Rebuild and redeploy the PaaS frontend: bash paas/scripts/deploy-paas-frontend-k8s.sh`);
+    }
+    if (!jenkinsfileHasNginxConfWritefileFix(localGroovy)) {
+        throw new IntegrationError(`Jenkinsfile is missing ${NGINX_CONF_WRITEFILE_MARKER} (SPA/Angular Step 6 uri crash). Rebuild frontend: cd paas/frontend && npm run build, then redeploy.`);
     }
     const { groovy, sourceLabel } = await resolveGroovyForJenkinsSync(jenkinsfilePath, localGroovy);
     if (!jenkinsfileHasCraneFix(localGroovy) || !jenkinsfileHasMutateCmdFix(localGroovy)) {

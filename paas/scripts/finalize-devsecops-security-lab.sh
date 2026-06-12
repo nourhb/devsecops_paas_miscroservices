@@ -20,28 +20,33 @@ step() { echo ""; echo "========== $* =========="; }
 
 cd "${REPO_ROOT}"
 
-step "1/7 — Sync Cosign keys (env, Jenkins pod, Kyverno, frontend env)"
+step "1/8 — Kyverno + API tokens (Sonar, Dependency-Track)"
+bash "${SCRIPT_DIR}/apply-kyverno-policies-lab.sh" || true
+REGENERATE_SONAR_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-sonar-token-lab.sh" || true
+REGENERATE_DT_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" || true
+
+step "2/8 — Sync Cosign keys (env, Jenkins pod, Kyverno, frontend env)"
 SYNC_JENKINS=1 SYNC_FRONTEND=1 bash "${SCRIPT_DIR}/sync-cosign-keys-lab.sh"
 
-step "2/7 — Mount cosign.pub + Harbor docker auth into frontend"
+step "3/8 — Mount cosign.pub + Harbor docker auth into frontend"
 bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
 bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh"
 
 if [[ "${SKIP_FRONTEND_REBUILD}" != "1" ]]; then
-  step "3/7 — Rebuild frontend image (bundled cosign + Harbor-aware verify) — ~6 min"
+  step "4/8 — Rebuild frontend image (bundled cosign + Harbor-aware verify) — ~6 min"
   bash "${SCRIPT_DIR}/deploy-paas-frontend-k8s.sh"
 else
-  step "3/7 — SKIP_FRONTEND_REBUILD=1 (API may stay cosignSigned=false until you rebuild once)"
+  step "4/8 — SKIP_FRONTEND_REBUILD=1 (API may stay cosignSigned=false until you rebuild once)"
   bash "${SCRIPT_DIR}/wire-harbor-cluster-registry-lab.sh" "${ENV_FILE}" || true
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
   bash "${SCRIPT_DIR}/mount-cosign-pub-frontend-lab.sh"
   bash "${SCRIPT_DIR}/wire-harbor-docker-auth-frontend-lab.sh"
 fi
 
-step "4/7 — Sign latest successful Jenkins artifact image"
+step "5/8 — Sign latest successful Jenkins artifact image"
 bash "${SCRIPT_DIR}/sign-latest-jenkins-paas-image-lab.sh" lastBuild
 
-step "5/7 — Security API smoke test"
+step "6/8 — Security API smoke test"
 LOGIN_JSON='{"email":"nourhb58@gmail.com","password":"YourNewPassword123"}'
 COOKIE_JAR="/tmp/paas-finalize-cookies.txt"
 rm -f "${COOKIE_JAR}"
@@ -73,14 +78,14 @@ print("OK: Security API reports cosignSigned=true")
 PY
 
 if [[ "${TRIGGER_DEPLOY}" == "1" ]]; then
-  step "6/7 — Trigger new Jenkins deploy (Step 9 should auto-sign)"
+  step "7/8 — Trigger new Jenkins deploy (Step 9 should auto-sign)"
   PROJECT_ID="${PROJECT_ID}" python3 "${SCRIPT_DIR}/trigger-paas-deploy-lab.py"
   echo "Wait for SUCCESS, then: bash paas/scripts/sign-latest-jenkins-paas-image-lab.sh lastBuild"
 else
-  step "6/7 — Skip new deploy (set TRIGGER_DEPLOY=1 to trigger build #next)"
+  step "7/8 — Skip new deploy (set TRIGGER_DEPLOY=1 to trigger build #next)"
 fi
 
-step "7/7 — Done"
+step "8/8 — Done"
 cat <<EOF
 
 DevSecOps security lab is configured.

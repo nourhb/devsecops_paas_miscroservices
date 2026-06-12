@@ -79,14 +79,17 @@ elif echo "${SEARCH}" | grep -q '"paging"'; then
   echo "OK: projects/search works (${TOTAL} project(s))"
 fi
 
-ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
-kubectl rollout status deployment/frontend -n paas --timeout=300s
+if [[ "${REGENERATE_SONAR_SKIP_DEPLOY:-}" != "1" ]]; then
+  ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
+  kubectl rollout status deployment/frontend -n paas --timeout=300s
+fi
 
 echo "==> Push SONAR_TOKEN into Jenkins paas-deploy job defaults"
 set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
-python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full || true
+# Params-only: rotate SONAR_TOKEN without replacing the Pipeline script (avoids stale repo Jenkinsfile).
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
 
 echo "Done. Trigger a NEW deploy (not Rebuild) so Step 5 uses the new token."

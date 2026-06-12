@@ -16,6 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 DEFAULT_JENKINSFILE = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy"
+LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
 
 CRANE_MARKERS = (
     "crane-next16-202605-j48300-split",
@@ -37,8 +38,21 @@ MULTI_FRAMEWORK_MARKERS = (
     "multi-framework-20260611",
     "multi-framework-20260610",
 )
+NGINX_CONF_WRITEFILE_MARKER = "nginx-conf-writefile-20260611"
+SCA_FULL_INSTALL_MARKER = "sca-npm-install-full-20260611"
 OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign only"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
+
+
+def verify_job_script_markers(cfg_xml: str) -> bool:
+    """Return True when stored Pipeline script includes nginx writeFile + SCA full-install fixes."""
+    if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
+        return False
+    if SCA_FULL_INSTALL_MARKER not in cfg_xml:
+        return False
+    if "full npm install then cyclonedx-npm" not in cfg_xml:
+        return False
+    return True
 
 
 def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
@@ -119,6 +133,25 @@ def assert_jenkinsfile_sonar_step5_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing SonarScanner CLI 6 auth ({SONAR_LOGIN_MARKER} / {SONAR_LOGIN_JENKINSFILE_MARKER}).\n"
             "  bash paas/scripts/patch-jenkins-sonar-token-env-lab.sh\n"
             "  or: bash paas/scripts/ultimate-paas-sanhome-lab.sh ONLY_FIX=1",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def assert_jenkinsfile_nginx_conf_fix(groovy: str, path: Path) -> None:
+    if NGINX_CONF_WRITEFILE_MARKER not in groovy:
+        print(
+            f"ERROR: {path} missing {NGINX_CONF_WRITEFILE_MARKER} "
+            "(SPA/Angular Step 6 fails: MissingPropertyException: uri in Groovy GString).\n"
+            "  git pull\n"
+            "  bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "writeNginxPaasDefaultConf" not in groovy:
+        print(
+            f"ERROR: {path} missing writeNginxPaasDefaultConf helper.\n"
+            "  git pull and re-sync Jenkins job",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -223,6 +256,16 @@ def esc_xml(t: str) -> str:
 def esc_cdata(t: str) -> str:
     return t.replace("]]>", "]]]]><![CDATA[>")
 
+
+# Always refreshed from docker-compose.env when using --params-only (never replace Pipeline script).
+FORCE_ENV_PARAM_DEFAULTS: frozenset[str] = frozenset(
+    {
+        "SONAR_HOST_URL",
+        "SONAR_TOKEN",
+        "DEPENDENCY_TRACK_BASE_URL",
+        "DEPENDENCY_TRACK_API_KEY",
+    }
+)
 
 ENV_PARAM_DEFAULTS: dict[str, str] = {
     "HARBOR_REGISTRY": "HARBOR_REGISTRY",
@@ -414,6 +457,58 @@ def merge_env_param_defaults(existing_xml: str) -> str:
     return out
 
 
+def merge_env_param_defaults_force(
+    existing_xml: str,
+    force_names: frozenset[str] | None = None,
+) -> str:
+    """Overwrite selected job parameter defaults from docker-compose.env (e.g. rotated SONAR_TOKEN)."""
+    out = existing_xml
+    for param_name in force_names or FORCE_ENV_PARAM_DEFAULTS:
+        env_key = ENV_PARAM_DEFAULTS.get(param_name, param_name)
+        val = (os.environ.get(env_key) or os.environ.get(param_name) or "").strip()
+        if not val:
+            continue
+        out = force_job_parameter_default(out, param_name, val)
+    return out
+
+
+def resolve_jenkinsfile_path() -> Path:
+    """Prefer explicit JENKINSFILE, then staged /tmp copy with nginx fix, else repo default."""
+    explicit = (os.environ.get("JENKINSFILE") or "").strip()
+    if explicit:
+        return Path(explicit)
+    if LAB_JENKINSFILE_STAGING.is_file():
+        text = LAB_JENKINSFILE_STAGING.read_text(encoding="utf-8")
+        if NGINX_CONF_WRITEFILE_MARKER in text:
+            print(
+                f"NOTE: using staged Jenkinsfile {LAB_JENKINSFILE_STAGING} "
+                f"({len(text)} bytes, has {NGINX_CONF_WRITEFILE_MARKER})"
+            )
+            return LAB_JENKINSFILE_STAGING
+    return DEFAULT_JENKINSFILE
+
+
+def refuse_stale_groovy_overwrite(existing_xml: str, groovy: str) -> None:
+    """Block --force-full from downgrading a fixed job script to a stale repo Jenkinsfile."""
+    if not existing_xml.strip():
+        return
+    for marker in (
+        NGINX_CONF_WRITEFILE_MARKER,
+        SCA_FULL_INSTALL_MARKER,
+        "sca-sanitize-package-name-20260612",
+    ):
+        if marker in existing_xml and marker not in groovy:
+            print(
+                f"ERROR: refusing to overwrite Jenkins job — source Jenkinsfile is STALE "
+                f"(job has {marker!r}, file does not).\n"
+                "  JENKINSFILE=/tmp/Jenkinsfile.paas-deploy "
+                "python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full\n"
+                "  Or: bash paas/scripts/restore-jenkins-paas-deploy-lab.sh",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+
 CPS_FLOW_DEFINITION = "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"
 CDATA_SCRIPT_BLOCK = re.compile(
     rf'(<definition\b[^>]*class="{re.escape(CPS_FLOW_DEFINITION)}"[^>]*>\s*<script>\s*<!\[CDATA\[)'
@@ -429,10 +524,12 @@ def existing_config_needs_full_push(existing_xml: str, groovy: str) -> bool:
         if not any(m in existing_xml for m in MULTI_FRAMEWORK_MARKERS):
             return True
     checks = (
+        (NGINX_CONF_WRITEFILE_MARKER, ("writeNginxPaasDefaultConf",)),
         (ENV_SAFE_DOTENV_LOADER_MARKER, ("paasSourceBuildEnvShellSnippet", "env-decode-node-20260601")),
         (SONAR_LOGIN_JENKINSFILE_MARKER, (SONAR_LOGIN_MARKER, "printf 'sonar.login")),
         (COSIGN_DIGEST_MARKER, ()),
         (SONAR_STEP5_MARKER, ()),
+        (SCA_FULL_INSTALL_MARKER, ("full npm install then cyclonedx-npm",)),
     )
     for primary, fallbacks in checks:
         if primary not in groovy:
@@ -585,9 +682,10 @@ def main() -> int:
     token = os.environ.get("JENKINS_API_TOKEN") or os.environ.get("JENKINS_TOKEN") or ""
     job = os.environ.get("JOB_NAME", "paas-deploy")
     minimal = "--minimal" in sys.argv
+    params_only = "--params-only" in sys.argv
     force = "--force" in sys.argv or "--force-full" in sys.argv
     force_full = "--force-full" in sys.argv
-    jenkinsfile = Path(os.environ.get("JENKINSFILE", str(DEFAULT_JENKINSFILE)))
+    jenkinsfile = resolve_jenkinsfile_path()
 
     if not user or not token:
         print("ERROR: set JENKINS_USERNAME and JENKINS_API_TOKEN in docker-compose.env", file=sys.stderr)
@@ -595,6 +693,52 @@ def main() -> int:
     if any(x in token for x in ("paste", "YOUR", "REAL_TOKEN")):
         print("ERROR: JENKINS_API_TOKEN looks like a placeholder", file=sys.stderr)
         return 1
+
+    if not wait_for_jenkins_api(base):
+        return 1
+
+    client = JenkinsClient(base, user, token)
+    code, _ = client.call("/api/json")
+    print(f"GET /api/json -> {code}")
+    if code != 200:
+        return 1
+
+    job_path = f"/job/{urllib.parse.quote(job)}/api/json"
+    job_cfg = f"/job/{urllib.parse.quote(job)}/config.xml"
+
+    if params_only:
+        cfg_code, existing_cfg = client.call(job_cfg)
+        if cfg_code != 200 or not existing_cfg.strip():
+            print(f"ERROR: job '{job}' not found — create it first with --force --force-full", file=sys.stderr)
+            return 1
+        merged = ensure_job_parameters(existing_cfg)
+        merged = merge_env_param_defaults(merged)
+        merged = merge_env_param_defaults_force(merged)
+        xml = merged.encode("utf-8")
+        print(
+            f"Updating job '{job}' parameter defaults only ({len(xml)} bytes) — Pipeline script unchanged"
+        )
+        extra = client.crumb_headers()
+        if extra:
+            print(f"Crumb: {list(extra.keys())[0]}")
+        ucode, ubody = client.call(job_cfg, "POST", xml, extra)
+        print(f"POST config.xml -> {ucode}")
+        if ucode not in (200, 201, 302):
+            print(ubody[:2500])
+            return 1
+        verify_code, verify_cfg = client.call(job_cfg)
+        if verify_code == 200:
+            if not verify_job_script_markers(verify_cfg):
+                print(
+                    f"WARN: job script missing {NGINX_CONF_WRITEFILE_MARKER} — "
+                    "run bash paas/scripts/restore-jenkins-paas-deploy-lab.sh before deploying",
+                    file=sys.stderr,
+                )
+            for name in FORCE_ENV_PARAM_DEFAULTS:
+                if job_defines_string_parameter(verify_cfg, name):
+                    print(f"OK: job parameter {name} defined")
+        print(f"OK: {base}/job/{job}/")
+        return 0
 
     if minimal:
         groovy = MINIMAL_GROOVY
@@ -613,15 +757,7 @@ def main() -> int:
         assert_jenkinsfile_cosign_digest_fix(groovy, jenkinsfile)
         assert_jenkinsfile_sonar_step5_fix(groovy, jenkinsfile)
         assert_jenkinsfile_multi_framework_fix(groovy, jenkinsfile)
-
-    if not wait_for_jenkins_api(base):
-        return 1
-
-    client = JenkinsClient(base, user, token)
-    code, _ = client.call("/api/json")
-    print(f"GET /api/json -> {code}")
-    if code != 200:
-        return 1
+        assert_jenkinsfile_nginx_conf_fix(groovy, jenkinsfile)
 
     code, pm_body = client.call("/pluginManager/api/json?depth=1")
     pipeline_markers = ("workflow-job", "workflow-cps", "workflow-aggregator")
@@ -637,8 +773,6 @@ def main() -> int:
         )
         return 1
 
-    job_path = f"/job/{urllib.parse.quote(job)}/api/json"
-    job_cfg = f"/job/{urllib.parse.quote(job)}/config.xml"
     code, _ = client.call(job_path)
     xml = build_xml(groovy, minimal_params=minimal)
 
@@ -648,11 +782,13 @@ def main() -> int:
         return 0
 
     if code == 200 and force:
+        cfg_code, existing_cfg = client.call(job_cfg)
+        if cfg_code == 200 and existing_cfg.strip():
+            refuse_stale_groovy_overwrite(existing_cfg, groovy)
         if force_full:
             mode = "full-document"
             print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode} — params + no concurrent builds)")
         else:
-            cfg_code, existing_cfg = client.call(job_cfg)
             if (
                 cfg_code == 200
                 and existing_cfg.strip()
@@ -682,6 +818,15 @@ def main() -> int:
             return 1
         verify_code, verify_cfg = client.call(job_cfg)
         if verify_code == 200:
+            if not verify_job_script_markers(verify_cfg):
+                print(
+                    f"ERROR: POST succeeded but job script still missing required markers "
+                    f"({NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}).\n"
+                    "  JENKINSFILE=/path/to/Jenkinsfile.paas-deploy bash paas/scripts/restore-jenkins-paas-deploy-lab.sh",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"OK: job script contains {NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}")
             for name in (
                 "SONAR_HOST_URL",
                 "SONAR_TOKEN",

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Workflow } from "lucide-react";
 import { jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle, formatStageDurationMs } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { buildPaasDeployDisplayStages } from "@/lib/paas-deploy-jenkins-stages";
-import { parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
+import { parsePipelineVerificationLogs, mergeJenkinsChecksByStep } from "@/server/jenkins/pipeline-step-verification";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,12 +38,30 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
         return null;
     }
     const data = stagesQuery.data;
+    const logParsed = deploymentLogs ? parsePipelineVerificationLogs(deploymentLogs) : null;
     const jenkinsHref = jenkinsUrlForBrowser(data?.buildUrl, {
         buildNumber: data?.buildNumber ?? buildNumber
     });
-    const deployChecks = deploymentLogs ? parsePipelineVerificationLogs(deploymentLogs).deployChecks : [];
-    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], data ?? undefined, deployChecks, deploymentStatus);
-    const jenkinsChecks = data?.jenkinsChecks ?? [];
+    const deployChecks = logParsed?.deployChecks ?? [];
+    const jenkinsChecks = mergeJenkinsChecksByStep(data?.jenkinsChecks, logParsed?.jenkinsChecks);
+    const wfMeta = data
+        ? {
+            ...data,
+            jenkinsChecks,
+            buildComplete: data.buildComplete ?? logParsed?.buildComplete ?? null,
+            result: data.result ?? logParsed?.buildComplete?.result ?? null,
+            building: data.building && !logParsed?.buildComplete
+        }
+        : logParsed?.jenkinsChecks?.length || logParsed?.buildComplete
+            ? {
+                configured: true,
+                jenkinsChecks,
+                buildComplete: logParsed.buildComplete,
+                result: logParsed.buildComplete?.result ?? null,
+                building: false
+            }
+            : undefined;
+    const displayStages = buildPaasDeployDisplayStages(data?.stages ?? [], wfMeta, deployChecks, deploymentStatus);
     const stages: JenkinsPipelineStageRow[] = displayStages;
     const started = stages.filter((s) => s.status.toUpperCase() !== "NOT_EXECUTED").length;
     const total = stages.length;

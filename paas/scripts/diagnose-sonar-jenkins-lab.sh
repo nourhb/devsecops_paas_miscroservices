@@ -57,9 +57,10 @@ fi
 echo "==> Jenkins pod: ${NS}/${POD}"
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 for URL in \
+  "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
+  "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
   "${SONAR_BASE_URL:-}" \
-  "${SONAR_HOST_URL:-}" \
-  "http://sonarqube-service.sonarqube.svc.cluster.local:9000"; do
+  "${SONAR_HOST_URL:-}"; do
   [[ -z "${URL}" ]] && continue
   echo "--- probe ${URL} (from Jenkins pod)"
   kubectl exec -n "${NS}" "${POD}" -c "${JENKINS_CONTAINER}" -- sh -c "

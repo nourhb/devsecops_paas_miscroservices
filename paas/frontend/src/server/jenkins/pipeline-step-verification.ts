@@ -70,3 +70,12 @@ export function stepHasOk(checks: PipelineStepCheck[], stepNum: number): boolean
     }
     return row.some((c) => c.level === "OK") && !row.some((c) => c.level === "FAIL");
 }
+export function mergeJenkinsChecksByStep(...sources: Array<PipelineStepCheck[] | undefined>): PipelineStepCheck[] {
+    const byStep = new Map<number, PipelineStepCheck>();
+    for (const list of sources) {
+        for (const check of list ?? []) {
+            byStep.set(check.step, check);
+        }
+    }
+    return [...byStep.entries()].sort((a, b) => a[0] - b[0]).map(([, check]) => check);
+}

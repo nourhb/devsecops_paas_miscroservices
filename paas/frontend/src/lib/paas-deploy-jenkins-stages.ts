@@ -51,6 +51,12 @@ type WfMeta = {
     result?: string | null;
     error?: string | null;
     jenkinsChecks?: PipelineStepCheck[];
+    buildComplete?: {
+        result: string;
+        image: string;
+        project: string;
+        build: string;
+    } | null;
 };
 function checkLevelToStageStatus(level: PipelineStepCheckLevel): string {
     switch (level) {
@@ -174,13 +180,27 @@ export function applyDeployChecksToDisplayStages(stages: PaasDeployDisplayStage[
         };
     });
 }
+function fullSuccessSyntheticStages(jenkinsChecks: PipelineStepCheck[] | undefined): PaasDeployDisplayStage[] {
+    const base = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
+        name,
+        status: "SUCCESS",
+        durationMs: null,
+        synthetic: true
+    }));
+    return applyJenkinsChecksToDisplayStages(base, jenkinsChecks);
+}
 export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf: WfMeta | undefined, deployChecks?: Array<{
     step: string;
     status: "OK" | "WARN" | "FAIL";
     detail: string;
 }>, deploymentStatus?: string): PaasDeployDisplayStage[] {
     let stages: PaasDeployDisplayStage[];
-    if (!wf?.configured || wf.skipped) {
+    const jenkinsSucceeded = wf?.buildComplete?.result?.toUpperCase() === "SUCCESS"
+        || wf?.result?.toUpperCase() === "SUCCESS";
+    if (jenkinsSucceeded && (wf?.jenkinsChecks?.length || wf?.buildComplete)) {
+        stages = fullSuccessSyntheticStages(wf?.jenkinsChecks);
+    }
+    else if (!wf?.configured || wf.skipped) {
         stages = PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.map((name) => ({
             name,
             status: "NOT_EXECUTED",
@@ -202,5 +222,9 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
             synthetic: true
         }));
     }
-    return applyDeployChecksToDisplayStages(applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks), deployChecks, deploymentStatus);
+    stages = applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks);
+    if (jenkinsSucceeded && stages.filter((stage) => stage.status.toUpperCase() !== "NOT_EXECUTED").length < PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length) {
+        stages = fullSuccessSyntheticStages(wf?.jenkinsChecks);
+    }
+    return applyDeployChecksToDisplayStages(stages, deployChecks, deploymentStatus);
 }

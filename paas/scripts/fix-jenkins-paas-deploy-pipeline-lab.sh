@@ -6,21 +6,12 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
-JENKINSFILE_TO_PUSH="${JENKINSFILE}"
-echo "==> 1. Resolve Jenkinsfile with monorepo-app-root-20260531"
-if ! grep -qF 'monorepo-app-root-20260531' "${JENKINSFILE}" 2>/dev/null; then
-  echo "WARN: local repo missing monorepo fix — fetching from GitHub raw (main)"
-  FRESH="/tmp/Jenkinsfile.paas-deploy.monorepo-fix"
-  curl -fsSL --retry 3 --connect-timeout 30 \
-    "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy" \
-    -o "${FRESH}"
-  if ! grep -qF 'monorepo-app-root-20260531' "${FRESH}"; then
-    echo "FAIL: downloaded Jenkinsfile still missing monorepo-app-root-20260531" >&2
-    exit 1
-  fi
-  JENKINSFILE_TO_PUSH="${FRESH}"
-else
-  git -C "${REPO_ROOT}" pull --ff-only origin main 2>/dev/null || true
+echo "==> 1. Resolve Jenkinsfile (git pull + raw URL fallback)"
+JENKINSFILE_TO_PUSH="$(bash "${SCRIPT_DIR}/resolve-jenkinsfile-lab.sh")"
+echo "    Using: ${JENKINSFILE_TO_PUSH}"
+if ! grep -qF 'monorepo-app-root-20260531' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing monorepo-app-root-20260531" >&2
+  exit 1
 fi
 if ! grep -qF 'crane-next16-202605-j48300-split' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
   echo "FAIL: Jenkinsfile missing crane-next16-202605-j48300-split" >&2
@@ -43,6 +34,15 @@ if ! grep -qF 'cosign-digest-crane-bin-20260602' "${JENKINSFILE_TO_PUSH}" 2>/dev
   echo "FAIL: Jenkinsfile missing cosign-digest-crane-bin-20260602 (Kyverno needs digest cosign sign)." >&2
   echo "  git pull origin main && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh" >&2
   exit 1
+fi
+if ! grep -qF 'nginx-conf-writefile-20260611' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "FAIL: Jenkinsfile missing nginx-conf-writefile-20260611 (SPA/Angular Step 6 MissingPropertyException: uri)." >&2
+  echo "  git pull && bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh" >&2
+  exit 1
+fi
+if ! grep -qF 'sca-npm-install-full-20260611' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
+  echo "WARN: Jenkinsfile missing sca-npm-install-full-20260611 (Step 4 SCA uses package-lock-only → ELSPROBLEMS)."
+  echo "  git pull / scp Jenkinsfile from dev machine, then: bash paas/scripts/apply-jenkins-sca-full-install-lab.sh"
 fi
 if ! grep -qF 'paas-artifacts/sonar-scanner.log' "${JENKINSFILE_TO_PUSH}" 2>/dev/null; then
   echo "==> Sonar Step 5 fix missing — patch Jenkinsfile (JAVA_HOME + scanner log)"
@@ -132,7 +132,9 @@ if ! bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh"; then
 fi
 
 echo ""
-echo "OK — trigger a NEW build (not Rebuild). Console must show:"
+echo "OK — trigger a NEW build (not Replay / not Rebuild #508). Console must show:"
+echo "  marker nginx-conf-writefile-20260611"
+echo "  marker sca-npm-install-full-20260611 (Step 4 SBOM → Dependency-Track)"
 echo "  marker cosign-digest-crane-bin-20260602"
 echo "  PAAS_IMAGE_DIGEST=... after crane mutate"
 echo "  [cosign] signing digest ... then [cosign] signing tag ..."
