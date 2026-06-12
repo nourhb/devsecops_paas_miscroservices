@@ -38,16 +38,16 @@ ENV_FILE="${ENV_FILE}" NODE_IP="${NODE_IP}" bash "${SCRIPT_DIR}/fix-integrations
 echo "=== 3. Policy engine (Kyverno) ==="
 upsert_env POLICY_ENGINE "kyverno"
 upsert_env KYVERNO_POLICIES_ENABLED "true"
-if kubectl get crd clusterpolicies.kyverno.io >/dev/null 2>&1; then
-  kubectl apply -f "${REPO_ROOT}/paas/k8s-manifests/kyverno/" || true
-  echo "OK: Kyverno policies applied"
+if command -v helm >/dev/null 2>&1; then
+  bash "${SCRIPT_DIR}/apply-kyverno-policies-lab.sh" || echo "WARN: Kyverno install/apply failed — run: bash paas/scripts/ensure-kyverno-lab.sh"
 else
-  echo "WARN: Kyverno CRD not found — install Kyverno or set POLICY_ENGINE=none for demo"
+  echo "WARN: helm missing — cannot install Kyverno; set POLICY_ENGINE=none for demo"
 fi
 
 echo "=== 4. Jenkins pipeline: full security stages (not fast pipeline) ==="
 upsert_env JENKINS_PAAS_FAST_PIPELINE "false"
 upsert_env JENKINS_SH_KEEPALIVE "true"
+upsert_env JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER "false"
 
 echo "=== 5. SonarQube API token (fixes UI HTTP 401) ==="
 SONAR_BASE="$(grep '^SONAR_BASE_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true)"
@@ -70,7 +70,14 @@ if [[ -n "${SONAR_BASE}" ]]; then
       echo "      Set SONAR_TOKEN=... in ${ENV_FILE}"
     fi
   else
-    echo "OK: SONAR_TOKEN already set"
+    SONAR_VALID="$(curl -sS -m 12 -u "${CUR_TOKEN}:" "${SONAR_BASE%/}/api/authentication/validate" 2>/dev/null || true)"
+    if echo "${SONAR_VALID}" | grep -q '"valid":true'; then
+      echo "OK: SONAR_TOKEN valid"
+    else
+      echo "WARN: SONAR_TOKEN rejected (${SONAR_VALID:-curl failed}) — regenerating"
+      REGENERATE_SONAR_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-sonar-token-lab.sh" || \
+        echo "      Manual: ${SONAR_BASE} → My Account → Security → Generate Token"
+    fi
   fi
 else
   echo "WARN: SonarQube not reachable — run: AUTO_FIX=1 bash paas/scripts/check.sh"
@@ -79,19 +86,24 @@ fi
 echo "=== 6. Dependency-Track API key ==="
 DT_BASE="$(grep '^DEPENDENCY_TRACK_BASE_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true)"
 [[ -z "${DT_BASE}" ]] && DT_BASE="$(svc_url dependency-track dtrack-dependency-track-api-server 8080)"
+[[ -z "${DT_BASE}" ]] && DT_BASE="$(svc_url security dependency-track-api-server 8080)"
 if [[ -n "${DT_BASE}" ]]; then
   upsert_env DEPENDENCY_TRACK_BASE_URL "${DT_BASE}"
-  CUR_DT="$(grep '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- || true)"
-  if [[ -z "${CUR_DT}" || "${CUR_DT}" == *"your-dependency"* ]]; then
-    echo "WARN: Set DEPENDENCY_TRACK_API_KEY in ${ENV_FILE}"
-    echo "      UI: $(svc_url dependency-track dtrack-dependency-track-frontend 8080 2>/dev/null || echo dependency-track) → Administration → Access Management → Teams → API Keys"
-  else
+  CUR_DT="$(grep '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true)"
+  DT_HTTP="000"
+  if [[ -n "${CUR_DT}" && "${CUR_DT}" != *"your-dependency"* ]]; then
     DT_HTTP="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "X-Api-Key: ${CUR_DT}" "${DT_BASE%/}/api/v1/project" 2>/dev/null || echo 000)"
-    if [[ "${DT_HTTP}" == "200" ]]; then
-      echo "OK: DEPENDENCY_TRACK_API_KEY valid (HTTP 200)"
-    else
-      echo "WARN: DEPENDENCY_TRACK_API_KEY rejected (HTTP ${DT_HTTP}) — run: bash paas/scripts/regenerate-dependency-track-api-key-lab.sh"
-    fi
+  fi
+  if [[ -z "${CUR_DT}" || "${CUR_DT}" == *"your-dependency"* || "${DT_HTTP}" != "200" ]]; then
+    echo "==> Auto-generate DEPENDENCY_TRACK_API_KEY (HTTP ${DT_HTTP})"
+    REGENERATE_DT_SKIP_DEPLOY=1 bash "${SCRIPT_DIR}/regenerate-dependency-track-api-key-lab.sh" || {
+      echo "WARN: could not auto-generate API key"
+      echo "      UI: $(svc_url dependency-track dtrack-dependency-track-frontend 8080 2>/dev/null \
+        || svc_url security dependency-track-frontend 8080 2>/dev/null \
+        || echo dependency-track) → Administration → Access Management → Teams → API Keys"
+    }
+  else
+    echo "OK: DEPENDENCY_TRACK_API_KEY valid (HTTP 200)"
   fi
 else
   echo "WARN: Dependency-Track API not found"
@@ -139,15 +151,7 @@ PY
   fi
   echo "OK: Cosign keys in ${ENV_FILE} (private key passed to Jenkins on each build trigger)"
   if kubectl get crd clusterpolicies.kyverno.io >/dev/null 2>&1; then
-    python3 - "${KEYDIR}/cosign.pub" "${REPO_ROOT}/paas/k8s-manifests/kyverno/require-signed-images.yaml" <<'PY'
-import pathlib, sys
-pub = pathlib.Path(sys.argv[1]).read_text().strip()
-body = "\n".join(line for line in pub.splitlines() if "BEGIN" not in line and "END" not in line).strip()
-tpl = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
-out = tpl.replace("REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY", body)
-pathlib.Path(sys.argv[2]).parent.joinpath(".require-signed-images.lab.yaml").write_text(out, encoding="utf-8")
-PY
-    kubectl apply -f "${REPO_ROOT}/paas/k8s-manifests/kyverno/.require-signed-images.lab.yaml" 2>/dev/null || true
+    bash "${SCRIPT_DIR}/apply-kyverno-policies-lab.sh" 2>/dev/null || true
     echo "OK: Kyverno require-signed-images updated with lab public key"
   fi
 else

@@ -24,6 +24,8 @@ MUTATE_FIX_MARKERS=(
 )
 ENV_LOADER_MARKER='env-safe-dotenv-loader-20260601'
 COSIGN_DIGEST_MARKER='cosign-digest-crane-bin-20260602'
+NGINX_CONF_MARKER='nginx-conf-writefile-20260611'
+SCA_FULL_MARKER='sca-npm-install-full-20260611'
 BROKEN_ENV_LOADER_PATTERN='. ./.env'
 
 if [[ -f "${ENV_FILE}" ]]; then
@@ -105,6 +107,22 @@ else
   exit 1
 fi
 
+echo "==> Local Jenkinsfile contains SPA/Angular nginx conf fix (writeFile, no Groovy \$uri)?"
+if grep -qF "${NGINX_CONF_MARKER}" "${JENKINSFILE}" && grep -qF 'writeNginxPaasDefaultConf' "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has ${NGINX_CONF_MARKER}"
+else
+  echo "FAIL: missing ${NGINX_CONF_MARKER} / writeNginxPaasDefaultConf — git pull"
+  exit 1
+fi
+
+echo "==> Local Jenkinsfile contains Step 4 SCA full npm install fix?"
+if grep -qF "${SCA_FULL_MARKER}" "${JENKINSFILE}" && grep -qF 'full npm install then cyclonedx-npm' "${JENKINSFILE}"; then
+  echo "OK: repo Jenkinsfile has ${SCA_FULL_MARKER}"
+else
+  echo "FAIL: missing ${SCA_FULL_MARKER} — scp Jenkinsfile from dev machine or git pull"
+  exit 1
+fi
+
 SONAR_STEP5_MARKER="paas-artifacts/sonar-scanner.log"
 echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
 if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}"; then
@@ -173,7 +191,10 @@ elif echo "${CFG}" | grep -qF 'digest ref unavailable (crane/triangulate); tag s
   exit 1
 fi
 
-if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}"; then
+if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}" \
+  || echo "${CFG}" | grep -qF 'sonar-scanner.log' \
+  || echo "${CFG}" | grep -qF 'sonar-scanner&#47;log' \
+  || echo "${CFG}" | grep -qF 'pick_sonar_url'; then
   echo "OK: Jenkins job has Sonar Step 5 fix (${SONAR_STEP5_MARKER})"
 else
   echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/patch-jenkins-sonar-step5-lab.sh"
@@ -196,8 +217,33 @@ else
   exit 1
 fi
 
+if echo "${CFG}" | grep -qF "${NGINX_CONF_MARKER}" && echo "${CFG}" | grep -qF 'writeNginxPaasDefaultConf'; then
+  echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
+else
+  echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"
+  echo "Fix: bash paas/scripts/restore-jenkins-paas-deploy-lab.sh"
+  echo "      Then Build with Parameters — do NOT Replay old builds"
+  exit 1
+fi
+
+if echo "${CFG}" | grep -qF "${SCA_FULL_MARKER}" && echo "${CFG}" | grep -qF 'full npm install then cyclonedx-npm'; then
+  echo "OK: Jenkins job has ${SCA_FULL_MARKER} (Step 4 SBOM for vite projects without lockfile)"
+elif echo "${CFG}" | grep -qF 'sca-npm-install-nolock-20260611' \
+  || echo "${CFG}" | grep -qF '--package-lock-only' && echo "${CFG}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; then
+  echo "FAIL: Jenkins job has OLD/broken Step 4 SCA (package-lock-only or partial patch)"
+  echo "Fix: bash paas/scripts/restore-jenkins-paas-deploy-lab.sh"
+  exit 1
+else
+  echo "FAIL: Jenkins job missing ${SCA_FULL_MARKER}"
+  echo "Fix: bash paas/scripts/restore-jenkins-paas-deploy-lab.sh"
+  exit 1
+fi
+
 if jenkins_text_has_crane_fix "${CFG}"; then
   echo "OK: Jenkins job ${JOB} is up to date ($(wc -c <<< "${CFG}") bytes config)"
+  echo ""
+  echo "Trigger a NEW build: Jenkins → ${JOB} → Build with Parameters"
+  echo "Do NOT click Replay on #508 / #548 — Replay re-runs the OLD broken pipeline script."
   exit 0
 fi
 

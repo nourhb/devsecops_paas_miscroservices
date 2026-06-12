@@ -8,9 +8,14 @@ export const EMBEDDED_JENKINSFILE_ROOT = "/app/paas-jenkinsfile-embedded";
 /** May be overridden by ConfigMap mount (can stay stale after image upgrades). */
 export const BUNDLED_JENKINSFILE_ROOT = "/app/paas-bundled";
 export const MULTI_FRAMEWORK_MARKERS = ["multi-framework-20260611", "multi-framework-20260610"] as const;
+export const NGINX_CONF_WRITEFILE_MARKER = "nginx-conf-writefile-20260611";
 
 export function jenkinsfileHasMultiFrameworkMarker(groovy: string): boolean {
     return MULTI_FRAMEWORK_MARKERS.some((m) => groovy.includes(m));
+}
+
+export function jenkinsfileHasNginxConfWritefileFix(groovy: string): boolean {
+    return groovy.includes(NGINX_CONF_WRITEFILE_MARKER) && groovy.includes("writeNginxPaasDefaultConf");
 }
 
 function jenkinsfileAt(root: string): string {
@@ -33,7 +38,7 @@ function readEmbeddedModuleGroovy(): string | null {
     try {
         const mod = require("./embedded-jenkinsfile") as { EMBEDDED_JENKINSFILE_GROOVY?: string };
         const groovy = mod.EMBEDDED_JENKINSFILE_GROOVY?.trim();
-        if (groovy && jenkinsfileHasMultiFrameworkMarker(groovy)) {
+        if (groovy && jenkinsfileHasMultiFrameworkMarker(groovy) && jenkinsfileHasNginxConfWritefileFix(groovy)) {
             return groovy;
         }
     }
@@ -80,10 +85,11 @@ export function resolveJenkinsfilePath(): {
     const embeddedText = readIfExists(embedded);
     const bundled = jenkinsfileAt(BUNDLED_JENKINSFILE_ROOT);
     const bundledText = readIfExists(bundled);
-    if (embeddedText && jenkinsfileHasMultiFrameworkMarker(embeddedText)) {
+    if (embeddedText && jenkinsfileHasMultiFrameworkMarker(embeddedText) && jenkinsfileHasNginxConfWritefileFix(embeddedText)) {
         return { absPath: embedded, root: EMBEDDED_JENKINSFILE_ROOT, source: "embedded" };
     }
-    if (embeddedText && (!bundledText || !jenkinsfileHasMultiFrameworkMarker(bundledText))) {
+    if (embeddedText && jenkinsfileHasNginxConfWritefileFix(embeddedText)
+        && (!bundledText || !jenkinsfileHasNginxConfWritefileFix(bundledText))) {
         return { absPath: embedded, root: EMBEDDED_JENKINSFILE_ROOT, source: "embedded" };
     }
     if (bundledText) {

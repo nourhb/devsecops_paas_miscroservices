@@ -106,6 +106,15 @@ if [[ "$(kubectl exec -n paas deploy/frontend -- printenv JENKINS_PAAS_FAST_PIPE
 fi
 
 echo ""
+echo "==> Boot auto-recover (run ONCE with sudo — fixes login after PC restart)"
+if [[ "$(id -u)" -eq 0 ]]; then
+  bash "${SCRIPT_DIR}/install-paas-autostart-lab.sh"
+else
+  echo "  sudo bash paas/scripts/install-paas-autostart-lab.sh"
+  echo "  (Then every reboot: Postgres + frontend recover automatically in ~2–5 min)"
+fi
+
+echo ""
 echo "OK. From PaaS UI only:"
 echo "  1. Edit project → Application environment (.env) → Save"
 echo "  2. Deploy (Steps 4–5 SCA/SAST; up to ${EXECUTORS} projects in parallel)"

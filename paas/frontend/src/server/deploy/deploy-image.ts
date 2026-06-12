@@ -36,3 +36,32 @@ export function buildDeployImageRepository(projectName: string): string {
 export function buildDeployImageTag(projectName: string, tag: string | number): string {
     return normalizeOciImageReference(`${buildDeployImageRepository(projectName)}:${tag}`);
 }
+
+/** Strip tag/digest so Harbor host:port paths compare correctly (not confused with :627 tag). */
+export function normalizeDeployImageRepositoryRef(imageRef: string): string {
+    const trimmed = imageRef.trim().toLowerCase();
+    const digestAt = trimmed.indexOf("@sha256:");
+    const withoutDigest = digestAt > 0 ? trimmed.slice(0, digestAt) : trimmed;
+    const slash = withoutDigest.lastIndexOf("/");
+    const lastColon = withoutDigest.lastIndexOf(":");
+    if (lastColon > slash && lastColon < withoutDigest.length - 1) {
+        return withoutDigest.slice(0, lastColon);
+    }
+    return withoutDigest;
+}
+
+export function deployImageRepositoryMatchesProject(imageRef: string, projectName: string): boolean {
+    const expected = buildDeployImageRepository(projectName).toLowerCase();
+    const actual = normalizeDeployImageRepositoryRef(imageRef);
+    if (actual === expected) {
+        return true;
+    }
+    const short = sanitizeDeployImageName(projectName);
+    if (actual === short) {
+        return true;
+    }
+    if (actual.endsWith(`/${short}`)) {
+        return true;
+    }
+    return false;
+}

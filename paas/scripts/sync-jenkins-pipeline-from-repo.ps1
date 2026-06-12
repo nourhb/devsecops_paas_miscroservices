@@ -6,7 +6,10 @@ $Script = Join-Path $RepoRoot "paas\scripts\create_jenkins_paas_deploy_job.py"
 if (-not (Test-Path $Script)) {
     throw "Missing $Script"
 }
+Write-Host "Embedding Jenkinsfile into frontend bundle..."
+node (Join-Path $RepoRoot "paas\frontend\scripts\embed-jenkinsfile.mjs")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Syncing Jenkins pipeline from repo to lab Jenkins..."
 python $Script --force --force-full
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host "OK. Next deploy console must show: marker=multi-framework-20260611"
+Write-Host "OK. Next deploy console must show: marker=nginx-conf-writefile-20260611"

@@ -4,6 +4,7 @@ import { env } from "@/server/config/env";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
 import {
     jenkinsfileHasMultiFrameworkMarker,
+    jenkinsfileHasNginxConfWritefileFix,
     readResolvedJenkinsfileGroovy
 } from "@/server/jenkins/jenkinsfile-source";
 
@@ -26,6 +27,9 @@ export async function syncJenkinsfileConfigMapFromEmbeddedIfNeeded(): Promise<st
     }
     if (!jenkinsfileHasMultiFrameworkMarker(resolved.groovy)) {
         return `[jenkinsfile-cm] Skipped (source missing multi-framework marker — rebuild frontend image).`;
+    }
+    if (!jenkinsfileHasNginxConfWritefileFix(resolved.groovy)) {
+        return `[jenkinsfile-cm] Skipped (source missing nginx-conf-writefile-20260611 — SPA/Angular Step 6 uri fix; rebuild frontend image).`;
     }
     const ns = CONFIGMAP_NAMESPACE;
     const embeddedPath = `${process.cwd()}/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy`;

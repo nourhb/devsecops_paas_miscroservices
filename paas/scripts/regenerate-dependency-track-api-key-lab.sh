@@ -21,10 +21,12 @@ upsert_env() {
 
 discover_dt_url() {
   if command -v kubectl >/dev/null 2>&1; then
-    for svc in dtrack-dependency-track-api-server dependency-track-api-server api-server; do
-      local np
-      np="$(kubectl get svc -n dependency-track "${svc}" -o jsonpath='{.spec.ports[?(@.port==8080)].nodePort}' 2>/dev/null || true)"
-      [[ -n "${np}" && "${np}" != "null" ]] && echo "http://${NODE_IP}:${np}" && return 0
+    local ns svc np
+    for ns in dependency-track security; do
+      for svc in dtrack-dependency-track-api-server dependency-track-api-server api-server; do
+        np="$(kubectl get svc -n "${ns}" "${svc}" -o jsonpath='{.spec.ports[?(@.port==8080)].nodePort}' 2>/dev/null || true)"
+        [[ -n "${np}" && "${np}" != "null" ]] && echo "http://${NODE_IP}:${np}" && return 0
+      done
     done
   fi
   grep '^DEPENDENCY_TRACK_BASE_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true

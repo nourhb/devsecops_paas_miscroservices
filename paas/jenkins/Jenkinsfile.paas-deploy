@@ -55,7 +55,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
         -F "bom=@sca/bom.json" 2>&1)" || true
       DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
       DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
-      if [[ "${DT_HTTP}" == "200" || "${DT_HTTP}" == "201" || "${DT_HTTP}" == "202" ]]; then
+      if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
       else
@@ -287,6 +287,20 @@ NODE
   return true
 }
 
+def writeNginxPaasDefaultConf(String appRoot = '.') {
+  def confDir = appRoot == '.' ? 'paas-artifacts/_nginx_conf/conf.d' : "${appRoot}/paas-artifacts/_nginx_conf/conf.d"
+  writeFile file: "${confDir}/default.conf", text: '''server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+'''
+}
+
 def verifyNextPublicEnvInBuild(String appRoot = '.') {
   if (!projectBuildEnvPresent()) {
     return
@@ -298,6 +312,10 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
   sh """
     set +e
     cd '${appRoot}'
+    if ! node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
+      echo "[env] verify: not Next.js — skip NEXT_PUBLIC bundle check (Express/API-only OK)"
+      exit 0
+    fi
     IS_FIREBASE=0
     if node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.firebase||d['@firebase/app']?0:1)" 2>/dev/null; then
       IS_FIREBASE=1
@@ -488,28 +506,42 @@ def paasOpensslLegacyShellSnippet() {
 '''
 }
 
+/** Groovy parse — works before portable Node is on PATH (legacy Jenkins agents). */
+def detectProjectFrameworkFromPackageText(String pkg) {
+  if (!pkg?.trim()) {
+    return 'node'
+  }
+  if (pkg =~ /"next"\s*:\s*["\^~]/) {
+    return 'next'
+  }
+  if (pkg.contains('"@angular/core"')) {
+    return 'angular'
+  }
+  if (pkg.contains('"@nestjs/core"')) {
+    return 'nestjs'
+  }
+  if (pkg =~ /"express"\s*:\s*["\^~]/) {
+    return 'express'
+  }
+  if (pkg.contains('"vite"') || pkg.contains('"@vitejs/plugin-react"') || pkg.contains('"react-scripts"')) {
+    return 'vite-react'
+  }
+  if (pkg.contains('"react"') || pkg.contains('"vue"')) {
+    return 'spa'
+  }
+  if (pkg =~ /"build"\s*:/ || pkg =~ /"build:ci"\s*:/ || pkg =~ /"start"\s*:/) {
+    return 'node'
+  }
+  return 'node'
+}
+
 /** next | angular | nestjs | express | vite-react | spa | node | python | java | static | unknown */
 def detectProjectFramework(String appRoot = '.') {
   def root = (appRoot ?: '.').trim() ?: '.'
-  if (fileExists("${root}/package.json")) {
+  def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
+  if (fileExists(pkgPath)) {
     try {
-      return sh(script: """
-        set -eu
-        cd '${root}'
-        node -e "
-          const p=require('./package.json');
-          const d={...(p.dependencies||{}),...(p.devDependencies||{})};
-          const s=p.scripts||{};
-          if (d.next) process.stdout.write('next');
-          else if (d['@angular/core']) process.stdout.write('angular');
-          else if (d['@nestjs/core']) process.stdout.write('nestjs');
-          else if (d.express) process.stdout.write('express');
-          else if (d.vite || d['@vitejs/plugin-react'] || d['react-scripts']) process.stdout.write('vite-react');
-          else if (d.react || d.vue) process.stdout.write('spa');
-          else if (s.build || s['build:ci'] || s.start) process.stdout.write('node');
-          else process.stdout.write('node');
-        "
-      """, returnStdout: true).trim()
+      return detectProjectFrameworkFromPackageText(readFile(pkgPath))
     } catch (Exception ignored) {
       return 'node'
     }
@@ -1121,19 +1153,25 @@ PAAS_PY
 }
 
 def dockerlessNginxCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot, String framework) {
+  println '[image] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no Groovy $uri in sh """)'
+  def legacyAngular = isLegacyAngularProject(appRoot)
+  if (legacyAngular) {
+    println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Node16 + ng build --progress=false; 4G heap; Step6 timeout bump)'
+  }
   def nodeVer = resolveNodeVersion(appRoot)
   println "[image] Step 6 — nginx static crane path (angular/spa dist → port 80; Node ${nodeVer})"
   ensureNodeTool(nodeVer)
-  withEnv(["PAAS_FRAMEWORK=${framework}"]) {
+  def heapMb = legacyAngular ? '4096' : '2048'
+  withEnv(["PAAS_FRAMEWORK=${framework}", "PAAS_LEGACY_ANGULAR=${legacyAngular ? 'true' : 'false'}"]) {
     sh """
       set -eu
       cd '${appRoot}'
-      export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-2048}"
+      export NODE_OPTIONS="\${NODE_OPTIONS:-} --max-old-space-size=\${JENKINS_NODE_MAX_OLD_SPACE_MB:-${heapMb}}"
 ${paasShellKeepaliveHelper()}
 ${paasOpensslLegacyShellSnippet()}
       echo "[image] nginx build using node \$(node -v 2>/dev/null || echo missing)"
       if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
-        if [ ! -d node_modules ] || [ ! -d node_modules/@angular ]; then
+        if [ ! -d node_modules ] || { [ -f package.json ] && grep -q '@angular/core' package.json 2>/dev/null && [ ! -d node_modules/@angular ]; }; then
           echo "[image] nginx path — npm install before ng build"
           if [ -f package-lock.json ]; then
             run_with_keepalive npm ci --no-audit --no-fund --prefer-offline || run_with_keepalive npm install --no-audit --no-fund
@@ -1143,7 +1181,10 @@ ${paasOpensslLegacyShellSnippet()}
         fi
         if [ ! -d dist ] && [ ! -d build ]; then
           echo "[image] nginx path — npm build before static layer"
-          if node -e "const s=require('./package.json').scripts||{};process.exit(s['build:ci']?0:1)" 2>/dev/null; then
+          if [ -f package.json ] && grep -q '@angular/core' package.json 2>/dev/null && [ -x node_modules/.bin/ng ]; then
+            echo "[image] legacy/modern Angular — ng build --progress=false (ivy compile may take several minutes)"
+            run_with_keepalive ./node_modules/.bin/ng build --progress=false
+          elif node -e "const s=require('./package.json').scripts||{};process.exit(s['build:ci']?0:1)" 2>/dev/null; then
             run_with_keepalive npm run build:ci
           elif node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.build?0:1)" 2>/dev/null; then
             run_with_keepalive npm run build
@@ -1180,17 +1221,11 @@ ${paasOpensslLegacyShellSnippet()}
     cp -a "\${STATIC_ROOT}/." paas-artifacts/_nginx_html/
     tar -C paas-artifacts/_nginx_html --transform='s#^#usr/share/nginx/html/#' -cf paas-artifacts/app-layer.tar .
     mkdir -p paas-artifacts/_nginx_conf/conf.d
-    cat > paas-artifacts/_nginx_conf/conf.d/default.conf <<'NGINX_PAAS'
-server {
-    listen 80;
-    server_name _;
-    root /usr/share/nginx/html;
-    index index.html;
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-NGINX_PAAS
+  """
+  writeNginxPaasDefaultConf(appRoot)
+  sh """
+    set -eu
+    cd '${appRoot}'
     tar -C paas-artifacts/_nginx_conf --transform='s#^#etc/nginx/#' -rf paas-artifacts/app-layer.tar .
     echo "[image] nginx crane append → ${imageRef}"
     "${craneBin}" ${craneInsecure} append \\
@@ -1759,6 +1794,12 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
   println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
   println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
+  println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
+  println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
+  println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'
+  println '[paas-jenkinsfile] marker=sca-npm-install-full-20260611 (full npm install before cyclonedx when no lockfile — not package-lock-only)'
+  println '[paas-jenkinsfile] marker=sca-sanitize-package-name-20260612 (cyclonedx rejects invalid npm names e.g. & in Warda/vite templates)'
+  println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -2107,12 +2148,20 @@ def runPaasDeploy = {
         println "[sca] Docker CLI missing; npm audit + @cyclonedx/cyclonedx-npm (Node) or extend agent for full SCA."
         def scaAppRoot = detectAppRoot()
         if (fileExists("${scaAppRoot}/package.json")) {
-          ensureNodeTool()
+          // cyclonedx-npm@latest pulls lru-cache needing Node 18+ tracingChannel — not Node 16 for legacy Angular
+          ensureNodeTool('20.19.5')
           def scaRc = sh(script: """
             set +e
             cd '${scaAppRoot}'
             mkdir -p sca
             npm audit --json > sca/npm-audit.json 2>/dev/null || true
+            node -e '
+              const fs=require("fs");
+              const slugify=(n)=>String(n||"app").normalize("NFKD").replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/^-+|-+\$/g,"").slice(0,214)||"app";
+              const valid=/^(?:@[a-z0-9-~][a-z0-9-._~]*\\/)?[a-z0-9-~][a-z0-9-._~]*\$/i;
+              const patch=(f)=>{ if(!fs.existsSync(f)) return; const j=JSON.parse(fs.readFileSync(f,"utf8")); const n=j.name||""; if(valid.test(n)) return; const s=slugify(n); console.log("[sca] invalid npm name "+JSON.stringify(n)+" -> "+s+" (cyclonedx-npm)"); j.name=s; fs.writeFileSync(f, JSON.stringify(j,null,2)+"\\n"); };
+              patch("package.json"); patch("package-lock.json");
+            ' 2>/dev/null || true
             CDX_RC=254
             if [ -f yarn.lock ]; then
               echo "[sca] cyclonedx-npm (yarn.lock — do not use --package-lock-only)"
@@ -2131,8 +2180,18 @@ def runPaasDeploy = {
               npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
               CDX_RC=\$?
             else
-              npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
-              CDX_RC=\$?
+              echo "[sca] no lockfile — full npm install then cyclonedx-npm (package-lock-only leaves ELSPROBLEMS / empty node_modules)"
+              if [ ! -d node_modules ] || [ ! -f package-lock.json ]; then
+                npm install --no-audit --no-fund
+              fi
+              if [ -f package-lock.json ]; then
+                npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
+                CDX_RC=\$?
+              fi
+              if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
+                npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
+                CDX_RC=\$?
+              fi
             fi
             echo \${CDX_RC}
           """, returnStdout: true).trim().tokenize('\n').last()
@@ -2266,6 +2325,7 @@ exit 0
             pick_sonar_url() {
               # Prefer in-cluster Sonar (faster than NodePort; NodePort can timeout on values.protobuf).
               for u in \
+                "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
                 "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
                 "http://sonarqube.sonarqube.svc.cluster.local:9000" \
                 "${SONAR_HOST_URL_PARAM}"
@@ -2395,7 +2455,9 @@ exit 0
 set +e
 SONAR_WS="${SONAR_SCAN_WORKSPACE}"
 if [ -z "${SONAR_WS}" ]; then SONAR_WS="$(pwd)"; fi
-for u in "${SONAR_SCAN_HOST_URL}" "http://sonarqube-service.sonarqube.svc.cluster.local:9000"; do
+for u in "${SONAR_SCAN_HOST_URL}" \
+  "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
+  "http://sonarqube-service.sonarqube.svc.cluster.local:9000"; do
   if curl -fsS -m 8 -u "${SONAR_SCAN_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
     SONAR_SCAN_HOST_URL="$u"
     break
@@ -2456,7 +2518,7 @@ echo $?
         artifactImage = params.FALLBACK_IMAGE?.trim() ?: "nginx:stable-alpine"
         println "[image] No build manifest found; using fallback image ${artifactImage}"
         println "PAAS_ARTIFACT_IMAGE=${artifactImage}"
-        sh """
+            sh """
           set +e
           mkdir -p paas-artifacts
           echo "PAAS_ARTIFACT_IMAGE=${artifactImage}" >> paas-artifacts/build-artifact-manifest.txt
@@ -2468,8 +2530,14 @@ echo $?
         ensureNodeTool(resolveNodeVersion(step6AppRoot))
       }
       def craneBin = ensureCraneTool()
-      println "[image] dockerless crane: durable-task timeout ${cranePushTimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
-      timeout(time: cranePushTimeoutMin, unit: 'MINUTES') {
+      def step6TimeoutMin = cranePushTimeoutMin
+      if (isLegacyAngularProject(step6AppRoot)) {
+        step6TimeoutMin = Math.max(step6TimeoutMin, 360)
+        println "[image] legacy Angular ivy build — Step 6 timeout ${step6TimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
+      } else {
+        println "[image] dockerless crane: durable-task timeout ${step6TimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
+      }
+      timeout(time: step6TimeoutMin, unit: 'MINUTES') {
         dockerlessImagePush(craneBin, dest, resolvedDockerfile)
       }
       artifactImage = dest

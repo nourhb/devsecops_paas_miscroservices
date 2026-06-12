@@ -193,6 +193,7 @@ function buildIntegrationProbes(input: {
     cosignSigned: boolean;
     policyEngine: ReturnType<typeof policyEngineLabel>;
     policyValidated: boolean;
+    kyvernoEnforcedPolicies: string[];
     opaAllowed: boolean;
     partialErrors: string[];
 }): SecurityIntegrationProbe[] {
@@ -269,7 +270,12 @@ function buildIntegrationProbes(input: {
                     ? "Policy validation passed."
                     : input.opaAllowed === false
                         ? "OPA rejected this image."
-                        : "Policy requirements not met (e.g. unsigned image)."
+                        : input.cosignSigned &&
+                            input.policyEngine === "Kyverno" &&
+                            (!input.kyvernoEnforcedPolicies.includes("require-signed-images") ||
+                                !input.kyvernoEnforcedPolicies.includes("require-non-root"))
+                            ? "Kyverno ClusterPolicies not in Enforce (or PaaS RBAC cannot list clusterpolicies — run enable-paas-kubernetes-lab.sh)."
+                            : "Policy requirements not met (e.g. unsigned image)."
         }
     ];
     if (input.partialErrors.length > 0) {
@@ -553,6 +559,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         cosignSigned,
         policyEngine,
         policyValidated,
+        kyvernoEnforcedPolicies: kyvernoPolicies.enforcedPolicies,
         opaAllowed,
         partialErrors
     });
