@@ -11,8 +11,7 @@ function friendlyDbBootMessage(raw: string): string | null {
         return null;
     }
     return "Database is still starting after reboot. Wait 2–3 minutes and try again. " +
-        "On the lab VM run: bash paas/scripts/recover-paas-after-k3s-restart.sh " +
-        "(install auto-recover once: sudo bash paas/scripts/install-paas-autostart-lab.sh).";
+        "On the lab VM run: bash paas/scripts/lab.sh start.";
 }
 
 export function fail(error: unknown) {
@@ -24,9 +23,9 @@ export function fail(error: unknown) {
         }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : "Internal server error";
-    const dbHint = friendlyDbBootMessage(message);
-    if (dbHint) {
-        return NextResponse.json({ message: dbHint }, { status: 503 });
+    const dbMessage = friendlyDbBootMessage(message);
+    if (dbMessage) {
+        return NextResponse.json({ message: dbMessage }, { status: 503 });
     }
     return NextResponse.json({ message }, { status: 500 });
 }

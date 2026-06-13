@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Fix a project after Jenkins SUCCESS but PaaS FAILED (pods not ready / wrong port / stale BlueGreen).
-# Usage: bash paas/scripts/heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber> [targetPort]
 set -uo pipefail
-
 PROJECT_NAME="${1:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber> [80|8000|3000]}"
 TAG="${2:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber>}"
 TARGET_PORT="${3:-}"
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
@@ -18,19 +14,200 @@ NS="${PROJECT_NAME}"
 APP="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
 IMAGE="${NODE_IP}:30002/paas/${PROJECT_NAME}:${TAG}"
 URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
-
-# shellcheck source=lib/argo-sync-lab.sh
-source "${SCRIPT_DIR}/lib/argo-sync-lab.sh"
-# shellcheck source=lib/gitops-ensure-main.sh
-source "${SCRIPT_DIR}/lib/gitops-ensure-main.sh"
-# shellcheck source=lib/patch-nginx-deploy-lab.sh
-source "${SCRIPT_DIR}/lib/patch-nginx-deploy-lab.sh"
-# shellcheck source=lib/patch-python-deploy-lab.sh
-source "${SCRIPT_DIR}/lib/patch-python-deploy-lab.sh"
-
+gitops_ensure_on_main() {
+  local repo="${1:?gitops repo path}"
+  local branch="${2:-main}"
+  local auth_url="${3:-}"
+  [[ -d "${repo}/.git" ]] || { echo "ERROR: not a git repo: ${repo}" >&2; return 1; }
+  pushd "${repo}" >/dev/null
+  if [[ -d .git/rebase-merge || -d .git/rebase-apply ]]; then
+    echo "==> gitops: abort stuck rebase in ${repo}"
+    git rebase --abort 2>/dev/null || rm -rf .git/rebase-merge .git/rebase-apply
+  fi
+  local fetch_target="origin"
+  if [[ -n "${auth_url}" ]]; then
+    git fetch "${auth_url}" "${branch}" 2>/dev/null || true
+    fetch_target="${auth_url}"
+  else
+    git fetch origin "${branch}" 2>/dev/null || true
+  fi
+  local current
+  current="$(git branch --show-current 2>/dev/null || true)"
+  if [[ -z "${current}" || "${current}" != "${branch}" ]]; then
+    echo "==> gitops: checkout ${branch} (was: ${current:-detached HEAD})"
+    if git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
+      git checkout -B "${branch}" "origin/${branch}"
+    elif git rev-parse "${fetch_target}/${branch}" >/dev/null 2>&1; then
+      git checkout -B "${branch}" "${fetch_target}/${branch}"
+    else
+      git checkout -B "${branch}"
+    fi
+  fi
+  if git rev-parse "origin/${branch}" >/dev/null 2>&1; then
+    echo "==> gitops: pull --rebase origin/${branch}"
+    git pull --rebase origin "${branch}" 2>/dev/null \
+      || git pull --rebase "${fetch_target}" "${branch}" 2>/dev/null \
+      || true
+  fi
+  popd >/dev/null
+}
+argo_sync_app_kubectl() {
+  local app="$1"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  [[ -n "${app}" ]] || return 1
+  if ! kubectl get application "${app}" -n "${ns}" >/dev/null 2>&1; then
+    echo "WARN: Application ${app} not found in ${ns}" >&2
+    return 1
+  fi
+  kubectl annotate application "${app}" -n "${ns}" \
+    argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
+  if kubectl patch application "${app}" -n "${ns}" --type merge -p '{
+    "operation": {
+      "initiatedBy": {"username": "lab-fix"},
+      "sync": {
+        "revision": "HEAD",
+        "prune": false,
+        "syncStrategy": {"apply": {"force": true}}
+      }
+    }
+  }' >/dev/null 2>&1; then
+    echo "OK: kubectl sync triggered for ${app}"
+    return 0
+  fi
+  echo "WARN: kubectl patch sync failed for ${app}" >&2
+  return 1
+}
+argo_sync_app_cli() {
+  local app="$1"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  command -v argocd >/dev/null 2>&1 || return 1
+  local base="${ARGOCD_BASE_URL:-}"
+  local user="${ARGOCD_USERNAME:-admin}"
+  local pass="${ARGOCD_PASSWORD:-}"
+  [[ -n "${base}" && -n "${pass}" ]] || return 1
+  local host port scheme
+  if [[ "${base}" =~ ^https?://([^:/]+):?([0-9]*) ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+    scheme="http"
+    [[ "${base}" == https* ]] && scheme="https"
+  else
+    return 1
+  fi
+  local login_args=(--username "${user}" --password "${pass}" --insecure --grpc-web)
+  [[ -n "${port}" ]] && login_args+=(--port "${port}") || true
+  argocd login "${host}" "${login_args[@]}" >/dev/null 2>&1 || return 1
+  argocd app sync "${app}" --force >/dev/null 2>&1 && {
+    echo "OK: argocd CLI sync for ${app}"
+    return 0
+  }
+  return 1
+}
+argo_sync_app_lab() {
+  local app="$1"
+  argo_sync_app_kubectl "${app}" && return 0
+  argo_sync_app_cli "${app}" && return 0
+  return 1
+}
+argo_wait_sync_lab() {
+  local app="$1"
+  local timeout="${2:-45}"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  local deadline=$((SECONDS + timeout))
+  while (( SECONDS < deadline )); do
+    local health sync
+    health="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")"
+    sync="$(kubectl get application "${app}" -n "${ns}" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")"
+    if [[ "${sync}" == "Synced" ]]; then
+      echo "OK: ${app} Synced (health=${health:-?})"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "WARN: ${app} not Synced within ${timeout}s" >&2
+  return 1
+}
+patch_nginx_deploy_lab() {
+  local ns="$1"
+  local cm="paas-nginx-override"
+  [[ -n "${ns}" ]] || return 1
+  kubectl create configmap "${cm}" -n "${ns}" --dry-run=client -o yaml \
+    --from-literal=default.conf='server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}' | kubectl apply -f - >/dev/null
+  python3 - "${ns}" "${cm}" <<'PY'
+import json, subprocess, sys
+ns, cm = sys.argv[1:3]
+out = subprocess.check_output(
+    ["kubectl", "get", "deploy", "-n", ns, "-o", "json"], text=True
+)
+data = json.loads(out)
+for dep in data.get("items", []):
+    name = dep.get("metadata", {}).get("name", "")
+    if name.endswith("-blue") or name.endswith("-green"):
+        continue
+    spec = dep.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    volumes = spec.setdefault("volumes", [])
+    if not any(v.get("name") == "paas-nginx-conf" for v in volumes):
+        volumes.append({"name": "paas-nginx-conf", "configMap": {"name": cm}})
+    containers = spec.get("containers") or []
+    if not containers:
+        continue
+    mounts = containers[0].setdefault("volumeMounts", [])
+    if not any(m.get("name") == "paas-nginx-conf" for m in mounts):
+        mounts.append({
+            "name": "paas-nginx-conf",
+            "mountPath": "/etc/nginx/conf.d/default.conf",
+            "subPath": "default.conf",
+        })
+    containers[0]["command"] = ["nginx"]
+    containers[0]["args"] = ["-g", "daemon off;"]
+    patch = json.dumps({"spec": dep["spec"]})
+    subprocess.run(
+        ["kubectl", "patch", "deployment", name, "-n", ns, "--type", "merge", "-p", patch],
+        check=False,
+    )
+    print(f"  nginx override mounted on deployment/{name}")
+PY
+}
+patch_python_deploy_lab() {
+  local ns="$1"
+  local port="${2:-8000}"
+  [[ -n "${ns}" ]] || return 1
+  python3 - "${ns}" "${port}" <<'PY'
+import json, subprocess, sys
+ns, port = sys.argv[1:3]
+start = (
+    "pip install -q --root-user-action=ignore 'gunicorn>=22' 'flask>=2' 2>/dev/null || true; "
+    "cd /app && exec python3 -m gunicorn -b 0.0.0.0:" + port + " main:app"
+)
+out = subprocess.check_output(["kubectl", "get", "deploy", "-n", ns, "-o", "json"], text=True)
+data = json.loads(out)
+for dep in data.get("items", []):
+    name = dep.get("metadata", {}).get("name", "")
+    if name.endswith("-blue") or name.endswith("-green"):
+        continue
+    containers = dep.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
+    if not containers:
+        continue
+    containers[0]["command"] = ["/bin/sh", "-c"]
+    containers[0]["args"] = [start]
+    patch = json.dumps({"spec": dep["spec"]})
+    subprocess.run(
+        ["kubectl", "patch", "deployment", name, "-n", ns, "--type", "merge", "-p", patch],
+        check=False,
+    )
+    print(f"  python start override on deployment/{name}")
+PY
+}
 ARGO_WAIT_SECONDS="${ARGO_WAIT_SECONDS:-45}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-120s}"
-
 if [[ -z "${TARGET_PORT}" ]]; then
   case "${PROJECT_NAME}" in
     *angular*|*demo-angular*) TARGET_PORT=80 ;;
@@ -38,10 +215,8 @@ if [[ -z "${TARGET_PORT}" ]]; then
     *) TARGET_PORT=3000 ;;
   esac
 fi
-
 [[ -d "${GITOPS}/.git" ]] || { echo "ERROR: clone gitops to ${GITOPS}" >&2; exit 1; }
 [[ -f "${VALUES}" ]] || { echo "ERROR: missing ${VALUES}" >&2; exit 1; }
-
 free_namespace_capacity() {
   local ns="$1"
   echo "==> Free cluster capacity in namespace ${ns}"
@@ -59,27 +234,22 @@ free_namespace_capacity() {
   kubectl delete pods -n "${ns}" --all --force --grace-period=0 2>/dev/null || true
   sleep 2
 }
-
 echo "==> Heal ${PROJECT_NAME} build :${TAG} targetPort=${TARGET_PORT}"
 echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
-
 if [[ -f "${ENV_FILE}" ]]; then
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   export GITHUB_TOKEN
 fi
 AUTH_URL=""
 [[ -n "${GITHUB_TOKEN:-}" ]] && AUTH_URL="https://${GITHUB_TOKEN}@github.com/nourhb/gitops.git"
-
 echo "==> Ensure gitops repo on main (fix detached HEAD / stuck rebase)"
 gitops_ensure_on_main "${GITOPS}" main "${AUTH_URL}"
-
 echo "==> Patch ${VALUES} (Rolling + image + targetPort)"
 python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" "${TARGET_PORT}" <<'PY'
 import sys
 from pathlib import Path
 import yaml
-
 path, tag, node_ip, name, port = sys.argv[1:6]
 port = int(port)
 repo = f"{node_ip}:30002/paas/{name}"
@@ -116,23 +286,18 @@ elif port == 80:
 Path(path).write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False), encoding="utf-8")
 print(f"OK values: Rolling image={repo}:{tag} service.targetPort={port}")
 PY
-
 free_namespace_capacity "${NS}"
-
 echo "==> Push GitOps to GitHub"
 if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
-  echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/recover-gitops-lab.sh)"
+  echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/push-gitops-lab.sh)"
 fi
-
 free_namespace_capacity "${NS}"
-
 echo "==> Argo sync ${APP}"
 kubectl patch application "${APP}" -n argocd --type json \
   -p='[{"op": "remove", "path": "/operation"}]' 2>/dev/null || true
 kubectl annotate application "${APP}" -n argocd argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
 argo_sync_app_lab "${APP}" || true
 argo_wait_sync_lab "${APP}" "${ARGO_WAIT_SECONDS}" || true
-
 echo "==> Force rolling deployment image + port"
 for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
   [[ "${dep}" == *-blue ]] || [[ "${dep}" == *-green ]] && continue
@@ -151,20 +316,16 @@ for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name
       -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":30},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":12},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":90}]' 2>/dev/null || true
   fi
 done
-
 if [[ "${TARGET_PORT}" == "80" ]]; then
   echo "==> Nginx config override (fixes invalid repo nginx.conf in existing images)"
   patch_nginx_deploy_lab "${NS}" || true
 fi
-
 if [[ "${TARGET_PORT}" == "8000" ]]; then
   echo "==> Python start override (gunicorn>=22 for Python 3.12)"
   patch_python_deploy_lab "${NS}" "${TARGET_PORT}" || true
 fi
-
 echo "==> Wait rollout"
 kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || true
-
 echo "==> Pods"
 kubectl get deploy,pods -n "${NS}" -o wide 2>/dev/null || true
 echo "==> Recent pod events / logs"
@@ -173,7 +334,6 @@ BAD_POD="$(kubectl get pods -n "${NS}" -o jsonpath='{range .items[?(@.status.con
 if [[ -n "${BAD_POD}" ]]; then
   kubectl describe pod "${BAD_POD}" -n "${NS}" 2>/dev/null | tail -20 || true
 fi
-
 HTTP="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" 2>/dev/null || echo '?')"
 echo ""
 echo "HTTP ${URL} => ${HTTP}"
@@ -181,6 +341,6 @@ if [[ "${HTTP}" =~ ^[23] ]]; then
   echo "OK — open ${URL}"
 else
   echo "WARN — still not HTTP 2xx/3xx"
-  echo "  bash paas/scripts/recover-gitops-lab.sh"
+  echo "  bash paas/scripts/push-gitops-lab.sh"
   echo "  kubectl logs -n ${NS} -l app.kubernetes.io/instance=${APP} --tail=80"
 fi

@@ -113,7 +113,6 @@ export interface JenkinsPipelineStagesResponse {
     reason?: string;
     error?: string;
     stagesSynthetic?: boolean;
-    wfapiHint?: string;
     jobUrlPath: string;
     displayJobName: string;
     buildNumber: number | null;

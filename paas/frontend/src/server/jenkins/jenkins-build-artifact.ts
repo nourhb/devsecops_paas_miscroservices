@@ -1,6 +1,5 @@
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 
-/** PAAS_BUILD_COMPLETE is emitted at the end of the log; the 5k progressive tail often drops it. */
 export function pickJenkinsLogForArtifactVerify(progressiveTail: string, fullConsole: string | null | undefined): string {
     if (/PAAS_BUILD_COMPLETE\s+result=/i.test(progressiveTail)) {
         return progressiveTail;

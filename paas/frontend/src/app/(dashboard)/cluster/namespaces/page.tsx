@@ -6,9 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Hint } from "@/components/hint";
 import { jenkinsUi, kubernetesApi, pipelineApi, projectApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { rollUpClusterFromProjects } from "@/lib/cluster-project-rollup";
 import type { Project } from "@/types";
 function formatTimestamp(value: string) {
@@ -314,10 +312,9 @@ export default function ClusterNamespacesPage() {
         selectedRecentMeta?.projectName,
         jenkinsConsoleExtra
     ]);
-    const podLogHint = "Select a pod in the table below and choose \u201CView logs\u201D, or use the platform CI/CD section for Jenkins output stored in this application.";
     const podLogBody = selectedPod
         ? podLogsQuery.data?.logs || (podLogsQuery.isFetching ? "Loading pod logs from Kubernetes\u2026" : "No log lines returned for this pod/container yet.")
-        : podLogHint;
+        : "Select a pod in the table below and choose \u201CView logs\u201D.";
     useEffect(() => {
         if (selectedPod) {
             logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -329,7 +326,6 @@ export default function ClusterNamespacesPage() {
           <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted">Cluster status</p>
           <h2 className="mt-2 flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight text-foreground">
             Kubernetes namespaces
-            <Hint side="bottom">{hints.clusterNamespaces.header}</Hint>
           </h2>
           <p className="mt-3 text-sm">
             <Link href="/cluster" className="font-medium text-primary hover:underline">

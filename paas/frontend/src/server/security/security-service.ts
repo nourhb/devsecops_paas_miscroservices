@@ -87,7 +87,6 @@ function integrationProjectKeys(project: Project): string[] {
     ].filter((k) => k.trim()))];
 }
 
-/** Dependency-Track projects are created from Harbor image slug (dtProjectNameForUpload), not always UUID. */
 function dependencyTrackLookupKeys(project: Project): string[] {
     const imageSlug = project.imageTag?.includes("/")
         ? project.imageTag.split("/").pop()?.split(":")[0]?.trim()
@@ -153,7 +152,6 @@ async function resolveLatestDeploymentLogs(project: Project, maxJenkinsChars = D
             }
         }
         catch {
-            // keep DB tail
         }
     }
     return {
@@ -375,58 +373,58 @@ async function resolveDependencyTrackMetrics(project: Project) {
     return dependencyTrackClient.projectMetrics(project.id);
 }
 
-async function buildIntegrationHints(project: Project, sonarStatus: string, dtProjectUuid: string | null, scaFromLogs?: {
+async function buildIntegrationNotes(project: Project, sonarStatus: string, dtProjectUuid: string | null, scaFromLogs?: {
     level: string;
     message: string;
 } | null, sonarFromLogs?: {
     level: string;
     message: string;
 } | null): Promise<string> {
-    const hints: string[] = [];
+    const notes: string[] = [];
     if (!env.SONAR_BASE_URL?.trim() || !env.SONAR_TOKEN?.trim()) {
-        hints.push("PaaS frontend: set SONAR_BASE_URL and SONAR_TOKEN in docker-compose.env, then run sync-paas-frontend-env-k8s.sh.");
+        notes.push("Configure SONAR_BASE_URL and SONAR_TOKEN on the PaaS frontend.");
     }
     else if (sonarStatus === "UNKNOWN") {
         if (sonarFromLogs?.level === "SKIP") {
-            hints.push(`SonarQube Step 5 skipped (${sonarFromLogs.message}) — set JENKINS_PAAS_FAST_PIPELINE=false on the Jenkins job and run Deploy again.`);
+            notes.push(`SonarQube Step 5 skipped (${sonarFromLogs.message}).`);
         }
         else if (sonarFromLogs?.level === "WARN" || sonarFromLogs?.level === "FAIL") {
-            hints.push(`SonarQube Step 5 ${sonarFromLogs.level}: ${sonarFromLogs.message}`);
+            notes.push(`SonarQube Step 5 ${sonarFromLogs.level}: ${sonarFromLogs.message}`);
         }
         else if (!sonarFromLogs) {
-            hints.push("SonarQube: no Step 5 marker in the last Jenkins build — trigger a full deploy (not GitOps-only).");
+            notes.push("SonarQube: no Step 5 marker in the last Jenkins build.");
         }
         else {
-            hints.push(`SonarQube: analysis may still be processing — refresh in a minute or check Sonar UI for project key ${project.projectName}.`);
+            notes.push(`SonarQube: analysis may still be processing for project key ${project.projectName}.`);
         }
         if (!(await sonarTokenLooksValid())) {
-            hints.push("SonarQube: SONAR_TOKEN rejected — run: bash paas/scripts/regenerate-sonar-token-lab.sh");
+            notes.push("SonarQube: SONAR_TOKEN rejected.");
         }
     }
     if (!env.DEPENDENCY_TRACK_BASE_URL?.trim() || !env.DEPENDENCY_TRACK_API_KEY?.trim()) {
-        hints.push("PaaS frontend: set DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY, then sync env to the frontend pod.");
+        notes.push("Configure DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY on the PaaS frontend.");
     }
     else if (!dtProjectUuid) {
         if (scaFromLogs?.level === "SKIP") {
-            hints.push(`Dependency-Track Step 4 skipped (${scaFromLogs.message}) — full pipeline required for SBOM upload.`);
+            notes.push(`Dependency-Track Step 4 skipped (${scaFromLogs.message}).`);
         }
         else if (scaFromLogs?.level === "WARN" || scaFromLogs?.level === "FAIL") {
-            hints.push(`Dependency-Track Step 4 ${scaFromLogs.level}: ${scaFromLogs.message}`);
+            notes.push(`Dependency-Track Step 4 ${scaFromLogs.level}: ${scaFromLogs.message}`);
         }
         else if (!scaFromLogs) {
-            hints.push("Dependency-Track: no Step 4 marker in last build — Jenkins must run SCA and POST bom.json (needs DEPENDENCY_TRACK_API_KEY on the Jenkins job).");
+            notes.push("Dependency-Track: no Step 4 marker in last build.");
         }
         else {
-            hints.push("Dependency-Track: Step 4 ran but no project linked yet — check Jenkins console for [sca] upload errors.");
+            notes.push("Dependency-Track: Step 4 ran but no project linked yet.");
         }
     }
     if (env.JENKINS_PAAS_FAST_PIPELINE === "true" && env.PAAS_ALLOW_FAST_PIPELINE === "true") {
-        hints.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps — set PAAS_ALLOW_FAST_PIPELINE=false (default) and redeploy from PaaS.");
+        notes.push("JENKINS_PAAS_FAST_PIPELINE=true skips Sonar and SCA steps.");
     }
-    if (hints.length === 0) {
+    if (notes.length === 0) {
         return "Security integrations reachable.";
     }
-    return hints.join(" ");
+    return notes.join(" ");
 }
 
 async function resolveSecurityImageRef(project: Project): Promise<string> {
@@ -525,26 +523,26 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         (!opaAllowed ? 20 : 0) +
         (!deploymentAllowed ? 15 : 0);
     const securityScore = score(100, severityPenalty + gatePenalty);
-    const integrationHints = await buildIntegrationHints(project, sonar.status, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
-    const logHints: string[] = [];
+    const integrationNotes = await buildIntegrationNotes(project, sonar.status, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
+    const logNotes: string[] = [];
     if (scaFromLogs?.level === "FAIL" || scaFromLogs?.level === "WARN") {
-        logHints.push(`Jenkins Step 4: ${scaFromLogs.level} — ${scaFromLogs.message}`);
+        logNotes.push(`Jenkins Step 4: ${scaFromLogs.level} — ${scaFromLogs.message}`);
     }
     if (sonarFromLogs?.level === "FAIL" || sonarFromLogs?.level === "WARN") {
-        logHints.push(`Jenkins Step 5: ${sonarFromLogs.level} — ${sonarFromLogs.message}`);
+        logNotes.push(`Jenkins Step 5: ${sonarFromLogs.level} — ${sonarFromLogs.message}`);
     }
     if (cosignFromLogs?.level === "FAIL" || cosignFromLogs?.level === "WARN") {
-        logHints.push(`Jenkins Step 9: ${cosignFromLogs.level} — ${cosignFromLogs.message}`);
+        logNotes.push(`Jenkins Step 9: ${cosignFromLogs.level} — ${cosignFromLogs.message}`);
     }
     const securitySummary = partialErrors.length > 0
-        ? `${integrationHints}${logHints.length ? ` ${logHints.join(" ")}` : ""} Partial errors: ${partialErrors.join("; ").slice(0, 220)}`
-        : logHints.length > 0
-            ? logHints.join(" ")
+        ? `${integrationNotes}${logNotes.length ? ` ${logNotes.join(" ")}` : ""} Partial errors: ${partialErrors.join("; ").slice(0, 220)}`
+        : logNotes.length > 0
+            ? logNotes.join(" ")
             : dependencyTrack.critical > 0
                 ? `${dependencyTrack.critical} critical vulnerabilities found in Dependency-Track.`
                 : dependencyTrack.high > 0
                     ? `${dependencyTrack.high} high vulnerabilities detected in Dependency-Track.`
-                    : integrationHints;
+                    : integrationNotes;
     const enforcementSummary = !cosignSigned
         ? "Deployment blocked: image is not signed with Cosign."
         : !policyValidated

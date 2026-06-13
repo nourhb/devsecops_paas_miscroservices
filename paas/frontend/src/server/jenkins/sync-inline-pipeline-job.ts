@@ -8,39 +8,21 @@ import { syncJenkinsfileConfigMapFromEmbeddedIfNeeded } from "@/server/jenkins/j
 import {
     jenkinsfileHasMultiFrameworkMarker,
     jenkinsfileHasNginxConfWritefileFix,
-    NGINX_CONF_WRITEFILE_MARKER,
+    jenkinsfileIsValidPaasDeploy,
     readResolvedJenkinsfileGroovy,
     resolveJenkinsfilePath
 } from "@/server/jenkins/jenkinsfile-source";
 import { syncInlinePaasDeployJobToJenkins } from "@/server/jenkins/inline-paas-deploy-job-sync";
 const JENKINSFILE_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
-const BUNDLED_MONOREPO_ROOT = "/app/paas-bundled";
-const PAAS_JENKINSFILE_MARKER_RE = /\[paas-jenkinsfile\] marker=steps-1-2-3(?:-\d+)*-202602/;
-const CRANE_NEXT16_MARKER = "crane-next16-202605";
-const COSIGN_SANDBOX_MARKER = "cosign-sandbox-sh-20260531";
-const MUTATE_CMD_FIX_MARKER = "monorepo-app-root-20260531";
-const ENV_SAFE_DOTENV_LOADER_MARKER = "env-safe-dotenv-loader-20260601";
 const BROKEN_CRANE_MUTATE_CMD_RE = /--entrypoint=\/bin\/sh\s*\\?\s*\n?\s*--cmd=-c[\s\S]*require\("\\\.\/package\.json"\)/m;
-function jenkinsfileHasMutateCmdFix(groovy: string): boolean {
-    return groovy.includes(MUTATE_CMD_FIX_MARKER) ||
-        groovy.includes("entrypoint=/app/start-paas.sh") ||
-        groovy.includes("[image] crane mutate OK");
-}
-function jenkinsfileHasCosignSandboxFix(groovy: string): boolean {
-    return groovy.includes(COSIGN_SANDBOX_MARKER) ||
-        (groovy.includes("def ensureCosignTool()") && groovy.includes("test -x '${labBin}'"));
-}
-const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
 const DEFAULT_JENKINSFILE_RAW_URL = "https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy";
+const STALE_CRANE_NEXT_BUILD_RE = /version\.split\(['"]\.['"]\)\.map\(Number\);process\.exit\(\(v\[0\]\|\|0\)>=16/;
+
 function jenkinsfileHasFixedStep6(groovy: string): boolean {
-    return (groovy.includes("crane-next16-202605: npm ci") ||
-        groovy.includes("crane-next16-202605-j48300: npm ci") ||
-        groovy.includes("crane-next16-202605-j48300-split") ||
-        (groovy.includes("Step 6a") && groovy.includes("foreground cmd; JENKINS-48300")));
+    return groovy.includes("Step 6a")
+        && groovy.includes("entrypoint=/app/start-paas.sh");
 }
-function jenkinsfileHasCraneFix(groovy: string): boolean {
-    return PAAS_JENKINSFILE_MARKER_RE.test(groovy) && groovy.includes(CRANE_NEXT16_MARKER);
-}
+
 async function fetchJenkinsfileFromRawUrl(url: string): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90000);
@@ -65,13 +47,12 @@ async function fetchJenkinsfileFromRawUrl(url: string): Promise<string> {
         clearTimeout(timer);
     }
 }
+
 async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: string): Promise<{
     groovy: string;
     sourceLabel: string;
 }> {
-    if (jenkinsfileHasCraneFix(localGroovy) &&
-        jenkinsfileHasMutateCmdFix(localGroovy) &&
-        jenkinsfileHasNginxConfWritefileFix(localGroovy)) {
+    if (jenkinsfileIsValidPaasDeploy(localGroovy) && jenkinsfileHasNginxConfWritefileFix(localGroovy)) {
         return { groovy: localGroovy, sourceLabel: localPath };
     }
     const rawUrl = env.JENKINSFILE_SYNC_RAW_URL.trim() || DEFAULT_JENKINSFILE_RAW_URL;
@@ -82,40 +63,35 @@ async function resolveGroovyForJenkinsSync(localPath: string, localGroovy: strin
         sourceLabel: `${rawUrl} (replaced stale file at ${localPath})`,
     };
 }
+
 function assertPaasDeployJenkinsfileSafeForSync(groovy: string, jenkinsfilePath: string): void {
-    if (!PAAS_JENKINSFILE_MARKER_RE.test(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is missing the PaaS pipeline marker. Update the repo or remount Jenkinsfile.paas-deploy.`);
-    }
-    if (!groovy.includes(CRANE_NEXT16_MARKER)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${CRANE_NEXT16_MARKER}). Run fix-jenkins-paas-deploy-pipeline-lab.sh on the lab VM.`);
-    }
-    if (!jenkinsfileHasCosignSandboxFix(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${COSIGN_SANDBOX_MARKER}). Re-sync paas-deploy from the current repo Jenkinsfile.`);
-    }
-    if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !jenkinsfileHasFixedStep6(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} still has obsolete Step 6 logic. Git pull and refresh the Jenkins job from the current Jenkinsfile.`);
-    }
-    if (BROKEN_CRANE_MUTATE_CMD_RE.test(groovy) || !jenkinsfileHasMutateCmdFix(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing Step 6 crane mutate fix — need ${MUTATE_CMD_FIX_MARKER}). Run: bash paas/scripts/fix-jenkins-paas-deploy-pipeline-lab.sh`);
-    }
-    if (!groovy.includes(ENV_SAFE_DOTENV_LOADER_MARKER)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${ENV_SAFE_DOTENV_LOADER_MARKER} — EMAIL_PASS with spaces breaks . ./.env). Run: bash paas/scripts/apply-jenkins-env-dotenv-fix-lab.sh`);
+    if (!jenkinsfileIsValidPaasDeploy(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is not a valid PaaS deploy pipeline.`);
     }
     if (!jenkinsfileHasNginxConfWritefileFix(groovy)) {
-        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is outdated (missing ${NGINX_CONF_WRITEFILE_MARKER} — SPA/Angular Step 6 fails with MissingPropertyException: uri). Rebuild the PaaS frontend image (npm run build embeds Jenkinsfile) or run fix-jenkins-paas-deploy-pipeline-lab.sh`);
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} is missing writeNginxPaasDefaultConf.`);
+    }
+    if (STALE_CRANE_NEXT_BUILD_RE.test(groovy) && !jenkinsfileHasFixedStep6(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} has obsolete Step 6 logic.`);
+    }
+    if (BROKEN_CRANE_MUTATE_CMD_RE.test(groovy)) {
+        throw new IntegrationError(`Jenkinsfile at ${jenkinsfilePath} has obsolete Step 6 crane mutate logic.`);
     }
 }
+
 function jenkinsfileRelativePathExists(root: string): boolean {
     return fs.existsSync(path.join(root, ...JENKINSFILE_SEGMENTS));
 }
+
 function findMonorepoRoot(): string | null {
     const resolved = resolveJenkinsfilePath();
     return resolved?.root ?? null;
 }
+
 export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: string): Promise<string> {
     const flag = env.JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER.trim();
-    const mountHint = env.PAAS_MONOREPO_ROOT.trim();
-    const mounted = Boolean(mountHint && jenkinsfileRelativePathExists(path.resolve(mountHint)));
+    const mountRoot = env.PAAS_MONOREPO_ROOT.trim();
+    const mounted = Boolean(mountRoot && jenkinsfileRelativePathExists(path.resolve(mountRoot)));
     const root = findMonorepoRoot();
     if (flag === "false") {
         return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false; mounted Jenkinsfile=${mounted}).`;
@@ -152,18 +128,13 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
         throw new IntegrationError("Jenkinsfile.paas-deploy is an obsolete stub; use the current file from the repo.");
     }
     if (!jenkinsfileHasMultiFrameworkMarker(localGroovy)) {
-        throw new IntegrationError(`Jenkinsfile is missing multi-framework marker (python/nginx/legacy Angular). Rebuild and redeploy the PaaS frontend: bash paas/scripts/deploy-paas-frontend-k8s.sh`);
+        throw new IntegrationError("Jenkinsfile is missing multi-framework support.");
     }
     if (!jenkinsfileHasNginxConfWritefileFix(localGroovy)) {
-        throw new IntegrationError(`Jenkinsfile is missing ${NGINX_CONF_WRITEFILE_MARKER} (SPA/Angular Step 6 uri crash). Rebuild frontend: cd paas/frontend && npm run build, then redeploy.`);
+        throw new IntegrationError("Jenkinsfile is missing writeNginxPaasDefaultConf.");
     }
     const { groovy, sourceLabel } = await resolveGroovyForJenkinsSync(jenkinsfilePath, localGroovy);
-    if (!jenkinsfileHasCraneFix(localGroovy) || !jenkinsfileHasMutateCmdFix(localGroovy)) {
-        assertPaasDeployJenkinsfileSafeForSync(groovy, sourceLabel);
-    }
-    else {
-        assertPaasDeployJenkinsfileSafeForSync(groovy, jenkinsfilePath);
-    }
+    assertPaasDeployJenkinsfileSafeForSync(groovy, sourceLabel);
     try {
         const out = await syncInlinePaasDeployJobToJenkins({
             jobName: trimmedJob,

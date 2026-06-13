@@ -41,7 +41,6 @@ export type JenkinsWorkflowDescribeResult = {
     configured: boolean;
     error?: string;
     stagesSynthetic?: boolean;
-    wfapiHint?: string;
     jobUrlPath: string;
     displayJobName: string;
     buildNumber: number | null;
@@ -132,7 +131,6 @@ function usesSharedJenkinsBuildJob(): boolean {
     return Boolean(env.JENKINS_BUILD_JOB_NAME.trim());
 }
 export { usesSharedJenkinsDeployJob };
-/** Cap parallel UI deploys; defaults to JENKINS_NUM_EXECUTORS when shared paas-deploy runs concurrent builds. */
 export function effectiveMaxConcurrentJenkinsDeploys(configured: number): number {
     if (configured > 0) {
         return configured;
@@ -175,7 +173,6 @@ async function waitForBuildNumberFromQueueItem(base: string, headers: Record<str
 }
 function appendSharedJobAgentLabel(q: URLSearchParams): void {
     const param = env.JENKINS_AGENT_LABEL_PARAMETER.trim() || "JENKINS_AGENT_LABEL";
-    // Always send the param (even empty) so Jenkins job default "built-in" does not win.
     q.set(param, env.JENKINS_AGENT_LABEL.trim());
 }
 function appendRegistryParameters(q: URLSearchParams): void {
@@ -217,7 +214,6 @@ function appendRegistryParameters(q: URLSearchParams): void {
     if (env.HELM_OCI_PLAIN_HTTP === "true") {
         q.set("HELM_OCI_PLAIN_HTTP", "true");
     }
-    // UI deploys always run full security pipeline (SCA, SAST, ZAP). Never honor fast-pipeline env on lab.
     q.set("JENKINS_PAAS_FAST_PIPELINE", "false");
     if (env.JENKINS_SH_KEEPALIVE === "true") {
         q.set("JENKINS_SH_KEEPALIVE", "true");
@@ -556,7 +552,6 @@ async function scanImageViaHarbor(imageRef: string): Promise<SeverityBreakdown |
         await integrationFetch(`${artifactUrl}/scan`, { method: "POST", headers });
     }
     catch {
-        // scan may already be running or unsupported — continue to read report
     }
     const vulnUrl = `${artifactUrl}/additions/vulnerabilities`;
     const response = await integrationFetch(vulnUrl, { method: "GET", headers });
@@ -1462,13 +1457,12 @@ export class JenkinsClient {
                         building: true,
                         result: null,
                         runStatus: null,
-                        stages: syntheticStagesWhenWfapiUnavailable({ configured: true, building: true, result: null }).map(({ name, status, durationMs }) => ({
-                            name,
-                            status,
-                            durationMs
-                        })),
-                        wfapiHint: `Waiting for Jenkins build for "${projectName}" on shared paas-deploy (build #${preferred} belongs to another project).`
-                    });
+                    stages: syntheticStagesWhenWfapiUnavailable({ configured: true, building: true, result: null }).map(({ name, status, durationMs }) => ({
+                        name,
+                        status,
+                        durationMs
+                    }))
+                });
                 }
             }
             else {
@@ -1484,8 +1478,7 @@ export class JenkinsClient {
                         name,
                         status,
                         durationMs
-                    })),
-                    wfapiHint: `Waiting for Jenkins to start a build for "${projectName}" on shared paas-deploy.`
+                    }))
                 });
             }
         }
@@ -1576,9 +1569,7 @@ export class JenkinsClient {
                     building,
                     result,
                     runStatus: null,
-                    stages: coarseStages,
-                    stagesSynthetic: true,
-                    wfapiHint: "Per-stage timing is unavailable because Jenkins did not expose wfapi/describe (usually fixed by installing the Pipeline: Stage View plugin). The checklist below reflects build state only, not live stage edges. Open the build in Jenkins for the full graph."
+                    stages: coarseStages
                 });
             }
             return withUrl({
@@ -1591,8 +1582,7 @@ export class JenkinsClient {
                 result,
                 runStatus: null,
                 stages: coarseStages,
-                stagesSynthetic: true,
-                wfapiHint: "Showing an approximate checklist; stage API returned an error."
+                stagesSynthetic: true
             });
         }
         let wf: {
@@ -1616,8 +1606,7 @@ export class JenkinsClient {
                 result,
                 runStatus: null,
                 stages: wfapiFallbackStages(),
-                stagesSynthetic: true,
-                wfapiHint: "Showing an approximate checklist because the stage API response was not valid JSON."
+                stagesSynthetic: true
             });
         }
         const runStatus = typeof wf.status === "string" ? wf.status.trim().toUpperCase() : null;
@@ -2359,7 +2348,7 @@ export class GitOpsClient {
         return commitHelmValuesGitHub(projectName, imageTag);
     }
 }
-/** Latest PAAS_ARTIFACT_IMAGE from Jenkins deploy job console (falls back to DB tag in callers). */
+
 export async function resolveLatestDeployArtifactImage(projectName: string, projectId: string): Promise<string | null> {
     if (!env.JENKINS_BASE_URL || !env.JENKINS_USERNAME || !env.JENKINS_API_TOKEN) {
         return null;

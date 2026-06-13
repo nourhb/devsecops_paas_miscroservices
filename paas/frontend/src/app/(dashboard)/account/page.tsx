@@ -6,9 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Hint } from "@/components/hint";
 import { useAuth } from "@/hooks/use-auth";
-import { hints } from "@/lib/app-hints";
 export default function AccountSettingsPage() {
     const { user, refreshUser, updateProfile } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -91,7 +89,6 @@ export default function AccountSettingsPage() {
         <h1 className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
           <UserRound className="h-7 w-7 text-primary"/>
           Profile & security
-          <Hint side="bottom">{hints.account.pageHeading}</Hint>
         </h1>
       </div>
       <Card className="rounded-2xl border-border/70">

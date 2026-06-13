@@ -33,7 +33,6 @@
     hsl(var(--background));
 }
 
-* {
   border-color: hsl(var(--border));
 }
 
@@ -56,7 +55,7 @@ body {
 }
 
 @layer components {
-  
+
   .inline-code {
     @apply box-decoration-clone rounded-md border border-border bg-foreground/[0.07] px-1.5 py-0.5 font-mono text-[0.8125rem] font-medium leading-snug text-foreground dark:bg-foreground/[0.12];
   }

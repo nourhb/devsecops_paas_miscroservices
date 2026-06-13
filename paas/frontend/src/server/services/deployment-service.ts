@@ -137,11 +137,11 @@ export async function runProjectDeployment(projectId: string, jwtUserId: string)
             }
         });
         if (activeCount >= maxConcurrent) {
-            const sharedHint = usesSharedJenkinsDeployJob()
-                ? ` Raise PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS or JENKINS_NUM_EXECUTORS (current cap ${maxConcurrent}) and run paas/scripts/scale-jenkins-concurrency-lab.sh on the lab VM.`
+            const sharedJobNote = usesSharedJenkinsDeployJob()
+                ? ` Raise PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS or JENKINS_NUM_EXECUTORS (current cap ${maxConcurrent}).`
                 : "";
             throw new ApiError(429, "Too many deployments are already running.", {
-                details: `${activeCount} deployment(s) are active (limit ${maxConcurrent}). Wait for one to finish.${sharedHint}`
+                details: `${activeCount} deployment(s) are active (limit ${maxConcurrent}). Wait for one to finish.${sharedJobNote}`
             });
         }
     }

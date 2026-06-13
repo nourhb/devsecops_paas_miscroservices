@@ -36,7 +36,7 @@ export async function buildDockerImage(projectId: string) {
     const project = await getProjectById(projectId);
     const tag = `${project.projectName}:${Date.now()}`;
     const ns = env.DOCKERHUB_NAMESPACE || env.DOCKERHUB_USERNAME || "local";
-    const imageRef = `${ns}/${tag}`.replace(/^local\//, "local/");
+    const imageRef = `${ns}/${tag}`.replace(/^local\//, "");
     const logs = [
         `[docker] build -t ${imageRef} .`,
         `[docker] FROM ${project.language.toLowerCase().includes("node") ? "node:20-alpine" : "eclipse-temurin:17-jre"}`,

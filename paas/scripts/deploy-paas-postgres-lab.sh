@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 PAAS_NS="${PAAS_NS:-paas}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="${SCRIPT_DIR}/../k8s-manifests/lab/postgres-in-paas.yaml"
 DB_URL='postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?options=-c%20lc_messages%3DC'
-
 echo "=== Remove broken ExternalName / headless postgres Service (if any) ==="
 kubectl delete svc postgres -n "${PAAS_NS}" --ignore-not-found
-
 echo "=== Deploy Postgres in ${PAAS_NS} (PVC postgres-pvc keeps users/projects) ==="
 kubectl apply -f "${MANIFEST}"
 kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/postgres-pvc -n "${PAAS_NS}" --timeout=120s 2>/dev/null || true
-
 if ! kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=600s; then
   echo "=== Postgres rollout failed — diagnostics ==="
   kubectl get pods -n "${PAAS_NS}" -l app=postgres -o wide || true
@@ -22,14 +18,11 @@ if ! kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=600s; 
   exit 1
 fi
 kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
-
 echo "=== Point frontend at postgres.paas (sync full env in bootstrap step 3) ==="
 kubectl set env deployment/frontend -n "${PAAS_NS}" DATABASE_URL="${DB_URL}" --containers=frontend 2>/dev/null \
   || kubectl set env deployment/frontend -n "${PAAS_NS}" DATABASE_URL="${DB_URL}" || true
-
 kubectl get pods,svc,endpoints -n "${PAAS_NS}" | grep -E 'postgres|frontend|NAME' || true
 kubectl exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas
 echo "Postgres OK. Run push-paas-schema-lab.sh if User table is missing."
-
 echo "OK: login at http://192.168.56.129:30100/login"
 echo "If schema missing: kubectl exec -n ${PAAS_NS} deploy/frontend -- npx prisma db push"

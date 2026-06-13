@@ -1,7 +1,6 @@
 import { env } from "@/server/config/env";
 import { isPlaceholderValue, realValueOrEmpty } from "@/server/config/real-values";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
-import { appendUnreachableProbeHint } from "@/server/http/integration-probe-hints";
 import { probeHostIsRemapSource } from "@/server/http/integration-probe-host";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
@@ -63,7 +62,7 @@ async function probeMany(bases: string[], path: string, ctx: HttpProbeCtx): Prom
     return {
         state: "unreachable",
         latencyMs: 0,
-        message: appendUnreachableProbeHint(ctx.itemId, first, "Not reachable — pods may be down; run: bash paas/scripts/diagnose-integration-pods-lab.sh")
+        message: "Not reachable"
     };
 }
 async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx): Promise<PlatformIntegrationReachability> {
@@ -90,7 +89,7 @@ async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx
         return {
             state: "unreachable",
             latencyMs: ms,
-            message: appendUnreachableProbeHint(ctx?.itemId, url, raw)
+            message: raw
         };
     }
     catch (error) {
@@ -99,7 +98,7 @@ async function httpProbe(url: string, init: RequestInit = {}, ctx?: HttpProbeCtx
         return {
             state: "unreachable",
             latencyMs: ms,
-            message: appendUnreachableProbeHint(ctx?.itemId, url, message)
+            message: message
         };
     }
 }
@@ -359,7 +358,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 return {
                     state: "unreachable",
                     latencyMs: ms,
-                    message: appendUnreachableProbeHint("argocd", base, `HTTP ${res.status} — check URL, token, and ARGOCD_TLS_SKIP_VERIFY or INTEGRATIONS_TLS_SKIP_VERIFY for self-signed certs`)
+                    message: `HTTP ${res.status}`
                 };
             }
             catch (error) {
@@ -367,7 +366,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 return {
                     state: "unreachable",
                     latencyMs: Date.now() - t0,
-                    message: appendUnreachableProbeHint("argocd", base, raw)
+                    message: raw
                 };
             }
         }
@@ -519,7 +518,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }
             return {
                 state: "unreachable",
-                message: appendUnreachableProbeHint(item.id, candidates[0] ?? "", "Trivy not responding on configured URLs")
+                message: "Trivy not responding on configured URLs"
             };
         }
         case "dockerhub": {

@@ -2,16 +2,6 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 const ERROR_LINE = /(FAILED|FAILURE|\bERROR\b|error:|Exception|HTTP\s[45]\d{2}|\[gitops\]\s+FAILED|\[argocd\]\s+FAILED|\[jenkins-monitor\]|Timed out|rejected the deploy)/i;
-export function jenkinsScmCloneFailureHint(logs: string): string | null {
-    const L = logs ?? "";
-    if (!/Error cloning remote repo ['"]origin['"]/i.test(L)) {
-        return null;
-    }
-    if (L.includes("[checkout]")) {
-        return null;
-    }
-    return "Jenkins failed while cloning the repository configured for Pipeline from SCM (the script that defines the job). That runs before PaaS sends GIT_URL or project Git credentials. Fix: use an inline pipeline script in Jenkins, or fix that SCM repo URL and credentials. If you ever see a [checkout] line above the error, the problem is cloning the app repo instead\u2014set Git credentials (Jenkins) on the PaaS project.";
-}
 export function DeploymentLogsView({ logs, failed }: {
     logs: string;
     failed: boolean;

@@ -109,9 +109,9 @@ const githubHeaders = (token: string) => ({
 export async function commitHelmValuesGitHub(projectName: string, imageTag: string, options?: {
     buildProfile?: BuildProfile;
     buildEnv?: Record<string, string> | null;
-    /** BlueGreen: deploy image to inactive slot, or flip traffic to that slot. */
+
     blueGreenPhase?: "inactive" | "flip";
-    /** Override BlueGreen — single Rolling deployment (used when blue/green verification fails). */
+
     forceRolling?: boolean;
 }): Promise<{
     committed: boolean;

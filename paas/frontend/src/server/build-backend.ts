@@ -14,7 +14,7 @@ export interface BuildProjectRecord {
     autoGenerateHelmChart: boolean;
     namespace: string;
     buildEnv?: Record<string, string> | null;
-    /** Raw DB value (encrypted envelope) for trigger diagnostics. */
+
     buildEnvStored?: unknown;
 }
 export function toBuildProjectRecord(project: {

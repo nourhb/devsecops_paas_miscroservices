@@ -5,7 +5,6 @@ function isTransientDbError(error: unknown): boolean {
     return /can't reach database server|connection refused|ECONNREFUSED|ETIMEDOUT|P1001|P1017|Connection terminated/i.test(msg);
 }
 
-/** Retry Prisma writes when Postgres is briefly unreachable (common during pod rollout). */
 export async function withPrismaRetry<T>(operation: () => Promise<T>, attempts = 4): Promise<T> {
     let lastError: unknown;
     for (let i = 0; i < attempts; i++) {

@@ -6,9 +6,7 @@ import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hint } from "@/components/hint";
 import { platformApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { cn } from "@/lib/utils";
 import type { PlatformIntegrationsResponse, PlatformIntegrationCategory, PlatformIntegrationItem, PlatformIntegrationReachability, PlatformToolGroup, PlatformToolTone } from "@/types";
 function toolingStatusLabel(tone: PlatformToolTone): string {
@@ -154,7 +152,6 @@ function CategoryCard({ category }: {
             <div className="space-y-1">
               <CardTitle className="flex flex-wrap items-center gap-2 text-lg leading-tight">
                 {category.title}
-                <Hint>{hints.integrations.categoryCard}</Hint>
               </CardTitle>
             </div>
           </div>
@@ -192,7 +189,6 @@ function ToolingGroup({ group }: {
           <Wrench className="h-4 w-4 text-muted-foreground"/>
           <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold">
             {group.title}
-            <Hint>{hints.integrations.toolingGroup}</Hint>
           </CardTitle>
         </div>
         <CardDescription className="text-xs sm:text-sm">
@@ -250,7 +246,6 @@ function DeployReadinessSummary({ dr }: {
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <AlertCircle className="h-4 w-4 text-primary"/>
               Delivery checklist
-              <Hint>{hints.integrations.deliveryChecklist}</Hint>
             </CardTitle>
             <CardDescription className="mt-1 max-w-2xl text-sm">
               What the platform needs to run builds, push to GitOps, sync Argo CD, and expose app URLs. Fix the red items in your server environment, then refresh.
@@ -330,7 +325,6 @@ export default function IntegrationsPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-muted">Integrations</p>
             <h1 className="flex flex-wrap items-center gap-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
               Platform hub
-              <Hint side="bottom">{hints.integrations.header}</Hint>
             </h1>
             {meta ? <MetaStrip meta={meta}/> : null}
           </div>
@@ -350,7 +344,6 @@ export default function IntegrationsPage() {
           <CardHeader>
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               Could not load integrations
-              <Hint>{hints.integrations.loadError}</Hint>
             </CardTitle>
             <CardDescription>Check your session and try Refresh. If this persists, verify the API route and server logs.</CardDescription>
           </CardHeader>
@@ -367,7 +360,6 @@ export default function IntegrationsPage() {
             <div>
               <h2 className="text-lg font-semibold text-foreground flex flex-wrap items-center gap-2">
               Runtime signals
-              <Hint>{hints.integrations.runtimeSignalsHeading}</Hint>
             </h2>
             </div>
           </div>
@@ -380,7 +372,6 @@ export default function IntegrationsPage() {
           <div>
             <h2 className="text-lg font-semibold text-foreground flex flex-wrap items-center gap-2">
               Integration catalog
-              <Hint>{hints.integrations.catalogHeading}</Hint>
             </h2>
           </div>
           <div className="space-y-6">
@@ -392,7 +383,6 @@ export default function IntegrationsPage() {
           <CardHeader>
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               No integration categories
-              <Hint>{hints.integrations.emptyCatalog}</Hint>
             </CardTitle>
             <CardDescription>Something returned an empty catalog. Check server logs and redeploy the frontend.</CardDescription>
           </CardHeader>

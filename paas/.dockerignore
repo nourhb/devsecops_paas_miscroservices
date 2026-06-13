@@ -13,9 +13,7 @@ frontend/blob-report
 
 **/.env
 **/.env.*
-!**/.env.example
 **/docker-compose.env
-!**/docker-compose.env.example
 **/.lab-cosign/
 **/*.pem
 **/cosign.key

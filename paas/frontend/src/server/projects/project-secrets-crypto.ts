@@ -64,7 +64,6 @@ export function decryptBuildEnvEnvelope(stored: EncryptedBuildEnvEnvelope): Reco
     }
 }
 
-/** Read build env from DB (encrypted envelope or legacy plaintext JSON). */
 export function resolveBuildEnvFromStorage(stored: unknown): Record<string, string> | null {
     if (stored == null) {
         return null;
@@ -75,7 +74,6 @@ export function resolveBuildEnvFromStorage(stored: unknown): Record<string, stri
     return normalizeBuildEnvInput(stored);
 }
 
-/** Log line for PaaS deploy/build trigger (no secret values). */
 export function buildEnvJenkinsTriggerLog(stored: unknown, resolved?: Record<string, string> | null): string {
     const envMap = resolved ?? resolveBuildEnvFromStorage(stored);
     if (!hasBuildEnvStored(stored)) {
@@ -89,7 +87,6 @@ export function buildEnvJenkinsTriggerLog(stored: unknown, resolved?: Record<str
     return `[build-env] Forwarding ${keys.length} variable(s) as PROJECT_BUILD_ENV_B64 (${publicCount} NEXT_PUBLIC_* — baked at Jenkins build, not injected at K8s deploy).`;
 }
 
-/** True when build env exists in DB; does not decrypt (safe for project list). */
 export function hasBuildEnvStored(stored: unknown): boolean {
     if (stored == null) {
         return false;
@@ -127,7 +124,6 @@ export function assessBuildEnvDeployReadiness(stored: unknown): BuildEnvDeployRe
     };
 }
 
-/** Block deploy when secrets exist in DB but cannot be decrypted (Jenkins would build without env). */
 export function assertBuildEnvReadyForDeploy(stored: unknown): void {
     const status = assessBuildEnvDeployReadiness(stored);
     if (!status.configured) {

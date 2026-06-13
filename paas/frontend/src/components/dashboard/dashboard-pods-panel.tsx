@@ -9,9 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Hint } from "@/components/hint";
 import { kubernetesApi, type KubernetesPodRecord } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { queryHttpMessage } from "@/lib/query-http-message";
 import type { DashboardOverviewResponse } from "@/types";
 import { cn } from "@/lib/utils";
@@ -137,7 +135,6 @@ export function DashboardPodsPanel({ fallbackProjects = [], overviewLoading = fa
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-1.5 text-base">
             Cluster pods &amp; logs
-            <Hint side="bottom">{hints.podsPanel.header}</Hint>
           </CardTitle>
         </div>
         <div className="flex flex-wrap items-center gap-2">

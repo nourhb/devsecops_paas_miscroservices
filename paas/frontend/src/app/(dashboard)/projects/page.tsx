@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Hint } from "@/components/hint";
 import { projectApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import type { Project } from "@/types";
 export default function ProjectsPage() {
     const queryClient = useQueryClient();
@@ -33,7 +31,6 @@ export default function ProjectsPage() {
         <div>
           <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
             Projects
-            <Hint side="bottom">{hints.projects.list}</Hint>
           </h2>
           <p className="text-sm text-muted">Git-backed services with CI/CD, security scans, and deployments.</p>
         </div>
@@ -46,7 +43,6 @@ export default function ProjectsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
             All projects
-            <Hint>{hints.projects.list}</Hint>
           </CardTitle>
         </CardHeader>
         <CardContent>

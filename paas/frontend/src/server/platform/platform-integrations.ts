@@ -139,7 +139,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL))) || null,
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL)))),
                     optional: true,
-                    notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint (k3s+Traefik is often http://<node>:30659). From Docker, INGRESS_NGINX_PROBE_URL alone can wire the catalog when NEXT_PUBLIC is unset at build time; INTEGRATIONS_PROBE_HOST_REMAP supports comma-separated rules (see docker-compose.env.example)."
+                    notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint. INTEGRATIONS_PROBE_HOST_REMAP supports comma-separated host remap rules in docker-compose.env."
                 },
                 {
                     id: "cert-manager",
