@@ -33,7 +33,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        runAsNonRoot: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: {{ include "simple-app.name" $root }}
           {{- $slotImg := index $root.Values $slot | default dict }}
@@ -43,7 +45,7 @@ spec:
           imagePullPolicy: {{ $root.Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             readOnlyRootFilesystem: false
-            runAsNonRoot: false
+            runAsNonRoot: true
             allowPrivilegeEscalation: false
           ports:
             - name: http
