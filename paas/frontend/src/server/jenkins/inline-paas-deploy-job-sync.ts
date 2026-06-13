@@ -5,7 +5,7 @@ type ParamDef = readonly [
     name: string,
     defaultValue: string
 ];
-/** Job param names populated from PaaS env when syncing Jenkins (fallback if trigger omits them). */
+
 const ENV_BACKED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
     HARBOR_REGISTRY: env.HARBOR_REGISTRY,
     HARBOR_USERNAME: env.HARBOR_USERNAME,
@@ -334,7 +334,7 @@ async function fetchJenkinsCrumb(base: string, authHeader: string, jar: CookieJa
     }
     return null;
 }
-function extractHtmlErrorHint(body: string, maxLen = 1200): string {
+function extractHtmlErrorDetail(body: string, maxLen = 1200): string {
     const patterns = [
         /<h1[^>]*>\s*([^<]+)/i,
         /id="error-description"[^>]*>\s*([\s\S]*?)<\/div>/i,
@@ -484,10 +484,10 @@ export async function syncInlinePaasDeployJobToJenkins(opts: SyncInlinePaasDeplo
             lines.push(`Job URL: ${base}/job/${jobName}/`);
             return lines.join("\n");
         }
-        const hint = extractHtmlErrorHint(body2);
+        const detail = extractHtmlErrorDetail(body2);
         let msg = `Job exists but config update failed HTTP ${code2}`;
-        if (hint) {
-            msg += `: ${hint}`;
+        if (detail) {
+            msg += `: ${detail}`;
         }
         msg += `\n${body2.slice(0, 4000)}`;
         msg +=

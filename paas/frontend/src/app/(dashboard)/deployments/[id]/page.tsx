@@ -9,11 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
-import { DeploymentLogsView, deploymentFailureStageLabel, jenkinsScmCloneFailureHint } from "@/components/deployments/deployment-logs-view";
-import { Hint } from "@/components/hint";
+import { DeploymentLogsView, deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { queryHttpMessage } from "@/lib/query-http-message";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
     const s = status.toUpperCase();
@@ -91,7 +89,6 @@ export default function DeploymentDetailPage() {
     const isPending = statusU === "PENDING";
     const canCancelJenkins = (isPending || isDeploying) && (!d.buildProvider || d.buildProvider === "jenkins");
     const isFailed = statusU === "FAILED";
-    const jenkinsHint = isFailed ? jenkinsScmCloneFailureHint(d.logs ?? "") : null;
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -113,7 +110,6 @@ export default function DeploymentDetailPage() {
           </div>
           <h1 className="flex flex-wrap items-center gap-2 font-mono text-xl font-semibold tracking-tight sm:text-2xl">
             {d.id}
-            <Hint side="bottom">{hints.deployment.deployId}</Hint>
           </h1>
           <p className="text-xs text-muted">
             Auto-refresh while running (~4s); otherwise on focus
@@ -144,7 +140,6 @@ export default function DeploymentDetailPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-success flex flex-wrap items-center gap-2">
               Your app is live
-              <Hint>{hints.deployment.deployedRun}</Hint>
             </CardTitle>
             <CardDescription className="text-foreground/90">
               Open the URL below to run your deployed application.
@@ -168,7 +163,6 @@ export default function DeploymentDetailPage() {
             <CardTitle className="text-base text-warning flex flex-wrap items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin"/>
               Publishing to cluster
-              <Hint>{hints.deployment.deploying}</Hint>
             </CardTitle>
             <CardDescription className="text-foreground/90">
               Jenkins may already show SUCCESS — this page stays on DEPLOYING until GitOps, Argo CD, and the live URL check finish.
@@ -180,7 +174,6 @@ export default function DeploymentDetailPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-danger flex flex-wrap items-center gap-2">
               Deployment failed
-              <Hint>{hints.deployment.failedCallout}</Hint>
             </CardTitle>
             <CardDescription className="text-danger/90">
               {d.failureReason ? (<>
@@ -200,7 +193,6 @@ export default function DeploymentDetailPage() {
           <CardHeader>
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               Live application
-              <Hint>{hints.deployment.liveApp}</Hint>
             </CardTitle>
             <CardDescription>URL recorded when this deployment reached DEPLOYED.</CardDescription>
           </CardHeader>
@@ -226,7 +218,6 @@ export default function DeploymentDetailPage() {
           <CardHeader>
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               Artifact
-              <Hint>{hints.deployment.artifact}</Hint>
             </CardTitle>
             <CardDescription>Image produced by the build backend for this deployment.</CardDescription>
           </CardHeader>
@@ -242,17 +233,12 @@ export default function DeploymentDetailPage() {
         <CardHeader>
           <CardTitle className="text-base flex flex-wrap items-center gap-2">
             Console output
-            <Hint>{hints.deployment.console}</Hint>
           </CardTitle>
           <CardDescription>
             Last 5000 characters; error lines are highlighted in red when the deployment failed.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {jenkinsHint ? (<div className="rounded-lg border border-primary/40 bg-primary/10 p-4 text-sm text-foreground">
-              <p className="font-medium text-primary">What this usually means</p>
-              <p className="mt-2 leading-relaxed text-foreground/90">{jenkinsHint}</p>
-            </div>) : null}
           <DeploymentLogsView logs={d.logs ?? ""} failed={isFailed}/>
         </CardContent>
       </Card>

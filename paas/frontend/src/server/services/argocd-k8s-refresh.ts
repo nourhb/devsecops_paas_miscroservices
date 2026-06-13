@@ -83,7 +83,6 @@ export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
     }
 }
 
-/** Hard refresh — does not start a sync operation. */
 export async function refreshArgoApplicationViaK8s(appName: string): Promise<{
     ok: boolean;
     logs: string;
@@ -110,7 +109,6 @@ export async function refreshArgoApplicationViaK8s(appName: string): Promise<{
     }
 }
 
-/** Trigger Argo CD sync via the Application CR (no argocd CLI / API token required). */
 export async function syncArgoApplicationViaK8s(appName: string): Promise<{
     ok: boolean;
     logs: string;

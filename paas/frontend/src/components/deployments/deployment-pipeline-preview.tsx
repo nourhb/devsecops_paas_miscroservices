@@ -106,9 +106,6 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
           </p>) : null}
         {data?.skipped ? (<p className="text-sm text-muted">{data.reason || "Jenkins stages are not available."}</p>) : null}
         {data?.error ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{data.error}</p>) : null}
-        {data?.wfapiHint ? (<p className={`rounded-md border px-3 py-2 text-sm leading-relaxed ${data.error ? "mt-2 border-border bg-muted/20 text-muted" : "border-primary/35 bg-primary/10 text-foreground/90"}`}>
-            {data.wfapiHint}
-          </p>) : null}
         {!data?.skipped && stages.length > 0 ? (<>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-muted">
@@ -128,16 +125,6 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
                 const idxLabel = jenkinsStageStepIndexLabel(stage.name, idx);
                 const title = shortJenkinsStageTitle(stage.name);
                 const stepNum = idx + 1;
-                const stepCheck = jenkinsChecks.filter((c) => c.step === stepNum).at(-1);
-                const checkHint = stepCheck
-                    ? stepCheck.level === "SKIP"
-                        ? `Skipped: ${stepCheck.message}`
-                        : stepCheck.level === "WARN"
-                            ? stepCheck.message
-                            : stepCheck.level === "FAIL"
-                                ? stepCheck.message
-                                : null
-                    : null;
                 return (<div key={`${idx}-${stage.name}`} className="flex min-w-[5.5rem] max-w-[7.5rem] shrink-0 flex-col items-center gap-1.5 text-center">
                     <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-xs font-semibold tabular-nums", ui.chipClass)}>
                       {idxLabel}
@@ -145,9 +132,7 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
                     <p className="line-clamp-3 text-[10px] font-medium leading-snug text-foreground" title={stage.name}>
                       {title}
                     </p>
-                    {checkHint ? (<span className="line-clamp-2 text-[8px] leading-tight text-warning" title={checkHint}>
-                        {checkHint}
-                      </span>) : (<span className="text-[9px] text-muted tabular-nums">{formatStageDurationMs(stage.durationMs)}</span>)}
+                    <span className="text-[9px] text-muted tabular-nums">{formatStageDurationMs(stage.durationMs)}</span>
                   </div>);
             })}
               </div>

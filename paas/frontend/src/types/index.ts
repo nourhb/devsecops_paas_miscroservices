@@ -66,7 +66,7 @@ export interface Project {
     url: string;
     pendingGitHubPush?: PendingGitHubPush | null;
     buildEnv?: Record<string, string> | null;
-    /** True when encrypted build env exists; values are omitted from API unless explicitly requested. */
+
     buildEnvConfigured?: boolean;
 }
 export interface PendingGitHubPush {

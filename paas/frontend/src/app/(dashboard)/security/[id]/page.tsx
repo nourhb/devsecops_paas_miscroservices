@@ -8,10 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hint } from "@/components/hint";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { projectApi, securityApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { queryHttpMessage } from "@/lib/query-http-message";
 import type { SecurityIntegrationProbeStatus } from "@/types";
 const SEVERITY_ROWS = [
@@ -98,7 +96,6 @@ export default function SecurityPage() {
       <div className="flex items-center justify-between">
         <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
           Security Overview: {displayName}
-          <Hint side="bottom">{hints.security.overviewTitle}</Hint>
         </h2>
         <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
           Sonar Quality Gate: {data.qualityGateStatus}
@@ -192,7 +189,6 @@ export default function SecurityPage() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
             Global Security Score
-            <Hint>{hints.security.globalScore}</Hint>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -208,7 +204,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
               SonarQube quality gate (live)
-              <Hint>{hints.security.sonarGate}</Hint>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -236,7 +231,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
               Dependency-Track vs Trivy (severity counts)
-              <Hint>{hints.security.depTrackVsTrivy}</Hint>
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[220px]">
@@ -280,7 +274,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
               Cosign, OPA, Kyverno / policy engine signals
-              <Hint>{hints.security.policySignals}</Hint>
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[200px]">
@@ -333,7 +326,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
             Security Analysis
-            <Hint>{hints.security.analysisCard}</Hint>
           </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
@@ -382,7 +374,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
             Trivy Scan
-            <Hint>{hints.security.trivyCard}</Hint>
           </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
@@ -397,7 +388,6 @@ export default function SecurityPage() {
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
             Security Enforcement
-            <Hint>{hints.security.enforcementCard}</Hint>
           </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">

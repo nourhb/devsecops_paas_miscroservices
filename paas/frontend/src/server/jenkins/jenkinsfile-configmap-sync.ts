@@ -12,7 +12,6 @@ const CONFIGMAP_NAME = "paas-jenkinsfile";
 const CONFIGMAP_KEY = "Jenkinsfile.paas-deploy";
 const CONFIGMAP_NAMESPACE = "paas";
 
-/** Keep the mounted ConfigMap aligned with the image-embedded Jenkinsfile (ConfigMap mount hides image COPY). */
 export async function syncJenkinsfileConfigMapFromEmbeddedIfNeeded(): Promise<string> {
     if (env.KUBERNETES_ENABLED !== "true") {
         return "[jenkinsfile-cm] Skipped (KUBERNETES_ENABLED!=true).";
@@ -26,10 +25,10 @@ export async function syncJenkinsfileConfigMapFromEmbeddedIfNeeded(): Promise<st
         return "[jenkinsfile-cm] Skipped (Jenkinsfile not found on disk).";
     }
     if (!jenkinsfileHasMultiFrameworkMarker(resolved.groovy)) {
-        return `[jenkinsfile-cm] Skipped (source missing multi-framework marker — rebuild frontend image).`;
+        return "[jenkinsfile-cm] Skipped (invalid Jenkinsfile).";
     }
     if (!jenkinsfileHasNginxConfWritefileFix(resolved.groovy)) {
-        return `[jenkinsfile-cm] Skipped (source missing nginx-conf-writefile-20260611 — SPA/Angular Step 6 uri fix; rebuild frontend image).`;
+        return "[jenkinsfile-cm] Skipped (invalid Jenkinsfile).";
     }
     const ns = CONFIGMAP_NAMESPACE;
     const embeddedPath = `${process.cwd()}/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy`;
@@ -60,10 +59,10 @@ export async function syncJenkinsfileConfigMapFromEmbeddedIfNeeded(): Promise<st
         }
     }
     catch (err: unknown) {
-        return `[jenkinsfile-cm] WARN: patch ConfigMap failed (${String(err)}). Mount may still serve stale pipeline until deploy-paas-frontend-k8s.sh runs.`;
+        return `[jenkinsfile-cm] WARN: patch ConfigMap failed (${String(err)}).`;
     }
     if (fs.existsSync(embeddedPath)) {
-        return `[jenkinsfile-cm] Updated ConfigMap/${CONFIGMAP_NAME} in ${ns} from embedded Jenkinsfile (multi-framework).`;
+        return `[jenkinsfile-cm] Updated ConfigMap/${CONFIGMAP_NAME} in ${ns}.`;
     }
     return `[jenkinsfile-cm] Updated ConfigMap/${CONFIGMAP_NAME} in ${ns} from ${resolved.source}.`;
 }

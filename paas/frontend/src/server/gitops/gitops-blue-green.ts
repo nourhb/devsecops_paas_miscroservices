@@ -18,13 +18,11 @@ export function inactiveSlot(active: BlueGreenSlot): BlueGreenSlot {
     return active === "blue" ? "green" : "blue";
 }
 
-/** Argo CD Helm release name for a PaaS project application. */
 export function helmReleaseName(projectName: string): string {
     const prefix = env.ARGOCD_APP_PREFIX.trim() || "paas";
     return `${prefix}-${sanitizeDeployImageName(projectName)}`;
 }
 
-/** Chart name candidates — Helm fullname is {release}-{chartName}-{slot?}. */
 export function helmChartNameCandidates(projectName: string): string[] {
     const slug = sanitizeDeployImageName(projectName);
     const dir = gitopsChartShortNameForProject(projectName);
@@ -68,7 +66,6 @@ function splitImageRef(ref: string): { repository: string; tag: string; digest: 
     return { repository: ref, tag: "", digest: "" };
 }
 
-/** Ensure values.yaml has blue/green structure (Rolling projects stay on `image` only). */
 export function ensureBlueGreenValuesStructure(
     doc: Record<string, unknown>,
     projectName: string,
@@ -121,7 +118,6 @@ export function ensureBlueGreenValuesStructure(
     return { activeSlot: active, inactive };
 }
 
-/** Deploy new build to the inactive slot (no traffic switch yet). */
 export function applyBlueGreenInactiveImage(
     doc: Record<string, unknown>,
     projectName: string,
@@ -137,7 +133,6 @@ export function applyBlueGreenInactiveImage(
     return { activeSlot, inactive };
 }
 
-/** Switch Service traffic to the slot that was just updated. */
 export function flipBlueGreenActiveSlot(doc: Record<string, unknown>): BlueGreenSlot {
     const current: BlueGreenSlot = doc.activeSlot === "green" ? "green" : "blue";
     const next = inactiveSlot(current);
@@ -154,7 +149,6 @@ export function flipBlueGreenActiveSlot(doc: Record<string, unknown>): BlueGreen
     return next;
 }
 
-/** Primary name (first candidate) — prefer simple-app for legacy charts. */
 export function blueGreenDeploymentName(projectName: string, slot: BlueGreenSlot): string {
     const candidates = blueGreenDeploymentNameCandidates(projectName, slot);
     const release = helmReleaseName(projectName);
@@ -165,7 +159,6 @@ export function blueGreenDeploymentName(projectName: string, slot: BlueGreenSlot
     return candidates[0];
 }
 
-/** Force Rolling strategy in values.yaml (clears blue/green slot blocks). */
 export function applyRollingImage(doc: Record<string, unknown>, projectName: string, imageTag: string): void {
     doc.deploymentStrategy = "Rolling";
     delete doc.activeSlot;

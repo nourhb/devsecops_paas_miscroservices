@@ -1,7 +1,7 @@
 import { env } from "@/server/config/env";
 
 export function buildHarborDockerConfigJson(): string | null {
-    const registry = env.HARBOR_REGISTRY.trim() || env.HARBOR_BASE_URL.trim().replace(/^https?:\/\//, "");
+    const registry = env.HARBOR_REGISTRY.trim() || env.HARBOR_BASE_URL.trim().replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
     const username = env.HARBOR_USERNAME.trim();
     const password = env.HARBOR_PASSWORD.trim();
     if (!registry || !username || !password) {

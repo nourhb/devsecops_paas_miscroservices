@@ -89,7 +89,6 @@ def materializeProjectBuildEnv(String appRoot) {
   }
   try {
     writeFile file: "${prefix}.paas-build-env.b64", text: b64
-    // Groovy decodeBase64 is blocked by Jenkins script security — decode with Node instead.
     ensureNodeTool()
     sh """
       set -eu
@@ -375,7 +374,6 @@ def dockerfileHasProductionBuild(String dockerfilePath) {
   return (text =~ /(?i)(next build|npm run build|npm run build:ci|yarn build|pnpm run build|pnpm build|ng build|vite build)/)
 }
 
-/** Node major for legacy Angular / webpack 4 (OpenSSL ERR_OSSL_EVP_UNSUPPORTED on Node 17+). */
 def resolveNodeVersion(String appRoot = '.') {
   def override = (env.JENKINS_PAAS_NODE_VERSION ?: '').trim()
   if (override) {
@@ -442,7 +440,6 @@ def shouldDeferAngularBuildToStep6(String appRoot, String dockerfilePath = 'Dock
   return false
 }
 
-/** python | nginx | node — drives dockerless crane base image + entrypoint (not always repo Dockerfile RUN steps). */
 def resolveCraneRuntimeStack(String appRoot, String dockerfilePath) {
   def root = (appRoot ?: '.').trim() ?: '.'
   if (fileExists("${root}/requirements.txt") || fileExists("${root}/pyproject.toml")
@@ -493,8 +490,6 @@ def paasOpensslLegacyShellSnippet() {
           case "$(node -v 2>/dev/null || echo v0)" in
             v17*|v18*|v19*|v20*|v21*|v22*)
               case "${NODE_OPTIONS:-}" in
-                *--openssl-legacy-provider*) ;;
-                *) export NODE_OPTIONS="${NODE_OPTIONS} --openssl-legacy-provider" ;;
               esac
               ;;
           esac
@@ -506,7 +501,6 @@ def paasOpensslLegacyShellSnippet() {
 '''
 }
 
-/** Groovy parse — works before portable Node is on PATH (legacy Jenkins agents). */
 def detectProjectFrameworkFromPackageText(String pkg) {
   if (!pkg?.trim()) {
     return 'node'
@@ -535,7 +529,6 @@ def detectProjectFrameworkFromPackageText(String pkg) {
   return 'node'
 }
 
-/** next | angular | nestjs | express | vite-react | spa | node | python | java | static | unknown */
 def detectProjectFramework(String appRoot = '.') {
   def root = (appRoot ?: '.').trim() ?: '.'
   def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
@@ -972,7 +965,6 @@ def harborForceNodePortPush() {
   return v.equalsIgnoreCase('true')
 }
 
-/** Crane push host: only when HARBOR_REGISTRY_PUSH is set (never auto-fill from NGINX_CLUSTER). */
 def resolveHarborPushImageRef(String imageRef) {
   def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
   if (harborForceNodePortPush()) {
@@ -1139,7 +1131,6 @@ PAAS_PY
     DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       case "\${DIGEST_REF}" in
-        *@sha256:*) ;;
         sha256:*)
           REPO="\${REF%:*}"
           DIGEST_REF="\${REPO}@\${DIGEST_REF}"
@@ -1247,7 +1238,6 @@ ${paasOpensslLegacyShellSnippet()}
     DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       case "\${DIGEST_REF}" in
-        *@sha256:*) ;;
         sha256:*)
           REPO="\${REF%:*}"
           DIGEST_REF="\${REPO}@\${DIGEST_REF}"
@@ -1596,7 +1586,6 @@ PAAS_START
     DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       case "\${DIGEST_REF}" in
-        *@sha256:*) ;;
         sha256:*)
           REPO="\${REF%:*}"
           DIGEST_REF="\${REPO}@\${DIGEST_REF}"
@@ -1609,7 +1598,6 @@ PAAS_START
   """
 }
 
-/** Shell helpers for Step 9 — sign tag + digest (Harbor needs digest signature for Kyverno verifyImages). */
 def cosignSignImageShellSnippet() {
   return '''
             set +e
@@ -1751,7 +1739,6 @@ def runPaasDeploy = {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
-  // PaaS UI always runs full security (Steps 4–5, 8, 10). Ignore job/env fast-pipeline flags.
   def paasFastPipeline = false
   def fastParam = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim()
   env.JENKINS_PAAS_FAST_PIPELINE = "false"
@@ -2148,7 +2135,6 @@ def runPaasDeploy = {
         println "[sca] Docker CLI missing; npm audit + @cyclonedx/cyclonedx-npm (Node) or extend agent for full SCA."
         def scaAppRoot = detectAppRoot()
         if (fileExists("${scaAppRoot}/package.json")) {
-          // cyclonedx-npm@latest pulls lru-cache needing Node 18+ tracingChannel — not Node 16 for legacy Angular
           ensureNodeTool('20.19.5')
           def scaRc = sh(script: """
             set +e
@@ -2844,7 +2830,6 @@ EOF
   }
 }
 
-// built-in label mismatch on Jenkins 2.5xx K8s — empty label uses default Built-In Node
 if (!agentLabel || agentLabel == 'built-in') {
   println "[paas] node: default Built-In Node (agentLabel=${agentLabel ?: 'empty'})"
   node {

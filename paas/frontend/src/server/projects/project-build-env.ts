@@ -2,7 +2,6 @@ import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,119}$/;
 
-/** Inject canonical public URL for Next.js / client bundles when not set in project build env. */
 export function augmentBuildEnvForPipeline(projectName: string, buildEnv: Record<string, string> | null | undefined): Record<string, string> {
     const merged = { ...(buildEnv ?? {}) };
     const publicUrl = buildAppPublicUrl(projectName).replace(/\/+$/, "");
@@ -92,7 +91,6 @@ export function normalizeBuildEnvInput(raw: unknown): Record<string, string> | n
     return Object.keys(out).length > 0 ? out : null;
 }
 
-/** Always includes pipeline public URL defaults + project Application environment. */
 export function encodeBuildEnvForJenkins(projectName: string, buildEnv: Record<string, string> | null | undefined): string {
     const merged = augmentBuildEnvForPipeline(projectName, buildEnv);
     return Buffer.from(JSON.stringify(merged), "utf8").toString("base64");

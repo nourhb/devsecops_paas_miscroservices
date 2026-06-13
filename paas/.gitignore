@@ -2,15 +2,13 @@ node_modules/
 frontend/node_modules
 frontend/.next
 frontend/.turbo
+frontend/tsconfig.tsbuildinfo
 
-# Secrets (templates: docker-compose.env.example, frontend/.env.example)
 .env
 .env.*
-!.env.example
 frontend/.env
 frontend/.env.*
 frontend/docker-compose.env
-!frontend/docker-compose.env.example
 
 .lab-cosign/
 *.pem
@@ -26,11 +24,8 @@ frontend/blob-report/
 jenkins/paas-deploy-job.generated.xml
 
 *.log
+__pycache__/
+*.pyc
 
 .DS_Store
 Thumbs.db
-
-.terraform
-*.tfstate
-*.tfstate.*
-crash.log

@@ -3,7 +3,6 @@ import { env } from "@/server/config/env";
 
 const SESSION_COOKIE_NAME = "paas_session";
 
-/** Parse JWT_EXPIRES_IN (e.g. 2h, 24h, 7d) to cookie maxAge seconds. */
 export function jwtExpiresInToSeconds(raw: string): number {
     const trimmed = raw.trim().toLowerCase();
     const match = /^(\d+)(s|m|h|d)?$/.exec(trimmed);
@@ -45,7 +44,6 @@ export function resolveSecureSessionCookieFlag() {
     if (base.startsWith("http://")) {
         return false;
     }
-    // Lab NodePort / HTTP PaaS: never force Secure cookies (breaks session on http://IP:30100).
     return false;
 }
 

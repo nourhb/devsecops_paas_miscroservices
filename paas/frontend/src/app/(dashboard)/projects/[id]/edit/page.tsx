@@ -10,9 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { Hint } from "@/components/hint";
 import { projectApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import { formatBuildEnvText, parseBuildEnvText } from "@/lib/project-build-env";
 export default function EditProjectPage() {
     const params = useParams<{
@@ -78,7 +76,6 @@ export default function EditProjectPage() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
             Edit project
-            <Hint>{hints.projects.edit}</Hint>
           </CardTitle>
         </CardHeader>
         <CardContent>

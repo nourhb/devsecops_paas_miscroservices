@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Hint } from "@/components/hint";
 import { dockerApi, projectApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import type { ContainerImageRecord } from "@/types";
 export default function DockerPage() {
     const params = useParams<{
@@ -48,7 +46,6 @@ export default function DockerPage() {
         <div>
           <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
             Docker &amp; registry
-            <Hint side="bottom">{hints.docker.pageHeading}</Hint>
           </h2>
           {projectQuery.data ? (<p className="text-sm text-muted">
               Current tag:{" "}
@@ -72,7 +69,6 @@ export default function DockerPage() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
             Image history
-            <Hint>{hints.docker.imageHistory}</Hint>
           </CardTitle>
         </CardHeader>
         <CardContent>

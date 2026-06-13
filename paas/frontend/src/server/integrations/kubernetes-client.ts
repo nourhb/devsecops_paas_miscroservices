@@ -680,7 +680,6 @@ export async function waitForAnyDeploymentReady(
     };
 }
 
-/** Remove legacy blue/green Deployments that block capacity or confuse Service selectors. */
 export async function deleteStaleBlueGreenDeployments(namespace: string): Promise<string[]> {
     const api = getAppsV1Api();
     if (!api) {
@@ -699,12 +698,10 @@ export async function deleteStaleBlueGreenDeployments(namespace: string): Promis
                 deleted.push(name);
             }
             catch {
-                // best-effort
             }
         }
     }
     catch {
-        // best-effort
     }
     return deleted;
 }
@@ -738,7 +735,6 @@ async function ensurePaasNginxConfigMap(namespace: string): Promise<void> {
             await api.createNamespacedConfigMap(namespace, body);
         }
         catch {
-            // best-effort
         }
     }
 }
@@ -802,7 +798,6 @@ function applyPythonStartRemediation(container: k8s.V1Container, containerPort: 
     container.args = [start];
 }
 
-/** Force image + containerPort on rolling Deployments when Argo/GitOps drift leaves pods unhealthy. */
 export async function remediateRollingDeployments(
     namespace: string,
     deploymentNames: string[],
@@ -853,7 +848,6 @@ export async function remediateRollingDeployments(
         catch (e) {
             const msg = kubernetesErrorMessage(e);
             if (!/404|not found/i.test(msg)) {
-                // ignore missing deployment names in candidate list
             }
         }
     }

@@ -12,9 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Hint } from "@/components/hint";
 import { argocdApi, kubernetesApi, monitoringApi, pipelineApi } from "@/lib/api";
-import { hints } from "@/lib/app-hints";
 import type { MonitoringKubernetesPod } from "@/types";
 import { cn } from "@/lib/utils";
 const chartCpu = "#0ea5e9";
@@ -158,7 +156,6 @@ export default function MonitoringPage() {
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
             <span className="flex flex-wrap items-center gap-2">
               Monitoring
-              <Hint side="bottom">{hints.monitoring.pageHeading}</Hint>
             </span>
             {snap ? (<span className="mt-1 block text-base font-normal text-muted">
                 {snap.project.projectName}
@@ -191,7 +188,6 @@ export default function MonitoringPage() {
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               <AlertCircle className="h-5 w-5"/>
               Could not load monitoring snapshot
-              <Hint side="left">{hints.monitoring.snapshotError}</Hint>
             </CardTitle>
             <CardDescription className="space-y-1">
               <span className="block">Check permissions, Prometheus, or Kubernetes settings, then retry.</span>
@@ -208,7 +204,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   CPU (instant)
-                  <Hint>{hints.monitoring.cpuInstant}</Hint>
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-2xl font-semibold tabular-nums">
@@ -222,7 +217,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   Memory (instant)
-                  <Hint>{hints.monitoring.memInstant}</Hint>
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-2xl font-semibold tabular-nums">{snap.runtime.memoryUsagePercent}%</CardContent>
@@ -232,7 +226,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   Deploy / build
-                  <Hint>{hints.monitoring.deployBuildStrip}</Hint>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -247,7 +240,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted flex flex-wrap items-center gap-1.5">
                   Namespace &amp; image
-                  <Hint>{hints.monitoring.namespaceImage}</Hint>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
@@ -262,7 +254,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   Cluster CPU — last hour
-                  <Hint>{hints.monitoring.cpuTrend}</Hint>
                 </CardTitle>
                 <CardDescription>
                   Prometheus <span className="font-mono text-xs">query_range</span> using <span className="font-mono text-xs">PROMETHEUS_QUERY_CPU</span> (or default node CPU idle).
@@ -286,7 +277,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   Cluster memory — last hour
-                  <Hint>{hints.monitoring.memTrend}</Hint>
                 </CardTitle>
                 <CardDescription>
                   Uses <span className="font-mono text-xs">PROMETHEUS_QUERY_MEMORY</span> (or default MemAvailable / MemTotal).
@@ -314,7 +304,6 @@ export default function MonitoringPage() {
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Boxes className="h-5 w-5 text-primary"/>
                   Pods in namespace
-                  <Hint>{hints.monitoring.podsByPhase}</Hint>
                 </CardTitle>
                 <CardDescription>
                   <span className="font-mono text-xs">{snap.project.namespace}</span>
@@ -340,7 +329,6 @@ export default function MonitoringPage() {
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Server className="h-5 w-5 text-primary"/>
                   Workloads &amp; pod logs
-                  <Hint>{hints.monitoring.workloadsLogs}</Hint>
                 </CardTitle>
                 <CardDescription>
                   Open logs for a container; uses the same Kubernetes log API as Cluster and Dashboard. Pod status from {snap.project.namespace}.
@@ -390,7 +378,6 @@ export default function MonitoringPage() {
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   <Activity className="h-5 w-5 text-primary"/>
                   GitOps (Argo CD)
-                  <Hint>{hints.monitoring.gitopsSnapshot}</Hint>
                 </CardTitle>
                 <CardDescription>Application sync and health for this project.</CardDescription>
               </CardHeader>
@@ -409,7 +396,6 @@ export default function MonitoringPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex flex-wrap items-center gap-2">
                   Workspace supply chain rollups
-                  <Hint>{hints.monitoring.supplyChainRollups}</Hint>
                 </CardTitle>
                 <CardDescription>Derived from all non-deleted projects (Cosign/Trivy-style rollups in metrics service), not only this app.</CardDescription>
               </CardHeader>
@@ -438,7 +424,6 @@ export default function MonitoringPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex flex-wrap items-center gap-2">
                 Logs
-                <Hint>{hints.monitoring.logTabs}</Hint>
               </CardTitle>
               <CardDescription>
                 Build and deployment buffers from the platform; pod log is live from Kubernetes when configured.
@@ -480,7 +465,6 @@ export default function MonitoringPage() {
         <CardHeader>
               <CardTitle className="text-base flex flex-wrap items-center gap-2">
                 Grafana
-                <Hint>{hints.monitoring.grafanaJump}</Hint>
               </CardTitle>
               <CardDescription>
                 Charts above use your configured Prometheus. Grafana remains the place for advanced dashboards and ad-hoc PromQL.

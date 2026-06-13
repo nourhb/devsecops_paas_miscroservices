@@ -9,7 +9,6 @@ export function sanitizeDeployImageName(projectName: string): string {
         .replace(/^-|-$/g, "") || "app";
 }
 
-/** OCI/Docker references must be lowercase in the repository path. */
 export function normalizeOciImageReference(imageRef: string): string {
     return imageRef.trim().toLowerCase();
 }
@@ -22,7 +21,7 @@ export function buildDeployImageRepository(projectName: string): string {
             .replace(/\{\{projectName\}\}/gi, safeName)
             .replace(/\{\{harborProject\}\}/gi, env.HARBOR_PROJECT.toLowerCase()));
     }
-    const harborHost = env.HARBOR_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/$/, "").split("/")[0];
+    const harborHost = env.HARBOR_BASE_URL.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
     if (harborHost) {
         return normalizeOciImageReference(`${harborHost}/${env.HARBOR_PROJECT.toLowerCase()}/${safeName}`);
     }
@@ -37,7 +36,6 @@ export function buildDeployImageTag(projectName: string, tag: string | number): 
     return normalizeOciImageReference(`${buildDeployImageRepository(projectName)}:${tag}`);
 }
 
-/** Strip tag/digest so Harbor host:port paths compare correctly (not confused with :627 tag). */
 export function normalizeDeployImageRepositoryRef(imageRef: string): string {
     const trimmed = imageRef.trim().toLowerCase();
     const digestAt = trimmed.indexOf("@sha256:");

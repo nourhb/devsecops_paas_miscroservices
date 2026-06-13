@@ -7,8 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Hint } from "@/components/hint";
-import { hints } from "@/lib/app-hints";
 function formatDate(value: string): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "\u2014" : date.toLocaleString();
@@ -50,7 +48,6 @@ export default function ArtifactsPage() {
                     <p className="text-xs font-medium text-muted">Build Outputs</p>
                     <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl">
                         Image artifacts
-                        <Hint side="bottom">{hints.artifacts.header}</Hint>
                     </h1>
                 </div>
                 <Button variant="outline" onClick={() => void loadArtifacts(true)} disabled={refreshing || loading}>
@@ -65,7 +62,6 @@ export default function ArtifactsPage() {
                         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                             <Package className="h-5 w-5 text-primary"/>
                             Latest image
-                            <Hint>{hints.artifacts.latestImage}</Hint>
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3 text-sm">
@@ -88,7 +84,6 @@ export default function ArtifactsPage() {
                     <CardHeader>
                         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                             Registry summary
-                            <Hint>{hints.artifacts.registrySummary}</Hint>
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3 text-sm">
@@ -112,7 +107,6 @@ export default function ArtifactsPage() {
                 <CardHeader>
                     <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                         Image artifacts
-                        <Hint>{hints.artifacts.table}</Hint>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="px-0 pb-0">

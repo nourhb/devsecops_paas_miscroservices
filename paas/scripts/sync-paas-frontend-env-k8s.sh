@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
@@ -11,26 +10,22 @@ SECRET_NAME="${SECRET_NAME:-paas-frontend-env}"
 umask 077
 FILTERED="$(mktemp "${TMPDIR:-/tmp}/paas-frontend-env.XXXXXX")"
 trap 'rm -f "${FILTERED}"' EXIT
-
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: env file not found: ${ENV_FILE}" >&2
   exit 1
 fi
-
 if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; then
   echo "ERROR: deployment/${DEPLOY_NAME} not found in namespace ${PAAS_NS}" >&2
   kubectl get deploy -A 2>/dev/null | grep -i frontend || true
   exit 1
 fi
-
 awk '
-  /^[[:space:]]*#/ { next }
+  /^[[:space:]]*
   /^[[:space:]]*$/ { next }
   match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) {
     eq = index($0, "=")
     key = substr($0, 1, eq - 1)
     val = substr($0, eq + 1)
-    # docker-compose.env uses quoted values; kubectl --from-env-file must not keep literal quotes.
     if (val ~ /^".*"$/) {
       val = substr(val, 2, length(val) - 2)
     } else if (val ~ /^'\''.*'\''$/) {
@@ -42,7 +37,6 @@ awk '
     for (k in env) print k "=" env[k]
   }
 ' "${ENV_FILE}" > "${FILTERED}"
-
 if ! grep -qE '^DATABASE_URL=.*postgres\.paas\.svc\.cluster\.local' "${FILTERED}"; then
   echo "ERROR: DATABASE_URL must use postgres.paas.svc.cluster.local for Kubernetes PaaS." >&2
   echo "       Do not use postgres:5432 (Docker Compose) or localhost." >&2
@@ -50,17 +44,14 @@ if ! grep -qE '^DATABASE_URL=.*postgres\.paas\.svc\.cluster\.local' "${FILTERED}
   exit 1
 fi
 chmod 600 "${FILTERED}" 2>/dev/null || true
-
 if ! grep -qE '^SMTP_HOST=' "${FILTERED}"; then
   echo "WARN: SMTP_HOST missing in ${ENV_FILE} — verification mail will use console mode only."
 fi
-
 echo "==> Secret ${SECRET_NAME} from ${ENV_FILE} ($(wc -l < "${FILTERED}") keys)"
 kubectl create secret generic "${SECRET_NAME}" \
   --from-env-file="${FILTERED}" \
   -n "${PAAS_NS}" \
   --dry-run=client -o yaml | kubectl apply -f -
-
 echo "==> Attach envFrom secret to deployment/${DEPLOY_NAME}"
 kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
 {
@@ -81,11 +72,9 @@ kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$
 }
 PATCH
 )"
-
 echo "==> Rollout"
 kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}"
 kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s
-
 echo "==> SMTP in pod (values hidden)"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   for v in SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER MAIL_FROM APP_BASE_URL; do
@@ -94,7 +83,6 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   done
   if [ -n "$SMTP_PASS" ]; then echo "SMTP_PASS=set"; else echo "SMTP_PASS=MISSING"; fi
 ' 2>/dev/null || echo "WARN: could not exec into pod yet — wait for rollout, then re-run check"
-
 echo "==> Security integrations in pod (values hidden)"
 SECURITY_OK=1
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
@@ -103,17 +91,15 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
     if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
   done
 ' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
-
 if grep -qE '^SONAR_TOKEN=' "${ENV_FILE}" && grep -qE '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}"; then
   :
 else
   echo ""
   echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN and/or DEPENDENCY_TRACK_API_KEY."
   echo "      Jenkins Steps 4–5 will skip Sonar/Dependency-Track until these are set."
-  echo "      Run: bash paas/scripts/setup-security-lab.sh"
+  echo "      Run: bash paas/scripts/lab.sh jenkins"
   SECURITY_OK=0
 fi
-
 echo ""
 if [[ "${SECURITY_OK}" -eq 1 ]]; then
   echo "OK. Trigger a NEW deploy from PaaS; Jenkins console should show SBOM upload + Sonar analysis (not 'non configuré')."

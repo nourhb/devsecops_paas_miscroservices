@@ -56,7 +56,7 @@ apiClient.interceptors.response.use((response) => response, async (error) => {
             authStorage.clear();
             return Promise.reject(error);
         }
-        // Do not log out on a single 401 — Postgres blips and pod restarts can cause transient auth failures.
+
         const alive = await probeSessionAlive();
         if (!alive) {
             authStorage.clear();

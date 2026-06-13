@@ -9,7 +9,6 @@ import { integrationFetch } from "@/server/http/integration-fetch";
 
 const execFileAsync = promisify(execFile);
 
-/** Lab default when sync-cosign-keys-lab.sh mounts the pubkey secret. */
 const LAB_MOUNTED_PUBLIC_KEY = "/etc/cosign/cosign.pub";
 
 function normalizePem(raw: string): string {
@@ -64,7 +63,6 @@ function harborBasicAuthHeader(): string | null {
     return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
 }
 
-/** Resolve tag → digest ref via Harbor API (Kyverno verifyImages matches digest). */
 function parseHarborImageRef(imageRef: string): {
     harborProject: string;
     repository: string;
@@ -132,7 +130,6 @@ async function harborDigestRefForTag(imageRef: string): Promise<string | null> {
     }
 }
 
-/** Harbor stores cosign signatures as accessories — works when pod cosign CLI cannot reach NodePort sigs. */
 async function harborArtifactHasCosignSignature(imageRef: string): Promise<boolean> {
     const base = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
     const auth = harborBasicAuthHeader();
@@ -226,7 +223,6 @@ async function harborArtifactHasCosignSignature(imageRef: string): Promise<boole
     }
 }
 
-/** Try in-cluster nginx first, then external NodePort (with docker config), then raw registry. */
 function imageRefsForVerify(imageRef: string): string[] {
     const refs: string[] = [];
     const slash = imageRef.indexOf("/");
@@ -237,7 +233,6 @@ function imageRefsForVerify(imageRef: string): string[] {
     const external = env.HARBOR_REGISTRY.trim();
     const nginx = env.HARBOR_REGISTRY_NGINX_CLUSTER.trim();
     const cluster = env.HARBOR_REGISTRY_CLUSTER.trim();
-    // Lab images are signed via HARBOR_REGISTRY (NodePort); try that before in-cluster nginx.
     if (external && imageRef.startsWith(`${external}/`)) {
         refs.push(imageRef.trim());
     }
@@ -350,7 +345,6 @@ export async function verifyImageWithCosign(imageRef: string, options?: {
     }
 }
 
-/** Exported for lab shell scripts mirroring Security API verify behaviour. */
 export function buildCosignVerifyCliArgs(
     keyPath: string,
     imageRef: string,

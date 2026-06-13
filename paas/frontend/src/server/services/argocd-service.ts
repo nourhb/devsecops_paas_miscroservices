@@ -83,7 +83,7 @@ export async function ensureArgoCdApplication(projectName: string, destinationNa
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated ensure for ${appName} (Argo CD not configured).`, created: false };
         }
-        throw new IntegrationError(`Argo CD is not configured: ${argoAuthHint()}`);
+        throw new IntegrationError(`Argo CD is not configured: ${argoAuthMessage()}`);
     }
     const existing = await getArgoApplicationHttpStatus(appName);
     if (existing === "present") {
@@ -152,7 +152,7 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
             health: "Unknown",
             syncStatus: "Unknown",
             appName,
-            unreachableReason: argoAuthHint()
+            unreachableReason: argoAuthMessage()
         };
     }
     const url = `${base}/api/v1/applications/${encodeURIComponent(appName)}`;
@@ -220,10 +220,10 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
         }
         const msg = formatFetchErrorChain(e);
         if (!allowSimulation()) {
-            const tlsHint = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
-                ? " If the server uses a self-signed cert, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
+            const tlsNote = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
+                ? " If the server uses a self-signed cert, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true."
                 : "";
-            throw new IntegrationError(`Argo CD status request failed: ${msg}${tlsHint}`);
+            throw new IntegrationError(`Argo CD status request failed: ${msg}${tlsNote}`);
         }
         return {
             health: "Unknown",
@@ -258,7 +258,7 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
         ensureLogs.push(`[argocd] API auth unavailable — ensure Application "${appName}" exists, then sync via Kubernetes API.`);
     }
     else if (!base || !allowSimulation()) {
-        throw new IntegrationError(`Argo CD is not configured: ${argoAuthHint()}`);
+        throw new IntegrationError(`Argo CD is not configured: ${argoAuthMessage()}`);
     }
     else {
         return { logs: `[argocd] Simulated sync for ${appName} (Argo CD not configured).` };
@@ -291,13 +291,13 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated sync for ${appName} (request failed: ${msg})` };
         }
-        const tlsHint = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
-            ? " If Argo CD uses a self-signed certificate, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true (lab only)."
+        const tlsNote = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
+            ? " If Argo CD uses a self-signed certificate, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true."
             : "";
-        const infraHint = /connect|refused|timeout|ECONNREFUSED/i.test(msg)
-            ? " On the cluster, ensure `kubectl get deploy -n argocd argocd-server` shows READY pods and `kubectl get endpoints -n argocd argocd-server` is non-empty; try ARGOCD_BASE_URL with the HTTP NodePort (port 80 mapping) if HTTPS fails."
+        const infraNote = /connect|refused|timeout|ECONNREFUSED/i.test(msg)
+            ? " Ensure argocd-server is reachable and ARGOCD_BASE_URL matches the cluster endpoint."
             : "";
-        throw new IntegrationError(`Argo CD sync request failed: ${msg}${tlsHint}${infraHint}`);
+        throw new IntegrationError(`Argo CD sync request failed: ${msg}${tlsNote}${infraNote}`);
     }
     if (!response.ok) {
         const body = await response.text();
@@ -325,21 +325,18 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
                 `Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (admin password) in the PaaS frontend environment.`);
         }
         if (response.status === 403) {
-            const hint = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
-            const labHint = " In lab, either fix Argo CD RBAC for this token, or set PAAS_STRICT_INTEGRATIONS=false in the frontend environment " +
-                "(paas/docker-compose.yml already sets it) so deploy can complete after GitOps when only the Argo **API** sync is denied.";
+            const detail = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
             throw new IntegrationError(`Argo CD denied this request (HTTP 403) for application "${appName}". ` +
-                `Check RBAC and that the Application exists and your token may sync it (Argo CD policies / admin token). ` +
+                `Check RBAC and that the Application exists and your token may sync it. ` +
                 `Expected application name: "${appName}" (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").` +
-                labHint +
-                hint);
+                detail);
         }
         throw new IntegrationError(`Argo CD sync failed (${response.status}): ${body.slice(0, 800)}`);
     }
     const syncLine = `[argocd] Sync accepted for ${appName}`;
     return { logs: ensureLogs.length ? `${ensureLogs.join("\n")}\n${syncLine}` : syncLine };
 }
-function argoAuthHint(): string {
+function argoAuthMessage(): string {
     return "Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (with ARGOCD_BASE_URL) to query Argo CD.";
 }
 async function argoAuthConfigured(): Promise<boolean> {

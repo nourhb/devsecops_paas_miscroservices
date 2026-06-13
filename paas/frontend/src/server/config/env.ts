@@ -89,16 +89,16 @@ const envSchema = z.object({
     JENKINS_AGENT_LABEL_PARAMETER: z.string().default("JENKINS_AGENT_LABEL"),
     JENKINS_DEPLOY_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     JENKINS_DEPLOY_POLL_MAX_MS: z.coerce.number().int().min(10000).default(3600000),
-    /** Max wait to resolve the correct shared paas-deploy build for a project before failing (ms). */
+
     PAAS_JENKINS_BUILD_RESOLVE_MAX_MS: z.coerce.number().int().min(60_000).default(900_000),
     PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS: z.coerce.number().int().min(0).default(0),
-    /** Built-in Jenkins executors (lab default 8). PaaS parallel deploy cap follows this when PAAS_MAX_CONCURRENT_JENKINS_DEPLOYS=0. */
+
     JENKINS_NUM_EXECUTORS: z.coerce.number().int().min(1).max(64).default(8),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
     JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("true"),
     JENKINSFILE_SYNC_RAW_URL: z.string().default(""),
     JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
-    /** When false (default), PaaS UI always triggers full security pipeline (SCA/SAST/ZAP). */
+
     PAAS_ALLOW_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
     JENKINS_SH_KEEPALIVE: z.enum(["true", "false"]).default("true"),
     PAAS_MONOREPO_ROOT: z.string().default(""),
@@ -195,7 +195,7 @@ const envSchema = z.object({
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
-    /** Pin app pods to a node hostname (e.g. master). Leave empty to let the scheduler place pods. */
+
     APPS_LAB_NODE_SELECTOR: z.preprocess(stripInlineEnvComment, z.string().default("")),
     APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
     APPS_INGRESS_CLASS: z.preprocess(stripInlineEnvComment, z.string().default("traefik")),
@@ -203,13 +203,13 @@ const envSchema = z.object({
     PAAS_DEPLOY_WAIT_ARGO_MS: z.coerce.number().int().min(10000).default(300000),
     PAAS_DEPLOY_WAIT_HTTP_MS: z.coerce.number().int().min(10000).default(180000),
     PAAS_DEPLOY_HTTP_POLL_MS: z.coerce.number().int().min(1000).default(5000),
-    /** Rolling (default) or BlueGreen — BlueGreen deploys to inactive slot then flips Service selector. */
+
     PAAS_DEPLOYMENT_STRATEGY: z.enum(["Rolling", "BlueGreen", "rolling", "bluegreen"]).default("Rolling"),
     PAAS_BLUE_GREEN_WAIT_DEPLOY_MS: z.coerce.number().int().min(10000).default(300000),
     AUTH_ALLOW_UNVERIFIED_LOGIN: z.enum(["true", "false"]).default("false"),
     NOTIFY_PIPELINE_FAILURE_EMAILS: z.enum(["true", "false"]).default("true"),
     PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
-    /** Block GitOps promote when Cosign/policy/Sonar gate fails (lab: keep false until tokens work). */
+
     PAAS_ENFORCE_SECURITY_GATE: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ENABLED: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ISSUER: z.string().default(""),
@@ -225,7 +225,7 @@ function harborRegistryHostFromBase(): string {
         return "";
     }
     return base
-        .replace(/^https?:\/\//i, "")
+        .replace(/^https?:\/\//, "")
         .replace(/\/$/, "")
         .split("/")[0];
 }
@@ -233,7 +233,7 @@ function resolvedHarborRegistryHost(): string {
     const explicit = firstNonEmpty(process.env.HARBOR_REGISTRY);
     if (explicit) {
         return explicit
-            .replace(/^https?:\/\//i, "")
+            .replace(/^https?:\/\//, "")
             .replace(/\/$/, "")
             .split("/")[0];
     }

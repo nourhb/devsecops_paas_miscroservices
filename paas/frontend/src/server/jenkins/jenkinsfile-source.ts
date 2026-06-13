@@ -3,19 +3,22 @@ import path from "path";
 import { env } from "@/server/config/env";
 
 export const JENKINSFILE_REL_SEGMENTS = ["paas", "jenkins", "Jenkinsfile.paas-deploy"] as const;
-/** Baked into the frontend image at build time — not replaced by the ConfigMap volume mount. */
 export const EMBEDDED_JENKINSFILE_ROOT = "/app/paas-jenkinsfile-embedded";
-/** May be overridden by ConfigMap mount (can stay stale after image upgrades). */
 export const BUNDLED_JENKINSFILE_ROOT = "/app/paas-bundled";
-export const MULTI_FRAMEWORK_MARKERS = ["multi-framework-20260611", "multi-framework-20260610"] as const;
-export const NGINX_CONF_WRITEFILE_MARKER = "nginx-conf-writefile-20260611";
+
+export function jenkinsfileIsValidPaasDeploy(groovy: string): boolean {
+    return groovy.includes("PAAS_BUILD_COMPLETE")
+        && groovy.includes("writeNginxPaasDefaultConf")
+        && groovy.includes("Step 1 — Params validation")
+        && groovy.includes("def paasStepOk");
+}
 
 export function jenkinsfileHasMultiFrameworkMarker(groovy: string): boolean {
-    return MULTI_FRAMEWORK_MARKERS.some((m) => groovy.includes(m));
+    return groovy.includes("detectProjectFrameworkFromPackageText");
 }
 
 export function jenkinsfileHasNginxConfWritefileFix(groovy: string): boolean {
-    return groovy.includes(NGINX_CONF_WRITEFILE_MARKER) && groovy.includes("writeNginxPaasDefaultConf");
+    return groovy.includes("writeNginxPaasDefaultConf");
 }
 
 function jenkinsfileAt(root: string): string {
@@ -38,12 +41,11 @@ function readEmbeddedModuleGroovy(): string | null {
     try {
         const mod = require("./embedded-jenkinsfile") as { EMBEDDED_JENKINSFILE_GROOVY?: string };
         const groovy = mod.EMBEDDED_JENKINSFILE_GROOVY?.trim();
-        if (groovy && jenkinsfileHasMultiFrameworkMarker(groovy) && jenkinsfileHasNginxConfWritefileFix(groovy)) {
+        if (groovy && jenkinsfileIsValidPaasDeploy(groovy)) {
             return groovy;
         }
     }
     catch {
-        // generated at `npm run build` / Docker builder stage
     }
     return null;
 }
@@ -85,7 +87,7 @@ export function resolveJenkinsfilePath(): {
     const embeddedText = readIfExists(embedded);
     const bundled = jenkinsfileAt(BUNDLED_JENKINSFILE_ROOT);
     const bundledText = readIfExists(bundled);
-    if (embeddedText && jenkinsfileHasMultiFrameworkMarker(embeddedText) && jenkinsfileHasNginxConfWritefileFix(embeddedText)) {
+    if (embeddedText && jenkinsfileIsValidPaasDeploy(embeddedText)) {
         return { absPath: embedded, root: EMBEDDED_JENKINSFILE_ROOT, source: "embedded" };
     }
     if (embeddedText && jenkinsfileHasNginxConfWritefileFix(embeddedText)

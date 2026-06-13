@@ -20,7 +20,6 @@ async function withAsyncLock<T>(key: string, store: Map<string, Promise<void>>, 
     }
 }
 
-/** Serializes all GitHub writes to the GitOps repo (prevents 409 during concurrent bootstraps). */
 export async function withGitOpsRepoLock<T>(repoKey: string, fn: () => Promise<T>): Promise<T> {
     const key = repoKey.trim().toLowerCase() || "default";
     return withAsyncLock(key, repoLocks, fn);
