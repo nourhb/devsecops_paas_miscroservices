@@ -1356,10 +1356,10 @@ ${paasShellKeepaliveHelper()}
         fi
         _deps_ok=0
         if [ -n "\$NM_SNAP" ] && [ -d "\$NM_SNAP" ] && [ -n "\$(ls -A "\$NM_SNAP" 2>/dev/null)" ]; then
-          echo "[image] restore node_modules from snapshot"
+          echo "[image] restore node_modules from snapshot (tar)"
           rm -rf node_modules
           mkdir -p node_modules
-          cp -a "\${NM_SNAP}/." node_modules/
+          run_with_keepalive bash -c "tar -C \"\${NM_SNAP}\" -cf - . | tar -C node_modules -xf -"
           if run_with_keepalive npm install --no-audit --no-fund --prefer-offline --loglevel info; then
             _deps_ok=1
           else
@@ -1378,7 +1378,8 @@ ${paasShellKeepaliveHelper()}
           mkdir -p "\$(dirname "\$NM_SNAP")"
           rm -rf "\${NM_SNAP}.new" "\$NM_SNAP"
           mkdir -p "\${NM_SNAP}.new"
-          cp -a node_modules/. "\${NM_SNAP}.new/"
+          echo "[image] saving node_modules snapshot via tar…"
+          run_with_keepalive bash -c "tar -C node_modules -cf - . | tar -C \"\${NM_SNAP}.new\" -xf -"
           mv "\${NM_SNAP}.new" "\$NM_SNAP"
           echo "[image] node_modules snapshot saved → \$NM_SNAP"
         fi
@@ -1787,6 +1788,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=sca-npm-install-full-20260611 (full npm install before cyclonedx when no lockfile — not package-lock-only)'
   println '[paas-jenkinsfile] marker=sca-sanitize-package-name-20260612 (cyclonedx rejects invalid npm names e.g. & in Warda/vite templates)'
   println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
+  println '[paas-jenkinsfile] marker=nm-snap-tar-step6-20260613 (Step6 restore/save node_modules via tar — cp -a breaks on Jenkins cache)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"

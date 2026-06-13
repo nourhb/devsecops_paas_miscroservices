@@ -179,9 +179,7 @@ function probeDefaultsForProfile(profile: BuildProfile): Record<string, unknown>
 }
 export function patchDeploymentForProfile(yaml: string, profileSpec: DeployProfileSpec): string {
     const port = profileSpec.containerPort;
-    let out = yaml
-        .replace(/readOnlyRootFilesystem:\s*true/g, "readOnlyRootFilesystem: false")
-        .replace(/runAsNonRoot:\s*true/g, "runAsNonRoot: false");
+    let out = yaml.replace(/readOnlyRootFilesystem:\s*true/g, "readOnlyRootFilesystem: false");
     if (!out.includes("containerPort:") && out.includes("containers:")) {
         out = out.replace(/(\s+- name: [^\n]+\n\s+image:)/, `          ports:\n            - name: http\n              containerPort: ${port}\n              protocol: TCP\n$1`);
     }
