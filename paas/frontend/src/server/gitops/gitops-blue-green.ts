@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
+import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
 
 export type DeploymentStrategy = "Rolling" | "BlueGreen";
@@ -123,8 +124,9 @@ export function applyBlueGreenInactiveImage(
     projectName: string,
     imageTag: string
 ): { activeSlot: BlueGreenSlot; inactive: BlueGreenSlot } {
-    const { activeSlot, inactive } = ensureBlueGreenValuesStructure(doc, projectName, imageTag);
-    const { repository, tag, digest } = splitImageRef(imageTag);
+    const normalizedTag = normalizeHarborImageRef(imageTag);
+    const { activeSlot, inactive } = ensureBlueGreenValuesStructure(doc, projectName, normalizedTag);
+    const { repository, tag, digest } = splitImageRef(normalizedTag);
     const block = slotImageBlock(doc, inactive);
     const img = block.image as Record<string, unknown>;
     img.repository = repository || buildDeployImageRepository(projectName);
@@ -164,7 +166,8 @@ export function applyRollingImage(doc: Record<string, unknown>, projectName: str
     delete doc.activeSlot;
     delete doc.blue;
     delete doc.green;
-    const { repository, tag, digest } = splitImageRef(imageTag);
+    const normalizedTag = normalizeHarborImageRef(imageTag);
+    const { repository, tag, digest } = splitImageRef(normalizedTag);
     doc.image = {
         repository: repository || buildDeployImageRepository(projectName),
         tag,

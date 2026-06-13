@@ -1,3 +1,4 @@
+import { coerceHarborRegistryHostForCosign, harborBaseUrlFromRegistryHost } from "@/server/deploy/harbor-registry-host";
 import { z } from "zod";
 function firstNonEmpty(...values: (string | undefined)[]): string {
     for (const v of values) {
@@ -218,10 +219,9 @@ const envSchema = z.object({
     KEYCLOAK_ADMIN_ROLE: z.string().default("")
 });
 const harborUrlRaw = firstNonEmpty(process.env.HARBOR_BASE_URL, process.env.HARBOR_URL);
-const harborBaseEffective = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
 function harborRegistryHostFromBase(): string {
-    const base = harborBaseEffective.trim();
-    if (!base) {
+    const base = /docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw;
+    if (!base.trim()) {
         return "";
     }
     return base
@@ -231,14 +231,15 @@ function harborRegistryHostFromBase(): string {
 }
 function resolvedHarborRegistryHost(): string {
     const explicit = firstNonEmpty(process.env.HARBOR_REGISTRY);
-    if (explicit) {
-        return explicit
-            .replace(/^https?:\/\//, "")
-            .replace(/\/$/, "")
-            .split("/")[0];
-    }
-    return harborRegistryHostFromBase();
+    const raw = explicit
+        ? explicit.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+        : harborRegistryHostFromBase();
+    return coerceHarborRegistryHostForCosign(raw);
 }
+const harborRegistryHostEffective = resolvedHarborRegistryHost();
+const harborBaseEffectiveResolved = harborRegistryHostEffective
+    ? harborBaseUrlFromRegistryHost(harborRegistryHostEffective)
+    : (/docker\.com/i.test(harborUrlRaw) ? "" : harborUrlRaw);
 function pemFromEnv(raw: string): string {
     let s = String(raw).trim();
     if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
@@ -364,8 +365,8 @@ const parsed = envSchema.safeParse({
     PAAS_ALLOW_FAST_PIPELINE: process.env.PAAS_ALLOW_FAST_PIPELINE,
     JENKINS_SH_KEEPALIVE: process.env.JENKINS_SH_KEEPALIVE,
     PAAS_MONOREPO_ROOT: process.env.PAAS_MONOREPO_ROOT,
-    HARBOR_REGISTRY: resolvedHarborRegistryHost(),
-    HARBOR_BASE_URL: harborBaseEffective,
+    HARBOR_REGISTRY: harborRegistryHostEffective,
+    HARBOR_BASE_URL: harborBaseEffectiveResolved,
     HARBOR_REGISTRY_CLUSTER: process.env.HARBOR_REGISTRY_CLUSTER,
     HARBOR_REGISTRY_NGINX_CLUSTER: process.env.HARBOR_REGISTRY_NGINX_CLUSTER,
     HARBOR_USERNAME: process.env.HARBOR_USERNAME,
