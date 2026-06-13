@@ -26,7 +26,6 @@ read_cosign_public_key() {
   printf '%b' "${raw}"
 }
 
-echo "==> Apply Kyverno require-signed-images (lab cosign public key)"
 PUBKEY="$(read_cosign_public_key)"
 export PAAS_COSIGN_PUBKEY_FOR_POLICY="${PUBKEY}"
 python3 - "${POLICY_SRC}" "${POLICY_OUT}" <<'PY'
@@ -52,7 +51,6 @@ unset PAAS_COSIGN_PUBKEY_FOR_POLICY
 
 kubectl apply -f "${POLICY_OUT}"
 
-echo "==> Harbor pull secret in ${KYVERNO_NS} (Kyverno verifyImages needs registry auth)"
 kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \
   --docker-server="${NODE_IP}:${HARBOR_NODEPORT}" \
@@ -60,34 +58,16 @@ kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \
   --docker-password="${HARBOR_PASS}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-patch_kyverno_deploy() {
-  local dep="$1"
-  if ! kubectl get deploy "${dep}" -n "${KYVERNO_NS}" >/dev/null 2>&1; then
-    echo "WARN: deployment/${dep} not found in ${KYVERNO_NS}"
-    return 0
-  fi
-  kubectl set env deployment/"${dep}" -n "${KYVERNO_NS}" KYVERNO_EXPERIMENTAL_ALLOW_INSECURE_REGISTRY=true >/dev/null 2>&1 || true
-  local has_pull has_insecure
-  has_pull="$(kubectl get deploy "${dep}" -n "${KYVERNO_NS}" -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -c imagePullSecrets || true)"
-  has_insecure="$(kubectl get deploy "${dep}" -n "${KYVERNO_NS}" -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -c allowInsecureRegistry || true)"
-  if [[ "${has_pull}" -eq 0 ]]; then
+dep=kyverno-admission-controller
+if kubectl get deploy "${dep}" -n "${KYVERNO_NS}" >/dev/null 2>&1; then
+  args="$(kubectl get deploy "${dep}" -n "${KYVERNO_NS}" -o jsonpath='{.spec.template.spec.containers[0].args}' || true)"
+  if ! grep -q imagePullSecrets <<<"${args}"; then
     kubectl patch deployment "${dep}" -n "${KYVERNO_NS}" --type=json \
       -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--imagePullSecrets=harbor-regcred"}]' || true
   fi
-  if [[ "${has_insecure}" -eq 0 ]]; then
+  if ! grep -q allowInsecureRegistry <<<"${args}"; then
     kubectl patch deployment "${dep}" -n "${KYVERNO_NS}" --type=json \
       -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--allowInsecureRegistry"}]' || true
   fi
   kubectl rollout status deployment/"${dep}" -n "${KYVERNO_NS}" --timeout=120s || true
-  echo "OK patched ${dep}"
-}
-
-for dep in kyverno-admission-controller kyverno-background-controller kyverno-reports-controller; do
-  patch_kyverno_deploy "${dep}"
-done
-
-echo ""
-echo "OK Kyverno cosign policy applied."
-echo "If Argo still fails with 'private or link-local address', run:"
-echo "  bash paas/scripts/fix-harbor-cosign-realm-lab.sh"
-echo "Then re-deploy so image refs use harbor.${NODE_IP}.nip.io:${HARBOR_NODEPORT}/..."
+fi
