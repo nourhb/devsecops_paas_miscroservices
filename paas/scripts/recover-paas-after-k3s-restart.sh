@@ -47,5 +47,11 @@ for i in $(seq 1 12); do
   sleep 15
   [[ "${i}" -eq 12 ]] && { echo "recover finished but health check still failing"; exit 1; }
 done
+echo "==> Platform bootstrap (Harbor cosign realm + Kyverno policy)"
+bash "${SCRIPT_DIR}/platform-bootstrap-lab.sh" || true
+if [[ -f "${ENV_FILE}" ]]; then
+  ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || true
+  bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh" || true
+fi
 echo ""
 echo "OK — PaaS login: http://${NODE_IP}:30100/login"

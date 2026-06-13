@@ -1,4 +1,5 @@
 import { env } from "@/server/config/env";
+import { coerceHarborRegistryHostForCosign } from "@/server/deploy/harbor-registry-host";
 import { IntegrationError } from "@/server/http/errors";
 
 export function sanitizeDeployImageName(projectName: string): string {
@@ -21,7 +22,9 @@ export function buildDeployImageRepository(projectName: string): string {
             .replace(/\{\{projectName\}\}/gi, safeName)
             .replace(/\{\{harborProject\}\}/gi, env.HARBOR_PROJECT.toLowerCase()));
     }
-    const harborHost = env.HARBOR_BASE_URL.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
+    const harborHost = coerceHarborRegistryHostForCosign(
+        env.HARBOR_REGISTRY || env.HARBOR_BASE_URL.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+    );
     if (harborHost) {
         return normalizeOciImageReference(`${harborHost}/${env.HARBOR_PROJECT.toLowerCase()}/${safeName}`);
     }

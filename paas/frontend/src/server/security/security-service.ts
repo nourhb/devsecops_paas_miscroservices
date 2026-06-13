@@ -3,6 +3,7 @@ import { DeploymentJobStatus, type Project } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
+import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { cosignClient, dependencyTrackClient, jenkinsClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
@@ -430,7 +431,7 @@ async function buildIntegrationNotes(project: Project, sonarStatus: string, dtPr
 async function resolveSecurityImageRef(project: Project): Promise<string> {
     const stored = project.imageTag?.trim();
     if (stored && stored.includes("/") && stored.includes(":")) {
-        return stored;
+        return normalizeHarborImageRef(stored);
     }
     const recent = await prisma.deployment.findFirst({
         where: {

@@ -5,6 +5,7 @@ cmd="${1:-}"
 usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot"
+  echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  health    Quick health check"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile to the paas-deploy job"
@@ -12,6 +13,8 @@ usage() {
 case "$cmd" in
   start|recover)
     bash "$DIR/recover-paas-after-k3s-restart.sh" ;;
+  bootstrap)
+    bash "$DIR/platform-bootstrap-lab.sh" ;;
   health|check)
     bash "$DIR/check-paas-lab-health.sh" ;;
   env)
