@@ -6,7 +6,9 @@ import { fail, ok } from "@/server/http/response";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { ValidationError } from "@/server/http/errors";
 import { jenkinsClient } from "@/server/integrations/devsecops-clients";
+import { TtlCache } from "@/server/http/ttl-cache";
 export const runtime = "nodejs";
+const pipelineStagesCache = new TtlCache<Awaited<ReturnType<typeof jenkinsClient.getWorkflowStagesForProject>>>(2500);
 export async function GET(request: NextRequest) {
     try {
         const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
@@ -35,7 +37,13 @@ export async function GET(request: NextRequest) {
         }
         const bnRaw = searchParams.get("buildNumber");
         const buildNumber = bnRaw === null || bnRaw === "" ? null : Number.parseInt(bnRaw, 10);
+        const cacheKey = `${projectId}:${Number.isFinite(buildNumber) ? buildNumber : "latest"}`;
+        const cached = pipelineStagesCache.get(cacheKey);
+        if (cached) {
+            return ok(cached);
+        }
         const payload = await jenkinsClient.getWorkflowStagesForProject(project.projectName, project.id, Number.isFinite(buildNumber) ? buildNumber : null);
+        pipelineStagesCache.set(cacheKey, payload, payload.building ? 1500 : 3000);
         return ok(payload);
     }
     catch (error) {

@@ -6,6 +6,8 @@ import type { BuildProfile } from "@/server/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
+import { helmReleaseName } from "@/server/gitops/gitops-blue-green";
+import { sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import fs from "node:fs";
 const BUNDLED_SIMPLE_APP_CHART = "/app/paas-bundled/paas/gitops/apps/simple-app";
 const CHART_RELATIVE_FILES = [
@@ -123,6 +125,7 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
     const refBase = (env.GITOPS_BOOTSTRAP_CHART_PATH.trim() || "apps/simple-app").replace(/\\/g, "/").replace(/\/$/, "");
     const referenceName = refBase.split("/").filter(Boolean).pop() ?? "simple-app";
     const profileSpec = resolveDeployProfileSpec(buildProfile);
+    const chartSlug = sanitizeDeployImageName(projectName);
     const filesWritten: string[] = [];
     for (const rel of CHART_RELATIVE_FILES) {
         const destPath = `${chartPath}/${rel}`;
@@ -134,8 +137,8 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
         if (!text) {
             text = await githubGetText(owner, repo, srcPath, branch, token);
         }
-        if (referenceName !== projectName) {
-            text = text.replaceAll(referenceName, projectName);
+        if (referenceName !== chartSlug) {
+            text = text.replaceAll(referenceName, chartSlug);
         }
         if (rel === "templates/deployment.yaml") {
             text = patchDeploymentForProfile(text, profileSpec);
@@ -188,6 +191,9 @@ export function patchDeploymentForProfile(yaml: string, profileSpec: DeployProfi
     return out;
 }
 export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectName: string, buildProfile: BuildProfile = "node", forceRolling = false): void {
+    const chartSlug = sanitizeDeployImageName(projectName);
+    doc.nameOverride = chartSlug;
+    doc.fullnameOverride = helmReleaseName(projectName);
     const profileSpec = resolveDeployProfileSpec(buildProfile);
     if (!doc.imagePullSecrets) {
         doc.imagePullSecrets = [{ name: "harbor-regcred" }];

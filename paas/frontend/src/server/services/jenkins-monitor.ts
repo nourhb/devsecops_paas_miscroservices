@@ -3,7 +3,12 @@ import { prisma } from "@/server/db/prisma";
 import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
 import { resolveBuildPlan } from "@/server/build-planner";
 import { recordDeploymentFailure } from "@/server/services/deployment-failure";
+const activeMonitors = new Set<string>();
 export function monitorDeployment(deploymentId: string, initialBuildNumber: number | null): void {
+    if (activeMonitors.has(deploymentId)) {
+        return;
+    }
+    activeMonitors.add(deploymentId);
     void runMonitorLoop(deploymentId, initialBuildNumber).catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
         void (async () => {
@@ -16,6 +21,8 @@ export function monitorDeployment(deploymentId: string, initialBuildNumber: numb
                 });
             }
         })();
+    }).finally(() => {
+        activeMonitors.delete(deploymentId);
     });
 }
 async function runMonitorLoop(deploymentId: string, initialBuildNumber: number | null): Promise<void> {

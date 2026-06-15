@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
-import type { DeploymentStatus } from "@/types";
+import type { DeploymentStatus, Project } from "@/types";
 import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
 import { cn } from "@/lib/utils";
 function statusBadgeVariant(status: string | undefined, ok: string[]): "success" | "warning" | "danger" | "outline" {
@@ -43,6 +43,27 @@ function deploymentJobBadgeVariant(status: string): "success" | "danger" | "warn
     }
     return "warning";
 }
+function displayBuildLabel(buildStatus: string | undefined, lastDeploymentStatus: string | undefined): string {
+    const bs = (buildStatus || "").toUpperCase();
+    const ds = (lastDeploymentStatus || "").toUpperCase();
+    if (bs === "PUSHING" && (ds === "PROMOTING" || ds === "SUCCESS" || ds === "DEPLOYING")) {
+        return "SUCCESS";
+    }
+    if ((bs === "BUILDING" || bs === "QUEUED") && ["SUCCESS", "PROMOTING", "DEPLOYED"].includes(ds)) {
+        return "SUCCESS";
+    }
+    return buildStatus || "—";
+}
+function displayDeployLabel(lastDeploymentStatus: string | undefined): string {
+    const ds = (lastDeploymentStatus || "").toUpperCase();
+    if (ds === "PROMOTING") {
+        return "PROMOTING (GitOps)";
+    }
+    if (ds === "DEPLOYING") {
+        return "DEPLOYING (Jenkins)";
+    }
+    return lastDeploymentStatus || "—";
+}
 export default function ProjectDetailsPage() {
     const params = useParams<{
         id: string;
@@ -53,22 +74,36 @@ export default function ProjectDetailsPage() {
     const projectQuery = useQuery({
         queryKey: ["project", projectId],
         queryFn: () => projectApi.getProject(projectId),
-        refetchInterval: 10000
+        refetchInterval: (q) => {
+            const p = q.state.data;
+            const busy = ["BUILDING", "QUEUED", "PUSHING"].includes((p?.buildStatus || "").toUpperCase());
+            const deployBusy = ["DEPLOYING", "PROMOTING", "PENDING", "QUEUED"].includes((p?.lastDeploymentStatus || "").toUpperCase());
+            return busy || deployBusy ? 4000 : 20000;
+        }
     });
     const statusQuery = useQuery({
         queryKey: ["status", projectId],
         queryFn: () => pipelineApi.getStatus(projectId) as Promise<DeploymentStatus>,
-        refetchInterval: 10000
+        refetchInterval: (q) => {
+            const s = q.state.data;
+            const busy = ["DEPLOYING", "PROMOTING", "PENDING", "QUEUED"].includes((s?.lastDeploymentStatus || "").toUpperCase());
+            const p = queryClient.getQueryData<Project>(["project", projectId]);
+            const buildBusy = ["BUILDING", "QUEUED", "PUSHING"].includes((p?.buildStatus || "").toUpperCase());
+            return busy || buildBusy ? 3000 : 20000;
+        }
     });
     const argoQuery = useQuery({
         queryKey: ["argocd", projectId],
         queryFn: () => argocdApi.getStatus(projectId),
-        refetchInterval: 20000
+        refetchInterval: 25000
     });
     const deploymentsQuery = useQuery({
         queryKey: ["deployments", projectId],
         queryFn: () => projectApi.listDeployments(projectId),
-        refetchInterval: 5000
+        refetchInterval: (q) => {
+            const active = (q.state.data ?? []).some((d) => ["PENDING", "DEPLOYING"].includes((d.status || "").toUpperCase()));
+            return active ? 4000 : 15000;
+        }
     });
     const appReachQuery = useQuery({
         queryKey: ["app-reachability", projectId],
@@ -79,7 +114,7 @@ export default function ProjectDetailsPage() {
     const securityQuery = useQuery({
         queryKey: ["security", projectId],
         queryFn: () => securityApi.getSecurity(projectId),
-        refetchInterval: 20000
+        refetchInterval: 30000
     });
     const buildMutation = useMutation({
         mutationFn: () => pipelineApi.triggerBuild(projectId),
@@ -200,6 +235,9 @@ export default function ProjectDetailsPage() {
     }
     const project = projectQuery.data;
     const status = statusQuery.data;
+    const lastDs = status?.lastDeploymentStatus ?? project.lastDeploymentStatus;
+    const buildLabel = displayBuildLabel(project.buildStatus, lastDs);
+    const deployLabel = displayDeployLabel(lastDs);
     const refreshing = statusQuery.isFetching && !statusQuery.isLoading;
     const latestDeployment = deploymentsQuery.data?.[0] ?? null;
     const activeDeployment = deploymentsQuery.data?.find((row) => row.status === "PENDING" || row.status === "DEPLOYING") ?? null;
@@ -281,14 +319,14 @@ export default function ProjectDetailsPage() {
         </div>
 
         <div className="flex flex-wrap items-start gap-2 xl:justify-end">
-          <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant={statusBadgeVariant(status?.lastDeploymentStatus ?? project.lastDeploymentStatus, [
+          <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant={statusBadgeVariant(lastDs, [
             "SUCCESS",
             "DEPLOYED"
         ])}>
-            Deploy: {status?.lastDeploymentStatus ?? project.lastDeploymentStatus}
+            Deploy: {deployLabel}
           </Badge>
-          <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant={statusBadgeVariant(project.buildStatus, ["SUCCESS"])}>
-            Build: {project.buildStatus}
+          <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant={statusBadgeVariant(buildLabel, ["SUCCESS", "READY"])}>
+            Build: {buildLabel}
           </Badge>
           <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant="outline">
             Pod: {status?.podStatus ?? project.podStatus}

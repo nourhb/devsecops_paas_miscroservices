@@ -27,6 +27,9 @@ import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
+import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
+
+const activePromotions = new Set<string>();
 
 function tail(s: string): string {
     return s.length <= DEPLOYMENT_LOG_TAIL_MAX_CHARS ? s : s.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
@@ -185,17 +188,32 @@ async function persistFailure(deploymentId: string, projectId: string, fullLog: 
 }
 
 export async function promoteDeploymentAfterJenkinsSuccess(deploymentId: string, projectId: string, projectName: string, jenkinsBuildNumber: number, jenkinsLogTail: string): Promise<void> {
+    const verified = resolveVerifiedArtifactImage(jenkinsLogTail, projectId, projectName, jenkinsBuildNumber);
+    const artifactImage = verified.image ?? `${buildDeployImageRepository(projectName)}:${jenkinsBuildNumber}`;
     await promoteDeploymentAfterBuildSuccess(deploymentId, projectId, projectName, {
         provider: "jenkins",
         runId: String(jenkinsBuildNumber),
         runNumber: jenkinsBuildNumber,
-        artifactImage: `${buildDeployImageRepository(projectName)}:${jenkinsBuildNumber}`,
+        artifactImage,
         artifactDigest: null,
         buildLogTail: jenkinsLogTail
     });
 }
 
 export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, projectId: string, projectName: string, input: PromoteDeploymentInput): Promise<void> {
+    if (activePromotions.has(deploymentId)) {
+        return;
+    }
+    activePromotions.add(deploymentId);
+    try {
+        await runPromoteDeploymentAfterBuildSuccess(deploymentId, projectId, projectName, input);
+    }
+    finally {
+        activePromotions.delete(deploymentId);
+    }
+}
+
+async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, projectId: string, projectName: string, input: PromoteDeploymentInput): Promise<void> {
     let imageRef = input.artifactImage;
     if (!imageRef) {
         try {
@@ -262,7 +280,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     await updateProject(projectId, {
         lastDeploymentStatus: "SUCCESS",
         deploymentLogs: buildPart,
-        buildStatus: "PUSHING",
+        buildStatus: "SUCCESS",
         imageTag: artifactRef
     });
     if (env.PAAS_ENFORCE_SECURITY_GATE === "true") {
@@ -395,7 +413,7 @@ export async function promoteDeploymentAfterBuildSuccess(deploymentId: string, p
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
     let urlReachable = false;
     let reachabilityError: string | undefined;
-    const postArgoDelayMs = Math.max(0, Number(process.env.PAAS_DEPLOY_POST_ARGO_PROBE_DELAY_MS ?? "15000") || 0);
+    const postArgoDelayMs = Math.max(0, env.PAAS_DEPLOY_POST_ARGO_PROBE_DELAY_MS);
     if (postArgoDelayMs > 0 && (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true")) {
         sections.push(`[deploy] Waiting ${postArgoDelayMs}ms after Argo CD before HTTP probe…`);
         await new Promise((r) => setTimeout(r, postArgoDelayMs));

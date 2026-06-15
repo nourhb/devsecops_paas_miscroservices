@@ -2,6 +2,7 @@ import * as k8s from "@kubernetes/client-node";
 import type { V1Pod } from "@kubernetes/client-node";
 import fs from "node:fs";
 import { env } from "@/server/config/env";
+import { TtlCache } from "@/server/http/ttl-cache";
 let coreApi: k8s.CoreV1Api | null | undefined;
 let customObjectsApi: k8s.CustomObjectsApi | null | undefined;
 let appsApi: k8s.AppsV1Api | null | undefined;
@@ -332,7 +333,14 @@ function normalizeExternalIps(service: {
     const values = ingress.map((item) => item.ip || item.hostname || "").filter(Boolean);
     return values.join(", ") || "-";
 }
+const namespacePodSummaryCache = new TtlCache<NamespacePodSummary>(10_000);
+
 export async function getNamespacePodSummary(namespace: string): Promise<NamespacePodSummary> {
+    const ns = namespace.trim() || "default";
+    const cached = namespacePodSummaryCache.get(ns);
+    if (cached) {
+        return cached;
+    }
     const api = getCoreV1Api();
     if (!api) {
         return {
@@ -346,21 +354,23 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
         };
     }
     try {
-        const { body } = await api.listNamespacedPod(namespace);
+        const { body } = await api.listNamespacedPod(ns);
         const items = body.items ?? [];
         const counts = { running: 0, failed: 0, pending: 0, succeeded: 0, other: 0 };
         for (const pod of items) {
             const b = podBucket(pod);
             counts[b] += 1;
         }
-        return {
+        const summary = {
             ...counts,
             total: items.length
         };
+        namespacePodSummaryCache.set(ns, summary);
+        return summary;
     }
     catch (e) {
         const message = kubernetesErrorMessage(e);
-        return {
+        const summary = {
             running: 0,
             failed: 0,
             pending: 0,
@@ -369,6 +379,8 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
             total: 0,
             error: message
         };
+        namespacePodSummaryCache.set(ns, summary, 3000);
+        return summary;
     }
 }
 export async function listNamespacePods(namespace: string): Promise<{

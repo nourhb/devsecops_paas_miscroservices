@@ -8,8 +8,12 @@ import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations
 import { promoteDeploymentAfterJenkinsSuccess } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
+import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { updateProject } from "@/server/projects/project-service";
+import { TtlCache } from "@/server/http/ttl-cache";
+
+const jenkinsUiRefreshThrottle = new TtlCache<true>(2500);
 
 function jenkinsConfigured(): boolean {
     return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
@@ -89,6 +93,78 @@ async function resolveDeployBuildNumber(deployment: {
     }
     const summary = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
     return summary ? normalizeBuildNumber(summary.number, baseline) : null;
+}
+
+/** Lightweight Jenkins poll for UI status — does not run GitOps promotion. */
+export async function refreshProjectJenkinsDisplayStatus(projectId: string): Promise<void> {
+    if (!jenkinsConfigured() || getBuildBackend().provider !== "jenkins") {
+        return;
+    }
+    if (jenkinsUiRefreshThrottle.get(projectId)) {
+        return;
+    }
+    jenkinsUiRefreshThrottle.set(projectId, true);
+    const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { buildStatus: true, lastDeploymentStatus: true }
+    });
+    if (!project) {
+        return;
+    }
+    const bs = (project.buildStatus || "").toUpperCase();
+    const ds = (project.lastDeploymentStatus || "").toUpperCase();
+    const busy = ["QUEUED", "BUILDING", "PUSHING"].includes(bs) || ["QUEUED", "DEPLOYING", "PROMOTING", "PENDING"].includes(ds);
+    if (!busy) {
+        return;
+    }
+    const deployment = await prisma.deployment.findFirst({
+        where: {
+            projectId,
+            status: { in: [DeploymentJobStatus.PENDING, DeploymentJobStatus.DEPLOYING] }
+        },
+        orderBy: { createdAt: "desc" },
+        include: { project: true }
+    });
+    if (!deployment) {
+        if (bs === "BUILDING" || bs === "QUEUED") {
+            const terminal = ["SUCCESS", "READY", "FAILED"].includes(bs);
+            if (!terminal && ["SUCCESS", "DEPLOYED", "FAILED", "ROLLED_BACK"].includes(ds)) {
+                await updateProject(projectId, {
+                    buildStatus: ds === "FAILED" ? "FAILED" : "SUCCESS"
+                });
+            }
+        }
+        return;
+    }
+    const buildNum = await resolveDeployBuildNumber(deployment);
+    if (buildNum === null) {
+        return;
+    }
+    const { projectName, id: pid } = deployment.project;
+    const meta = await jenkinsClient.getBuildApiJson(projectName, pid, buildNum, "deploy");
+    if (!meta) {
+        return;
+    }
+    if (!terminalBuild(meta)) {
+        await updateProject(projectId, {
+            buildStatus: "BUILDING",
+            lastDeploymentStatus: "DEPLOYING",
+            deploymentLogs: deployment.logs ?? undefined
+        });
+        return;
+    }
+    if (meta.result === "SUCCESS") {
+        await updateProject(projectId, {
+            buildStatus: "SUCCESS",
+            lastDeploymentStatus: deployment.status === DeploymentJobStatus.DEPLOYING ? "PROMOTING" : "SUCCESS"
+        });
+    }
+    else {
+        await updateProject(projectId, {
+            buildStatus: "FAILED",
+            lastDeploymentStatus: "FAILED"
+        });
+    }
 }
 
 export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Promise<void> {

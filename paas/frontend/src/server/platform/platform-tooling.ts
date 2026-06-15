@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { getCoreV1Api, getCustomObjectsApi, isKubernetesConfigured } from "@/server/integrations/kubernetes-client";
+import { TtlCache } from "@/server/http/ttl-cache";
 import type { PlatformToolGroup } from "@/types";
 type ToolTone = "success" | "warning" | "danger" | "outline";
 function toneFromPods(running: number, total: number): ToolTone {
@@ -155,7 +156,21 @@ async function countCrdsContaining(value: string): Promise<number> {
 function tool(name: string, detail: string, tone: ToolTone = "outline") {
     return { name, detail, tone };
 }
+const platformToolingCache = new TtlCache<{
+    groups: PlatformToolGroup[];
+}>(45_000);
 export async function getPlatformTooling(): Promise<{
+    groups: PlatformToolGroup[];
+}> {
+    const cached = platformToolingCache.get("default");
+    if (cached) {
+        return cached;
+    }
+    const payload = await loadPlatformTooling();
+    platformToolingCache.set("default", payload);
+    return payload;
+}
+async function loadPlatformTooling(): Promise<{
     groups: PlatformToolGroup[];
 }> {
     const calicoAgentPattern = /calico|tigera|canal/i;

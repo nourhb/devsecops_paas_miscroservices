@@ -1,5 +1,5 @@
 import { env } from "@/server/config/env";
-import { coerceHarborRegistryHostForCosign } from "@/server/deploy/harbor-registry-host";
+import { coerceHarborRegistryHostForCosign, normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { IntegrationError } from "@/server/http/errors";
 
 export function sanitizeDeployImageName(projectName: string): string {
@@ -55,6 +55,10 @@ export function deployImageRepositoryMatchesProject(imageRef: string, projectNam
     const expected = buildDeployImageRepository(projectName).toLowerCase();
     const actual = normalizeDeployImageRepositoryRef(imageRef);
     if (actual === expected) {
+        return true;
+    }
+    const coercedActual = normalizeDeployImageRepositoryRef(normalizeHarborImageRef(imageRef));
+    if (coercedActual === expected) {
         return true;
     }
     const short = sanitizeDeployImageName(projectName);
