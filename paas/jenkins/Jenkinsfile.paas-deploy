@@ -1293,6 +1293,8 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   if (imageRef != artifactImageRef) {
     println "[image] Harbor registry host coerced for push: ${artifactImageRef} → ${imageRef}"
   }
+  // Kyverno cosign + GitOps must use the same nip.io registry host as the push target.
+  artifactImageRef = imageRef
   def registry = normalizeRegistryHost(registryHostFor(imageRef))
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
   def harborHost = normalizeRegistryHost(harborRegistry)
@@ -1841,6 +1843,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
   println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
   println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
+  println '[paas-jenkinsfile] marker=harbor-nipio-artifact-ref-20260615 (PAAS_ARTIFACT_IMAGE + cosign use nip.io push ref)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -2545,7 +2548,11 @@ echo $?
     materializeProjectBuildEnv(step6AppRoot)
     patchNextBuildEnvIntoConfig(step6AppRoot)
     dockerAvailable = commandExists("docker")
-    def dest = normalizeOciImageReference("${imageName}:${env.BUILD_NUMBER}")
+    def rawDest = normalizeOciImageReference("${imageName}:${env.BUILD_NUMBER}")
+    def dest = resolveHarborPushImageRef(rawDest)
+    if (dest != rawDest) {
+      println "[image] coerced artifact ref: ${rawDest} → ${dest}"
+    }
     def df = params.DOCKERFILE_PATH?.trim() ?: "Dockerfile"
     def ctx = params.DOCKER_BUILD_CONTEXT?.trim() ?: "."
     imagePushPending = false
@@ -2727,6 +2734,8 @@ EOF
         println "[cosign] Pas d'image construite / poussée par ce build — signature ignorée."
         return
       }
+      cosignImageRef = coerceImageRefRegistryHost(normalizeOciImageReference(cosignImageRef))
+      println "[cosign] signing ref (nip.io when Harbor IP): ${cosignImageRef}"
       def credId = params.COSIGN_CREDENTIALS_ID?.trim() ?: ""
       def labKeyPath = "/var/jenkins_home/cosign-lab/cosign.key"
       def pemFromEnv = normalizeCosignPrivateKeyPem(env.COSIGN_PRIVATE_KEY ?: "")
