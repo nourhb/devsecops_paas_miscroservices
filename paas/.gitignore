@@ -26,6 +26,9 @@ jenkins/paas-deploy-job.generated.xml
 *.log
 __pycache__/
 *.pyc
+*.bak
+*.bak.*
+frontend/docker-compose.env.bak*
 
 .DS_Store
 Thumbs.db

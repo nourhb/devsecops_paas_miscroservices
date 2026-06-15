@@ -20,7 +20,7 @@ if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; th
   exit 1
 fi
 awk '
-  /^[[:space:]]*
+  /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }
   match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) {
     eq = index($0, "=")
@@ -72,9 +72,14 @@ kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$
 }
 PATCH
 )"
-echo "==> Rollout"
-kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}"
-kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s
+REPLICAS="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+if [[ "${PAAS_SKIP_ROLLOUT:-}" == "1" ]] || [[ "${REPLICAS}" -eq 0 ]]; then
+  echo "==> Skip rollout (replicas=${REPLICAS}); pod will pick up env on next start"
+else
+  echo "==> Rollout"
+  kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}"
+  kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s
+fi
 echo "==> SMTP in pod (values hidden)"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   for v in SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER MAIL_FROM APP_BASE_URL; do
