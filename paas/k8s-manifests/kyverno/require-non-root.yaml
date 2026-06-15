@@ -22,6 +22,7 @@ spec:
                 - simple-app
                 - harbor
                 - jenkins
+                - cicd
                 - kube-system
                 - kyverno
                 - ingress-nginx

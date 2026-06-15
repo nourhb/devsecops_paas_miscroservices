@@ -18,18 +18,13 @@ JENKINS_NS="${JENKINS_NS:-cicd}"
 load_env() {
   HARBOR_USER="${HARBOR_USER:-admin}"
   HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
-  COSIGN_KEY="${COSIGN_PRIVATE_KEY:-}"
   COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
   [[ -f "${ENV_FILE}" ]] || return 0
   HARBOR_USER="$(grep -E '^HARBOR_USER=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   HARBOR_PASS="$(grep -E '^HARBOR_PASS=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   [[ -z "${HARBOR_USER}" ]] && HARBOR_USER="admin"
   [[ -z "${HARBOR_PASS}" ]] && HARBOR_PASS="Harbor12345"
-  [[ -z "${COSIGN_KEY}" ]] && COSIGN_KEY="$(grep -E '^COSIGN_PRIVATE_KEY=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   [[ -z "${COSIGN_PASSWORD}" ]] && COSIGN_PASSWORD="$(grep -E '^COSIGN_PASSWORD=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
-  if [[ -n "${COSIGN_KEY}" && "${COSIGN_KEY}" == *'\\n'* ]]; then
-    COSIGN_KEY="$(printf '%b' "${COSIGN_KEY}")"
-  fi
 }
 
 jenkins_pod() {
@@ -37,42 +32,64 @@ jenkins_pod() {
     | grep -i jenkins | grep -v Terminating | head -1 || true
 }
 
+# Shared shell run inside Jenkins (HTTP Harbor + digest refs — tag-only sign hits HTTPS and fails).
+jenkins_cosign_script() {
+  cat <<SCRIPT
+set -e
+CRANE=''
+for c in /var/jenkins_home/.jenkins-paas-cache/crane/*/crane /var/jenkins_home/bin/crane; do
+  [ -x "\$c" ] && CRANE="\$c" && break
+done
+[ -n "\$CRANE" ] || CRANE=\$(command -v crane 2>/dev/null || true)
+COSIGN=/var/jenkins_home/bin/cosign
+[ -x "\$COSIGN" ] || COSIGN=\$(command -v cosign 2>/dev/null || true)
+KEY='/var/jenkins_home/cosign-lab/cosign.key'
+[ -x "\$CRANE" ] && [ -x "\$COSIGN" ] && [ -f "\$KEY" ] || { echo "missing crane/cosign/key"; exit 1; }
+export COSIGN_EXPERIMENTAL=1
+"\$CRANE" auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure \\
+  || "\$CRANE" auth login '${NODE_IP}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
+if ! "\$CRANE" digest --insecure '${DST}' >/dev/null 2>&1; then
+  echo "[cosign-lab] crane copy ${SRC} -> ${DST}"
+  "\$CRANE" copy --insecure '${SRC}' '${DST}' || "\$CRANE" tag --insecure '${SRC}' '${DST}'
+fi
+SRC_D=\$("\$CRANE" digest --insecure '${SRC}' | tr -d '\\r\\n')
+DST_D='${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}@'\${SRC_D#*@}
+echo "[cosign-lab] SRC_D=\$SRC_D"
+echo "[cosign-lab] DST_D=\$DST_D"
+if "\$COSIGN" tree "\$DST_D" 2>/dev/null | grep -qi signature; then
+  echo "OK: signature already on \$DST_D"
+  exit 0
+fi
+echo "[cosign-lab] cosign copy signatures"
+"\$COSIGN" copy --allow-insecure-registry --force "\$SRC_D" "\$DST_D" || true
+if "\$COSIGN" tree "\$DST_D" 2>/dev/null | grep -qi signature; then
+  echo "OK: cosign copy transferred signature"
+  "\$COSIGN" tree "\$DST_D" 2>/dev/null | head -8 || true
+  exit 0
+fi
+echo "[cosign-lab] cosign sign digest (HTTP Harbor)"
+COSIGN_PASSWORD='${COSIGN_PASSWORD}' "\$COSIGN" sign --yes --allow-insecure-registry --key "\$KEY" "\$DST_D"
+"\$COSIGN" tree "\$DST_D" 2>/dev/null | head -8 || true
+echo OK signed
+SCRIPT
+}
+
 run_via_jenkins() {
-  local pod key_path
+  local pod
   pod="$(jenkins_pod)"
   [[ -n "${pod}" ]] || return 1
-  key_path="/var/jenkins_home/cosign-lab/cosign.key"
-  echo "==> crane/cosign via ${JENKINS_NS}/${pod}"
-  kubectl exec -n "${JENKINS_NS}" "${pod}" -- sh -ce "
-    set -e
-    CRANE=''
-    for c in /var/jenkins_home/.jenkins-paas-cache/crane/*/crane /var/jenkins_home/bin/crane; do
-      [ -x \"\$c\" ] && CRANE=\"\$c\" && break
-    done
-    [ -n \"\$CRANE\" ] || CRANE=\$(command -v crane 2>/dev/null || true)
-    COSIGN=/var/jenkins_home/bin/cosign
-    [ -x \"\$COSIGN\" ] || COSIGN=\$(command -v cosign 2>/dev/null || true)
-    KEY='${key_path}'
-    [ -x \"\$CRANE\" ] && [ -x \"\$COSIGN\" ] && [ -f \"\$KEY\" ] || exit 1
-    \"\$CRANE\" auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure \\
-      || \"\$CRANE\" auth login '${NODE_IP}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
-    if ! \"\$CRANE\" digest '${DST}' >/dev/null 2>&1; then
-      \"\$CRANE\" copy --insecure '${SRC}' '${DST}' || \"\$CRANE\" tag --insecure '${SRC}' '${DST}'
-    fi
-    export COSIGN_EXPERIMENTAL=1
-    \"\$COSIGN\" copy --allow-insecure-registry --force '${SRC}' '${DST}' 2>/dev/null || true
-    COSIGN_PASSWORD='${COSIGN_PASSWORD}' \"\$COSIGN\" sign --yes --allow-insecure-registry --key \"\$KEY\" '${DST}'
-    \"\$COSIGN\" tree '${DST}' 2>/dev/null | head -5 || true
-  "
+  echo "==> crane/cosign via ${JENKINS_NS}/${pod} (digest ref)"
+  kubectl exec -n "${JENKINS_NS}" "${pod}" -- sh -ce "$(jenkins_cosign_script)"
 }
 
 run_k8s_job() {
-  local key="${COSIGN_KEY:-}"
-  [[ -n "${key}" ]] || key="$(kubectl exec -n "${JENKINS_NS}" "$(jenkins_pod)" -- cat /var/jenkins_home/cosign-lab/cosign.key 2>/dev/null || true)"
+  local key pod job key_secret auth_secret
+  pod="$(jenkins_pod)"
+  key="$(kubectl exec -n "${JENKINS_NS}" "${pod}" -- cat /var/jenkins_home/cosign-lab/cosign.key 2>/dev/null || true)"
   [[ -n "${key}" ]] || return 1
-  local job="paas-cosign-nipio-${PROJECT_SLUG}-$(date +%s)"
-  local key_secret="paas-cosign-signing-key"
-  local auth_secret="paas-harbor-cosign-auth"
+  job="paas-cosign-nipio-${PROJECT_SLUG}-$(date +%s)"
+  key_secret="paas-cosign-signing-key"
+  auth_secret="paas-harbor-cosign-auth"
   kubectl create namespace "${JOB_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl create secret generic "${key_secret}" -n "${JOB_NS}" \
     --from-literal=cosign.key="${key}" \
@@ -84,6 +101,7 @@ run_k8s_job() {
     --docker-password="${HARBOR_PASS}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   echo "==> cosign Job ${JOB_NS}/${job}"
+  kubectl delete job "${job}" -n "${JOB_NS}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl apply -n "${JOB_NS}" -f - <<EOF
 apiVersion: batch/v1
 kind: Job
@@ -96,6 +114,10 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
       imagePullSecrets:
         - name: ${auth_secret}
       volumes:
@@ -111,16 +133,22 @@ spec:
       containers:
         - name: cosign
           image: ${COSIGN_IMAGE}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
           volumeMounts:
             - name: cosign-key
               mountPath: /cosign
               readOnly: true
             - name: docker-config
-              mountPath: /root/.docker
+              mountPath: /home/nonroot/.docker
               readOnly: true
           env:
             - name: COSIGN_EXPERIMENTAL
               value: "1"
+            - name: HOME
+              value: /home/nonroot
             - name: COSIGN_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -132,21 +160,19 @@ spec:
             - |
               set -e
               export COSIGN_PRIVATE_KEY="\$(cat /cosign/cosign.key)"
-              SRC='${SRC}'
-              DST='${DST}'
-              cosign copy --allow-insecure-registry --force "\${SRC}" "\${DST}" || true
-              if cosign tree "\${DST}" 2>/dev/null | grep -qi signature; then
-                echo OK signatures on DST after copy
-                exit 0
-              fi
               ARCH=\$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
               wget -q -O /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_\${ARCH}.tar.gz"
               tar -xzf /tmp/crane.tgz -C /usr/local/bin crane 2>/dev/null || tar -xzf /tmp/crane.tgz -C /tmp && install /tmp/crane /usr/local/bin/crane
               crane auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
-              crane copy --insecure "\${SRC}" "\${DST}" || crane tag --insecure "\${SRC}" "\${DST}"
-              cosign sign --yes --allow-insecure-registry --key env://COSIGN_PRIVATE_KEY "\${DST}"
-              cosign tree "\${DST}" | head -5
-              echo OK signed
+              SRC='${SRC}'
+              DST='${DST}'
+              SRC_D=\$(crane digest --insecure "\${SRC}" | tr -d '\\r\\n')
+              DST_D='${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}@'\${SRC_D#*@}
+              crane copy --insecure "\${SRC}" "\${DST}" 2>/dev/null || true
+              cosign copy --allow-insecure-registry --force "\${SRC_D}" "\${DST_D}" || true
+              if cosign tree "\${DST_D}" 2>/dev/null | grep -qi signature; then echo OK copy; exit 0; fi
+              cosign sign --yes --allow-insecure-registry --key env://COSIGN_PRIVATE_KEY "\${DST_D}"
+              cosign tree "\${DST_D}" | head -5
 EOF
   if ! kubectl wait --for=condition=complete "job/${job}" -n "${JOB_NS}" --timeout=300s; then
     kubectl logs "job/${job}" -n "${JOB_NS}" --tail=80 2>/dev/null || true
@@ -163,6 +189,7 @@ if run_via_jenkins; then
   echo "OK: signed via Jenkins pod"
   exit 0
 fi
+echo "WARN: Jenkins cosign failed — trying k8s Job" >&2
 if run_k8s_job; then
   echo "OK: signed via k8s Job"
   exit 0
