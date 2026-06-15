@@ -18,38 +18,38 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-read_cosign_public_key() {
-  local raw
-  raw="$(grep -E '^COSIGN_PUBLIC_KEY=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"')"
-  if [[ -z "${raw}" ]]; then
-    echo "ERROR: COSIGN_PUBLIC_KEY not set in ${ENV_FILE}" >&2
-    exit 1
-  fi
-  printf '%b' "${raw}"
-}
-
-PUBKEY="$(read_cosign_public_key)"
-export PAAS_COSIGN_PUBKEY_FOR_POLICY="${PUBKEY}"
-python3 - "${POLICY_SRC}" "${POLICY_OUT}" <<'PY'
-import os
+python3 - "${ENV_FILE}" "${POLICY_SRC}" "${POLICY_OUT}" <<'PY'
+import re
 import sys
 from pathlib import Path
-src, out = sys.argv[1:3]
-pubkey = os.environ.get("PAAS_COSIGN_PUBKEY_FOR_POLICY", "").strip()
-if not pubkey:
-    raise SystemExit("COSIGN_PUBLIC_KEY empty")
-text = Path(src).read_text(encoding="utf-8")
-inner = pubkey
-if "BEGIN PUBLIC KEY" in pubkey:
-    inner = "\n".join(
-        line.strip() for line in pubkey.splitlines()
-        if line.strip() and not line.strip().startswith("-----")
-    )
-text = text.replace("REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY", inner)
-Path(out).write_text(text, encoding="utf-8")
-print(f"OK wrote {out}")
+import yaml
+
+env_path, src_path, out_path = sys.argv[1:4]
+text = Path(env_path).read_text(encoding="utf-8")
+raw = ""
+for line in text.splitlines():
+    if line.startswith("COSIGN_PUBLIC_KEY="):
+        raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+if not raw:
+    raise SystemExit("COSIGN_PUBLIC_KEY not set in env file")
+if "\\n" in raw and "\n" not in raw:
+    raw = raw.replace("\\n", "\n")
+raw = raw.strip()
+if "BEGIN PUBLIC KEY" not in raw:
+    body = re.sub(r"\s+", "", raw)
+    raw = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----"
+
+policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
+keys = (
+    policy["spec"]["rules"][0]["verifyImages"][0]["attestors"][0]["entries"][0]["keys"]
+)
+keys["publicKeys"] = raw
+
+out = Path(out_path)
+out.write_text(yaml.safe_dump(policy, default_flow_style=False, sort_keys=False), encoding="utf-8")
+yaml.safe_load(out.read_text(encoding="utf-8"))
+print(f"OK wrote {out_path}")
 PY
-unset PAAS_COSIGN_PUBKEY_FOR_POLICY
 
 kubectl apply -f "${POLICY_OUT}"
 
