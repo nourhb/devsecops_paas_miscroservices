@@ -20,7 +20,7 @@ bash "${SCRIPT_DIR}/recover-harbor-registry-lab.sh" || true
 bash "${SCRIPT_DIR}/lab.sh" fix-gitops
 bash "${SCRIPT_DIR}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}"
 bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
-bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || true
+bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}"
 bash "${SCRIPT_DIR}/heal-project-deploy-lab.sh" "${PROJECT_NAME}" "${TAG}" "${TARGET_PORT}"
 
 echo ""

@@ -331,7 +331,7 @@ if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TA
 fi
 echo "==> Kyverno policy (HTTP Harbor + cosign)"
 bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
-bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || true
+bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}"
 free_namespace_capacity "${NS}"
 GITOPS_REV="$(git -C "${GITOPS}" rev-parse HEAD 2>/dev/null || echo HEAD)"
 echo "==> Argo sync ${APP} @ ${GITOPS_REV:0:12}"
