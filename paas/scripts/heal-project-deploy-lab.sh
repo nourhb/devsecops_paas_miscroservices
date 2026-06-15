@@ -280,8 +280,13 @@ AUTH_URL=""
 [[ -n "${GITHUB_TOKEN:-}" ]] && AUTH_URL="https://${GITHUB_TOKEN}@github.com/nourhb/gitops.git"
 echo "==> Ensure gitops repo on main (fix detached HEAD / stuck rebase)"
 gitops_ensure_on_main "${GITOPS}" main "${AUTH_URL}"
+echo "==> Sync ${GITOPS} from origin/main before nip.io patch (avoid fast-forward wiping heal)"
+gitops_fetch_origin "${GITOPS}" main "${AUTH_URL}"
+pushd "${GITOPS}" >/dev/null
+git pull --rebase origin main 2>/dev/null || git pull --rebase "${AUTH_URL}" main 2>/dev/null || true
+popd >/dev/null
 ensure_harbor_regcred "${NS}"
-echo "==> Patch ${VALUES} (Rolling + image + targetPort)"
+echo "==> Patch ${VALUES} (Rolling + nip.io image + targetPort)"
 python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" "${TARGET_PORT}" "${HARBOR_PORT}" <<'PY'
 import sys
 from pathlib import Path
@@ -289,16 +294,31 @@ import yaml
 path, tag, node_ip, name, port, harbor_port = sys.argv[1:7]
 port = int(port)
 repo = f"harbor.{node_ip}.nip.io:{harbor_port}/paas/{name}"
+import re
+private_ip = re.compile(r"^(\d{1,3}\.){3}\d{1,3}(:\d+)?/")
+
+def nip_repo(r: str) -> str:
+    if "nip.io" in r:
+        return r
+    if "/paas/" in r:
+        tail = r.split("/paas/", 1)[1].split(":")[0]
+        return f"{repo.rsplit('/', 1)[0]}/{tail}"
+    return repo
+
 doc = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
 doc["deploymentStrategy"] = "Rolling"
 for k in ("activeSlot", "blue", "green", "nodeSelector"):
     doc.pop(k, None)
 img = doc.get("image") if isinstance(doc.get("image"), dict) else {}
-img["repository"] = repo
+img["repository"] = nip_repo(str(img.get("repository") or repo))
 img["tag"] = str(tag)
 img["digest"] = ""
 img["pullPolicy"] = "IfNotPresent"
 doc["image"] = img
+for slot in ("blue", "green"):
+    block = doc.get(slot)
+    if isinstance(block, dict) and isinstance(block.get("image"), dict):
+        block["image"]["repository"] = nip_repo(str(block["image"].get("repository") or repo))
 doc["nameOverride"] = name
 doc["fullnameOverride"] = f"paas-{name}"
 svc = doc.get("service") if isinstance(doc.get("service"), dict) else {}

@@ -125,7 +125,7 @@ gitops_pull_rebase_resolve_apps() {
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
     if [[ "${f}" == apps/* ]]; then
-      echo "==> gitops: resolve rebase conflict in ${f} (keep repaired chart)"
+      echo "==> gitops: resolve rebase conflict in ${f} (keep local heal commit = --theirs during rebase)"
       git checkout --theirs -- "${f}"
       git add -- "${f}"
       resolved=1
