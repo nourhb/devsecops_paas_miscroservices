@@ -12,6 +12,7 @@ usage() {
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
   echo "  heal      Patch GitOps values + Argo sync + rollout"
+  echo "  ultimate  Full fix: Kyverno HTTP Harbor + GitOps + deploy (one command)"
 }
 case "$cmd" in
   start|recover)
@@ -30,6 +31,8 @@ case "$cmd" in
     bash "$DIR/fix-gitops-repo-lab.sh" ;;
   heal)
     bash "$DIR/heal-project-deploy-lab.sh" "${2:?usage: lab.sh heal <project-slug> <build> [port]}" "${3:?}" "${4:-3000}" ;;
+  ultimate)
+    bash "$DIR/ultimate-project-deploy-lab.sh" "${2:?usage: lab.sh ultimate <project-slug> <build> [port]}" "${3:?}" "${4:-3000}" ;;
   ""|-h|--help|help)
     usage
     exit 0 ;;

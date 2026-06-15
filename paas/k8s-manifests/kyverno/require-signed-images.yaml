@@ -30,6 +30,10 @@ spec:
       verifyImages:
         - imageReferences:
             - "*"
+          imageRegistryCredentials:
+            allowInsecureRegistry: true
+            secrets:
+              - harbor-regcred
           attestors:
             - entries:
                 - keys:
@@ -37,3 +41,7 @@ spec:
                       -----BEGIN PUBLIC KEY-----
                       REPLACE_WITH_REAL_COSIGN_PUBLIC_KEY
                       -----END PUBLIC KEY-----
+                    rekor:
+                      ignoreTlog: true
+                    ctlog:
+                      ignoreSCT: true

@@ -24,6 +24,7 @@ load_token() {
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   if [[ -z "${GITHUB_TOKEN}" || "${GITHUB_TOKEN}" == *your_* || "${GITHUB_TOKEN}" == *placeholder* ]]; then
     echo "ERROR: GITOPS_REPO_TOKEN missing or placeholder in ${ENV_FILE}" >&2
+    echo "  Set a GitHub PAT with repo scope in GITOPS_REPO_TOKEN (not your GitHub password)." >&2
     exit 1
   fi
   export GITHUB_TOKEN

@@ -40,36 +40,44 @@ if "BEGIN PUBLIC KEY" not in raw:
     raw = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----"
 
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
-keys = (
-    policy["spec"]["rules"][0]["verifyImages"][0]["attestors"][0]["entries"][0]["keys"]
-)
+verify = policy["spec"]["rules"][0]["verifyImages"][0]
+verify["imageRegistryCredentials"] = {
+    "allowInsecureRegistry": True,
+    "secrets": ["harbor-regcred"],
+}
+keys = verify["attestors"][0]["entries"][0]["keys"]
 keys["publicKeys"] = raw
+keys.setdefault("rekor", {})["ignoreTlog"] = True
+keys.setdefault("ctlog", {})["ignoreSCT"] = True
 
 out = Path(out_path)
 out.write_text(yaml.safe_dump(policy, default_flow_style=False, sort_keys=False), encoding="utf-8")
 yaml.safe_load(out.read_text(encoding="utf-8"))
-print(f"OK wrote {out_path}")
+print(f"OK wrote {out_path} (HTTP Harbor + harbor-regcred)")
 PY
 
 kubectl apply -f "${POLICY_OUT}"
 
-kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \
   --docker-server="${HARBOR_REGISTRY}" \
   --docker-username="${HARBOR_USER}" \
   --docker-password="${HARBOR_PASS}" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-dep=kyverno-admission-controller
-if kubectl get deploy "${dep}" -n "${KYVERNO_NS}" >/dev/null 2>&1; then
-  args="$(kubectl get deploy "${dep}" -n "${KYVERNO_NS}" -o jsonpath='{.spec.template.spec.containers[0].args}' || true)"
-  if ! grep -q imagePullSecrets <<<"${args}"; then
-    kubectl patch deployment "${dep}" -n "${KYVERNO_NS}" --type=json \
-      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--imagePullSecrets=harbor-regcred"}]' || true
+for dep in kyverno-admission-controller kyverno-background-controller kyverno-reports-controller; do
+  if ! kubectl get deploy "${dep}" -n "${KYVERNO_NS}" >/dev/null 2>&1; then
+    continue
   fi
+  args="$(kubectl get deploy "${dep}" -n "${KYVERNO_NS}" -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null || echo "[]")"
   if ! grep -q allowInsecureRegistry <<<"${args}"; then
     kubectl patch deployment "${dep}" -n "${KYVERNO_NS}" --type=json \
-      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--allowInsecureRegistry"}]' || true
+      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--allowInsecureRegistry"}]' 2>/dev/null || true
   fi
-  kubectl rollout status deployment/"${dep}" -n "${KYVERNO_NS}" --timeout=120s || true
-fi
+  if [[ "${dep}" == "kyverno-admission-controller" ]] && ! grep -q imagePullSecrets <<<"${args}"; then
+    kubectl patch deployment "${dep}" -n "${KYVERNO_NS}" --type=json \
+      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--imagePullSecrets=harbor-regcred"}]' 2>/dev/null || true
+  fi
+  kubectl rollout status deployment/"${dep}" -n "${KYVERNO_NS}" --timeout=120s 2>/dev/null || true
+done
+echo "OK: Kyverno policy + HTTP Harbor registry credentials"

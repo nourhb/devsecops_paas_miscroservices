@@ -329,6 +329,8 @@ echo "==> Push GitOps to GitHub"
 if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
   echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/push-gitops-lab.sh)"
 fi
+echo "==> Kyverno policy (HTTP Harbor + cosign)"
+bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
 bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || true
 free_namespace_capacity "${NS}"
 GITOPS_REV="$(git -C "${GITOPS}" rev-parse HEAD 2>/dev/null || echo HEAD)"
