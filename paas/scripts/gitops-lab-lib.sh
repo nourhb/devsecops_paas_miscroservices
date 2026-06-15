@@ -17,11 +17,51 @@ gitops_fetch_origin() {
   local auth_url="${3:-}"
   pushd "${repo}" >/dev/null
   if [[ -n "${auth_url}" ]]; then
-    git fetch "${auth_url}" "${branch}" 2>/dev/null || git fetch origin "${branch}" 2>/dev/null || true
+    git fetch "${auth_url}" "+refs/heads/${branch}:refs/remotes/origin/${branch}" 2>/dev/null \
+      || git fetch "${auth_url}" "${branch}" 2>/dev/null \
+      || git fetch origin "${branch}" 2>/dev/null \
+      || true
   else
     git fetch origin "${branch}" 2>/dev/null || true
   fi
   popd
+}
+
+gitops_local_ahead_of_origin() {
+  local repo="${1:?repo path}"
+  local branch="${2:-main}"
+  pushd "${repo}" >/dev/null
+  git rev-list --count "origin/${branch}..HEAD" 2>/dev/null || echo 0
+  popd
+}
+
+gitops_push_main() {
+  local repo="${1:?repo path}"
+  local branch="${2:-main}"
+  local auth_url="${3:?auth url}"
+  pushd "${repo}" >/dev/null
+  local ahead
+  ahead="$(git rev-list --count "origin/${branch}..HEAD" 2>/dev/null || echo 0)"
+  if [[ "${ahead}" == "0" ]]; then
+    echo "Nothing to push (already up to date with origin/${branch})"
+    popd >/dev/null
+    return 0
+  fi
+  echo "==> git push origin ${branch} (${ahead} commit(s))"
+  if ! git push "${auth_url}" "HEAD:refs/heads/${branch}"; then
+    echo "ERROR: git push failed" >&2
+    popd >/dev/null
+    return 1
+  fi
+  git fetch "${auth_url}" "+refs/heads/${branch}:refs/remotes/origin/${branch}" 2>/dev/null || true
+  ahead="$(git rev-list --count "origin/${branch}..HEAD" 2>/dev/null || echo 0)"
+  if [[ "${ahead}" != "0" ]]; then
+    echo "ERROR: still ${ahead} commit(s) ahead of origin/${branch} after push" >&2
+    popd >/dev/null
+    return 1
+  fi
+  echo "OK: pushed ${repo} @ $(git rev-parse --short HEAD)"
+  popd >/dev/null
 }
 
 # Drop local commits/conflicts and match origin/main (lab repair always rewrites apps/<slug>).
