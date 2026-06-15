@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { buildAppIngressHost } from "@/server/deploy/app-public-url";
+import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { resolveDeploymentStrategy } from "@/server/gitops/gitops-blue-green";
 import { resolveDeployProfileSpec, type DeployProfileSpec } from "@/server/deploy/deploy-profile";
 import type { BuildProfile } from "@/server/build-planner";
@@ -263,5 +264,24 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     }
     if (!Array.isArray(ingress.tls)) {
         ingress.tls = [];
+    }
+    const image = doc.image && typeof doc.image === "object" && doc.image !== null
+        ? (doc.image as Record<string, unknown>)
+        : null;
+    if (image && typeof image.repository === "string" && image.repository.trim()) {
+        image.repository = normalizeHarborImageRef(image.repository);
+    }
+    for (const slot of ["blue", "green"] as const) {
+        const block = doc[slot];
+        if (!block || typeof block !== "object" || block === null) {
+            continue;
+        }
+        const slotImg = (block as Record<string, unknown>).image;
+        if (slotImg && typeof slotImg === "object" && slotImg !== null) {
+            const repo = (slotImg as Record<string, unknown>).repository;
+            if (typeof repo === "string" && repo.trim()) {
+                (slotImg as Record<string, unknown>).repository = normalizeHarborImageRef(repo);
+            }
+        }
     }
 }
