@@ -1661,9 +1661,9 @@ def cosignSignImageShellSnippet() {
               local out rc attempt
               for attempt in 1 2 3; do
                 if [ -n "${INSEC}" ]; then
-                  out="$("${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                  out="$("${COSIGN_EXE}" sign --yes --tlog-upload=false ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
                 else
-                  out="$("${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                  out="$("${COSIGN_EXE}" sign --yes --tlog-upload=false --key "${COSIGN_KEY}" "${ref}" 2>&1)"
                 fi
                 rc=$?
                 if [ "${rc}" -eq 0 ]; then
@@ -2750,8 +2750,7 @@ EOF
         paasStepWarn(9, 'cosign', "tool bootstrap failed: ${cosignToolErr.message?.take(200)}")
         return
       }
-      def insecure = (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim().equalsIgnoreCase("true")
-      def insecureFlag = insecure ? "--allow-insecure-registry" : ""
+      def insecureFlag = "--allow-insecure-registry"
       def craneBinCosign = ""
       if (imagePublishedViaCrane) {
         try {

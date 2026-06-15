@@ -85,10 +85,26 @@ digest_hex() {
 }
 sig_ref() { printf '%s:sha256-%s.sig' "$1" "$2"; }
 sig_ok() { "$CRANE" manifest --insecure "$1" >/dev/null 2>&1; }
-cosign_has_sig() {
+triangulate_ref() {
   [ -x "$COSIGN" ] || return 1
-  "$COSIGN" tree --allow-insecure-registry "$1" 2>/dev/null | grep -qi signature \
-    || "$COSIGN" tree "$1" 2>/dev/null | grep -qi signature
+  "$COSIGN" triangulate --allow-insecure-registry "$1" 2>/dev/null \
+    || "$COSIGN" triangulate "$1" 2>/dev/null || true
+}
+ip_signed() {
+  local t
+  t=$(triangulate_ref "$SRC_D")
+  if [ -n "$t" ] && sig_ok "$t"; then
+    printf '%s' "$t"
+    return 0
+  fi
+  t=$(triangulate_ref "$SRC")
+  if [ -n "$t" ] && sig_ok "$t"; then
+    printf '%s' "$t"
+    return 0
+  fi
+  sig_ok "$SRC_SIG" && { printf '%s' "$SRC_SIG"; return 0; }
+  sig_ok "$TAG_SIG" && { printf '%s' "$TAG_SIG"; return 0; }
+  return 1
 }
 copy_sig() {
   local s="$1" d="$2"
@@ -97,21 +113,26 @@ copy_sig() {
   "$CRANE" copy --insecure "$s" "$d"
   sig_ok "$d"
 }
+nipio_dst_for_tri() { printf '%s' "$1" | sed "s|^$SRC_REPO|$DST_REPO|"; }
 sign_ip_image() {
   [ -x "$COSIGN" ] && [ -f "$KEY" ] || { echo "ERROR: cosign=[$COSIGN] key=[$KEY]"; return 1; }
   echo "$HARBOR_PASS" | "$COSIGN" login "$NODE_IP:$HARBOR_PORT" -u "$HARBOR_USER" --password-stdin --allow-insecure-registry 2>/dev/null || true
   echo "[cosign-lab] cosign sign IP digest $SRC_D"
   set +e
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC_D" 2>&1
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --tlog-upload=false --allow-insecure-registry --key "$KEY" "$SRC_D" 2>&1
   rc1=$?
   echo "[cosign-lab] cosign sign IP tag $SRC (rc digest=$rc1)"
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC" 2>&1
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --tlog-upload=false --allow-insecure-registry --key "$KEY" "$SRC" 2>&1
   rc2=$?
   set -e
   sleep 2
-  echo "[cosign-lab] tags after sign:" $($CRANE ls --insecure "$SRC_REPO" 2>/dev/null | grep -E "sig|${IMAGE_TAG}" | head -10 | tr '\n' ' ' || echo none)
-  cosign_has_sig "$SRC_D" || cosign_has_sig "$SRC" || sig_ok "$SRC_SIG" || sig_ok "$TAG_SIG" \
-    || { echo "ERROR: cosign sign did not create signature on IP (rc digest=$rc1 tag=$rc2)" >&2; return 1; }
+  TRI=$(ip_signed || true)
+  if [ -n "$TRI" ]; then
+    echo "[cosign-lab] IP signature ref: $TRI"
+    return 0
+  fi
+  echo "ERROR: cosign sign did not create Harbor signature (rc digest=$rc1 tag=$rc2)" >&2
+  return 1
 }
 SRC_D=$(resolve_digest_ref "$SRC" "$SRC_REPO")
 HEX=$(digest_hex "$SRC_D")
@@ -127,51 +148,26 @@ if sig_ok "$DST_SIG"; then
   echo "OK: signature already on $DST_SIG"
   exit 0
 fi
-if ! sig_ok "$SRC_SIG" && ! cosign_has_sig "$SRC_D"; then
+IP_TRI=$(ip_signed || true)
+if [ -z "$IP_TRI" ]; then
   echo "[cosign-lab] no signature on IP — signing now"
   sign_ip_image
+  IP_TRI=$(ip_signed)
 fi
-# Copy digest .sig tag if present
+DST_TRI=$(nipio_dst_for_tri "$IP_TRI")
+if copy_sig "$IP_TRI" "$DST_TRI"; then
+  echo "OK: crane copied cosign signature to nip.io"
+  exit 0
+fi
 if copy_sig "$SRC_SIG" "$DST_SIG"; then
   echo "OK: crane copied digest .sig to nip.io"
   exit 0
 fi
-# Harbor/cosign often stores signature as referrer — triangulate + crane copy
-if [ -x "$COSIGN" ] && cosign_has_sig "$SRC_D"; then
-  TRI=$("$COSIGN" triangulate --allow-insecure-registry "$SRC_D" 2>/dev/null \
-    || "$COSIGN" triangulate "$SRC_D" 2>/dev/null || true)
-  if [ -n "$TRI" ]; then
-    DST_TRI=$(printf '%s' "$TRI" | sed "s|^$SRC_REPO|$DST_REPO|")
-    echo "[cosign-lab] triangulate $TRI -> $DST_TRI"
-    if sig_ok "$TRI" && copy_sig "$TRI" "$DST_TRI"; then
-      echo "OK: crane copied triangulated sig to nip.io"
-      exit 0
-    fi
-    if "$CRANE" copy --insecure "$TRI" "$DST_TRI" 2>/dev/null && sig_ok "$DST_TRI"; then
-      echo "OK: crane copied triangulate ref to nip.io"
-      exit 0
-    fi
-  fi
-fi
-if [ -x "$COSIGN" ]; then
-  for IMG in "$SRC" "$SRC_D"; do
-    TRI=$("$COSIGN" triangulate --allow-insecure-registry "$IMG" 2>/dev/null \
-      || "$COSIGN" triangulate "$IMG" 2>/dev/null || true)
-    if [ -n "$TRI" ] && sig_ok "$TRI"; then
-      DST_TRI=$(printf '%s' "$TRI" | sed "s|^$SRC_REPO|$DST_REPO|")
-      if copy_sig "$TRI" "$DST_TRI"; then
-        echo "OK: crane copied triangulated .sig to nip.io"
-        exit 0
-      fi
-    fi
-  done
-TAG_SIG="$SRC_REPO:$IMAGE_TAG.sig"
-DST_TAG_SIG="$DST_REPO:$IMAGE_TAG.sig"
 if copy_sig "$TAG_SIG" "$DST_TAG_SIG"; then
   echo "OK: crane copied tag .sig to nip.io"
   exit 0
 fi
-echo "ERROR: no .sig on IP or nip.io for $SRC (cosign sign failed?)" >&2
+echo "ERROR: could not copy cosign signature to nip.io for $DST" >&2
 exit 1
 EOS
 }
@@ -333,7 +329,6 @@ EOS
 }
 
 load_env
-bash "${SCRIPT_DIR}/fix-harbor-cosign-realm-lab.sh" 2>/dev/null || true
 echo "==> Ensure cosign .sig on ${DST} (from ${SRC})"
 if run_via_jenkins && verify_nipio_sig; then
   echo "OK: verified cosign .sig on nip.io"
