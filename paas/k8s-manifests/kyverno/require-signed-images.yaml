@@ -19,6 +19,7 @@ spec:
           - resources:
               namespaces:
                 - argocd
+                - cicd
                 - devsecops-paas
                 - paas
                 - simple-app
