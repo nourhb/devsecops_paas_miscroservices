@@ -17,6 +17,9 @@ spec:
           - resources:
               namespaces:
                 - argocd
+                - devsecops-paas
+                - paas
+                - simple-app
                 - harbor
                 - jenkins
                 - kube-system

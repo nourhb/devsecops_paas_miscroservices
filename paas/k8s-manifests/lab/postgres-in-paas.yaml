@@ -42,10 +42,16 @@ spec:
         app: postgres
     spec:
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
         fsGroup: 70
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            allowPrivilegeEscalation: false
           args: ["postgres", "-c", "lc_messages=C"]
           env:
             - name: POSTGRES_USER
