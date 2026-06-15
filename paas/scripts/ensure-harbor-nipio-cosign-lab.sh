@@ -116,16 +116,17 @@ copy_sig() {
 nipio_dst_for_tri() { printf '%s' "$1" | sed "s|^$SRC_REPO|$DST_REPO|"; }
 sign_ip_image() {
   [ -x "$COSIGN" ] && [ -f "$KEY" ] || { echo "ERROR: cosign=[$COSIGN] key=[$KEY]"; return 1; }
+  export COSIGN_EXPERIMENTAL=1
   echo "$HARBOR_PASS" | "$COSIGN" login "$NODE_IP:$HARBOR_PORT" -u "$HARBOR_USER" --password-stdin --allow-insecure-registry 2>/dev/null || true
   echo "[cosign-lab] cosign sign IP digest $SRC_D"
   set +e
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --tlog-upload=false --allow-insecure-registry --key "$KEY" "$SRC_D" 2>&1
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC_D" 2>&1
   rc1=$?
   echo "[cosign-lab] cosign sign IP tag $SRC (rc digest=$rc1)"
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --tlog-upload=false --allow-insecure-registry --key "$KEY" "$SRC" 2>&1
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC" 2>&1
   rc2=$?
   set -e
-  sleep 2
+  sleep 3
   TRI=$(ip_signed || true)
   if [ -n "$TRI" ]; then
     echo "[cosign-lab] IP signature ref: $TRI"
@@ -284,7 +285,7 @@ spec:
               crane manifest --insecure "\$DST_SIG" >/dev/null
               echo OK crane sig copy
 EOF
-  if ! kubectl wait --for=condition=complete "job/${job}" -n "${JOB_NS}" --timeout=180s; then
+  if ! kubectl wait --for=condition=complete "job/${job}" -n "${JOB_NS}" --timeout=300s; then
     kubectl logs "job/${job}" -n "${JOB_NS}" --tail=80 2>/dev/null || true
     kubectl delete job "${job}" -n "${JOB_NS}" --ignore-not-found >/dev/null 2>&1 || true
     return 1
