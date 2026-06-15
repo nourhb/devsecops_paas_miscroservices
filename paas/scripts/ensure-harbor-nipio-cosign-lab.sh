@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copy image + cosign signature to harbor.<nip>.nip.io (Kyverno needs signatures on the nip.io ref).
+# Copy image + cosign .sig artifact to harbor.<nip>.nip.io (Kyverno verifies nip.io ref).
+# cosign copy/attach/sign always probes nip.io over HTTPS — use crane --insecure for .sig copy.
 set -euo pipefail
 PROJECT_SLUG="${1:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"
 IMAGE_TAG="${2:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"
@@ -14,7 +15,6 @@ DST="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}:${IMAGE_TAG}"
 SRC_REPO="${NODE_IP}:${HARBOR_PORT}/paas/${PROJECT_SLUG}"
 DST_REPO="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}"
 JOB_NS="${COSIGN_JOB_NS:-cicd}"
-COSIGN_IMAGE="${COSIGN_JOB_IMAGE:-ghcr.io/sigstore/cosign/cosign:v2.4.1}"
 JENKINS_NS="${JENKINS_NS:-cicd}"
 
 load_env() {
@@ -34,7 +34,6 @@ jenkins_pod() {
     | grep -i jenkins | grep -v Terminating | head -1 || true
 }
 
-# crane digest often returns only sha256:… — cosign needs host/repo@sha256:…
 jenkins_cosign_script() {
   cat <<SCRIPT
 set -e
@@ -45,19 +44,16 @@ done
 [ -n "\$CRANE" ] || CRANE=\$(command -v crane 2>/dev/null || true)
 COSIGN=/var/jenkins_home/bin/cosign
 [ -x "\$COSIGN" ] || COSIGN=\$(command -v cosign 2>/dev/null || true)
-KEY='/var/jenkins_home/cosign-lab/cosign.key'
-[ -x "\$CRANE" ] && [ -x "\$COSIGN" ] && [ -f "\$KEY" ] || { echo "missing crane/cosign/key"; exit 1; }
+[ -x "\$CRANE" ] || { echo "missing crane"; exit 1; }
 export COSIGN_EXPERIMENTAL=1
 "\$CRANE" auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure \\
   || "\$CRANE" auth login '${NODE_IP}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
 if ! "\$CRANE" digest --insecure '${DST}' >/dev/null 2>&1; then
-  echo "[cosign-lab] crane copy ${SRC} -> ${DST}"
+  echo "[cosign-lab] crane copy image ${SRC} -> ${DST}"
   "\$CRANE" copy --insecure '${SRC}' '${DST}' || "\$CRANE" tag --insecure '${SRC}' '${DST}'
 fi
 resolve_digest_ref() {
-  local img="\$1"
-  local repo="\$2"
-  local d
+  local img="\$1" repo="\$2" d
   d=\$("\$CRANE" digest --insecure "\${img}" | tr -d '\\r\\n')
   case "\${d}" in
     *@sha256:*) printf '%s' "\${d}" ;;
@@ -65,39 +61,70 @@ resolve_digest_ref() {
     *) printf '%s@%s' "\${repo}" "\${d}" ;;
   esac
 }
+digest_hex() {
+  local d="\$1"
+  case "\${d}" in
+    *@sha256:*) printf '%s' "\${d#*@sha256:}" ;;
+    sha256:*) printf '%s' "\${d#sha256:}" ;;
+    *) printf '%s' "\${d}" ;;
+  esac
+}
+sig_ref_for_repo() {
+  local repo="\$1" hex="\$2"
+  printf '%s:sha256-%s.sig' "\${repo}" "\${hex}"
+}
+sig_present() {
+  local ref="\$1"
+  "\$CRANE" manifest --insecure "\${ref}" >/dev/null 2>&1
+}
+copy_sig_artifact() {
+  local src_sig="\$1" dst_sig="\$2"
+  if ! sig_present "\${src_sig}"; then
+    return 1
+  fi
+  echo "[cosign-lab] crane copy sig \${src_sig} -> \${dst_sig}"
+  "\$CRANE" copy --insecure "\${src_sig}" "\${dst_sig}"
+  sig_present "\${dst_sig}"
+}
 SRC_D=\$(resolve_digest_ref '${SRC}' '${SRC_REPO}')
 DST_D=\$(resolve_digest_ref '${DST}' '${DST_REPO}')
+HEX=\$(digest_hex "\$SRC_D")
 echo "[cosign-lab] SRC_D=\$SRC_D"
 echo "[cosign-lab] DST_D=\$DST_D"
-if "\$COSIGN" tree "\$DST_D" 2>/dev/null | grep -qi signature; then
-  echo "OK: signature already on \$DST_D"
+echo "[cosign-lab] HEX=\$HEX"
+DST_SIG=\$(sig_ref_for_repo '${DST_REPO}' "\$HEX")
+if sig_present "\${DST_SIG}"; then
+  echo "OK: signature artifact already on \${DST_SIG}"
   exit 0
 fi
-echo "[cosign-lab] cosign copy signatures (full digest refs)"
-if "\$COSIGN" copy --allow-insecure-registry --force "\$SRC_D" "\$DST_D"; then
-  if "\$COSIGN" tree "\$DST_D" 2>/dev/null | grep -qi signature; then
-    echo "OK: cosign copy transferred signature"
-    "\$COSIGN" tree "\$DST_D" 2>/dev/null | head -8 || true
-    exit 0
-  fi
+# Harbor cosign signature tag (digest-based)
+SRC_SIG=\$(sig_ref_for_repo '${SRC_REPO}' "\$HEX")
+if copy_sig_artifact "\${SRC_SIG}" "\${DST_SIG}"; then
+  echo "OK: crane copied digest .sig to nip.io"
+  exit 0
 fi
-echo "[cosign-lab] cosign download + attach (no re-sign on nip.io)"
-SIG=/tmp/paas-cosign-\$\$.sig
-if "\$COSIGN" download signature --allow-insecure-registry "\$SRC_D" > "\$SIG" 2>/dev/null; then
-  if "\$COSIGN" attach signature --allow-insecure-registry --signature "\$SIG" "\$DST_D"; then
-    rm -f "\$SIG"
-    if "\$COSIGN" tree "\$DST_D" 2>/dev/null | grep -qi signature; then
-      echo "OK: attached signature from IP digest to nip.io digest"
-      "\$COSIGN" tree "\$DST_D" 2>/dev/null | head -8 || true
-      exit 0
+# cosign triangulate on IP (HTTP) — exact .sig tag from Jenkins sign step
+if [ -x "\$COSIGN" ]; then
+  for IMG in '${SRC}' '${SRC_D}'; do
+    TRI=\$("\$COSIGN" triangulate --allow-insecure-registry "\${IMG}" 2>/dev/null || "\$COSIGN" triangulate "\${IMG}" 2>/dev/null || true)
+    if [ -n "\${TRI}" ] && sig_present "\${TRI}"; then
+      DST_TRI=\$(printf '%s' "\${TRI}" | sed "s|^${SRC_REPO}|${DST_REPO}|")
+      if copy_sig_artifact "\${TRI}" "\${DST_TRI}"; then
+        echo "OK: crane copied triangulated .sig to nip.io"
+        exit 0
+      fi
     fi
-  fi
+  done
 fi
-rm -f "\$SIG"
-echo "[cosign-lab] cosign sign digest (HTTP Harbor)"
-COSIGN_PASSWORD='${COSIGN_PASSWORD}' "\$COSIGN" sign --yes --allow-insecure-registry --key "\$KEY" "\$DST_D"
-"\$COSIGN" tree "\$DST_D" 2>/dev/null | head -8 || true
-echo OK signed
+# Tag-based signature (Jenkins also signs :tag on IP)
+TAG_SIG='${SRC_REPO}:${IMAGE_TAG}.sig'
+DST_TAG_SIG='${DST_REPO}:${IMAGE_TAG}.sig'
+if copy_sig_artifact "\${TAG_SIG}" "\${DST_TAG_SIG}"; then
+  echo "OK: crane copied tag .sig to nip.io"
+  exit 0
+fi
+echo "ERROR: no .sig on IP registry for ${SRC} (run Jenkins build cosign step first)" >&2
+exit 1
 SCRIPT
 }
 
@@ -105,29 +132,28 @@ run_via_jenkins() {
   local pod
   pod="$(jenkins_pod)"
   [[ -n "${pod}" ]] || return 1
-  echo "==> crane/cosign via ${JENKINS_NS}/${pod} (digest ref)"
+  echo "==> crane sig copy via ${JENKINS_NS}/${pod}"
   kubectl exec -n "${JENKINS_NS}" "${pod}" -- sh -ce "$(jenkins_cosign_script)"
 }
 
 run_k8s_job() {
-  local key pod job key_secret auth_secret
+  local pod job auth_secret
   pod="$(jenkins_pod)"
-  key="$(kubectl exec -n "${JENKINS_NS}" "${pod}" -- cat /var/jenkins_home/cosign-lab/cosign.key 2>/dev/null || true)"
-  [[ -n "${key}" ]] || return 1
+  [[ -n "${pod}" ]] || return 1
   job="paas-cosign-nipio-${PROJECT_SLUG}-$(date +%s)"
-  key_secret="paas-cosign-signing-key"
   auth_secret="paas-harbor-cosign-auth"
   kubectl create namespace "${JOB_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  kubectl create secret generic "${key_secret}" -n "${JOB_NS}" \
-    --from-literal=cosign.key="${key}" \
-    --from-literal=cosign.password="${COSIGN_PASSWORD}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl create secret docker-registry "${auth_secret}" -n "${JOB_NS}" \
     --docker-server="${HARBOR_HOST}:${HARBOR_PORT}" \
     --docker-username="${HARBOR_USER}" \
     --docker-password="${HARBOR_PASS}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo "==> cosign Job ${JOB_NS}/${job}"
+  kubectl create secret docker-registry "${auth_secret}-ip" -n "${JOB_NS}" \
+    --docker-server="${NODE_IP}:${HARBOR_PORT}" \
+    --docker-username="${HARBOR_USER}" \
+    --docker-password="${HARBOR_PASS}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  echo "==> crane sig Job ${JOB_NS}/${job}"
   kubectl delete job "${job}" -n "${JOB_NS}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl apply -n "${JOB_NS}" -f - <<EOF
 apiVersion: batch/v1
@@ -145,99 +171,53 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         fsGroup: 65532
-      imagePullSecrets:
-        - name: ${auth_secret}
-      volumes:
-        - name: cosign-key
-          secret:
-            secretName: ${key_secret}
-        - name: docker-config
-          secret:
-            secretName: ${auth_secret}
-            items:
-              - key: .dockerconfigjson
-                path: config.json
       containers:
-        - name: cosign
-          image: ${COSIGN_IMAGE}
+        - name: crane
+          image: gcr.io/go-containerregistry/crane:debug
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
             allowPrivilegeEscalation: false
-          volumeMounts:
-            - name: cosign-key
-              mountPath: /cosign
-              readOnly: true
-            - name: docker-config
-              mountPath: /home/nonroot/.docker
-              readOnly: true
           env:
-            - name: COSIGN_EXPERIMENTAL
-              value: "1"
             - name: HOME
-              value: /home/nonroot
-            - name: COSIGN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: ${key_secret}
-                  key: cosign.password
-                  optional: true
-          command: ["/bin/sh", "-ce"]
+              value: /tmp
+          command: ["/busybox/sh", "-ce"]
           args:
             - |
               set -e
-              export COSIGN_PRIVATE_KEY="\$(cat /cosign/cosign.key)"
-              ARCH=\$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-              wget -q -O /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_\${ARCH}.tar.gz"
-              tar -xzf /tmp/crane.tgz -C /usr/local/bin crane 2>/dev/null || tar -xzf /tmp/crane.tgz -C /tmp && install /tmp/crane /usr/local/bin/crane
-              crane auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
-              crane auth login '${NODE_IP}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
-              resolve_digest_ref() {
-                local img="\$1" repo="\$2" d
-                d=\$(crane digest --insecure "\${img}" | tr -d '\\r\\n')
-                case "\${d}" in
-                  *@sha256:*) printf '%s' "\${d}" ;;
-                  sha256:*) printf '%s@%s' "\${repo}" "\${d}" ;;
-                  *) printf '%s@%s' "\${repo}" "\${d}" ;;
-                esac
-              }
-              SRC_D=\$(resolve_digest_ref '${SRC}' '${SRC_REPO}')
-              DST_D=\$(resolve_digest_ref '${DST}' '${DST_REPO}')
-              echo "SRC_D=\${SRC_D}"
-              echo "DST_D=\${DST_D}"
-              crane copy --insecure '${SRC}' '${DST}' 2>/dev/null || true
-              if cosign copy --allow-insecure-registry --force "\${SRC_D}" "\${DST_D}" && cosign tree "\${DST_D}" 2>/dev/null | grep -qi signature; then
-                echo OK copy; exit 0
-              fi
-              if cosign download signature --allow-insecure-registry "\${SRC_D}" > /tmp/sig.pem 2>/dev/null; then
-                cosign attach signature --allow-insecure-registry --signature /tmp/sig.pem "\${DST_D}"
-                cosign tree "\${DST_D}" | head -5
-                exit 0
-              fi
-              cosign sign --yes --allow-insecure-registry --key env://COSIGN_PRIVATE_KEY "\${DST_D}"
-              cosign tree "\${DST_D}" | head -5
+              CRANE=/ko-app/crane
+              \$CRANE auth login '${HARBOR_HOST}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
+              \$CRANE auth login '${NODE_IP}:${HARBOR_PORT}' -u '${HARBOR_USER}' -p '${HARBOR_PASS}' --insecure
+              HEX=\$(\$CRANE digest --insecure '${SRC}' | tr -d '\\r\\n' | sed 's/.*@*sha256://')
+              SRC_SIG='${SRC_REPO}:sha256-'\${HEX}'.sig'
+              DST_SIG='${DST_REPO}:sha256-'\${HEX}'.sig'
+              \$CRANE copy --insecure '${SRC}' '${DST}' 2>/dev/null || true
+              echo "copy sig \${SRC_SIG} -> \${DST_SIG}"
+              \$CRANE copy --insecure "\${SRC_SIG}" "\${DST_SIG}"
+              \$CRANE manifest --insecure "\${DST_SIG}" >/dev/null
+              echo OK crane sig copy
 EOF
-  if ! kubectl wait --for=condition=complete "job/${job}" -n "${JOB_NS}" --timeout=300s; then
+  if ! kubectl wait --for=condition=complete "job/${job}" -n "${JOB_NS}" --timeout=180s; then
     kubectl logs "job/${job}" -n "${JOB_NS}" --tail=80 2>/dev/null || true
-    kubectl describe job "${job}" -n "${JOB_NS}" 2>/dev/null | tail -30 || true
+    kubectl describe job "${job}" -n "${JOB_NS}" 2>/dev/null | tail -25 || true
     kubectl delete job "${job}" -n "${JOB_NS}" --ignore-not-found >/dev/null 2>&1 || true
     return 1
   fi
-  kubectl logs "job/${job}" -n "${JOB_NS}" --tail=40
+  kubectl logs "job/${job}" -n "${JOB_NS}" --tail=20
   kubectl delete job "${job}" -n "${JOB_NS}" --ignore-not-found >/dev/null 2>&1 || true
 }
 
 load_env
 bash "${SCRIPT_DIR}/fix-harbor-cosign-realm-lab.sh" 2>/dev/null || true
-echo "==> Ensure cosign signature on ${DST} (from ${SRC})"
+echo "==> Ensure cosign .sig on ${DST} (from ${SRC})"
 if run_via_jenkins; then
-  echo "OK: signed via Jenkins pod"
+  echo "OK: signature on nip.io via Jenkins crane"
   exit 0
 fi
-echo "WARN: Jenkins cosign failed — trying k8s Job" >&2
+echo "WARN: Jenkins crane sig copy failed — trying k8s Job" >&2
 if run_k8s_job; then
-  echo "OK: signed via k8s Job"
+  echo "OK: signature on nip.io via k8s Job"
   exit 0
 fi
-echo "ERROR: could not sign ${DST}" >&2
+echo "ERROR: could not copy cosign signature to ${DST}" >&2
 exit 1
