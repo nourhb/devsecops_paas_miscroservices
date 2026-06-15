@@ -93,18 +93,26 @@ copy_sig() {
   sig_ok "$d"
 }
 sign_ip_image() {
-  [ -x "$COSIGN" ] && [ -f "$KEY" ] || { echo "WARN: no cosign/key for IP sign" >&2; return 1; }
-  echo "[cosign-lab] cosign sign on IP digest $SRC_D"
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC_D" \
-    || COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --key "$KEY" "$SRC_D" || true
-  echo "[cosign-lab] cosign sign on IP tag $SRC"
-  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC" \
-    || COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --key "$KEY" "$SRC" || true
+  [ -x "$COSIGN" ] && [ -f "$KEY" ] || { echo "ERROR: cosign=[$COSIGN] key=[$KEY]"; return 1; }
+  echo "$HARBOR_PASS" | "$COSIGN" login "$NODE_IP:$HARBOR_PORT" -u "$HARBOR_USER" --password-stdin --allow-insecure-registry 2>/dev/null || true
+  echo "[cosign-lab] cosign sign IP digest $SRC_D"
+  set +e
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC_D" 2>&1
+  rc1=$?
+  echo "[cosign-lab] cosign sign IP tag $SRC (rc digest=$rc1)"
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" sign --yes --allow-insecure-registry --key "$KEY" "$SRC" 2>&1
+  rc2=$?
+  set -e
+  sleep 2
+  echo "[cosign-lab] tags after sign:" $($CRANE ls --insecure "$SRC_REPO" 2>/dev/null | grep -E "sig|${IMAGE_TAG}" | head -10 | tr '\n' ' ' || echo none)
+  sig_ok "$SRC_SIG" || sig_ok "$TAG_SIG" || { echo "ERROR: cosign sign did not create .sig on IP (rc digest=$rc1 tag=$rc2)" >&2; return 1; }
 }
 SRC_D=$(resolve_digest_ref "$SRC" "$SRC_REPO")
 HEX=$(digest_hex "$SRC_D")
-DST_SIG=$(sig_ref "$DST_REPO" "$HEX")
 SRC_SIG=$(sig_ref "$SRC_REPO" "$HEX")
+DST_SIG=$(sig_ref "$DST_REPO" "$HEX")
+TAG_SIG="$SRC_REPO:$IMAGE_TAG.sig"
+DST_TAG_SIG="$DST_REPO:$IMAGE_TAG.sig"
 echo "[cosign-lab] SRC_D=$SRC_D HEX=$HEX"
 echo "[cosign-lab] SRC_SIG=$SRC_SIG"
 echo "[cosign-lab] DST_SIG=$DST_SIG"
@@ -114,8 +122,8 @@ if sig_ok "$DST_SIG"; then
   exit 0
 fi
 if ! sig_ok "$SRC_SIG"; then
-  echo "[cosign-lab] no .sig on IP — signing now (build ${IMAGE_TAG} was never cosign-signed in Jenkins)"
-  sign_ip_image || true
+  echo "[cosign-lab] no digest .sig on IP — signing now"
+  sign_ip_image
 fi
 if copy_sig "$SRC_SIG" "$DST_SIG"; then
   echo "OK: crane copied digest .sig to nip.io"
@@ -133,7 +141,6 @@ if [ -x "$COSIGN" ]; then
       fi
     fi
   done
-fi
 TAG_SIG="$SRC_REPO:$IMAGE_TAG.sig"
 DST_TAG_SIG="$DST_REPO:$IMAGE_TAG.sig"
 if copy_sig "$TAG_SIG" "$DST_TAG_SIG"; then

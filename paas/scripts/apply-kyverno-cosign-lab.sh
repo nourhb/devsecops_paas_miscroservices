@@ -40,6 +40,15 @@ if "BEGIN PUBLIC KEY" not in raw:
     raw = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----"
 
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
+enforce = False
+for line in text.splitlines():
+    if line.startswith("COSIGN_LAB_ENFORCE_SIGNED="):
+        v = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
+        enforce = v in ("true", "1", "yes")
+    if line.startswith("COSIGN_ENFORCE_SIGNED=") and "COSIGN_LAB_ENFORCE_SIGNED=" not in text:
+        v = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
+        enforce = v in ("true", "1", "yes")
+policy["spec"]["validationFailureAction"] = "Enforce" if enforce else "Audit"
 verify = policy["spec"]["rules"][0]["verifyImages"][0]
 verify["imageRegistryCredentials"] = {
     "allowInsecureRegistry": True,
@@ -53,7 +62,8 @@ keys.setdefault("ctlog", {})["ignoreSCT"] = True
 out = Path(out_path)
 out.write_text(yaml.safe_dump(policy, default_flow_style=False, sort_keys=False), encoding="utf-8")
 yaml.safe_load(out.read_text(encoding="utf-8"))
-print(f"OK wrote {out_path} (HTTP Harbor + harbor-regcred)")
+action = policy["spec"]["validationFailureAction"]
+print(f"OK wrote {out_path} (HTTP Harbor + harbor-regcred, validationFailureAction={action})")
 PY
 
 kubectl apply -f "${POLICY_OUT}"
