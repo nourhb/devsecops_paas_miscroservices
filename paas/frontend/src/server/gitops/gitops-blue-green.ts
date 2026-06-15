@@ -1,6 +1,5 @@
 import { env } from "@/server/config/env";
-import { buildDeployImageRepository, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
-import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
+import { buildDeployImageRepository, buildDeployImageRepositoryForClusterPull, deployImageRepositoryForClusterPull, harborClusterPullImageRef, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
 import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
 
 export type DeploymentStrategy = "Rolling" | "BlueGreen";
@@ -75,8 +74,9 @@ export function ensureBlueGreenValuesStructure(
     doc.deploymentStrategy = "BlueGreen";
     const active: BlueGreenSlot = doc.activeSlot === "green" ? "green" : "blue";
     const inactive = inactiveSlot(active);
-    const { repository, tag, digest } = splitImageRef(imageTag);
-    const repo = repository || buildDeployImageRepository(projectName);
+    const normalizedTag = harborClusterPullImageRef(imageTag);
+    const { repository, tag, digest } = splitImageRef(normalizedTag);
+    const repo = repository || buildDeployImageRepositoryForClusterPull(projectName);
 
     const legacy = doc.image && typeof doc.image === "object" && doc.image !== null
         ? (doc.image as Record<string, unknown>)
@@ -124,12 +124,12 @@ export function applyBlueGreenInactiveImage(
     projectName: string,
     imageTag: string
 ): { activeSlot: BlueGreenSlot; inactive: BlueGreenSlot } {
-    const normalizedTag = normalizeHarborImageRef(imageTag);
+    const normalizedTag = harborClusterPullImageRef(imageTag);
     const { activeSlot, inactive } = ensureBlueGreenValuesStructure(doc, projectName, normalizedTag);
     const { repository, tag, digest } = splitImageRef(normalizedTag);
     const block = slotImageBlock(doc, inactive);
     const img = block.image as Record<string, unknown>;
-    img.repository = repository || buildDeployImageRepository(projectName);
+    img.repository = repository || buildDeployImageRepositoryForClusterPull(projectName);
     img.tag = tag;
     img.digest = digest;
     return { activeSlot, inactive };
@@ -166,10 +166,10 @@ export function applyRollingImage(doc: Record<string, unknown>, projectName: str
     delete doc.activeSlot;
     delete doc.blue;
     delete doc.green;
-    const normalizedTag = normalizeHarborImageRef(imageTag);
+    const normalizedTag = harborClusterPullImageRef(imageTag);
     const { repository, tag, digest } = splitImageRef(normalizedTag);
     doc.image = {
-        repository: repository || buildDeployImageRepository(projectName),
+        repository: deployImageRepositoryForClusterPull(repository || buildDeployImageRepository(projectName)),
         tag,
         digest,
         pullPolicy: "IfNotPresent"
