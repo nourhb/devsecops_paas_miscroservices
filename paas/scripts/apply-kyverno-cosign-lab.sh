@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Lab Kyverno cosign policy: HTTP Harbor creds + public key from env.
+# Enforce mode ONLY when shell exports COSIGN_LAB_ENFORCE_SIGNED=true (not docker-compose COSIGN_ENFORCE_SIGNED).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -12,19 +14,21 @@ HARBOR_REGISTRY="${HARBOR_HOST}:${HARBOR_NODEPORT}"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 KYVERNO_NS="${KYVERNO_NS:-kyverno}"
+# Shell env only — default Audit so PaaS deploys are never blocked in lab unless explicitly opted in.
+LAB_ENFORCE="${COSIGN_LAB_ENFORCE_SIGNED:-false}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: missing ${ENV_FILE}" >&2
   exit 1
 fi
 
-python3 - "${ENV_FILE}" "${POLICY_SRC}" "${POLICY_OUT}" <<'PY'
+ACTION="$(python3 - "${ENV_FILE}" "${POLICY_SRC}" "${POLICY_OUT}" "${LAB_ENFORCE}" <<'PY'
 import re
 import sys
 from pathlib import Path
 import yaml
 
-env_path, src_path, out_path = sys.argv[1:4]
+env_path, src_path, out_path, lab_enforce = sys.argv[1:5]
 text = Path(env_path).read_text(encoding="utf-8")
 raw = ""
 for line in text.splitlines():
@@ -39,14 +43,8 @@ if "BEGIN PUBLIC KEY" not in raw:
     body = re.sub(r"\s+", "", raw)
     raw = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----"
 
+enforce = lab_enforce.strip().lower() in ("true", "1", "yes")
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
-# Lab only: COSIGN_LAB_ENFORCE_SIGNED (never COSIGN_ENFORCE_SIGNED from PaaS prod config).
-enforce = False
-for line in text.splitlines():
-    if line.startswith("COSIGN_LAB_ENFORCE_SIGNED="):
-        v = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
-        enforce = v in ("true", "1", "yes")
-        break
 policy["spec"]["validationFailureAction"] = "Enforce" if enforce else "Audit"
 verify = policy["spec"]["rules"][0]["verifyImages"][0]
 verify["imageRegistryCredentials"] = {
@@ -61,11 +59,19 @@ keys.setdefault("ctlog", {})["ignoreSCT"] = True
 out = Path(out_path)
 out.write_text(yaml.safe_dump(policy, default_flow_style=False, sort_keys=False), encoding="utf-8")
 yaml.safe_load(out.read_text(encoding="utf-8"))
-action = policy["spec"]["validationFailureAction"]
-print(f"OK wrote {out_path} (HTTP Harbor + harbor-regcred, validationFailureAction={action})")
+print(policy["spec"]["validationFailureAction"])
 PY
+)"
 
 kubectl apply -f "${POLICY_OUT}"
+
+# Belt-and-suspenders: cluster policy must match intended lab mode.
+CURRENT="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
+if [[ "${CURRENT}" != "${ACTION}" ]]; then
+  kubectl patch clusterpolicy require-signed-images --type=merge \
+    -p "{\"spec\":{\"validationFailureAction\":\"${ACTION}\"}}"
+fi
+echo "OK wrote ${POLICY_OUT} (validationFailureAction=${ACTION}, COSIGN_LAB_ENFORCE_SIGNED=${LAB_ENFORCE})"
 
 kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \

@@ -272,6 +272,8 @@ free_namespace_capacity() {
 echo "==> Heal ${PROJECT_NAME} build :${TAG} targetPort=${TARGET_PORT}"
 echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
+echo "==> Kyverno lab policy (Audit unless COSIGN_LAB_ENFORCE_SIGNED=true)"
+COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
 if [[ -f "${ENV_FILE}" ]]; then
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   export GITHUB_TOKEN
@@ -349,11 +351,16 @@ echo "==> Push GitOps to GitHub"
 if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
   echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/push-gitops-lab.sh)"
 fi
-echo "==> Kyverno policy (HTTP Harbor + cosign; lab defaults to Audit — deploy not blocked)"
-bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
-echo "==> Cosign nip.io signature (best-effort)"
-if ! bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}"; then
-  echo "WARN: cosign .sig missing on nip.io — deploy continues (set COSIGN_LAB_ENFORCE_SIGNED=true to block)"
+echo "==> Cosign nip.io signature (best-effort; skipped when Kyverno Audit)"
+KYVERNO_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || echo Audit)"
+if [[ "${KYVERNO_ACTION}" == "Enforce" ]]; then
+  bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || {
+    echo "ERROR: cosign required (Kyverno Enforce) but signature missing on nip.io" >&2
+    exit 1
+  }
+else
+  bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || \
+    echo "WARN: cosign best-effort failed — deploy continues (Kyverno ${KYVERNO_ACTION})"
 fi
 free_namespace_capacity "${NS}"
 GITOPS_REV="$(git -C "${GITOPS}" rev-parse HEAD 2>/dev/null || echo HEAD)"

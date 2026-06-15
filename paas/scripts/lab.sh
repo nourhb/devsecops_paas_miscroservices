@@ -35,6 +35,7 @@ case "$cmd" in
   deploy)
     REPO_ROOT="$(cd "$DIR/../.." && pwd)"
     git -C "${REPO_ROOT}" pull origin main 2>/dev/null || true
+    export COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}"
     bash "$DIR/apply-kyverno-cosign-lab.sh"
     bash "$DIR/ensure-harbor-nipio-cosign-lab.sh" "${2:?usage: lab.sh deploy <project-slug> <build> [port]}" "${3:?}" || true
     bash "$DIR/heal-project-deploy-lab.sh" "${2}" "${3}" "${4:-3000}" ;;
