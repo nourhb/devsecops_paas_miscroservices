@@ -10,11 +10,13 @@ GITOPS="${GITOPS:-${HOME}/gitops}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_HOST="harbor.${NODE_IP}.nip.io"
 HARBOR_PORT="${HARBOR_NODEPORT:-30002}"
+# Kubelet/containerd must pull via IP:port (HTTP). nip.io host triggers HTTPS pull errors on lab Harbor.
+HARBOR_PULL_REGISTRY="${NODE_IP}:${HARBOR_PORT}"
 ARGOCD_APP_PREFIX="${ARGOCD_APP_PREFIX:-paas}"
 VALUES="${GITOPS}/apps/${PROJECT_NAME}/values.yaml"
 NS="${PROJECT_NAME}"
 APP="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
-IMAGE="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_NAME}:${TAG}"
+IMAGE="${HARBOR_PULL_REGISTRY}/paas/${PROJECT_NAME}:${TAG}"
 URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
 # shellcheck source=gitops-lab-lib.sh
 source "${SCRIPT_DIR}/gitops-lab-lib.sh"
@@ -246,11 +248,11 @@ ensure_harbor_regcred() {
   fi
   kubectl create namespace "${ns}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
   kubectl create secret docker-registry harbor-regcred -n "${ns}" \
-    --docker-server="${HARBOR_HOST}:${HARBOR_PORT}" \
+    --docker-server="${HARBOR_PULL_REGISTRY}" \
     --docker-username="${user}" \
     --docker-password="${pass}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo "OK: harbor-regcred in namespace ${ns} (${HARBOR_HOST}:${HARBOR_PORT})"
+  echo "OK: harbor-regcred in namespace ${ns} (${HARBOR_PULL_REGISTRY})"
 }
 free_namespace_capacity() {
   local ns="$1"
@@ -288,23 +290,28 @@ pushd "${GITOPS}" >/dev/null
 git pull --rebase origin main 2>/dev/null || git pull --rebase "${AUTH_URL}" main 2>/dev/null || true
 popd >/dev/null
 ensure_harbor_regcred "${NS}"
-echo "==> Patch ${VALUES} (Rolling + nip.io image + targetPort)"
+echo "==> Patch ${VALUES} (Rolling + Harbor IP pull image + targetPort)"
 python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" "${TARGET_PORT}" "${HARBOR_PORT}" <<'PY'
 import sys
 from pathlib import Path
 import yaml
 path, tag, node_ip, name, port, harbor_port = sys.argv[1:7]
 port = int(port)
-repo = f"harbor.{node_ip}.nip.io:{harbor_port}/paas/{name}"
-import re
-private_ip = re.compile(r"^(\d{1,3}\.){3}\d{1,3}(:\d+)?/")
+# Cluster pulls use IP:port (HTTP Harbor). Jenkins/cosign use harbor.<ip>.nip.io separately.
+repo = f"{node_ip}:{harbor_port}/paas/{name}"
 
-def nip_repo(r: str) -> str:
-    if "nip.io" in r:
-        return r
+def pull_repo(r: str) -> str:
+    r = str(r or "").strip()
+    if not r:
+        return repo
+    if "nip.io" in r and "/paas/" in r:
+        tail = r.split("/paas/", 1)[1].split(":")[0]
+        return f"{node_ip}:{harbor_port}/paas/{tail}"
+    if r.startswith(f"{node_ip}:{harbor_port}/"):
+        return r.rsplit(":", 1)[0] if r.count(":") > 1 and r.rsplit(":", 1)[-1].isdigit() else r
     if "/paas/" in r:
         tail = r.split("/paas/", 1)[1].split(":")[0]
-        return f"{repo.rsplit('/', 1)[0]}/{tail}"
+        return f"{node_ip}:{harbor_port}/paas/{tail}"
     return repo
 
 doc = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
@@ -312,7 +319,7 @@ doc["deploymentStrategy"] = "Rolling"
 for k in ("activeSlot", "blue", "green", "nodeSelector"):
     doc.pop(k, None)
 img = doc.get("image") if isinstance(doc.get("image"), dict) else {}
-img["repository"] = nip_repo(str(img.get("repository") or repo))
+img["repository"] = pull_repo(str(img.get("repository") or repo))
 img["tag"] = str(tag)
 img["digest"] = ""
 img["pullPolicy"] = "IfNotPresent"
@@ -320,7 +327,7 @@ doc["image"] = img
 for slot in ("blue", "green"):
     block = doc.get(slot)
     if isinstance(block, dict) and isinstance(block.get("image"), dict):
-        block["image"]["repository"] = nip_repo(str(block["image"].get("repository") or repo))
+        block["image"]["repository"] = pull_repo(str(block["image"].get("repository") or repo))
 doc["nameOverride"] = name
 doc["fullnameOverride"] = f"paas-{name}"
 svc = doc.get("service") if isinstance(doc.get("service"), dict) else {}
