@@ -40,14 +40,13 @@ if "BEGIN PUBLIC KEY" not in raw:
     raw = f"-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----"
 
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
+# Lab only: COSIGN_LAB_ENFORCE_SIGNED (never COSIGN_ENFORCE_SIGNED from PaaS prod config).
 enforce = False
 for line in text.splitlines():
     if line.startswith("COSIGN_LAB_ENFORCE_SIGNED="):
         v = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
         enforce = v in ("true", "1", "yes")
-    if line.startswith("COSIGN_ENFORCE_SIGNED=") and "COSIGN_LAB_ENFORCE_SIGNED=" not in text:
-        v = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
-        enforce = v in ("true", "1", "yes")
+        break
 policy["spec"]["validationFailureAction"] = "Enforce" if enforce else "Audit"
 verify = policy["spec"]["rules"][0]["verifyImages"][0]
 verify["imageRegistryCredentials"] = {

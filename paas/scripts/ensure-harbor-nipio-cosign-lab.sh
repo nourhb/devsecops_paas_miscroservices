@@ -85,6 +85,11 @@ digest_hex() {
 }
 sig_ref() { printf '%s:sha256-%s.sig' "$1" "$2"; }
 sig_ok() { "$CRANE" manifest --insecure "$1" >/dev/null 2>&1; }
+cosign_has_sig() {
+  [ -x "$COSIGN" ] || return 1
+  "$COSIGN" tree --allow-insecure-registry "$1" 2>/dev/null | grep -qi signature \
+    || "$COSIGN" tree "$1" 2>/dev/null | grep -qi signature
+}
 copy_sig() {
   local s="$1" d="$2"
   sig_ok "$s" || return 1
@@ -105,7 +110,8 @@ sign_ip_image() {
   set -e
   sleep 2
   echo "[cosign-lab] tags after sign:" $($CRANE ls --insecure "$SRC_REPO" 2>/dev/null | grep -E "sig|${IMAGE_TAG}" | head -10 | tr '\n' ' ' || echo none)
-  sig_ok "$SRC_SIG" || sig_ok "$TAG_SIG" || { echo "ERROR: cosign sign did not create .sig on IP (rc digest=$rc1 tag=$rc2)" >&2; return 1; }
+  cosign_has_sig "$SRC_D" || cosign_has_sig "$SRC" || sig_ok "$SRC_SIG" || sig_ok "$TAG_SIG" \
+    || { echo "ERROR: cosign sign did not create signature on IP (rc digest=$rc1 tag=$rc2)" >&2; return 1; }
 }
 SRC_D=$(resolve_digest_ref "$SRC" "$SRC_REPO")
 HEX=$(digest_hex "$SRC_D")
@@ -121,13 +127,31 @@ if sig_ok "$DST_SIG"; then
   echo "OK: signature already on $DST_SIG"
   exit 0
 fi
-if ! sig_ok "$SRC_SIG"; then
-  echo "[cosign-lab] no digest .sig on IP — signing now"
+if ! sig_ok "$SRC_SIG" && ! cosign_has_sig "$SRC_D"; then
+  echo "[cosign-lab] no signature on IP — signing now"
   sign_ip_image
 fi
+# Copy digest .sig tag if present
 if copy_sig "$SRC_SIG" "$DST_SIG"; then
   echo "OK: crane copied digest .sig to nip.io"
   exit 0
+fi
+# Harbor/cosign often stores signature as referrer — triangulate + crane copy
+if [ -x "$COSIGN" ] && cosign_has_sig "$SRC_D"; then
+  TRI=$("$COSIGN" triangulate --allow-insecure-registry "$SRC_D" 2>/dev/null \
+    || "$COSIGN" triangulate "$SRC_D" 2>/dev/null || true)
+  if [ -n "$TRI" ]; then
+    DST_TRI=$(printf '%s' "$TRI" | sed "s|^$SRC_REPO|$DST_REPO|")
+    echo "[cosign-lab] triangulate $TRI -> $DST_TRI"
+    if sig_ok "$TRI" && copy_sig "$TRI" "$DST_TRI"; then
+      echo "OK: crane copied triangulated sig to nip.io"
+      exit 0
+    fi
+    if "$CRANE" copy --insecure "$TRI" "$DST_TRI" 2>/dev/null && sig_ok "$DST_TRI"; then
+      echo "OK: crane copied triangulate ref to nip.io"
+      exit 0
+    fi
+  fi
 fi
 if [ -x "$COSIGN" ]; then
   for IMG in "$SRC" "$SRC_D"; do
@@ -291,8 +315,15 @@ CRANE=$(find_crane)
 [ -n "$CRANE" ] || exit 1
 HEX=$("$CRANE" digest --insecure "$SRC" | tr -d '\r\n' | sed 's/.*@*sha256://')
 DST_SIG="$DST_REPO:sha256-${HEX}.sig"
-"$CRANE" manifest --insecure "$DST_SIG" >/dev/null
-echo "$DST_SIG"
+DST_D="$DST_REPO@sha256:${HEX}"
+"$CRANE" manifest --insecure "$DST_SIG" >/dev/null 2>/dev/null && { echo "$DST_SIG"; exit 0; }
+COSIGN=$(command -v cosign 2>/dev/null || true)
+[ -x /var/jenkins_home/bin/cosign ] && COSIGN=/var/jenkins_home/bin/cosign
+if [ -x "$COSIGN" ] && "$COSIGN" tree --allow-insecure-registry "$DST_D" 2>/dev/null | grep -qi signature; then
+  echo "$DST_D (cosign tree)"
+  exit 0
+fi
+exit 1
 EOS
 )" 2>&1)"; then
     echo "${out}" >&2
