@@ -14,13 +14,18 @@ export function normalizeOciImageReference(imageRef: string): string {
     return imageRef.trim().toLowerCase();
 }
 
+export function canonicalDeployImageRepository(imageRef: string): string {
+    return normalizeDeployImageRepositoryRef(normalizeHarborImageRef(imageRef.trim().toLowerCase()));
+}
+
 export function buildDeployImageRepository(projectName: string): string {
     const safeName = sanitizeDeployImageName(projectName);
     const template = env.DEPLOY_IMAGE_NAME_TEMPLATE.trim();
     if (template) {
-        return normalizeOciImageReference(template
+        const fromTemplate = template
             .replace(/\{\{projectName\}\}/gi, safeName)
-            .replace(/\{\{harborProject\}\}/gi, env.HARBOR_PROJECT.toLowerCase()));
+            .replace(/\{\{harborProject\}\}/gi, env.HARBOR_PROJECT.toLowerCase());
+        return normalizeOciImageReference(normalizeHarborImageRef(fromTemplate));
     }
     const harborHost = coerceHarborRegistryHostForCosign(
         env.HARBOR_REGISTRY || env.HARBOR_BASE_URL.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
@@ -52,20 +57,17 @@ export function normalizeDeployImageRepositoryRef(imageRef: string): string {
 }
 
 export function deployImageRepositoryMatchesProject(imageRef: string, projectName: string): boolean {
-    const expected = buildDeployImageRepository(projectName).toLowerCase();
-    const actual = normalizeDeployImageRepositoryRef(imageRef);
+    const expected = canonicalDeployImageRepository(buildDeployImageRepository(projectName));
+    const actual = canonicalDeployImageRepository(imageRef);
     if (actual === expected) {
         return true;
     }
-    const coercedActual = normalizeDeployImageRepositoryRef(normalizeHarborImageRef(imageRef));
-    if (coercedActual === expected) {
-        return true;
-    }
     const short = sanitizeDeployImageName(projectName);
-    if (actual === short) {
+    const bareActual = normalizeDeployImageRepositoryRef(imageRef).toLowerCase();
+    if (bareActual === short) {
         return true;
     }
-    if (actual.endsWith(`/${short}`)) {
+    if (bareActual.endsWith(`/${short}`)) {
         return true;
     }
     return false;

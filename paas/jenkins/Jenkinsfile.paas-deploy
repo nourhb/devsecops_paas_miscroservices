@@ -1656,14 +1656,103 @@ def cosignSignImageShellSnippet() {
   return '''
             set +e
             export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            harbor_nipio_to_ip_ref() {
+              local ref="$1"
+              case "$ref" in
+                harbor.*.nip.io:*/*|harbor.*.nip.io/*)
+                  local host="${ref%%/*}"
+                  local rest="${ref#*/}"
+                  local nip_host port ip
+                  nip_host="${host%%:*}"
+                  port="${host#*:}"
+                  if [ "${port}" = "${nip_host}" ]; then
+                    port=""
+                  fi
+                  ip="$(printf '%s' "${nip_host}" | sed -nE 's/^harbor\\.([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\.nip\\.io$/\\1/p')"
+                  if [ -z "${ip}" ]; then
+                    return 1
+                  fi
+                  if [ -n "${port}" ]; then
+                    printf '%s/%s' "${ip}:${port}" "${rest}"
+                  else
+                    printf '%s/%s' "${ip}" "${rest}"
+                  fi
+                  return 0
+                  ;;
+              esac
+              return 1
+            }
+            sig_ok() {
+              local ref="$1" crane="${CRANE_BIN:-}"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || crane="$(command -v crane 2>/dev/null || true)"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || return 1
+              "${crane}" manifest --insecure "${ref}" >/dev/null 2>&1
+            }
+            copy_sig_ref() {
+              local src="$1" dst="$2" crane="${CRANE_BIN:-}"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || crane="$(command -v crane 2>/dev/null || true)"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || return 1
+              sig_ok "${src}" || return 1
+              echo "[cosign] crane copy signature ${src} -> ${dst}"
+              "${crane}" copy --insecure "${src}" "${dst}" >/dev/null 2>&1 && sig_ok "${dst}"
+            }
+            nipio_dst_for_tri() {
+              local tri="$1" nip_ref="$2" ip_ref="$3"
+              local nip_repo="${nip_ref%%@*}"
+              nip_repo="${nip_repo%:*}"
+              local ip_repo="${ip_ref%%@*}"
+              ip_repo="${ip_repo%:*}"
+              printf '%s' "${tri}" | sed "s|^${ip_repo}|${nip_repo}|"
+            }
+            sign_nipio_via_ip() {
+              local nip_ref="$1"
+              local ip_ref
+              ip_ref="$(harbor_nipio_to_ip_ref "${nip_ref}")" || return 1
+              local crane="${CRANE_BIN:-}"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || crane="$(command -v crane 2>/dev/null || true)"
+              [ -n "${crane}" ] && [ -x "${crane}" ] || {
+                echo "[cosign] WARN: nip.io sign needs IP fallback but crane missing"
+                return 1
+              }
+              echo "[cosign] Harbor HTTP nip.io — sign via IP ref ${ip_ref}"
+              "${crane}" copy --insecure "${nip_ref}" "${ip_ref}" >/dev/null 2>&1 || true
+              local ip_digest nip_repo ip_repo
+              ip_digest="$(resolve_digest_ref "${ip_ref}" || true)"
+              nip_repo="${nip_ref%%@*}"
+              nip_repo="${nip_repo%:*}"
+              ip_repo="${ip_ref%%@*}"
+              ip_repo="${ip_repo%:*}"
+              if [ -n "${ip_digest}" ]; then
+                sign_img "${ip_digest}" || true
+              fi
+              sign_img "${ip_ref}" || true
+              local tri dst_tri
+              tri="$("${COSIGN_EXE}" triangulate --allow-insecure-registry "${ip_digest:-${ip_ref}}" 2>/dev/null || true)"
+              if [ -n "${tri}" ]; then
+                dst_tri="$(nipio_dst_for_tri "${tri}" "${nip_ref}" "${ip_ref}")"
+                if copy_sig_ref "${tri}" "${dst_tri}"; then
+                  echo "[cosign] OK: signature copied to nip.io ${dst_tri}"
+                  return 0
+                fi
+              fi
+              local hex="${ip_digest#*@sha256:}"
+              hex="${hex#sha256:}"
+              if [ -n "${hex}" ]; then
+                if copy_sig_ref "${ip_repo}:sha256-${hex}.sig" "${nip_repo}:sha256-${hex}.sig"; then
+                  echo "[cosign] OK: digest .sig copied to nip.io"
+                  return 0
+                fi
+              fi
+              return 1
+            }
             sign_img() {
               local ref="$1"
               local out rc attempt
               for attempt in 1 2 3; do
                 if [ -n "${INSEC}" ]; then
-                  out="$("${COSIGN_EXE}" sign --yes --tlog-upload=false ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                  out="$("${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
                 else
-                  out="$("${COSIGN_EXE}" sign --yes --tlog-upload=false --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                  out="$("${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "${ref}" 2>&1)"
                 fi
                 rc=$?
                 if [ "${rc}" -eq 0 ]; then
@@ -1681,6 +1770,11 @@ def cosignSignImageShellSnippet() {
                   fi
                   echo "[cosign] WARN: could not sign ${ref} (Harbor unreachable) — image push OK, deploy continues"
                   return 0
+                fi
+                if echo "${out}" | grep -qE 'HTTP response to HTTPS|server gave HTTP'; then
+                  echo "${out}"
+                  sign_nipio_via_ip "${ref}" && return 0
+                  return "${rc}"
                 fi
                 echo "${out}"
                 return "${rc}"
@@ -1835,6 +1929,8 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
   println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
   println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
+  println '[paas-jenkinsfile] marker=cosign-nipio-ip-fallback-20260615 (HTTP Harbor: sign IP + crane copy .sig to nip.io)'
+  println '[paas-jenkinsfile] marker=cosign-no-tlog-upload-flag-20260615 (new cosign rejects --tlog-upload=false with signing-config)'
   println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
   println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
   println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'

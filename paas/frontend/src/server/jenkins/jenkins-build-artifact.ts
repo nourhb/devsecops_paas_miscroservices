@@ -1,4 +1,4 @@
-import { buildDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, canonicalDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
 
 export function pickJenkinsLogForArtifactVerify(progressiveTail: string, fullConsole: string | null | undefined): string {
     if (/PAAS_BUILD_COMPLETE\s+result=/i.test(progressiveTail)) {
@@ -15,7 +15,7 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
     image: string | null;
     error: string | null;
 } {
-    const expectedRepo = buildDeployImageRepository(projectName).toLowerCase();
+    const expectedRepo = canonicalDeployImageRepository(buildDeployImageRepository(projectName));
     const completeMatches = [...log.matchAll(/PAAS_BUILD_COMPLETE\s+result=(\S+)\s+image=(\S+)\s+project=(\S+)\s+build=(\S+)/gi)];
     const complete = completeMatches.at(-1);
     if (complete) {

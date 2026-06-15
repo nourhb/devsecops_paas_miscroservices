@@ -47,6 +47,8 @@ enforce = lab_enforce.strip().lower() in ("true", "1", "yes")
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
 policy["spec"]["validationFailureAction"] = "Enforce" if enforce else "Audit"
 verify = policy["spec"]["rules"][0]["verifyImages"][0]
+# Kyverno rejects Audit + mutateDigest:true (admission webhook validate-policy).
+verify["mutateDigest"] = True if enforce else False
 verify["imageRegistryCredentials"] = {
     "allowInsecureRegistry": True,
     "secrets": ["harbor-regcred"],
@@ -63,15 +65,54 @@ print(policy["spec"]["validationFailureAction"])
 PY
 )"
 
-kubectl apply -f "${POLICY_OUT}"
+apply_cluster_policy() {
+  # Strategic merge apply can leave mutateDigest:true when switching Enforce→Audit.
+  if kubectl get clusterpolicy require-signed-images >/dev/null 2>&1; then
+    kubectl replace -f "${POLICY_OUT}" --force
+  else
+    kubectl apply -f "${POLICY_OUT}"
+  fi
+}
 
-# Belt-and-suspenders: cluster policy must match intended lab mode.
-CURRENT="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
-if [[ "${CURRENT}" != "${ACTION}" ]]; then
-  kubectl patch clusterpolicy require-signed-images --type=merge \
-    -p "{\"spec\":{\"validationFailureAction\":\"${ACTION}\"}}"
+patch_lab_kyverno_mode() {
+  local md="false"
+  [[ "${ACTION}" == "Enforce" ]] && md="true"
+  kubectl patch clusterpolicy require-signed-images --type=json -p="[
+    {\"op\":\"replace\",\"path\":\"/spec/validationFailureAction\",\"value\":\"${ACTION}\"},
+    {\"op\":\"replace\",\"path\":\"/spec/rules/0/verifyImages/0/mutateDigest\",\"value\":${md}}
+  ]"
+}
+
+# Enforce→Audit fails apply while mutateDigest stays true — patch live policy first.
+if [[ "${ACTION}" == "Audit" ]] && kubectl get clusterpolicy require-signed-images >/dev/null 2>&1; then
+  CURRENT_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
+  CURRENT_MD="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.rules[0].verifyImages[0].mutateDigest}' 2>/dev/null || true)"
+  if [[ "${CURRENT_ACTION}" != "Audit" ]] || [[ "${CURRENT_MD}" == "true" ]]; then
+    echo "==> Pre-patch Kyverno Audit + mutateDigest=false"
+    patch_lab_kyverno_mode
+  fi
 fi
-echo "OK wrote ${POLICY_OUT} (validationFailureAction=${ACTION}, COSIGN_LAB_ENFORCE_SIGNED=${LAB_ENFORCE})"
+
+if ! apply_cluster_policy 2>/dev/null; then
+  echo "WARN: kubectl replace failed — patching live policy in place (Audit needs mutateDigest=false)" >&2
+  patch_lab_kyverno_mode
+fi
+
+CURRENT_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
+CURRENT_MD="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.rules[0].verifyImages[0].mutateDigest}' 2>/dev/null || true)"
+EXPECTED_MD="false"
+[[ "${ACTION}" == "Enforce" ]] && EXPECTED_MD="true"
+if [[ "${CURRENT_ACTION}" != "${ACTION}" ]] || [[ "${CURRENT_MD}" != "${EXPECTED_MD}" ]]; then
+  echo "WARN: policy drift (action=${CURRENT_ACTION:-?} mutateDigest=${CURRENT_MD:-?}) — patching" >&2
+  patch_lab_kyverno_mode
+fi
+CURRENT_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
+CURRENT_MD="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.rules[0].verifyImages[0].mutateDigest}' 2>/dev/null || true)"
+if [[ "${CURRENT_ACTION}" != "${ACTION}" ]]; then
+  echo "ERROR: require-signed-images validationFailureAction=${CURRENT_ACTION:-?} (wanted ${ACTION})" >&2
+  exit 1
+fi
+echo "OK wrote ${POLICY_OUT} (validationFailureAction=${CURRENT_ACTION}, mutateDigest=${CURRENT_MD}, COSIGN_LAB_ENFORCE_SIGNED=${LAB_ENFORCE})"
 
 kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \

@@ -16,6 +16,23 @@ export function coerceHarborRegistryHostForCosign(host: string): string {
     return port ? `${nip}:${port}` : nip;
 }
 
+export function harborIpRegistryHostFromNipio(host: string): string {
+    const trimmed = host.trim().replace(/^https?:\/\//i, "").replace(/\/$/, "");
+    if (!trimmed) {
+        return "";
+    }
+    const colon = trimmed.lastIndexOf(":");
+    const hasPort = colon > 0 && !trimmed.slice(0, colon).includes("/");
+    const name = hasPort ? trimmed.slice(0, colon) : trimmed;
+    const port = hasPort ? trimmed.slice(colon + 1) : "";
+    const m = name.match(/^harbor\.(\d{1,3}(?:\.\d{1,3}){3})\.nip\.io$/i);
+    if (!m) {
+        return trimmed;
+    }
+    const ip = m[1];
+    return port ? `${ip}:${port}` : ip;
+}
+
 export function normalizeHarborImageRef(imageRef: string): string {
     const ref = imageRef.trim();
     if (!ref) {
