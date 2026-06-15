@@ -967,6 +967,24 @@ def coerceHarborHostForCosign(String host) {
   return h
 }
 
+def coerceImageRefRegistryHost(String imageRef) {
+  def ref = (imageRef ?: '').trim()
+  if (!ref) {
+    return ref
+  }
+  def slash = ref.indexOf('/')
+  if (slash < 0) {
+    return ref.toLowerCase()
+  }
+  def host = ref.substring(0, slash)
+  def rest = ref.substring(slash + 1)
+  def coerced = coerceHarborHostForCosign(host)
+  if (coerced == host) {
+    return ref.toLowerCase()
+  }
+  return "${coerced}/${rest}".toLowerCase()
+}
+
 def normalizeRegistryHost(String reg) {
   if (!reg?.trim()) {
     return ""
@@ -980,20 +998,21 @@ def harborForceNodePortPush() {
 }
 
 def resolveHarborPushImageRef(String imageRef) {
-  def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
+  def coerced = coerceImageRefRegistryHost(imageRef)
   if (harborForceNodePortPush()) {
-    return imageRef
+    return coerced
   }
   def pushRaw = (params.HARBOR_REGISTRY_PUSH?.trim() ?: env.HARBOR_REGISTRY_PUSH?.trim() ?: "")
   def pushReg = normalizeRegistryHost(pushRaw)
-  if (!external || !pushReg || external == pushReg || !imageRef?.trim()) {
-    return imageRef
+  def external = normalizeRegistryHost(params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "")
+  if (!external || !pushReg || external == pushReg || !coerced?.trim()) {
+    return coerced
   }
-  def ref = imageRef.trim()
+  def ref = coerced.trim()
   if (ref.startsWith("${external}/")) {
     return ref.replaceFirst(external, pushReg)
   }
-  return imageRef
+  return coerced
 }
 
 def isDockerHubStyleImageRef(String imageRef) {
@@ -1272,18 +1291,16 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   def artifactImageRef = normalizeOciImageReference(imageRef)
   imageRef = resolveHarborPushImageRef(artifactImageRef)
   if (imageRef != artifactImageRef) {
-    println "[image] Harbor crane push via in-cluster registry ${imageRef} (GitOps/cosign ref stays ${artifactImageRef})"
+    println "[image] Harbor registry host coerced for push: ${artifactImageRef} → ${imageRef}"
   }
-  def registry = registryHostFor(imageRef)
+  def registry = normalizeRegistryHost(registryHostFor(imageRef))
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
   def harborHost = normalizeRegistryHost(harborRegistry)
-  def pushHost = normalizeRegistryHost(imageRef)
-  def craneInsecure = ""
-  if ((harborHost && (registry == harborHost || pushHost == harborHost)) || (pushHost && pushHost.contains('.svc.'))) {
-    craneInsecure = "--insecure"
-  } else if (harborRegistry.startsWith('http://') || (env.COSIGN_ALLOW_INSECURE_REGISTRY ?: '').trim().equalsIgnoreCase('true')) {
-    craneInsecure = "--insecure"
+  if (!harborHost && registry.contains('.nip.io')) {
+    harborHost = registry
   }
+  def pushHost = registry
+  def craneInsecure = "--insecure"
   def dockerhubUser = params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: ""
   def dockerhubToken = params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: ""
   def harborUser = params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: ""
@@ -1299,7 +1316,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
       '''
     }
-  } else if (harborHost && registry == harborHost) {
+  } else if (harborHost && (registry == harborHost || pushHost == harborHost || registry.contains('.nip.io'))) {
     if (!harborUser || !harborPassword) {
       error("Harbor credentials are required for dockerless image push.")
     }
@@ -1308,15 +1325,24 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         set -eu
         echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
         if command -v getent >/dev/null 2>&1; then
-          getent hosts "${REGISTRY%%:*}" 2>/dev/null || echo "[image] WARN: DNS lookup failed for ${REGISTRY%%:*} (Jenkins agent must run inside the cluster for HARBOR_REGISTRY_PUSH)"
+          getent hosts "${REGISTRY%%:*}" 2>/dev/null || echo "[image] WARN: DNS lookup failed for ${REGISTRY%%:*}"
         fi
-        _hc="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" 2>/dev/null || echo 000)"
-        if [ "${_hc}" != "200" ] && [ "${_hc}" != "401" ]; then
-          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (502/000 = recover: bash paas/scripts/recover-harbor-registry-lab.sh; in-cluster: HARBOR_REGISTRY_PUSH)"
-        else
-          echo "[image] Harbor /v2/ OK (HTTP ${_hc})"
+        _harbor_ok=0
+        for _try in 1 2 3 4 5 6; do
+          _hc="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" 2>/dev/null || echo 000)"
+          if [ "${_hc}" = "200" ] || [ "${_hc}" = "401" ]; then
+            echo "[image] Harbor /v2/ OK (HTTP ${_hc})"
+            _harbor_ok=1
+            break
+          fi
+          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (attempt ${_try}/6) — 502 = run: bash paas/scripts/recover-harbor-registry-lab.sh"
+          sleep 20
+        done
+        if [ "${_harbor_ok}" != "1" ]; then
+          echo "[image] ERROR: Harbor registry not reachable at http://${REGISTRY}/v2/ — fix Harbor before crane push"
+          exit 1
         fi
-        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" &
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" --insecure &
         _auth_pid=$!
         _n=0
         while kill -0 "$_auth_pid" 2>/dev/null; do
@@ -1563,7 +1589,7 @@ PAAS_START
         exit "\${_crane_rc}"
       fi
       _crane_attempt=\$((_crane_attempt + 1))
-      sleep 30
+      sleep 60
     done
     echo "[image] crane append finished; running crane mutate (same shell as append — monorepo-safe)"
     USE_STANDALONE=0
@@ -1720,7 +1746,7 @@ def imagePublishedViaCrane = false
 def cosignImageRef = ""
 
 def runPaasDeploy = {
-  env.HARBOR_REGISTRY = (params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim()
+  env.HARBOR_REGISTRY = coerceHarborHostForCosign((params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim())
   env.HARBOR_FORCE_NODEPORT_PUSH = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: 'true').trim()
   if (harborForceNodePortPush()) {
     env.HARBOR_REGISTRY_PUSH = ""
@@ -1814,6 +1840,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=sca-sanitize-package-name-20260612 (cyclonedx rejects invalid npm names e.g. & in Warda/vite templates)'
   println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
   println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
+  println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -1821,7 +1848,7 @@ def runPaasDeploy = {
     nonEmptyNoSpace(branchName, "BRANCH PARAMS")
     nonEmptyNoSpace(imageName, "IMAGE_NAME PARAMS")
     nonEmptyNoSpace(projectId, "PROJECT_ID PARAMS")
-    imageName = normalizeOciImageReference(resolveImageNameForHarbor(imageName))
+    imageName = coerceImageRefRegistryHost(normalizeOciImageReference(resolveImageNameForHarbor(imageName)))
     println "[params] project=${projectId} branch=${branchName} image=${imageName}"
     paasStepOk(1, 'params', "GIT_URL, BRANCH, IMAGE_NAME, PROJECT_ID validated; image=${imageName}")
     println "*** END : Check Parameters ***"

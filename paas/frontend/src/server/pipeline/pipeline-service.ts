@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, DeploymentJobStatus } from "@prisma/client";
 import type { ActionResponse, DeploymentStatus } from "@/types";
 import type { BuildTriggerOptions } from "@/server/build-backend";
 import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
@@ -7,6 +7,8 @@ import { IntegrationError } from "@/server/http/errors";
 import { getProjectById, mapProjectToResponse, updateProject } from "@/server/projects/project-service";
 import { getNamespacePodSummary } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
+import { prisma } from "@/server/db/prisma";
+import { refreshProjectJenkinsDisplayStatus, reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
 function summarizeKubernetesError(message: string) {
     const normalized = message.trim();
     if (/unable to verify the first certificate|self[- ]signed certificate|certificate/i.test(normalized)) {
@@ -64,6 +66,18 @@ export async function rollbackProject(projectId: string): Promise<ActionResponse
     };
 }
 export async function getProjectStatus(projectId: string): Promise<DeploymentStatus> {
+    await refreshProjectJenkinsDisplayStatus(projectId).catch(() => undefined);
+    const active = await prisma.deployment.findFirst({
+        where: {
+            projectId,
+            status: { in: [DeploymentJobStatus.PENDING, DeploymentJobStatus.DEPLOYING] }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true }
+    });
+    if (active?.status === DeploymentJobStatus.PENDING) {
+        void reconcileJenkinsDeploymentRecord(active.id).catch(() => undefined);
+    }
     const project = await getProjectById(projectId);
     const base = mapProjectToResponse(project);
     if (env.KUBERNETES_ENABLED === "true") {

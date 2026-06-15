@@ -82,7 +82,9 @@ export default function DashboardPage() {
     const overviewQuery = useQuery({
         queryKey: ["dashboard-overview"],
         queryFn: dashboardOverviewApi.get,
-        refetchInterval: 20000
+        staleTime: 20_000,
+        placeholderData: (previousData) => previousData,
+        refetchInterval: 30_000
     });
     const stats = overviewQuery.data?.stats;
     const recent = overviewQuery.data?.recentDeployments ?? [];

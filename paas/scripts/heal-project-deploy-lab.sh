@@ -8,11 +8,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 GITOPS="${GITOPS:-${HOME}/gitops}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
+HARBOR_HOST="harbor.${NODE_IP}.nip.io"
+HARBOR_PORT="${HARBOR_NODEPORT:-30002}"
 ARGOCD_APP_PREFIX="${ARGOCD_APP_PREFIX:-paas}"
 VALUES="${GITOPS}/apps/${PROJECT_NAME}/values.yaml"
 NS="${PROJECT_NAME}"
 APP="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
-IMAGE="${NODE_IP}:30002/paas/${PROJECT_NAME}:${TAG}"
+IMAGE="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_NAME}:${TAG}"
 URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
 gitops_ensure_on_main() {
   local repo="${1:?gitops repo path}"
@@ -216,7 +218,30 @@ if [[ -z "${TARGET_PORT}" ]]; then
   esac
 fi
 [[ -d "${GITOPS}/.git" ]] || { echo "ERROR: clone gitops to ${GITOPS}" >&2; exit 1; }
+if [[ ! -f "${VALUES}" ]]; then
+  echo "==> Missing ${VALUES} — bootstrap chart from repo"
+  bash "${SCRIPT_DIR}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}" || exit 1
+fi
 [[ -f "${VALUES}" ]] || { echo "ERROR: missing ${VALUES}" >&2; exit 1; }
+ensure_harbor_regcred() {
+  local ns="$1"
+  local user pass
+  user="${HARBOR_USER:-admin}"
+  pass="${HARBOR_PASS:-Harbor12345}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    user="$(grep -E '^HARBOR_USER=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+    pass="$(grep -E '^HARBOR_PASS=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+    [[ -z "${user}" ]] && user="admin"
+    [[ -z "${pass}" ]] && pass="Harbor12345"
+  fi
+  kubectl create namespace "${ns}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+  kubectl create secret docker-registry harbor-regcred -n "${ns}" \
+    --docker-server="${HARBOR_HOST}:${HARBOR_PORT}" \
+    --docker-username="${user}" \
+    --docker-password="${pass}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  echo "OK: harbor-regcred in namespace ${ns} (${HARBOR_HOST}:${HARBOR_PORT})"
+}
 free_namespace_capacity() {
   local ns="$1"
   echo "==> Free cluster capacity in namespace ${ns}"
@@ -245,14 +270,15 @@ AUTH_URL=""
 [[ -n "${GITHUB_TOKEN:-}" ]] && AUTH_URL="https://${GITHUB_TOKEN}@github.com/nourhb/gitops.git"
 echo "==> Ensure gitops repo on main (fix detached HEAD / stuck rebase)"
 gitops_ensure_on_main "${GITOPS}" main "${AUTH_URL}"
+ensure_harbor_regcred "${NS}"
 echo "==> Patch ${VALUES} (Rolling + image + targetPort)"
-python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" "${TARGET_PORT}" <<'PY'
+python3 - "${VALUES}" "${TAG}" "${NODE_IP}" "${PROJECT_NAME}" "${TARGET_PORT}" "${HARBOR_PORT}" <<'PY'
 import sys
 from pathlib import Path
 import yaml
-path, tag, node_ip, name, port = sys.argv[1:6]
+path, tag, node_ip, name, port, harbor_port = sys.argv[1:7]
 port = int(port)
-repo = f"{node_ip}:30002/paas/{name}"
+repo = f"harbor.{node_ip}.nip.io:{harbor_port}/paas/{name}"
 doc = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
 doc["deploymentStrategy"] = "Rolling"
 for k in ("activeSlot", "blue", "green", "nodeSelector"):
@@ -263,6 +289,8 @@ img["tag"] = str(tag)
 img["digest"] = ""
 img["pullPolicy"] = "IfNotPresent"
 doc["image"] = img
+doc["nameOverride"] = name
+doc["fullnameOverride"] = f"paas-{name}"
 svc = doc.get("service") if isinstance(doc.get("service"), dict) else {}
 svc["targetPort"] = port
 doc["service"] = svc

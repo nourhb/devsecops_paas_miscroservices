@@ -7,6 +7,8 @@ POLICY_SRC="${REPO_ROOT}/paas/k8s-manifests/kyverno/require-signed-images.yaml"
 POLICY_OUT="${REPO_ROOT}/paas/k8s-manifests/kyverno/.require-signed-images.lab.yaml"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_NODEPORT="${HARBOR_NODEPORT:-30002}"
+HARBOR_HOST="harbor.${NODE_IP}.nip.io"
+HARBOR_REGISTRY="${HARBOR_HOST}:${HARBOR_NODEPORT}"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 KYVERNO_NS="${KYVERNO_NS:-kyverno}"
@@ -53,7 +55,7 @@ kubectl apply -f "${POLICY_OUT}"
 
 kubectl create namespace "${KYVERNO_NS}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret docker-registry harbor-regcred -n "${KYVERNO_NS}" \
-  --docker-server="${NODE_IP}:${HARBOR_NODEPORT}" \
+  --docker-server="${HARBOR_REGISTRY}" \
   --docker-username="${HARBOR_USER}" \
   --docker-password="${HARBOR_PASS}" \
   --dry-run=client -o yaml | kubectl apply -f -

@@ -311,6 +311,11 @@ export class JenkinsBuildBackend implements BuildBackend {
                 }
                 if (terminalResult(meta.result, meta.building)) {
                     if (meta.result === "SUCCESS") {
+                        await updateProject(projectId, {
+                            buildStatus: "SUCCESS",
+                            lastDeploymentStatus: "SUCCESS",
+                            deploymentLogs: logTail
+                        });
                         if (!(await jenkinsClient.verifyDeployBuildBelongsToProject(projectName, projectId, activeBuildNum))) {
                             const reassigned = await jenkinsClient.findDeployBuildForProject(projectName, projectId, {
                                 baseline,

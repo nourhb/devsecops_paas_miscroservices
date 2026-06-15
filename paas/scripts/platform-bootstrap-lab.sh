@@ -2,6 +2,7 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 bash "${DIR}/normalize-harbor-env-lab.sh" || true
+bash "${DIR}/recover-harbor-registry-lab.sh" || true
 bash "${DIR}/fix-harbor-cosign-realm-lab.sh" || true
 bash "${DIR}/apply-kyverno-cosign-lab.sh" || true
 kubectl patch clusterpolicy require-non-root -n kyverno --type=json \

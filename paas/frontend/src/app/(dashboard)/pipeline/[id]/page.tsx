@@ -33,6 +33,9 @@ function displayBuildStatus(projectStatus: string | undefined, lastDeploymentSta
     if (ds === "FAILED" && (bs === "BUILDING" || bs === "QUEUED")) {
         return "FAILED";
     }
+    if ((bs === "BUILDING" || bs === "QUEUED") && (ds === "SUCCESS" || ds === "PROMOTING" || ds === "DEPLOYED")) {
+        return "SUCCESS";
+    }
     return projectStatus || "\u2014";
 }
 function buildHeaderBadgeVariant(buildLabel: string): "success" | "warning" | "danger" | "outline" {
@@ -71,22 +74,37 @@ export default function PipelinePage() {
     const queryClient = useQueryClient();
     const projectQuery = useQuery({
         queryKey: ["project", projectId],
-        queryFn: () => projectApi.getProject(projectId)
+        queryFn: () => projectApi.getProject(projectId),
+        refetchInterval: (q) => {
+            const p = q.state.data;
+            const busy = ["BUILDING", "QUEUED", "PUSHING"].includes((p?.buildStatus || "").toUpperCase());
+            const deployBusy = ["DEPLOYING", "PROMOTING", "PENDING", "QUEUED"].includes((p?.lastDeploymentStatus || "").toUpperCase());
+            return busy || deployBusy ? 4000 : false;
+        }
     });
     const statusQuery = useQuery({
         queryKey: ["status", projectId],
         queryFn: () => pipelineApi.getStatus(projectId) as Promise<DeploymentStatus>,
-        refetchInterval: 8000
+        refetchInterval: (q) => {
+            const s = q.state.data;
+            const deployBusy = ["DEPLOYING", "PROMOTING", "PENDING", "QUEUED"].includes((s?.lastDeploymentStatus || "").toUpperCase());
+            const proj = queryClient.getQueryData<Project>(["project", projectId]);
+            const buildBusy = ["BUILDING", "QUEUED", "PUSHING"].includes((proj?.buildStatus || "").toUpperCase());
+            return deployBusy || buildBusy ? 3000 : 15000;
+        }
     });
     const argoQuery = useQuery({
         queryKey: ["argocd", projectId],
         queryFn: () => argocdApi.getStatus(projectId),
-        refetchInterval: 12000
+        refetchInterval: (q) => {
+            const h = (q.state.data?.health || "").toUpperCase();
+            return h === "PROGRESSING" || h === "UNKNOWN" ? 8000 : 25000;
+        }
     });
     const securityQuery = useQuery({
         queryKey: ["dependency-track", projectId],
         queryFn: () => securityApi.getDependencyTrack(projectId),
-        refetchInterval: 12000
+        refetchInterval: 30000
     });
     const pipelineStagesQuery = useQuery({
         queryKey: ["jenkins-pipeline-stages", projectId],
@@ -98,7 +116,7 @@ export default function PipelinePage() {
             const appBusy = ["BUILDING", "QUEUED", "PUSHING"].includes(u(proj?.buildStatus));
             const stagesData = queryClient.getQueryData<JenkinsPipelineStagesResponse>(["jenkins-pipeline-stages", projectId]);
             const jenkinsBusy = Boolean(stagesData?.building);
-            return appBusy || jenkinsBusy ? 3000 : 20000;
+            return appBusy || jenkinsBusy ? 2000 : 30000;
         }
     });
     const buildMutation = useMutation({

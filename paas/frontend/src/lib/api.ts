@@ -295,7 +295,7 @@ export const dashboardMetricsApi = {
 export const dashboardOverviewApi = {
     get: async () => {
         const { data } = await apiClient.get<DashboardOverviewResponse>("/api/dashboard/overview", {
-            timeout: 45000
+            timeout: 25_000
         });
         return data;
     }

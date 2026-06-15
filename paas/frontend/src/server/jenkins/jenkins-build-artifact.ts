@@ -1,4 +1,4 @@
-import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
 
 export function pickJenkinsLogForArtifactVerify(progressiveTail: string, fullConsole: string | null | undefined): string {
     if (/PAAS_BUILD_COMPLETE\s+result=/i.test(progressiveTail)) {
@@ -33,10 +33,10 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
             };
         }
         const normalized = image.trim().toLowerCase();
-        if (!normalized.startsWith(`${expectedRepo}:`) && !normalized.startsWith(`${expectedRepo}@`)) {
+        if (!deployImageRepositoryMatchesProject(normalized, projectName)) {
             return {
                 image: null,
-                error: `Jenkins artifact ${image} does not match expected repository ${expectedRepo}.`
+                error: `Jenkins artifact ${image} does not match expected repository ${expectedRepo} (IP vs nip.io host is OK when paths match).`
             };
         }
         return { image: image.trim(), error: null };
@@ -45,7 +45,7 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
     for (let i = artifactMatches.length - 1; i >= 0; i--) {
         const candidate = artifactMatches[i][1]?.trim() ?? "";
         const normalized = candidate.toLowerCase();
-        if (normalized.startsWith(`${expectedRepo}:`) || normalized.startsWith(`${expectedRepo}@`)) {
+        if (deployImageRepositoryMatchesProject(normalized, projectName)) {
             return { image: candidate, error: null };
         }
     }

@@ -29,7 +29,7 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
         refetchInterval: (q) => {
             const building = Boolean(q.state.data?.building);
             if (deployBusy || building) {
-                return 4000;
+                return 2500;
             }
             return 20000;
         }

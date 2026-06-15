@@ -4,6 +4,7 @@ import { listClusterDeployments, listClusterPods, listClusterServices } from "@/
 import { listPlatformArtifacts } from "@/server/artifacts/artifact-service";
 import { getPlatformTooling } from "@/server/platform/platform-tooling";
 import { getSecurityMetrics } from "@/server/security/security-service";
+import { TtlCache } from "@/server/http/ttl-cache";
 import type { ArtifactRecord, PlatformToolGroup, SeverityBreakdown, UserRole } from "@/types";
 function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.ProjectWhereInput {
     return role === "ADMIN" ? { deletedAt: null } : { createdById: userId, deletedAt: null };
@@ -125,8 +126,9 @@ const emptySeverity: SeverityBreakdown = {
     medium: 0,
     low: 0
 };
-const SECURITY_SAMPLE_LIMIT = 6;
-const SECURITY_METRICS_BUDGET_MS = 12000;
+const SECURITY_SAMPLE_LIMIT = 3;
+const SECURITY_METRICS_BUDGET_MS = 4000;
+const dashboardOverviewCache = new TtlCache<DashboardOverview>(25_000);
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -239,6 +241,11 @@ function sumSeverity(a: SeverityBreakdown, b: SeverityBreakdown): SeverityBreakd
     };
 }
 export async function getDashboardOverview(userId: string, role: UserRole): Promise<DashboardOverview> {
+    const cacheKey = `${userId}:${role}`;
+    const cached = dashboardOverviewCache.get(cacheKey);
+    if (cached) {
+        return cached;
+    }
     const projects = await prisma.project.findMany({
         where: accessibleProjectsWhere(userId, role),
         orderBy: { updatedAt: "desc" },
@@ -382,7 +389,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
         clusterDataSource = "project_rollups";
     }
     const securityRollup = await rollupSecurityForDashboard(projectIds.slice(0, SECURITY_SAMPLE_LIMIT));
-    return {
+    const overview: DashboardOverview = {
         stats: {
             totalProjects,
             totalDeployments,
@@ -427,4 +434,6 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
         })),
         clusterDataSource
     };
+    dashboardOverviewCache.set(cacheKey, overview);
+    return overview;
 }
