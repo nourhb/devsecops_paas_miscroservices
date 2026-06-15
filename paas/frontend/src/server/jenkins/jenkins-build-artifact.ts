@@ -1,4 +1,4 @@
-import { buildDeployImageRepository, canonicalDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
+import { buildDeployImageRepository, buildDeployImageRepositoryForClusterPull, canonicalDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
 
 export function pickJenkinsLogForArtifactVerify(progressiveTail: string, fullConsole: string | null | undefined): string {
     if (/PAAS_BUILD_COMPLETE\s+result=/i.test(progressiveTail)) {
@@ -15,7 +15,8 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
     image: string | null;
     error: string | null;
 } {
-    const expectedRepo = canonicalDeployImageRepository(buildDeployImageRepository(projectName));
+    const expectedRepo = buildDeployImageRepositoryForClusterPull(projectName);
+    const expectedNipio = canonicalDeployImageRepository(buildDeployImageRepository(projectName));
     const completeMatches = [...log.matchAll(/PAAS_BUILD_COMPLETE\s+result=(\S+)\s+image=(\S+)\s+project=(\S+)\s+build=(\S+)/gi)];
     const complete = completeMatches.at(-1);
     if (complete) {
@@ -36,7 +37,7 @@ export function resolveVerifiedArtifactImage(log: string, projectId: string, pro
         if (!deployImageRepositoryMatchesProject(normalized, projectName)) {
             return {
                 image: null,
-                error: `Jenkins artifact ${image} does not match expected repository ${expectedRepo} (IP vs nip.io host is OK when paths match).`
+                error: `Jenkins artifact ${image} does not match expected repository ${expectedRepo} (Jenkins nip.io ${expectedNipio} is equivalent).`
             };
         }
         return { image: image.trim(), error: null };
