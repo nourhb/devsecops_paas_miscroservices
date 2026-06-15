@@ -19,6 +19,16 @@ IMAGE="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}:${IMAGE_TAG}"
 [[ -d "${GITOPS}/.git" ]] || { echo "ERROR: clone gitops to ${GITOPS}" >&2; exit 1; }
 [[ -d "${REF_CHART}" ]] || { echo "ERROR: missing reference chart ${REF_CHART}" >&2; exit 1; }
 
+# shellcheck source=gitops-lab-lib.sh
+source "${SCRIPT_DIR}/gitops-lab-lib.sh"
+AUTH_URL=""
+if [[ -f "${REPO_ROOT}/paas/frontend/docker-compose.env" ]]; then
+  GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${REPO_ROOT}/paas/frontend/docker-compose.env" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+  [[ -n "${GITHUB_TOKEN}" ]] && AUTH_URL="https://${GITHUB_TOKEN}@github.com/nourhb/gitops.git"
+fi
+echo "==> Reset ${GITOPS} to origin/main (avoid add/add merge conflicts)"
+gitops_reset_to_origin_main "${GITOPS}" main "${AUTH_URL}"
+
 echo "==> Repair GitOps chart at ${APP_DIR}"
 mkdir -p "${APP_DIR}/templates"
 for rel in Chart.yaml templates/_helpers.tpl templates/deployment.yaml templates/deployment-bluegreen.yaml templates/service.yaml templates/ingress.yaml; do
