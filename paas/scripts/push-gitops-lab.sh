@@ -62,13 +62,9 @@ if git rev-parse "origin/${BRANCH}" >/dev/null 2>&1; then
 else
   echo "WARN: no origin/${BRANCH} yet — first push"
 fi
-AHEAD="$(git rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo 0)"
-if [[ "${AHEAD}" == "0" ]]; then
-  echo "Nothing to push (already up to date with origin/${BRANCH})"
+if ! gitops_push_main "${GITOPS}" "${BRANCH}" "${AUTH_URL}"; then
   popd >/dev/null
-  exit 0
+  exit 1
 fi
-echo "==> git push origin ${BRANCH} (${AHEAD} commit(s))"
-git push "${AUTH_URL}" "${BRANCH}"
 popd >/dev/null
 echo "OK: pushed ${GITOPS}"

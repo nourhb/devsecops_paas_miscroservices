@@ -94,6 +94,45 @@ argo_wait_sync_lab() {
   echo "WARN: ${app} not Synced within ${timeout}s" >&2
   return 1
 }
+argo_diagnose_app_lab() {
+  local app="$1"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  echo "==> Argo diagnose ${app}"
+  kubectl get application "${app}" -n "${ns}" -o jsonpath='sync={.status.sync.status} health={.status.health.status} rev={.status.sync.revision}{"\n"}' 2>/dev/null || true
+  kubectl get application "${app}" -n "${ns}" -o jsonpath='{range .status.conditions[*]}{.type}={.message}{"\n"}{end}' 2>/dev/null | tail -5 || true
+  kubectl get application "${app}" -n "${ns}" -o jsonpath='{range .status.operationState.syncResult.resources[?(@.message)]}{.kind}/{.namespace}/{.name}: {.message}{"\n"}{end}' 2>/dev/null | tail -10 || true
+}
+argo_sync_app_kubectl_revision() {
+  local app="$1"
+  local revision="$2"
+  local ns="${ARGOCD_NAMESPACE:-argocd}"
+  [[ -n "${app}" && -n "${revision}" ]] || return 1
+  kubectl annotate application "${app}" -n "${ns}" argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
+  kubectl patch application "${app}" -n "${ns}" --type merge -p "{
+    \"operation\": {
+      \"initiatedBy\": {\"username\": \"lab-fix\"},
+      \"sync\": {
+        \"revision\": \"${revision}\",
+        \"prune\": true,
+        \"syncStrategy\": {\"apply\": {\"force\": true}}
+      }
+    }
+  }" >/dev/null 2>&1 && {
+    echo "OK: kubectl sync ${app} @ ${revision:0:12}"
+    return 0
+  }
+  return 1
+}
+helm_apply_chart_lab() {
+  local ns="$1"
+  local chart_dir="$2"
+  local release="$3"
+  command -v helm >/dev/null 2>&1 || return 1
+  [[ -d "${chart_dir}" ]] || return 1
+  echo "==> helm template ${release} + kubectl apply (Argo fallback)"
+  helm template "${release}" "${chart_dir}" --namespace "${ns}" | kubectl apply -n "${ns}" -f - 2>/dev/null && return 0
+  return 1
+}
 patch_nginx_deploy_lab() {
   local ns="$1"
   local cm="paas-nginx-override"
@@ -173,7 +212,7 @@ for dep in data.get("items", []):
     print(f"  python start override on deployment/{name}")
 PY
 }
-ARGO_WAIT_SECONDS="${ARGO_WAIT_SECONDS:-45}"
+ARGO_WAIT_SECONDS="${ARGO_WAIT_SECONDS:-120}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-120s}"
 if [[ -z "${TARGET_PORT}" ]]; then
   case "${PROJECT_NAME}" in
@@ -290,13 +329,17 @@ echo "==> Push GitOps to GitHub"
 if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
   echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/push-gitops-lab.sh)"
 fi
+bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || true
 free_namespace_capacity "${NS}"
-echo "==> Argo sync ${APP}"
+GITOPS_REV="$(git -C "${GITOPS}" rev-parse HEAD 2>/dev/null || echo HEAD)"
+echo "==> Argo sync ${APP} @ ${GITOPS_REV:0:12}"
 kubectl patch application "${APP}" -n argocd --type json \
   -p='[{"op": "remove", "path": "/operation"}]' 2>/dev/null || true
-kubectl annotate application "${APP}" -n argocd argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
-argo_sync_app_lab "${APP}" || true
-argo_wait_sync_lab "${APP}" "${ARGO_WAIT_SECONDS}" || true
+argo_sync_app_kubectl_revision "${APP}" "${GITOPS_REV}" || argo_sync_app_lab "${APP}" || true
+argo_wait_sync_lab "${APP}" "${ARGO_WAIT_SECONDS}" || {
+  argo_diagnose_app_lab "${APP}"
+  helm_apply_chart_lab "${NS}" "${GITOPS}/apps/${PROJECT_NAME}" "paas-${PROJECT_NAME}" || true
+}
 echo "==> Force rolling deployment image + port"
 for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
   [[ "${dep}" == *-blue ]] || [[ "${dep}" == *-green ]] && continue
