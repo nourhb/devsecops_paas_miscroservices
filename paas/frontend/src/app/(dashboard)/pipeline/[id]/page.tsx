@@ -17,6 +17,7 @@ import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-par
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
+import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
 import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
@@ -151,9 +152,8 @@ export default function PipelinePage() {
     const deployMutation = useMutation({
         mutationFn: () => pipelineApi.deploy(projectId),
         onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+            invalidatePostDeployQueries(queryClient, projectId);
             queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
-            queryClient.invalidateQueries({ queryKey: ["project", projectId] });
             queryClient.invalidateQueries({ queryKey: ["pipeline-help", projectId] });
             toast.success(data.message || "Deployment finished");
         },

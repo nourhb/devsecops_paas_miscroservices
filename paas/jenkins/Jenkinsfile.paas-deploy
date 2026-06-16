@@ -20,12 +20,22 @@ def nonFatalStage(String label, Closure body) {
   }
 }
 
+def securityMandatoryStage(String label, Closure body) {
+  println "*** BEGIN : ${label} (mandatory) ***"
+  body()
+  println "*** END : ${label} (mandatory) ***"
+}
+
 def paasStepLog(String level, int step, String id, String msg) {
   def safe = (msg ?: "").replaceAll('[\\r\\n]+', ' ').take(500)
   println "PAAS_STEP_${level} step=${step} id=${id} msg=${safe}"
 }
 def paasStepOk(int step, String id, String msg) { paasStepLog('OK', step, id, msg) }
 def paasStepWarn(int step, String id, String msg) { paasStepLog('WARN', step, id, msg) }
+def paasStepFail(int step, String id, String msg) {
+  paasStepLog('FAIL', step, id, msg)
+  error("PAAS security step ${step} failed (${id}): ${msg}")
+}
 def paasStepSkip(int step, String reason) { println "PAAS_STEP_SKIP step=${step} reason=${reason.take(500)}" }
 
 def uploadBomToDependencyTrack(String projId, String dtProjectName, String branchOrVersionLabel) {
@@ -34,14 +44,10 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
   def ver = "${branchOrVersionLabel}-${env.BUILD_NUMBER}"
   def dtName = (dtProjectName ?: projId).trim()
   if (!dtBase || !dtKey) {
-    println "[sca] Dependency-Track non configuré (DEPENDENCY_TRACK_BASE_URL / API_KEY); pas d'upload SBOM."
-    paasStepWarn(4, 'dependency-track', 'DEPENDENCY_TRACK_BASE_URL or API_KEY missing on Jenkins job')
-    return
+    paasStepFail(4, 'dependency-track', 'DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY are required')
   }
   if (!fileExists("sca/bom.json")) {
-    println "[sca] Pas de sca/bom.json; upload Dependency-Track ignoré."
-    paasStepWarn(4, 'dependency-track', 'sca/bom.json missing — SBOM not uploaded')
-    return
+    paasStepFail(4, 'dependency-track', 'sca/bom.json missing — SBOM required before upload')
   }
   withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
     sh '''
@@ -1341,7 +1347,6 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
   if (imageRef != artifactImageRef) {
     println "[image] Harbor registry host coerced for push: ${artifactImageRef} → ${imageRef}"
   }
-  // Kyverno cosign + GitOps must use the same nip.io registry host as the push target.
   artifactImageRef = imageRef
   def registry = normalizeRegistryHost(registryHostFor(imageRef))
   def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
@@ -2343,7 +2348,7 @@ def runPaasDeploy = {
       paasStepSkip(4, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 4 (SCA / Dependency-Check / cdxgen)."
     } else {
-      nonFatalStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
+      securityMandatoryStage("3. SCA (Dependency-Check + CycloneDX + Dependency-Track)") {
       dockerAvailable = commandExists("docker")
       sh "mkdir -p sca"
       if (!dockerAvailable) {
@@ -2397,7 +2402,7 @@ def runPaasDeploy = {
             echo \${CDX_RC}
           """, returnStdout: true).trim().tokenize('\n').last()
           if (scaRc != "0" || !fileExists("${scaAppRoot}/sca/bom.json")) {
-            paasStepWarn(4, 'sca', "bom.json missing or cyclonedx failed (rc=${scaRc}) — yarn: use yarn.lock path; npm: package-lock.json; or enable Docker for cdxgen")
+            paasStepFail(4, 'sca', "bom.json missing or cyclonedx failed (rc=${scaRc}) — yarn: use yarn.lock path; npm: package-lock.json; or enable Docker for cdxgen")
           } else {
             paasStepOk(4, 'sca', 'sca/bom.json generated (cyclonedx-npm)')
           }
@@ -2429,15 +2434,15 @@ def runPaasDeploy = {
                 sh "mkdir -p sca && cp '${scaPyRoot}/sca/bom.json' sca/bom.json"
               }
             } else {
-              paasStepWarn(4, 'sca', 'Python SBOM missing — pip install cyclonedx-bom or enable Docker for cdxgen')
+              paasStepFail(4, 'sca', 'Python SBOM missing — pip install cyclonedx-bom or enable Docker for cdxgen')
             }
           } else {
-            paasStepWarn(4, 'sca', 'No package.json or Python manifest — enable Docker on Jenkins agent for full OWASP scan')
+            paasStepFail(4, 'sca', 'No package.json or Python manifest — enable Docker on Jenkins agent for full OWASP scan')
           }
         }
         uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
         if (!fileExists('sca/bom.json')) {
-          paasStepWarn(4, 'sca', 'No sca/bom.json after SCA — check cyclonedx/cdxgen logs')
+          paasStepFail(4, 'sca', 'No sca/bom.json after SCA — check cyclonedx/cdxgen logs')
         }
         return
       }
@@ -2489,7 +2494,7 @@ exit 0
       if (fileExists('sca/bom.json')) {
         paasStepOk(4, 'sca', 'sca/bom.json present (Dependency-Check + CycloneDX)')
       } else {
-        paasStepWarn(4, 'sca', 'sca/bom.json missing — check Docker and NVD_API_KEY in console')
+        paasStepFail(4, 'sca', 'sca/bom.json missing — check Docker and NVD_API_KEY in console')
       }
     }
     }
@@ -2500,15 +2505,13 @@ exit 0
       paasStepSkip(5, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
-      nonFatalStage("4. SAST — SonarQube") {
+      securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-scanner-cli6-login-20260607 (sonar.login+token; cluster URL; ws.timeout=300; retries)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
       if (!sonarUrlParam || !sonarToken) {
-        paasStepWarn(5, 'sonar', 'SONAR_HOST_URL or SONAR_TOKEN missing on Jenkins job — set in PaaS env and redeploy frontend')
-        println "[sonar] SONAR_HOST_URL / SONAR_TOKEN not set; skipping SonarQube analysis."
-        return
+        paasStepFail(5, 'sonar', 'SONAR_HOST_URL and SONAR_TOKEN are required on Jenkins job')
       }
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
@@ -2569,7 +2572,7 @@ exit 0
               printf 'sonar.projectVersion=%s\n' "${SONAR_VERSION}"
               printf 'sonar.sources=%s\n' "${SOURCES}"
               printf 'sonar.exclusions=%s\n' '**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js'
-              printf 'sonar.qualitygate.wait=%s\n' 'false'
+              printf 'sonar.qualitygate.wait=%s\n' 'true'
               printf 'sonar.scanner.analysisCacheEnabled=%s\n' 'false'
               printf 'sonar.ws.timeout=%s\n' '300'
             } > "${SP}"
@@ -2640,7 +2643,7 @@ exit 0
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepWarn(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
+            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
           }
         }
         return
@@ -2676,7 +2679,7 @@ sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
 sonar.projectVersion=${SONAR_SCAN_PROJECT_VERSION}
 sonar.sources=app,src,components,pages,lib
 sonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**
-sonar.qualitygate.wait=false
+sonar.qualitygate.wait=true
 sonar.scm.provider=git
 SONARPROP
 chmod 600 "${SP}"
@@ -2691,7 +2694,7 @@ docker run --rm \
 echo $?
 ''', returnStdout: true).trim().tokenize('\n').last()
         if (sonarDockerRc != "0") {
-          paasStepWarn(5, 'sonar', "scanner exit ${sonarDockerRc} — check SONAR_TOKEN / URL from Jenkins agent")
+          paasStepFail(5, 'sonar', "scanner exit ${sonarDockerRc} — check SONAR_TOKEN / URL from Jenkins agent")
         } else {
           paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
         }
@@ -2887,10 +2890,9 @@ EOF
   }
 
   stage("Step 9 — Signature de l'image (Cosign)") {
-    nonFatalStage("10. Cosign (aligné Jenkinsfile.paas-deploy.full)") {
+    securityMandatoryStage("10. Cosign (aligné Jenkinsfile.paas-deploy.full)") {
       if (!cosignImageRef?.trim()) {
-        println "[cosign] Pas d'image construite / poussée par ce build — signature ignorée."
-        return
+        paasStepFail(9, 'cosign', 'no image built — cannot sign')
       }
       cosignImageRef = coerceImageRefRegistryHost(normalizeOciImageReference(cosignImageRef))
       println "[cosign] signing ref (nip.io when Harbor IP): ${cosignImageRef}"
@@ -2898,15 +2900,13 @@ EOF
       def labKeyPath = "/var/jenkins_home/cosign-lab/cosign.key"
       def pemFromEnv = normalizeCosignPrivateKeyPem(env.COSIGN_PRIVATE_KEY ?: "")
       if (!credId && !pemFromEnv && !fileExists(labKeyPath)) {
-        println "[cosign] COSIGN_CREDENTIALS_ID, COSIGN_PRIVATE_KEY, or ${labKeyPath} absent — étape ignorée."
-        return
+        paasStepFail(9, 'cosign', 'COSIGN_CREDENTIALS_ID, COSIGN_PRIVATE_KEY, or lab key required')
       }
       def cosignExe
       try {
         cosignExe = ensureCosignTool()
       } catch (Throwable cosignToolErr) {
-        paasStepWarn(9, 'cosign', "tool bootstrap failed: ${cosignToolErr.message?.take(200)}")
-        return
+        paasStepFail(9, 'cosign', "tool bootstrap failed: ${cosignToolErr.message?.take(200)}")
       }
       def insecureFlag = "--allow-insecure-registry"
       def craneBinCosign = ""

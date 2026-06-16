@@ -212,7 +212,7 @@ const envSchema = z.object({
     NOTIFY_PIPELINE_FAILURE_EMAILS: z.enum(["true", "false"]).default("true"),
     PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
 
-    PAAS_ENFORCE_SECURITY_GATE: z.enum(["true", "false"]).default("false"),
+    PAAS_ENFORCE_SECURITY_GATE: z.enum(["true", "false"]).default("true"),
     KEYCLOAK_ENABLED: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ISSUER: z.string().default(""),
     KEYCLOAK_CLIENT_ID: z.string().default(""),

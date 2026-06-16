@@ -71,6 +71,36 @@ function main() {
         byKey.set(key, value);
     }
     const entries = [...byKey.entries()];
+    const dbIdx = entries.findIndex(([k]) => k === "DATABASE_URL");
+    if (dbIdx >= 0) {
+        const [, v] = entries[dbIdx];
+        const k8sDb = v
+            .replace("@postgres:5432", "@postgres.paas.svc.cluster.local:5432")
+            .replace("@localhost:5432", "@postgres.paas.svc.cluster.local:5432")
+            .replace("@127.0.0.1:5432", "@postgres.paas.svc.cluster.local:5432");
+        if (k8sDb !== v) {
+            console.warn("WARN: DATABASE_URL uses docker-compose host — rewriting for Kubernetes PaaS");
+            entries[dbIdx] = ["DATABASE_URL", k8sDb];
+        }
+    }
+    const labHost = (() => {
+        const app = byKey.get("APP_BASE_URL") || byKey.get("NEXT_PUBLIC_APP_BASE_URL") || "";
+        const m = String(app).match(/^https?:\/\/([^:/?#]+)/i);
+        return m ? m[1] : null;
+    })();
+    if (labHost && labHost !== "host.docker.internal") {
+        for (let i = 0; i < entries.length; i++) {
+            const [k, v] = entries[i];
+            if (!/_BASE_URL$|_PROBE_URL$/.test(k) || !v.includes("host.docker.internal")) {
+                continue;
+            }
+            const rewritten = v.replace(/host\.docker\.internal/g, labHost);
+            if (rewritten !== v) {
+                console.warn(`WARN: ${k} host.docker.internal -> ${labHost} for Kubernetes PaaS`);
+                entries[i] = [k, rewritten];
+            }
+        }
+    }
     const header = "";
     const body = entries.map(([k, v]) => `${k}=${escapeForComposeLine(v)}`).join("\n");
     writeFileSync(outputPath, `${header}${body}\n`, "utf8");

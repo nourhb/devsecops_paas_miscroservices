@@ -37,6 +37,10 @@ awk '
     for (k in env) print k "=" env[k]
   }
 ' "${ENV_FILE}" > "${FILTERED}"
+if grep -qE '^DATABASE_URL=.*@postgres:5432' "${FILTERED}"; then
+  sed -i 's|@postgres:5432|@postgres.paas.svc.cluster.local:5432|g' "${FILTERED}"
+  echo "==> Rewrote DATABASE_URL host postgres -> postgres.paas.svc.cluster.local"
+fi
 if ! grep -qE '^DATABASE_URL=.*postgres\.paas\.svc\.cluster\.local' "${FILTERED}"; then
   echo "ERROR: DATABASE_URL must use postgres.paas.svc.cluster.local for Kubernetes PaaS." >&2
   echo "       Do not use postgres:5432 (Docker Compose) or localhost." >&2

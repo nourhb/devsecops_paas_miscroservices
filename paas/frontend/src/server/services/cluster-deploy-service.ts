@@ -23,6 +23,7 @@ import {
 import { augmentBuildEnvForPipeline } from "@/server/projects/project-build-env";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
+import { invalidateDashboardOverviewCache } from "@/server/services/dashboard-overview-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
@@ -583,4 +584,5 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
         imageTag: artifactRef,
         url: appUrl
     });
+    invalidateDashboardOverviewCache();
 }

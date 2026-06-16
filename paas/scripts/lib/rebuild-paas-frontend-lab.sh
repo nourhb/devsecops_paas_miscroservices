@@ -30,7 +30,12 @@ TARGET_IMAGE="${IMAGE_REPO}:${TAG}"
 
 echo "==> Current deployment image: ${CURRENT_IMAGE}"
 echo "==> Building ${TARGET_IMAGE} from ${REPO_ROOT}/paas"
-docker build -f "${REPO_ROOT}/paas/frontend/Dockerfile" -t "${TARGET_IMAGE}" "${REPO_ROOT}/paas"
+BUILD_ARGS=()
+if [[ "${FORCE_FRONTEND_REBUILD:-false}" == "true" ]] || [[ "${NO_CACHE:-false}" == "true" ]]; then
+  BUILD_ARGS+=(--no-cache)
+  echo "==> Force rebuild (no Docker cache)"
+fi
+docker build "${BUILD_ARGS[@]}" -f "${REPO_ROOT}/paas/frontend/Dockerfile" -t "${TARGET_IMAGE}" "${REPO_ROOT}/paas"
 
 echo "==> Load image into k3s containerd (lab)"
 if command -v k3s >/dev/null 2>&1; then

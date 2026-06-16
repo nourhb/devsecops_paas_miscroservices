@@ -43,7 +43,10 @@ export default function SecurityPage() {
         queryKey: ["security", projectId],
         queryFn: () => securityApi.getSecurity(projectId),
         retry: 1,
-        staleTime: 15000
+        staleTime: 5000,
+        refetchInterval: projectQuery.data?.buildStatus === "BUILDING" || ["DEPLOYING", "PROMOTING"].includes((projectQuery.data?.lastDeploymentStatus || "").toUpperCase())
+            ? 5000
+            : 20000
     });
     const displayName = projectQuery.data?.projectName ?? projectId;
     const data = securityQuery.data;
@@ -209,6 +212,10 @@ export default function SecurityPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {data.qualityGateStatus === "UNKNOWN" ? (<div className="flex h-[180px] flex-col items-center justify-center gap-2 text-center text-sm text-muted">
+                <p className="font-medium text-foreground">No quality gate result</p>
+                <p className="max-w-sm text-xs">Sonar Step 5 was skipped or did not finish. Set SONAR_HOST_URL + SONAR_TOKEN on Jenkins, then run a new deploy.</p>
+              </div>) : (<>
             <div className="h-[180px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -227,6 +234,7 @@ export default function SecurityPage() {
               </ResponsiveContainer>
             </div>
             <p className="text-center text-xs text-muted">Value comes from SonarQube quality-gate API for this project key.</p>
+            </>)}
           </CardContent>
         </Card>
         <Card>
@@ -236,9 +244,14 @@ export default function SecurityPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[220px]">
-            {severityTotals === 0 ? (<p className="flex h-full items-center justify-center text-sm text-muted">
-                No vulnerabilities reported in Dependency-Track or Trivy (all severities are 0).
-              </p>) : (<ResponsiveContainer width="100%" height="100%">
+            {severityTotals === 0 ? (<div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-muted">
+                <p className="font-medium text-foreground">No vulnerabilities counted</p>
+                <p className="text-xs">
+                  {data.dependencyTrackProjectUuid
+                    ? "Dependency-Track is linked and Trivy/Harbor scan returned 0 findings — a clean bill of health."
+                    : "Run a full Jenkins build (Step 4 SCA + Harbor image scan). If Step 4 shows OK in verification below, zeros mean a clean scan."}
+                </p>
+              </div>) : (<ResponsiveContainer width="100%" height="100%">
               <BarChart data={[
             {
                 severity: "Critical",
