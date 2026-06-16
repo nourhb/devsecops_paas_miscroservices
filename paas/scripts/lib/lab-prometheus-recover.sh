@@ -38,6 +38,40 @@ verify_kyverno_monitoring_exclude() {
   echo "OK live require-non-root excludes monitoring"
 }
 
+scale_if_zero() {
+  local kind="$1"
+  local name="$2"
+  local target="${3:-1}"
+  if ! kubectl get "${kind}" "${name}" -n "${MON_NS}" >/dev/null 2>&1; then
+    return 0
+  fi
+  local cur
+  cur="$(kubectl get "${kind}" "${name}" -n "${MON_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+  if [[ -z "${cur}" ]] || [[ "${cur}" == "0" ]]; then
+    echo "==> scale ${kind}/${name} ${cur:-0} -> ${target}"
+    kubectl scale "${kind}" "${name}" -n "${MON_NS}" --replicas="${target}"
+  fi
+}
+
+scale_up_monitoring_stack() {
+  echo "==> Scale up monitoring stack (Kyverno may have scaled everything to 0/0)"
+  scale_if_zero deployment kube-prometheus-stack-operator 1
+  if kubectl get deployment kube-prometheus-stack-operator -n "${MON_NS}" >/dev/null 2>&1; then
+    kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=300s 2>/dev/null || {
+      echo "WARN: operator deployment not ready yet"
+      kubectl get pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus-operator 2>/dev/null || true
+    }
+  fi
+  scale_if_zero statefulset prometheus-kube-prometheus-stack-prometheus 1
+  scale_if_zero statefulset alertmanager-kube-prometheus-stack-alertmanager 1
+  scale_if_zero deployment kube-prometheus-stack-grafana 1
+  scale_if_zero deployment kube-prometheus-stack-kube-state-metrics 1
+  if kubectl get prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" >/dev/null 2>&1; then
+    kubectl annotate prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" \
+      paas-lab-recover="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+  fi
+}
+
 apply_kyverno_policies
 verify_kyverno_monitoring_exclude
 
@@ -49,7 +83,9 @@ kubectl get endpoints -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|grafana|
 echo "==> Recent Kyverno blocks in ${MON_NS}"
 kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -6 || true
 
-echo "==> Operator first (prometheus CR needs a running operator)"
+scale_up_monitoring_stack
+
+echo "==> Operator rollout (after scale-up)"
 kubectl rollout restart deployment/kube-prometheus-stack-operator -n "${MON_NS}" 2>/dev/null || true
 kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=300s 2>/dev/null || {
   echo "WARN: operator not ready — describe:"
@@ -96,6 +132,7 @@ for i in $(seq 1 36); do
   done
   if (( i % 6 == 0 )); then
     echo "... still waiting (${i}0s)"
+    kubectl get sts,deploy -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
     kubectl get pods -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
     kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -3 || true
   fi
