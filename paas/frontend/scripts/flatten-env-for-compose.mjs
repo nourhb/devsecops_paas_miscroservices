@@ -56,6 +56,17 @@ function escapeForComposeLine(value) {
         .replace(/\$/g, "$$$$");
     return `"${escaped}"`;
 }
+function envTrim(map, key) {
+    const v = map.get(key);
+    if (v == null) {
+        return "";
+    }
+    return String(v).trim();
+}
+function prometheusNodePortUrl(url) {
+    return /:30536\/?$/.test(url) || /:30083\/?$/.test(url);
+}
+const PROM_IN_CLUSTER = "http://kube-prometheus-stack-prometheus.monitoring.svc:9090";
 function main() {
     if (!existsSync(inputPath)) {
         console.error(`Missing ${inputPath}; create frontend/.env first.`);
@@ -101,13 +112,20 @@ function main() {
         }
     }
     const labNodeIp = byKey.get("APPS_PUBLIC_LAB_NODE_IP") || byKey.get("NODE_IP") || labHost || "";
-    if (labNodeIp && !byKey.get("PROMETHEUS_BASE_URL")?.trim()) {
-        byKey.set("PROMETHEUS_BASE_URL", `http://${labNodeIp}:30536`);
-        console.warn(`WARN: PROMETHEUS_BASE_URL defaulted to http://${labNodeIp}:30536 (kube-prometheus-stack NodePort)`);
+    for (const key of ["PROMETHEUS_PROBE_URL", "PROMETHEUS_BASE_URL"]) {
+        const current = envTrim(byKey, key);
+        if (current && prometheusNodePortUrl(current)) {
+            byKey.set(key, PROM_IN_CLUSTER);
+            console.warn(`WARN: ${key} NodePort rewritten to in-cluster ${PROM_IN_CLUSTER} (pods cannot reach node NodePort on this lab)`);
+        }
     }
-    if (labNodeIp && !byKey.get("PROMETHEUS_PROBE_URL")?.trim()) {
-        byKey.set("PROMETHEUS_PROBE_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc:9090");
-        console.warn("WARN: PROMETHEUS_PROBE_URL defaulted to in-cluster kube-prometheus-stack service");
+    if (labNodeIp && !envTrim(byKey, "PROMETHEUS_PROBE_URL")) {
+        byKey.set("PROMETHEUS_PROBE_URL", PROM_IN_CLUSTER);
+        console.warn(`WARN: PROMETHEUS_PROBE_URL defaulted to ${PROM_IN_CLUSTER}`);
+    }
+    if (labNodeIp && !envTrim(byKey, "PROMETHEUS_BASE_URL")) {
+        byKey.set("PROMETHEUS_BASE_URL", PROM_IN_CLUSTER);
+        console.warn(`WARN: PROMETHEUS_BASE_URL defaulted to ${PROM_IN_CLUSTER}`);
     }
     const entriesOut = [...byKey.entries()];
     const header = "";

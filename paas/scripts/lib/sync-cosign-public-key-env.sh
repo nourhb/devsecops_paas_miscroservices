@@ -27,7 +27,14 @@ if ! kubectl exec -n "${JENKINS_NS}" "${pod}" -- test -f "${KEY_PATH}" 2>/dev/nu
   exit 0
 fi
 
-pub="$(kubectl exec -n "${JENKINS_NS}" "${pod}" -- cosign public-key --key "${KEY_PATH}" 2>/dev/null || true)"
+pub="$(kubectl exec -n "${JENKINS_NS}" "${pod}" -- sh -ce '
+  COSIGN=""
+  for c in /var/jenkins_home/bin/cosign /var/jenkins_home/cosign-lab/cosign; do
+    [ -x "$c" ] && COSIGN="$c" && break
+  done
+  [ -n "$COSIGN" ] || exit 1
+  COSIGN_PASSWORD="${COSIGN_PASSWORD:-}" "$COSIGN" public-key --key /var/jenkins_home/cosign-lab/cosign.key
+' 2>/dev/null || true)"
 if [[ -z "${pub}" ]]; then
   echo "WARN: cosign public-key failed in ${JENKINS_NS}/${pod}" >&2
   exit 0
