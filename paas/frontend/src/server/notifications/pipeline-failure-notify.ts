@@ -1,7 +1,7 @@
 import type { DeploymentFailureReason } from "@prisma/client";
 import { env } from "@/server/config/env";
 import { sendAuthMail, getAppBaseUrl } from "@/server/auth/auth-mailer";
-import { humanizeFailureReason } from "@/server/services/deployment-failure-labels";
+import { deploymentFailureStageLabel } from "@/lib/deployment-failure-labels";
 const LOG_SNIPPET_MAX = 4500;
 function howToInvestigate(reason: DeploymentFailureReason | null): string {
     switch (reason) {
@@ -39,7 +39,7 @@ export async function notifyPipelineFailureEmail(input: {
     const base = getAppBaseUrl();
     const detailUrl = `${base}/deployments/${encodeURIComponent(input.deploymentId)}`;
     const pipelineUrl = `${base}/pipeline/${encodeURIComponent(input.projectId)}`;
-    const stage = humanizeFailureReason(input.reason) || "Unknown stage";
+    const stage = deploymentFailureStageLabel(input.reason) || "Unknown stage";
     const summary = `Pipeline / deployment failed for project "${input.projectName}" (${stage}).`;
     const logTail = input.logs.length <= LOG_SNIPPET_MAX ? input.logs : `${input.logs.slice(-LOG_SNIPPET_MAX)}\n…(truncated)`;
     const investigation = howToInvestigate(input.reason);

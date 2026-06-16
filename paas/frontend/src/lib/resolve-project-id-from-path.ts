@@ -4,10 +4,6 @@ function isUuid(value: string): boolean {
     return UUID_SEGMENT.test(value);
 }
 
-/**
- * Resolves a project id from dashboard routes that are scoped to a single project.
- * Returns null on list pages, create flow, or non-project routes.
- */
 export function resolveProjectIdFromPath(pathname: string): string | null {
     const path = pathname.split("?")[0]?.replace(/\/+$/, "") || "";
     const projectDetail = path.match(/^\/projects\/([^/]+)$/);

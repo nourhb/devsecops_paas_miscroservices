@@ -2,9 +2,6 @@
 import { useProjectIdFromRoute } from "@/hooks/use-project-id-from-route";
 import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 
-/**
- * Floating pipeline help — visible on every project-scoped page (including deployments).
- */
 export function ProjectPipelineHelpDock() {
     const projectId = useProjectIdFromRoute();
     if (!projectId) {

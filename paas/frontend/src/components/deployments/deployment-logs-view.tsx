@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { deploymentFailureStageLabel } from "@/lib/deployment-failure-labels";
 import { cn } from "@/lib/utils";
 const ERROR_LINE = /(FAILED|FAILURE|\bERROR\b|error:|Exception|HTTP\s[45]\d{2}|\[gitops\]\s+FAILED|\[argocd\]\s+FAILED|\[jenkins-monitor\]|Timed out|rejected the deploy)/i;
 export function DeploymentLogsView({ logs, failed }: {
@@ -22,18 +23,4 @@ export function DeploymentLogsView({ logs, failed }: {
         </span>))}
     </pre>);
 }
-export function deploymentFailureStageLabel(reason: string | null | undefined): string {
-    if (!reason) {
-        return "";
-    }
-    const labels: Record<string, string> = {
-        JENKINS: "Build backend",
-        GITOPS: "GitOps",
-        ARGOCD: "Argo CD",
-        IMAGE_REF: "Image configuration",
-        TRIGGER: "Deploy trigger",
-        TIMEOUT: "Timeout",
-        UNKNOWN: "Unknown"
-    };
-    return labels[reason] ?? reason;
-}
+export { deploymentFailureStageLabel };

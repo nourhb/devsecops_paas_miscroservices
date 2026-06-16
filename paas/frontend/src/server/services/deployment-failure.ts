@@ -3,7 +3,6 @@ import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { updateProject } from "@/server/projects/project-service";
 import { notifyPipelineFailureEmail } from "@/server/notifications/pipeline-failure-notify";
-export { humanizeFailureReason } from "@/server/services/deployment-failure-labels";
 const MESSAGE_MAX = 2000;
 export async function recordDeploymentFailure(deploymentId: string, projectId: string, options: {
     reason: DeploymentFailureReason;
