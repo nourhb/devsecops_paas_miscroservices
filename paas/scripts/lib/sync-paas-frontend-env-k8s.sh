@@ -7,12 +7,17 @@ PAAS_NS="${PAAS_NS:-paas}"
 DEPLOY_NAME="${DEPLOY_NAME:-frontend}"
 CONTAINER_NAME="${CONTAINER_NAME:-frontend}"
 SECRET_NAME="${SECRET_NAME:-paas-frontend-env}"
+RBAC_MANIFEST="${RBAC_MANIFEST:-${REPO_ROOT}/paas/k8s-manifests/lab/paas-frontend-k8s-rbac.yaml}"
 umask 077
 FILTERED="$(mktemp "${TMPDIR:-/tmp}/paas-frontend-env.XXXXXX")"
 trap 'rm -f "${FILTERED}"' EXIT
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: env file not found: ${ENV_FILE}" >&2
   exit 1
+fi
+if [[ -f "${RBAC_MANIFEST}" ]]; then
+  echo "==> Apply frontend RBAC (pods/logs + Prometheus service proxy)"
+  kubectl apply -f "${RBAC_MANIFEST}"
 fi
 if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; then
   echo "ERROR: deployment/${DEPLOY_NAME} not found in namespace ${PAAS_NS}" >&2
@@ -62,6 +67,7 @@ kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$
   "spec": {
     "template": {
       "spec": {
+        "serviceAccountName": "paas-frontend",
         "containers": [
           {
             "name": "${CONTAINER_NAME}",
