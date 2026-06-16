@@ -17,6 +17,35 @@ fi
 echo "==> Push pipeline to Jenkins job paas-deploy"
 JENKINSFILE="$(bash "${SCRIPT_DIR}/resolve-jenkinsfile-lab.sh")"
 export JENKINSFILE
+load_jenkins_creds_for_sync() {
+  local env_file="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
+  if [[ -f "${env_file}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+      local key="${line%%=*}"
+      case "${key}" in
+        JENKINS_USERNAME|JENKINS_API_TOKEN|JENKINS_USER|JENKINS_TOKEN|JENKINS_BASE_URL|JENKINS_PROBE_URL)
+          export "${line}"
+          ;;
+      esac
+    done < "${env_file}"
+  fi
+  [[ -z "${JENKINS_USERNAME:-}" && -n "${JENKINS_USER:-}" ]] && export JENKINS_USERNAME="${JENKINS_USER}"
+  [[ -z "${JENKINS_API_TOKEN:-}" && -n "${JENKINS_TOKEN:-}" ]] && export JENKINS_API_TOKEN="${JENKINS_TOKEN}"
+  if [[ -z "${JENKINS_USERNAME:-}" || -z "${JENKINS_API_TOKEN:-}" ]]; then
+    if command -v kubectl >/dev/null 2>&1 && kubectl get secret paas-frontend-env -n "${PAAS_NS:-paas}" >/dev/null 2>&1; then
+      local ns="${PAAS_NS:-paas}"
+      for key in JENKINS_USERNAME JENKINS_API_TOKEN JENKINS_USER JENKINS_TOKEN; do
+        local val
+        val="$(kubectl get secret paas-frontend-env -n "${ns}" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
+        [[ -n "${val}" ]] && export "${key}=${val}"
+      done
+      [[ -z "${JENKINS_USERNAME:-}" && -n "${JENKINS_USER:-}" ]] && export JENKINS_USERNAME="${JENKINS_USER}"
+      [[ -z "${JENKINS_API_TOKEN:-}" && -n "${JENKINS_TOKEN:-}" ]] && export JENKINS_API_TOKEN="${JENKINS_TOKEN}"
+    fi
+  fi
+}
+load_jenkins_creds_for_sync
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 echo "==> Disable stale inline Jenkinsfile sync on trigger"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"

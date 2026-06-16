@@ -83,9 +83,9 @@ export default function DashboardPage() {
     const overviewQuery = useQuery({
         queryKey: ["dashboard-overview"],
         queryFn: dashboardOverviewApi.get,
-        staleTime: 20_000,
+        staleTime: 10_000,
         placeholderData: (previousData) => previousData,
-        refetchInterval: 30_000
+        refetchInterval: 15_000
     });
     const stats = overviewQuery.data?.stats;
     const recent = overviewQuery.data?.recentDeployments ?? [];
@@ -134,6 +134,7 @@ export default function DashboardPage() {
         { name: "Unknown", value: sonarUnknown, fill: chartColors.muted }
     ];
     const sonarGateHasSignal = sonarPassed + sonarFailed + sonarUnknown > 0;
+    const scanCompareHasSignal = scanCompareData.some((row) => row.dt > 0 || row.trivy > 0);
     const policySignalData = [
         { name: "Cosign unsigned", value: security?.unsignedImages ?? 0, fill: chartColors.info },
         { name: "Deploy blocked", value: security?.policyBlocked ?? 0, fill: chartColors.danger },
@@ -141,6 +142,8 @@ export default function DashboardPage() {
         { name: "OPA policy gap", value: security?.opa.projectsWithPolicyGap ?? 0, fill: "#6366f1" },
         { name: "OPA violations", value: security?.opa.violationCount ?? 0, fill: chartColors.warning }
     ];
+    const policySignalHasSignal = policySignalData.some((item) => item.value > 0);
+    const securitySampled = security?.sampledProjects ?? 0;
     const toolHealthChartData = [
         { name: "Live", value: stats?.liveTools ?? 0, fill: chartColors.success, dotClassName: "bg-success" },
         { name: "Degraded", value: stats?.degradedTools ?? 0, fill: chartColors.warning, dotClassName: "bg-warning" },
@@ -300,7 +303,11 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Dependency-Track vs Trivy by severity</p>
-              <div className="h-[260px]">
+              {securitySampled === 0 ? (<ChartEmptyState title="No security sample yet">
+                  Dashboard polls up to 3 recent projects. Add a project, run a full deploy (not fast pipeline), then refresh. If deploys exist, open Integrations to confirm Dependency-Track and Harbor Trivy are reachable.
+                </ChartEmptyState>) : !scanCompareHasSignal ? (<ChartEmptyState title="Zero scanner findings">
+                  {securitySampled} project(s) sampled with no Critical/High/Medium/Low counted — clean scans, or SBOM/Trivy not uploaded yet. Open a project Security tab for per-tool detail.
+                </ChartEmptyState>) : (<div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={scanCompareData} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
@@ -312,7 +319,7 @@ export default function DashboardPage() {
                     <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </div>)}
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">SonarQube quality gate (projects sampled)</p>
@@ -332,7 +339,11 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Signing & policy (Cosign / OPA / Kyverno)</p>
-              <div className="h-[220px]">
+              {securitySampled === 0 ? (<ChartEmptyState title="No policy sample yet">
+                  Same as scanner charts: needs at least one deployed project with a Harbor image ref. Run a deploy, then refresh.
+                </ChartEmptyState>) : !policySignalHasSignal ? (<ChartEmptyState title="No policy issues">
+                  {securitySampled} project(s) sampled — all images signed, no OPA violations, Kyverno policies satisfied. Bars appear when unsigned images or policy gaps are detected.
+                </ChartEmptyState>) : (<div className="h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={policySignalData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
@@ -344,7 +355,7 @@ export default function DashboardPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </div>)}
             </div>
           </CardContent>
         </Card>

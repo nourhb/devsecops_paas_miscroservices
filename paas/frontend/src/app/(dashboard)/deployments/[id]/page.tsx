@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, ChevronRight, ClipboardList, ExternalLink, Hash, Loader2, StopCircle } from "lucide-react";
@@ -13,6 +14,7 @@ import { DeploymentLogsView, deploymentFailureStageLabel } from "@/components/de
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
+import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
     const s = status.toUpperCase();
     if (s === "SUCCESS" || s === "DEPLOYED") {
@@ -32,6 +34,7 @@ export default function DeploymentDetailPage() {
     }>();
     const deploymentId = params.id;
     const queryClient = useQueryClient();
+    const lastStatusRef = useRef<string | null>(null);
     const query = useQuery({
         queryKey: ["deployment", deploymentId],
         queryFn: () => pipelineApi.getDeployment(deploymentId),
@@ -41,6 +44,17 @@ export default function DeploymentDetailPage() {
             return s === "PENDING" || s === "DEPLOYING" ? 3000 : false;
         }
     });
+    useEffect(() => {
+        const status = query.data?.status?.toUpperCase() ?? "";
+        const projectId = query.data?.projectId;
+        const terminal = status === "DEPLOYED" || status === "SUCCESS" || status === "FAILED";
+        if (terminal && projectId && lastStatusRef.current !== status) {
+            invalidatePostDeployQueries(queryClient, projectId);
+        }
+        if (status) {
+            lastStatusRef.current = status;
+        }
+    }, [query.data?.status, query.data?.projectId, queryClient]);
     const cancelMutation = useMutation({
         mutationFn: () => pipelineApi.cancelDeployment(deploymentId),
         onSuccess: (data) => {

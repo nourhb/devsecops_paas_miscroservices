@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 DEFAULT_JENKINSFILE = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy"
 LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
@@ -206,15 +206,23 @@ def read_compose_env_value(key: str, path: Path = DEFAULT_ENV) -> str:
 def load_env_file(path: Path, *, skip_keys: frozenset[str] = _HOST_ENV_SKIP) -> None:
     if not path.is_file():
         return
+    parsed: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
         key = key.strip()
-        if key in skip_keys or not key or key in os.environ:
+        if not key or key in skip_keys:
             continue
-        os.environ[key] = parse_compose_env_value(val)
+        parsed[key] = parse_compose_env_value(val)
+    for key, val in parsed.items():
+        if key not in os.environ:
+            os.environ[key] = val
+    if not os.environ.get("JENKINS_USERNAME") and parsed.get("JENKINS_USER"):
+        os.environ["JENKINS_USERNAME"] = parsed["JENKINS_USER"]
+    if not os.environ.get("JENKINS_API_TOKEN") and parsed.get("JENKINS_TOKEN"):
+        os.environ["JENKINS_API_TOKEN"] = parsed["JENKINS_TOKEN"]
 def esc_xml(t: str) -> str:
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 def esc_cdata(t: str) -> str:
@@ -593,7 +601,9 @@ def main() -> int:
     force_full = "--force-full" in sys.argv
     jenkinsfile = resolve_jenkinsfile_path()
     if not user or not token:
-        print("ERROR: set JENKINS_USERNAME and JENKINS_API_TOKEN in docker-compose.env", file=sys.stderr)
+        print("ERROR: set JENKINS_USERNAME and JENKINS_API_TOKEN in docker-compose.env or paas-frontend-env secret", file=sys.stderr)
+        print("  Fix: add to paas/frontend/.env then npm run env:compose && bash paas/scripts/lab.sh env", file=sys.stderr)
+        print("  Or: kubectl get secret paas-frontend-env -n paas -o jsonpath='{.data.JENKINS_USERNAME}' | base64 -d", file=sys.stderr)
         return 1
     if any(x in token for x in ("paste", "YOUR", "REAL_TOKEN")):
         print("ERROR: JENKINS_API_TOKEN looks like a placeholder", file=sys.stderr)

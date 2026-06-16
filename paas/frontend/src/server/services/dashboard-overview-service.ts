@@ -126,8 +126,8 @@ const emptySeverity: SeverityBreakdown = {
     medium: 0,
     low: 0
 };
-const SECURITY_SAMPLE_LIMIT = 3;
-const SECURITY_METRICS_BUDGET_MS = 4000;
+const SECURITY_SAMPLE_LIMIT = 10;
+const SECURITY_METRICS_BUDGET_MS = 12_000;
 const dashboardOverviewCache = new TtlCache<DashboardOverview>(25_000);
 
 function sleep(ms: number): Promise<void> {
@@ -240,6 +240,10 @@ function sumSeverity(a: SeverityBreakdown, b: SeverityBreakdown): SeverityBreakd
         low: a.low + b.low
     };
 }
+export function invalidateDashboardOverviewCache(): void {
+    dashboardOverviewCache.clear();
+}
+
 export async function getDashboardOverview(userId: string, role: UserRole): Promise<DashboardOverview> {
     const cacheKey = `${userId}:${role}`;
     const cached = dashboardOverviewCache.get(cacheKey);

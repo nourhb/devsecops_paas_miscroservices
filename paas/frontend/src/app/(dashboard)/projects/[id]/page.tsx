@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
+import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 import type { DeploymentStatus, Project } from "@/types";
 import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
 import { cn } from "@/lib/utils";
@@ -146,10 +147,8 @@ export default function ProjectDetailsPage() {
     const deployMutation = useMutation({
         mutationFn: () => pipelineApi.deploy(projectId),
         onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: ["status", projectId] });
+            invalidatePostDeployQueries(queryClient, projectId);
             queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
-            queryClient.invalidateQueries({ queryKey: ["deployments", projectId] });
-            queryClient.invalidateQueries({ queryKey: ["project", projectId] });
             queryClient.invalidateQueries({ queryKey: ["app-reachability", projectId] });
             const msg = data.message || "Deployment queued";
             if (data.deploymentId) {

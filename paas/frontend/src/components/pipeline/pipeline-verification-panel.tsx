@@ -69,17 +69,20 @@ export function PipelineVerificationPanel({ jenkinsChecks, deployChecks, buildCo
                     ?? rows.find((r) => r.level === "WARN")
                     ?? rows.find((r) => r.level === "OK")
                     ?? rows.find((r) => r.level === "SKIP");
-                return (<li key={label} className={cn("rounded-lg border px-3 py-2 text-sm", !worst && "border-border/60 bg-muted/10", worst?.level === "OK" && "border-success/25 bg-success/5", worst?.level === "WARN" && "border-warning/30 bg-warning/5", worst?.level === "SKIP" && "border-border bg-muted/15", worst?.level === "FAIL" && "border-danger/30 bg-danger/5")}>
+                const buildSucceeded = (buildComplete?.result || "").toUpperCase() === "SUCCESS";
+                const inferredSkip = !worst && buildSucceeded && stepNum >= 8 && stepNum <= 11;
+                return (<li key={label} className={cn("rounded-lg border px-3 py-2 text-sm", !worst && !inferredSkip && "border-border/60 bg-muted/10", worst?.level === "OK" && "border-success/25 bg-success/5", worst?.level === "WARN" && "border-warning/30 bg-warning/5", worst?.level === "SKIP" && "border-border bg-muted/15", worst?.level === "FAIL" && "border-danger/30 bg-danger/5", inferredSkip && "border-border bg-muted/15")}>
                                         <div className="flex items-start gap-2">
-                                            {worst ? levelIcon(worst.level) : <span className="mt-0.5 h-4 w-4 rounded-full border border-dashed border-muted"/>}
+                                            {worst ? levelIcon(worst.level) : inferredSkip ? <SkipForward className="h-4 w-4 shrink-0 text-muted"/> : <span className="mt-0.5 h-4 w-4 rounded-full border border-dashed border-muted"/>}
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span className="font-mono text-xs text-primary">Step {stepNum}</span>
                                                     {worst ? (<Badge variant={worst.level === "OK" ? "success" : worst.level === "FAIL" ? "danger" : "outline"} className="text-[10px]">
                                                             {worst.level}
-                                                        </Badge>) : (<Badge variant="outline" className="text-[10px]">No marker yet</Badge>)}
+                                                        </Badge>) : inferredSkip ? (<Badge variant="outline" className="text-[10px]">SKIP</Badge>) : (<Badge variant="outline" className="text-[10px]">No marker yet</Badge>)}
                                                 </div>
                                                 <p className="mt-0.5 text-xs text-muted">{label}</p>
+                                                {inferredSkip && !worst ? (<p className="mt-1 font-mono text-[11px] leading-snug text-muted">Optional stage — no PAAS_STEP line in Jenkins console tail.</p>) : null}
                                                 {rows.map((r) => (<p key={`${r.id}-${r.message}`} className="mt-1 font-mono text-[11px] leading-snug text-foreground/90">
                                                         [{r.id}] {r.message}
                                                     </p>))}

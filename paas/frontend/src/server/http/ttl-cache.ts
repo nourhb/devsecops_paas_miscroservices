@@ -27,6 +27,14 @@ export class TtlCache<T> {
         });
     }
 
+    clear(): void {
+        this.store.clear();
+    }
+
+    delete(key: string): void {
+        this.store.delete(key);
+    }
+
     async getOrSet(key: string, factory: () => Promise<T>, ttlMs?: number): Promise<T> {
         const cached = this.get(key);
         if (cached !== undefined) {
