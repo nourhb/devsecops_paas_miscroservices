@@ -1,6 +1,6 @@
 import type { DeploymentFailureReason } from "@prisma/client";
-import { humanizeFailureReason } from "@/server/services/deployment-failure-labels";
-import type { PipelineHelpAction, PipelineHelpItem, PipelineHelpSeverity } from "@/server/help/pipeline-help-types";
+import { deploymentFailureStageLabel } from "@/lib/deployment-failure-labels";
+import type { PipelineHelpAction, PipelineHelpItem, PipelineHelpSeverity } from "@/types";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES } from "@/lib/paas-deploy-jenkins-stages";
 
 interface AdviceTemplate {
@@ -182,7 +182,7 @@ function adviceForDeployStep(step: string, status: string, detail: string): Advi
 }
 
 function failureAdvice(reason: DeploymentFailureReason | null, message: string | null): AdviceTemplate {
-    const stage = humanizeFailureReason(reason) || "pipeline";
+    const stage = deploymentFailureStageLabel(reason) || "pipeline";
     const fixes: Record<DeploymentFailureReason, string> = {
         JENKINS: "Open the build log in Jenkins. Look for compile errors, missing passwords, or a failed test step. Fix the error in your code or settings, push to Git, then click Full deploy.",
         GITOPS: "Your admin should verify the GitOps repository URL and token can push changes. Check for merge conflicts on the values file.",
@@ -299,7 +299,7 @@ export function buildHelpFromFailure(reason: DeploymentFailureReason | null, mes
     return {
         id: itemId(["failure", reason ?? "unknown"]),
         severity: "error",
-        stepLabel: humanizeFailureReason(reason) || "Pipeline",
+        stepLabel: deploymentFailureStageLabel(reason) || "Pipeline",
         happened: template.happened,
         means: template.means,
         fix: template.fix,

@@ -11,7 +11,7 @@ import {
     buildNoLogsHelpItem,
     buildSuccessHelpItem
 } from "@/server/help/pipeline-help-catalog";
-import type { PipelineHelpItem, PipelineHelpResponse, PipelineHelpSeverity } from "@/server/help/pipeline-help-types";
+import type { PipelineHelpItem, PipelineHelpResponse, PipelineHelpSeverity } from "@/types";
 import { getProjectById } from "@/server/projects/project-service";
 
 function worstSeverity(items: PipelineHelpItem[]): PipelineHelpSeverity {

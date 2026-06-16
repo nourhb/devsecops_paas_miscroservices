@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,10 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, children, className }: DialogProps) {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
   React.useEffect(() => {
     if (!open) {
       return;
@@ -29,31 +34,31 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
       window.removeEventListener("keydown", onKey);
     };
   }, [open, onOpenChange]);
-  if (!open) {
+  if (!open || !mounted) {
     return null;
   }
-  return (<div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="presentation">
+  return createPortal(<div className="fixed inset-0 z-[200] flex items-center justify-center p-4" role="presentation">
       <button type="button" className="absolute inset-0 bg-background/80 backdrop-blur-sm" aria-label="Close dialog" onClick={() => onOpenChange(false)}/>
-      <div role="dialog" aria-modal="true" className={cn("relative z-10 flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl sm:max-w-2xl sm:rounded-2xl", className)}>
+      <div role="dialog" aria-modal="true" dir="ltr" className={cn("relative z-10 flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-2xl sm:max-w-2xl", className)}>
         {children}
       </div>
-    </div>);
+    </div>, document.body);
 }
 
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1 border-b border-border/60 px-5 py-4 sm:px-6", className)} {...props}/>;
+  return <div className={cn("flex flex-col gap-1 border-b border-border/60 px-5 py-4 text-left sm:px-6", className)} {...props}/>;
 }
 
 export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-lg font-semibold leading-tight tracking-tight text-foreground", className)} {...props}/>;
+  return <h2 className={cn("text-left text-lg font-semibold leading-tight tracking-tight text-foreground", className)} {...props}/>;
 }
 
 export function DialogDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn("text-sm text-muted", className)} {...props}/>;
+  return <p className={cn("text-left text-sm text-muted", className)} {...props}/>;
 }
 
 export function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex-1 overflow-y-auto px-5 py-4 sm:px-6", className)} {...props}/>;
+  return <div className={cn("flex-1 overflow-y-auto px-5 py-4 text-left sm:px-6", className)} {...props}/>;
 }
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

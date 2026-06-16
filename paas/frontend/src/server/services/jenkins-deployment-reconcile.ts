@@ -95,7 +95,6 @@ async function resolveDeployBuildNumber(deployment: {
     return summary ? normalizeBuildNumber(summary.number, baseline) : null;
 }
 
-/** Lightweight Jenkins poll for UI status — does not run GitOps promotion. */
 export async function refreshProjectJenkinsDisplayStatus(projectId: string): Promise<void> {
     if (!jenkinsConfigured() || getBuildBackend().provider !== "jenkins") {
         return;
