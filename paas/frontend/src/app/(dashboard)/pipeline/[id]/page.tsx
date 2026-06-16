@@ -14,6 +14,7 @@ import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, s
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help-provider";
 import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-parse";
+import { mergeJenkinsChecksByStep, parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
 import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
@@ -108,9 +109,14 @@ export default function PipelinePage() {
         queryFn: () => securityApi.getDependencyTrack(projectId),
         refetchInterval: 30000
     });
+    const pipelineBuildNumber = useMemo(() => {
+        const tag = projectQuery.data?.imageTag || statusQuery.data?.imageTag || "";
+        const match = /:(\d+)$/.exec(tag);
+        return match ? Number.parseInt(match[1], 10) : undefined;
+    }, [projectQuery.data?.imageTag, statusQuery.data?.imageTag]);
     const pipelineStagesQuery = useQuery({
-        queryKey: ["jenkins-pipeline-stages", projectId],
-        queryFn: ({ signal }) => jenkinsUi.pipelineStages(projectId, undefined, signal),
+        queryKey: ["jenkins-pipeline-stages", projectId, pipelineBuildNumber ?? "latest"],
+        queryFn: ({ signal }) => jenkinsUi.pipelineStages(projectId, pipelineBuildNumber, signal),
         enabled: Boolean(projectQuery.data),
         refetchInterval: () => {
             const proj = queryClient.getQueryData<Project>(["project", projectId]);
@@ -183,14 +189,38 @@ export default function PipelinePage() {
         onError: () => toast.error("Rollback failed")
     });
     const wfStages = pipelineStagesQuery.data;
-    const jenkinsOpenHref = useMemo(() => jenkinsUrlForBrowser(wfStages?.buildUrl, { buildNumber: wfStages?.buildNumber }), [wfStages?.buildUrl, wfStages?.buildNumber]);
+    const jenkinsOpenHref = useMemo(() => jenkinsUrlForBrowser(wfStages?.buildUrl, { buildNumber: wfStages?.buildNumber ?? pipelineBuildNumber }), [wfStages?.buildUrl, wfStages?.buildNumber, pipelineBuildNumber]);
     const liveStagesList = useMemo(() => wfStages?.stages ?? [], [wfStages?.stages]);
     const deployVerifyLogs = useMemo(() => {
         const s = statusQuery.data;
         return `${s?.deploymentLogs ?? ""}\n${s?.buildLogs ?? ""}`;
     }, [statusQuery.data]);
     const deployChecks = useMemo(() => parseDeployVerificationFromLogs(deployVerifyLogs), [deployVerifyLogs]);
-    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus), [liveStagesList, wfStages, deployChecks, statusQuery.data?.lastDeploymentStatus]);
+    const logParsed = useMemo(() => parsePipelineVerificationLogs(deployVerifyLogs), [deployVerifyLogs]);
+    const jenkinsChecks = useMemo(() => mergeJenkinsChecksByStep(wfStages?.jenkinsChecks, logParsed?.jenkinsChecks), [wfStages?.jenkinsChecks, logParsed?.jenkinsChecks]);
+    const wfMeta = useMemo(() => {
+        if (wfStages) {
+            return {
+                ...wfStages,
+                jenkinsChecks,
+                buildComplete: wfStages.buildComplete ?? logParsed?.buildComplete ?? null,
+                result: wfStages.result ?? logParsed?.buildComplete?.result ?? null,
+                building: wfStages.building && !logParsed?.buildComplete
+            };
+        }
+        if (logParsed?.jenkinsChecks?.length || logParsed?.buildComplete) {
+            return {
+                configured: true,
+                jenkinsChecks,
+                buildComplete: logParsed.buildComplete,
+                result: logParsed.buildComplete?.result ?? null,
+                building: false
+            };
+        }
+        return undefined;
+    }, [wfStages, jenkinsChecks, logParsed]);
+    const displayStages = useMemo(() => buildPaasDeployDisplayStages(liveStagesList, wfMeta, deployChecks, statusQuery.data?.lastDeploymentStatus), [liveStagesList, wfMeta, deployChecks, statusQuery.data?.lastDeploymentStatus]);
+    const showPipelineStages = displayStages.length > 0 && (wfMeta?.configured || Boolean(jenkinsChecks.length) || Boolean(logParsed?.buildComplete));
     const jStarted = useMemo(() => displayStages.filter((s) => {
         const u = (s.status || "").toUpperCase();
         return u !== "NOT_EXECUTED" && u !== "NOT_BUILT" && u !== "SKIPPED";
@@ -367,7 +397,7 @@ export default function PipelinePage() {
                 <span className="font-mono">Step N</span> that stopped.
               </p>
             </div>) : null}
-          {!wfStages?.skipped && wfStages?.configured && !pipelineStagesQuery.isLoading ? (<>
+          {!wfStages?.skipped && showPipelineStages && !pipelineStagesQuery.isLoading ? (<>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs text-muted">
                   <span>Progress ({jStarted} / {jTotal} stages with activity)</span>
@@ -419,7 +449,7 @@ export default function PipelinePage() {
         </CardContent>
       </Card>
 
-      <PipelineVerificationPanel jenkinsChecks={wfStages?.jenkinsChecks ?? []} deployChecks={deployChecks} buildComplete={wfStages?.buildComplete ?? null} artifactImage={wfStages?.artifactImage ?? null}/>
+      <PipelineVerificationPanel jenkinsChecks={jenkinsChecks} deployChecks={deployChecks} buildComplete={wfMeta?.buildComplete ?? null} artifactImage={wfStages?.artifactImage ?? logParsed?.artifactImage ?? null}/>
 
       <details className="rounded-xl border border-border/60 bg-muted/10 px-4 py-3 text-sm">
         <summary className="cursor-pointer font-medium text-foreground">How to track that each step really worked</summary>

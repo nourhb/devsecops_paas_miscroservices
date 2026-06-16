@@ -66,7 +66,7 @@ export async function getProjectMonitoringSnapshot(projectId: string): Promise<P
         },
         runtime,
         prometheus: {
-            configured: Boolean(env.PROMETHEUS_BASE_URL?.trim()),
+            configured: Boolean(env.PROMETHEUS_BASE_URL?.trim() || env.PROMETHEUS_PROBE_URL?.trim()),
             rangeError: range.error,
             durationSeconds: 3600,
             stepSeconds: 60,
@@ -117,7 +117,10 @@ export async function getRuntimeMetrics(projectId: string): Promise<RuntimeMetri
             buildStatus: true
         }
     });
-    const runningApplications = projects.filter((project) => project.lastDeploymentStatus === "SUCCESS").length;
+    const runningApplications = projects.filter((project) => {
+        const status = (project.lastDeploymentStatus || "").toUpperCase();
+        return status === "SUCCESS" || status === "DEPLOYED";
+    }).length;
     const failedBuilds = projects.filter((project) => project.buildStatus === "FAILED").length;
     const imageTags = projects.map((project) => project.imageTag).filter((tag): tag is string => Boolean(tag));
     const signResults = await Promise.all(imageTags.map((imageTag) => cosignClient.isSigned(imageTag, { timeoutMs: METRICS_COSIGN_TIMEOUT_MS })));
@@ -153,7 +156,10 @@ export async function getDashboardMetrics(): Promise<DashboardMetricsPayload> {
         buildNumber: Math.floor(p.updatedAt.getTime() / 1000) % 1000000,
         createdAt: p.updatedAt.toISOString()
     }));
-    let runningPods = projects.filter((p) => p.lastDeploymentStatus === "SUCCESS").length;
+    let runningPods = projects.filter((p) => {
+        const status = (p.lastDeploymentStatus || "").toUpperCase();
+        return status === "SUCCESS" || status === "DEPLOYED";
+    }).length;
     let failedPods = projects.filter((p) => p.podStatus === "FAILED" || p.lastDeploymentStatus === "FAILED").length;
     if (env.KUBERNETES_ENABLED === "true" && projects.length > 0) {
         const namespaces = projects.map((p) => p.namespace);
