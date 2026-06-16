@@ -137,25 +137,36 @@ export function prometheusKubernetesProxyBases(): string[] {
     const namespace = (process.env.PROMETHEUS_K8S_NAMESPACE || "monitoring").trim();
     const serviceNames = [
         process.env.PROMETHEUS_K8S_SERVICE || "kube-prometheus-stack-prometheus",
-        "prometheus-service"
+        "prometheus-service",
+        "prometheus-operated"
     ].map((value) => value.trim()).filter(Boolean);
     return [...new Set(serviceNames)].map((serviceName) => `https://${apiHost}:${apiPort}/api/v1/namespaces/${namespace}/services/http:${serviceName}:9090/proxy`);
 }
 export async function kubernetesAuthenticatedFetch(url: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<Response> {
-    const kc = getKubeConfig();
-    if (!kc) {
-        throw new Error("Kubernetes API client not configured");
-    }
-    const opts: k8s.RequestOpts = {
-        url,
-        method: init.method || "GET"
-    };
-    await kc.applyToRequest(opts);
     const headers = new Headers(init.headers as HeadersInit);
-    if (opts.headers) {
-        for (const [key, value] of Object.entries(opts.headers)) {
-            if (value !== undefined) {
-                headers.set(key, Array.isArray(value) ? value.join(", ") : String(value));
+    const tokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+    if (fs.existsSync(tokenPath)) {
+        headers.set("Authorization", `Bearer ${fs.readFileSync(tokenPath, "utf8").trim()}`);
+    }
+    else {
+        const kc = getKubeConfig();
+        if (!kc) {
+            throw new Error("Kubernetes API client not configured");
+        }
+        const opts: {
+            url: string;
+            method: string;
+            headers?: Record<string, string>;
+        } = {
+            url,
+            method: init.method || "GET"
+        };
+        kc.applyToRequest(opts);
+        if (opts.headers) {
+            for (const [key, value] of Object.entries(opts.headers)) {
+                if (value !== undefined) {
+                    headers.set(key, value);
+                }
             }
         }
     }
