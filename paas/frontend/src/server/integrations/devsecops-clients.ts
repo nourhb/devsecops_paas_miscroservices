@@ -2196,18 +2196,29 @@ export class DockerHubClient {
 }
 const PROM_DEFAULT_CPU_QUERY = "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))";
 const PROM_DEFAULT_MEMORY_QUERY = "100 * (1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes)))";
+export function isPrometheusConfigured(): boolean {
+    return prometheusBaseUrls().length > 0;
+}
 function prometheusBaseUrls(): string[] {
-    const nodeIp = process.env.NODE_IP?.trim() || process.env.LAB_NODE_IP?.trim();
-    const candidates = [
-        "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
-        "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
-        "http://prometheus-service.monitoring.svc.cluster.local:9090",
-        "http://prometheus-operated.monitoring.svc.cluster.local:9090",
+    const nodeIp = process.env.NODE_IP?.trim()
+        || process.env.LAB_NODE_IP?.trim()
+        || env.APPS_PUBLIC_LAB_NODE_IP?.trim();
+    const explicit = [
         env.PROMETHEUS_PROBE_URL?.trim(),
-        env.PROMETHEUS_BASE_URL?.trim(),
-        nodeIp ? `http://${nodeIp}:30536` : "",
-        nodeIp ? `http://${nodeIp}:30083` : ""
+        env.PROMETHEUS_BASE_URL?.trim()
     ].filter((value): value is string => Boolean(value));
+    const nodePortUrls = nodeIp
+        ? [`http://${nodeIp}:30536`, `http://${nodeIp}:30083`]
+        : [];
+    const inCluster = [
+        "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
+        "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+        "http://prometheus-service.monitoring.svc.cluster.local:9090",
+        "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+    ];
+    const candidates = nodeIp
+        ? [...explicit, ...nodePortUrls, ...inCluster]
+        : [...explicit, ...inCluster, ...nodePortUrls];
     return [...new Set(candidates.map((value) => value.replace(/\/$/, "")))];
 }
 function prometheusFetchOptions(base: string): IntegrationFetchOptions {
