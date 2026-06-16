@@ -135,6 +135,7 @@ export async function getRuntimeMetrics(projectId: string): Promise<RuntimeMetri
     const projects = await prisma.project.findMany({
         where: { deletedAt: null },
         select: {
+            namespace: true,
             imageTag: true,
             lastDeploymentStatus: true,
             buildStatus: true
