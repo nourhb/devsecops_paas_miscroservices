@@ -978,12 +978,16 @@ export async function readPodLog(namespace: string, podName: string, container?:
 export async function getKyvernoPolicyStatus(policyNames: string[]): Promise<{
     configured: boolean;
     enforcedPolicies: string[];
+    presentPolicies: string[];
+    auditPolicies: string[];
 }> {
     const api = getCustomObjectsApi();
     if (!api) {
         return {
             configured: false,
-            enforcedPolicies: []
+            enforcedPolicies: [],
+            presentPolicies: [],
+            auditPolicies: []
         };
     }
     try {
@@ -998,19 +1002,30 @@ export async function getKyvernoPolicyStatus(policyNames: string[]): Promise<{
                 };
             }>;
         }).items ?? []);
-        const enforcedPolicies = items
-            .filter((item) => policyNames.includes(item.metadata?.name || "") && item.spec?.validationFailureAction === "Enforce")
-            .map((item) => item.metadata?.name || "")
+        const matched = items.filter((item) => policyNames.includes(item.metadata?.name || ""));
+        const nameOf = (item: (typeof items)[number]) => item.metadata?.name || "";
+        const enforcedPolicies = matched
+            .filter((item) => item.spec?.validationFailureAction === "Enforce")
+            .map(nameOf)
             .filter(Boolean);
+        const auditPolicies = matched
+            .filter((item) => item.spec?.validationFailureAction === "Audit")
+            .map(nameOf)
+            .filter(Boolean);
+        const presentPolicies = matched.map(nameOf).filter(Boolean);
         return {
             configured: true,
-            enforcedPolicies
+            enforcedPolicies,
+            presentPolicies,
+            auditPolicies
         };
     }
     catch {
         return {
             configured: true,
-            enforcedPolicies: []
+            enforcedPolicies: [],
+            presentPolicies: [],
+            auditPolicies: []
         };
     }
 }

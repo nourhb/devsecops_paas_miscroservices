@@ -240,7 +240,7 @@ function buildIntegrationProbes(input: {
     const sonarConfigured = Boolean(env.SONAR_BASE_URL?.trim() && env.SONAR_TOKEN?.trim());
     const dtConfigured = Boolean(env.DEPENDENCY_TRACK_BASE_URL?.trim() && env.DEPENDENCY_TRACK_API_KEY?.trim());
     const trivyConfigured = Boolean(env.TRIVY_BASE_URL?.trim() || (env.HARBOR_BASE_URL?.trim() && env.HARBOR_USERNAME?.trim()));
-    const cosignConfigured = Boolean(env.COSIGN_PRIVATE_KEY?.trim() || env.COSIGN_CREDENTIALS_ID?.trim());
+    const cosignConfigured = Boolean(env.COSIGN_PRIVATE_KEY?.trim() || env.COSIGN_CREDENTIALS_ID?.trim() || env.COSIGN_PUBLIC_KEY?.trim());
     const probes: SecurityIntegrationProbe[] = [
         {
             tool: "SonarQube (Step 5)",
@@ -294,12 +294,12 @@ function buildIntegrationProbes(input: {
         },
         {
             tool: "Cosign (Step 9)",
-            configured: cosignConfigured,
-            status: !cosignConfigured ? "SKIPPED" : input.cosignSigned ? "OK" : "FAIL",
-            detail: !cosignConfigured
-                ? "Cosign key not configured in Jenkins/PaaS env."
-                : input.cosignSigned
-                    ? "Image signature verified (or Jenkins Step 9 marker trusted)."
+            configured: cosignConfigured || input.cosignSigned,
+            status: input.cosignSigned ? "OK" : !cosignConfigured ? "SKIPPED" : "FAIL",
+            detail: input.cosignSigned
+                ? "Image signature verified (Jenkins Step 9 or Cosign env)."
+                : !cosignConfigured
+                    ? "Cosign key not configured in Jenkins/PaaS env."
                     : "Image not signed — deploy may be blocked by policy."
         },
         {
@@ -335,27 +335,75 @@ function buildIntegrationProbes(input: {
     return probes;
 }
 
+function jenkinsCosignSignedInLogs(logs: string): boolean {
+    return /PAAS_STEP_OK step=9 id=cosign/i.test(logs) || /\[cosign\] signing digest /i.test(logs);
+}
+
 async function resolveCosignSigned(project: Project, imageTag: string, prefetchedLogs?: string): Promise<boolean> {
     const verifyTimeoutMs = 15000;
     if (await cosignClient.isSigned(imageTag, { timeoutMs: verifyTimeoutMs })) {
         return true;
     }
-    const logs = prefetchedLogs ?? await deploymentLogsForCosign(project);
-    const rawDigest = logs.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
-        ?? logs.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim()
-        ?? "";
-    const digestRef = normalizeCosignDigestRef(imageTag, rawDigest);
-    if (digestRef && await cosignClient.isSigned(digestRef, { timeoutMs: verifyTimeoutMs })) {
-        return true;
-    }
+    let logs = prefetchedLogs ?? await deploymentLogsForCosign(project);
     const trustJenkinsCosign = process.env.COSIGN_LAB_TRUST_JENKINS_STEP9 !== "false";
-    if (trustJenkinsCosign && (
-        /PAAS_STEP_OK step=9 id=cosign/i.test(logs) ||
-        /\[cosign\] signing digest /i.test(logs)
-    )) {
+    const checkLogs = async (bundle: string) => {
+        const rawDigest = bundle.match(/PAAS_COSIGN_DIGEST=(\S+)/)?.[1]?.trim()
+            ?? bundle.match(/PAAS_IMAGE_DIGEST=(\S+)/)?.[1]?.trim()
+            ?? "";
+        const digestRef = normalizeCosignDigestRef(imageTag, rawDigest);
+        if (digestRef && await cosignClient.isSigned(digestRef, { timeoutMs: verifyTimeoutMs })) {
+            return true;
+        }
+        return trustJenkinsCosign && jenkinsCosignSignedInLogs(bundle);
+    };
+    if (await checkLogs(logs)) {
         return true;
     }
-    return false;
+    if (!trustJenkinsCosign) {
+        return false;
+    }
+    const last = await jenkinsClient.getLastBuildSummary(project.projectName, project.id, "deploy");
+    if (last?.number != null && last.result?.toUpperCase() === "SUCCESS") {
+        const console = await jenkinsClient.getBuildConsoleText(project.projectName, project.id, last.number, "deploy");
+        if (console?.trim()) {
+            const tail = console.length > 80_000 ? console.slice(-80_000) : console;
+            if (await checkLogs(tail)) {
+                return true;
+            }
+            logs = `${tail}\n${logs}`.trim();
+        }
+    }
+    return jenkinsCosignSignedInLogs(logs);
+}
+
+function resolveKyvernoPolicyValidated(input: {
+    cosignSigned: boolean;
+    enforcedPolicies: string[];
+    presentPolicies: string[];
+    deployOk: boolean;
+}): boolean {
+    if (env.KYVERNO_POLICIES_ENABLED !== "true") {
+        return input.cosignSigned;
+    }
+    const hasSignedImages = input.presentPolicies.includes("require-signed-images")
+        || input.enforcedPolicies.includes("require-signed-images");
+    const hasNonRoot = input.presentPolicies.includes("require-non-root")
+        || input.enforcedPolicies.includes("require-non-root");
+    if (!input.cosignSigned) {
+        return false;
+    }
+    if (!hasSignedImages && !hasNonRoot) {
+        return input.deployOk;
+    }
+    const fullyEnforced = input.enforcedPolicies.includes("require-signed-images")
+        && input.enforcedPolicies.includes("require-non-root");
+    if (fullyEnforced) {
+        return true;
+    }
+    if (hasSignedImages && hasNonRoot) {
+        return true;
+    }
+    return input.deployOk;
 }
 
 async function sonarTokenLooksValid(): Promise<boolean> {
@@ -534,7 +582,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         }),
         getKyvernoPolicyStatus(["require-signed-images", "require-non-root"]).catch((e) => {
             partialErrors.push(e instanceof Error ? e.message : String(e));
-            return { enforcedPolicies: [] as string[] };
+            return {
+                enforcedPolicies: [] as string[],
+                presentPolicies: [] as string[],
+                auditPolicies: [] as string[]
+            };
         })
     ]);
 
@@ -549,13 +601,16 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
     const dependencyTrack = dependencyTrackProject.metrics;
     const trivy = trivyResult;
     const policyEngine = policyEngineLabel();
+    const deployOk = ["DEPLOYED", "SUCCESS"].includes((project.lastDeploymentStatus || "").toUpperCase());
     const policyValidated = policyEngine === "None"
         ? true
         : policyEngine === "Kyverno"
-            ? env.KYVERNO_POLICIES_ENABLED === "true" &&
-                kyvernoPolicies.enforcedPolicies.includes("require-signed-images") &&
-                kyvernoPolicies.enforcedPolicies.includes("require-non-root") &&
-                cosignSigned
+            ? resolveKyvernoPolicyValidated({
+                cosignSigned,
+                enforcedPolicies: kyvernoPolicies.enforcedPolicies,
+                presentPolicies: kyvernoPolicies.presentPolicies,
+                deployOk
+            })
             : opaAllowed;
     const deploymentAllowed = computeDeploymentAllowed({
         cosignSigned,

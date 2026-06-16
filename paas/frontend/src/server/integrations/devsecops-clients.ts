@@ -2196,6 +2196,15 @@ export class DockerHubClient {
 }
 const PROM_DEFAULT_CPU_QUERY = "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))";
 const PROM_DEFAULT_MEMORY_QUERY = "100 * (1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes)))";
+function prometheusBaseUrls(): string[] {
+    const candidates = [
+        env.PROMETHEUS_PROBE_URL?.trim(),
+        env.PROMETHEUS_BASE_URL?.trim(),
+        "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+        "http://prometheus-k8s.monitoring.svc.cluster.local:9090"
+    ].filter((value): value is string => Boolean(value));
+    return [...new Set(candidates.map((value) => value.replace(/\/$/, "")))];
+}
 function prometheusInstantScalar(payload: unknown): number | null {
     const data = payload as {
         data?: {
@@ -2244,7 +2253,7 @@ function prometheusRangeFirstSeries(payload: unknown): {
     });
 }
 export class PrometheusClient {
-    private enabled = Boolean(env.PROMETHEUS_BASE_URL);
+    private enabled = prometheusBaseUrls().length > 0;
     async clusterUsage(projectId: string): Promise<{
         cpu: number;
         ram: number;
@@ -2256,29 +2265,31 @@ export class PrometheusClient {
         if (!this.enabled) {
             return fallback;
         }
-        const base = env.PROMETHEUS_BASE_URL.replace(/\/$/, "");
         const cpuQuery = env.PROMETHEUS_QUERY_CPU.trim() || PROM_DEFAULT_CPU_QUERY;
         const memQuery = env.PROMETHEUS_QUERY_MEMORY.trim() || PROM_DEFAULT_MEMORY_QUERY;
-        try {
-            return await fetchOrFallback("Prometheus", true, `${base}/api/v1/query?query=${encodeURIComponent(cpuQuery)}`, { method: "GET" }, fallback, async (response) => {
-                const cpuPayload = await response.json();
-                const cpu = prometheusInstantScalar(cpuPayload) ?? fallback.cpu;
-                let ram = fallback.ram;
-                try {
-                    const memRes = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(memQuery)}`, { method: "GET" });
-                    if (memRes.ok) {
-                        ram = prometheusInstantScalar(await memRes.json()) ?? fallback.ram;
+        for (const base of prometheusBaseUrls()) {
+            try {
+                return await fetchOrFallback("Prometheus", true, `${base}/api/v1/query?query=${encodeURIComponent(cpuQuery)}`, { method: "GET" }, fallback, async (response) => {
+                    const cpuPayload = await response.json();
+                    const cpu = prometheusInstantScalar(cpuPayload) ?? fallback.cpu;
+                    let ram = fallback.ram;
+                    try {
+                        const memRes = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(memQuery)}`, { method: "GET" });
+                        if (memRes.ok) {
+                            ram = prometheusInstantScalar(await memRes.json()) ?? fallback.ram;
+                        }
                     }
-                }
-                catch {
-                    ram = fallback.ram;
-                }
-                return { cpu, ram };
-            });
+                    catch {
+                        ram = fallback.ram;
+                    }
+                    return { cpu, ram };
+                });
+            }
+            catch {
+                continue;
+            }
         }
-        catch {
-            return fallback;
-        }
+        return fallback;
     }
     async clusterUsageRange(opts: {
         durationSeconds: number;
@@ -2297,47 +2308,47 @@ export class PrometheusClient {
         if (!this.enabled) {
             return { cpuSeries: [], memorySeries: [] };
         }
-        const base = env.PROMETHEUS_BASE_URL.replace(/\/$/, "");
         const cpuQuery = env.PROMETHEUS_QUERY_CPU.trim() || PROM_DEFAULT_CPU_QUERY;
         const memQuery = env.PROMETHEUS_QUERY_MEMORY.trim() || PROM_DEFAULT_MEMORY_QUERY;
         const end = Math.floor(Date.now() / 1000);
         const start = end - opts.durationSeconds;
         const step = Math.max(15, opts.stepSeconds);
-        const qCpu = `${base}/api/v1/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${end}&step=${step}`;
-        const qMem = `${base}/api/v1/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${end}&step=${step}`;
-        try {
-            const cpuRes = await integrationFetch(qCpu, { method: "GET" });
-            if (!cpuRes.ok) {
-                const t = await cpuRes.text();
-                return {
-                    cpuSeries: [],
-                    memorySeries: [],
-                    error: `Prometheus query_range (CPU) failed (${cpuRes.status}): ${t.slice(0, 400)}`
-                };
-            }
-            const cpuPayload = await cpuRes.json();
-            const cpuSeries = prometheusRangeFirstSeries(cpuPayload);
-            let memorySeries: {
-                ts: number;
-                value: number;
-            }[] = [];
+        let lastError: string | undefined;
+        for (const base of prometheusBaseUrls()) {
+            const qCpu = `${base}/api/v1/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${end}&step=${step}`;
+            const qMem = `${base}/api/v1/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${end}&step=${step}`;
             try {
-                const memRes = await integrationFetch(qMem, { method: "GET" });
-                if (memRes.ok) {
-                    memorySeries = prometheusRangeFirstSeries(await memRes.json());
+                const cpuRes = await integrationFetch(qCpu, { method: "GET" });
+                if (!cpuRes.ok) {
+                    const t = await cpuRes.text();
+                    lastError = `Prometheus query_range (CPU) failed (${cpuRes.status}): ${t.slice(0, 400)}`;
+                    continue;
                 }
+                const cpuPayload = await cpuRes.json();
+                const cpuSeries = prometheusRangeFirstSeries(cpuPayload);
+                let memorySeries: {
+                    ts: number;
+                    value: number;
+                }[] = [];
+                try {
+                    const memRes = await integrationFetch(qMem, { method: "GET" });
+                    if (memRes.ok) {
+                        memorySeries = prometheusRangeFirstSeries(await memRes.json());
+                    }
+                }
+                catch {
+                }
+                return { cpuSeries, memorySeries };
             }
-            catch {
+            catch (e) {
+                lastError = e instanceof Error ? e.message : String(e);
             }
-            return { cpuSeries, memorySeries };
         }
-        catch (e) {
-            return {
-                cpuSeries: [],
-                memorySeries: [],
-                error: e instanceof Error ? e.message : String(e)
-            };
-        }
+        return {
+            cpuSeries: [],
+            memorySeries: [],
+            error: lastError ?? "Prometheus unreachable"
+        };
     }
 }
 export class GitOpsClient {
