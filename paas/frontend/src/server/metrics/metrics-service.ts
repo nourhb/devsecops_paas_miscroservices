@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/prisma";
 import type { ProjectMonitoringSnapshot, RuntimeMetrics } from "@/types";
 import { getProjectById } from "@/server/projects/project-service";
 import { cosignClient, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
-import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
+import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, getNamespacePodSummary, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
 const METRICS_COSIGN_TIMEOUT_MS = 12000;
 function summarizePodRecords(items: ClusterPodRecord[]) {
@@ -33,6 +33,29 @@ function summarizePodRecords(items: ClusterPodRecord[]) {
         }
     }
     return summary;
+}
+async function countRunningApplications(projects: Array<{
+    namespace: string;
+    lastDeploymentStatus: string;
+}>): Promise<number> {
+    const deployOk = (status: string) => {
+        const normalized = (status || "").toUpperCase();
+        return normalized === "SUCCESS" || normalized === "DEPLOYED";
+    };
+    if (env.KUBERNETES_ENABLED === "true") {
+        const namespaces = [...new Set(projects.map((project) => project.namespace.trim()).filter(Boolean))].slice(0, 40);
+        let liveNamespaces = 0;
+        for (const namespace of namespaces) {
+            const summary = await getNamespacePodSummary(namespace);
+            if (summary.running > 0) {
+                liveNamespaces += 1;
+            }
+        }
+        if (liveNamespaces > 0) {
+            return liveNamespaces;
+        }
+    }
+    return projects.filter((project) => deployOk(project.lastDeploymentStatus)).length;
 }
 export async function getProjectMonitoringSnapshot(projectId: string): Promise<ProjectMonitoringSnapshot> {
     const project = await getProjectById(projectId);
@@ -117,10 +140,7 @@ export async function getRuntimeMetrics(projectId: string): Promise<RuntimeMetri
             buildStatus: true
         }
     });
-    const runningApplications = projects.filter((project) => {
-        const status = (project.lastDeploymentStatus || "").toUpperCase();
-        return status === "SUCCESS" || status === "DEPLOYED";
-    }).length;
+    const runningApplications = await countRunningApplications(projects);
     const failedBuilds = projects.filter((project) => project.buildStatus === "FAILED").length;
     const imageTags = projects.map((project) => project.imageTag).filter((tag): tag is string => Boolean(tag));
     const signResults = await Promise.all(imageTags.map((imageTag) => cosignClient.isSigned(imageTag, { timeoutMs: METRICS_COSIGN_TIMEOUT_MS })));

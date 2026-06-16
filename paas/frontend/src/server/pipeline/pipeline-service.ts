@@ -8,7 +8,8 @@ import { getProjectById, mapProjectToResponse, updateProject } from "@/server/pr
 import { getNamespacePodSummary } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
-import { refreshProjectJenkinsDisplayStatus, reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
+import { jenkinsClient } from "@/server/integrations/devsecops-clients";
+import { refreshProjectJenkinsDisplayStatus, reconcileJenkinsDeploymentRecord, extractJenkinsRunFromLogs } from "@/server/services/jenkins-deployment-reconcile";
 function summarizeKubernetesError(message: string) {
     const normalized = message.trim();
     if (/unable to verify the first certificate|self[- ]signed certificate|certificate/i.test(normalized)) {
@@ -65,6 +66,34 @@ export async function rollbackProject(projectId: string): Promise<ActionResponse
         message: `Rollback executed for ${project.projectName}`
     };
 }
+function jenkinsConfigured(): boolean {
+    return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);
+}
+
+async function enrichBuildLogsFromJenkins(projectName: string, projectId: string, storedLogs: string): Promise<string> {
+    if (!jenkinsConfigured()) {
+        return storedLogs;
+    }
+    try {
+        const last = await jenkinsClient.getLastBuildSummary(projectName, projectId, "deploy");
+        if (!last?.number || last.building) {
+            return storedLogs;
+        }
+        const storedRun = extractJenkinsRunFromLogs(storedLogs);
+        if (storedRun === last.number && storedLogs.includes("PAAS_BUILD_COMPLETE")) {
+            return storedLogs;
+        }
+        const console = await jenkinsClient.getBuildConsoleText(projectName, projectId, last.number, "deploy");
+        if (!console?.trim()) {
+            return storedLogs;
+        }
+        return console.length > 80_000 ? console.slice(-80_000) : console;
+    }
+    catch {
+        return storedLogs;
+    }
+}
+
 export async function getProjectStatus(projectId: string): Promise<DeploymentStatus> {
     await refreshProjectJenkinsDisplayStatus(projectId).catch(() => undefined);
     const active = await prisma.deployment.findFirst({
@@ -80,24 +109,26 @@ export async function getProjectStatus(projectId: string): Promise<DeploymentSta
     }
     const project = await getProjectById(projectId);
     const base = mapProjectToResponse(project);
+    const buildLogs = await enrichBuildLogsFromJenkins(project.projectName, project.id, base.buildLogs);
+    const enriched = { ...base, buildLogs };
     if (env.KUBERNETES_ENABLED === "true") {
         const live = await getNamespacePodSummary(project.namespace);
         if (live.error && live.total === 0) {
             return {
-                ...base,
+                ...enriched,
                 podStatus: summarizeKubernetesError(live.error),
-                deploymentLogs: [base.deploymentLogs, `[k8s] ${live.error}`].filter(Boolean).join("\n")
+                deploymentLogs: [enriched.deploymentLogs, `[k8s] ${live.error}`].filter(Boolean).join("\n")
             };
         }
         if (live.total > 0) {
             return {
-                ...base,
+                ...enriched,
                 podStatus: `${live.running} running · ${live.failed} failed · ${live.pending} pending (${live.total} pods)`
             };
         }
     }
-    const ds = (base.lastDeploymentStatus || "").toUpperCase();
-    let podStatus = base.podStatus;
+    const ds = (enriched.lastDeploymentStatus || "").toUpperCase();
+    let podStatus = enriched.podStatus;
     if (!podStatus || podStatus === "UNKNOWN") {
         if (ds === "DEPLOYED") {
             podStatus = env.KUBERNETES_ENABLED === "true" ? "DEPLOYED (0 pods in namespace)" : "DEPLOYED (no live cluster data)";
@@ -115,5 +146,5 @@ export async function getProjectStatus(projectId: string): Promise<DeploymentSta
             podStatus = env.KUBERNETES_ENABLED === "true" ? "No pods in namespace yet" : "No live cluster data";
         }
     }
-    return { ...base, podStatus };
+    return { ...enriched, podStatus };
 }
