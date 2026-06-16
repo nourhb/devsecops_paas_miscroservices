@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { projectApi } from "@/lib/api";
 import { parseBuildEnvText } from "@/lib/project-build-env";
 import { queryHttpMessage } from "@/lib/query-http-message";
-import type { BuildProfile } from "@/server/build-planner";
+import type { BuildProfile } from "@/server/build/build-planner";
 function inferBuildProfileFromLanguage(language: string): BuildProfile {
     const value = language.trim().toLowerCase();
     if (/(next|node|react|vue|angular|javascript|typescript|nest)/.test(value)) {

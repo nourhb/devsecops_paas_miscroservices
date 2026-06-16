@@ -1,8 +1,8 @@
 import { Prisma, DeploymentJobStatus } from "@prisma/client";
 import type { ActionResponse, DeploymentStatus } from "@/types";
-import type { BuildTriggerOptions } from "@/server/build-backend";
-import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
-import { resolveBuildPlan } from "@/server/build-planner";
+import type { BuildTriggerOptions } from "@/server/build/build-backend";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build/build-backend";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { getProjectById, mapProjectToResponse, updateProject } from "@/server/projects/project-service";
 import { getNamespacePodSummary } from "@/server/integrations/kubernetes-client";

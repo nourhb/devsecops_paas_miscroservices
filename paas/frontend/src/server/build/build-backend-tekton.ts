@@ -1,9 +1,9 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
-import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build-backend";
-import { prependBuildMetadata } from "@/server/build-metadata";
+import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build/build-backend";
+import { prependBuildMetadata } from "@/server/build/build-metadata";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
-import type { ResolvedBuildPlan } from "@/server/build-planner";
+import type { ResolvedBuildPlan } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { IntegrationError } from "@/server/http/errors";

@@ -1,7 +1,7 @@
 import { DeploymentFailureReason } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
-import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build/build-backend";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { recordDeploymentFailure } from "@/server/services/deployment-failure";
 const activeMonitors = new Set<string>();
 export function monitorDeployment(deploymentId: string, initialBuildNumber: number | null): void {

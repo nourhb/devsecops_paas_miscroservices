@@ -1,4 +1,4 @@
-import type { BuildMode, BuildProfile, BuildProvider, ResolvedBuildPlan } from "@/server/build-planner";
+import type { BuildMode, BuildProfile, BuildProvider, ResolvedBuildPlan } from "@/server/build/build-planner";
 const META_PREFIX = "[build-meta]";
 export interface BuildRunMetadata {
     provider?: BuildProvider;

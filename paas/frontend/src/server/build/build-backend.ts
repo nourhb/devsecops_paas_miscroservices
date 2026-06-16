@@ -1,8 +1,8 @@
-import type { ResolvedBuildPlan } from "@/server/build-planner";
-import { resolveBuildProvider } from "@/server/build-planner";
+import type { ResolvedBuildPlan } from "@/server/build/build-planner";
+import { resolveBuildProvider } from "@/server/build/build-planner";
 import { resolveBuildEnvFromStorage } from "@/server/projects/project-secrets-crypto";
-import { JenkinsBuildBackend } from "@/server/build-backend-jenkins";
-import { TektonBuildBackend } from "@/server/build-backend-tekton";
+import { JenkinsBuildBackend } from "@/server/build/build-backend-jenkins";
+import { TektonBuildBackend } from "@/server/build/build-backend-tekton";
 export interface BuildProjectRecord {
     id: string;
     projectName: string;

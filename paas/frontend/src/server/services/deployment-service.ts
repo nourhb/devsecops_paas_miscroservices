@@ -2,9 +2,9 @@ import { DeploymentFailureReason, DeploymentJobStatus, Prisma } from "@prisma/cl
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { env } from "@/server/config/env";
-import { parseBuildMetadata } from "@/server/build-metadata";
-import { getBuildBackend, toBuildProjectRecord } from "@/server/build-backend";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { parseBuildMetadata } from "@/server/build/build-metadata";
+import { getBuildBackend, toBuildProjectRecord } from "@/server/build/build-backend";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { ApiError, IntegrationError, NotFoundError } from "@/server/http/errors";
 import { assertBuildEnvReadyForDeploy } from "@/server/projects/project-secrets-crypto";

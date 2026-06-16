@@ -1,6 +1,6 @@
 import { IntegrationError, ValidationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
-import type { BuildProfile } from "@/server/build-planner";
+import type { BuildProfile } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import type { RepositoryLanguageDetectionResponse } from "@/types";
 type GitHubRepoRef = {

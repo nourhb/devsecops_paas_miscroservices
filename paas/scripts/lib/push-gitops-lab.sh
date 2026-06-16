@@ -46,7 +46,7 @@ elif ! git diff --quiet || ! git diff --cached --quiet; then
   echo "WARN: uncommitted changes in ${GITOPS}" >&2
   git status --short
   echo "Re-run with a commit message, e.g.:" >&2
-  echo "  bash paas/scripts/lib/push-gitops-lab.sh 'chore: blue-green helm templates'" >&2
+  echo "  bash paas/scripts/lab.sh repair <project-slug> <tag>" >&2
   popd >/dev/null
   exit 1
 fi

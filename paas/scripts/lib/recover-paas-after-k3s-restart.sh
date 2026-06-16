@@ -52,14 +52,14 @@ else
 fi
 
 echo "==> Postgres in namespace ${PAAS_NS} (PVC keeps users/projects)"
-bash "${SCRIPT_DIR}/deploy-paas-postgres-lab.sh"
-bash "${SCRIPT_DIR}/wait-for-postgres-lab.sh"
+bash "${SCRIPT_DIR}/lab-postgres.sh" deploy
+bash "${SCRIPT_DIR}/lab-postgres.sh" wait
 
 if kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -tAc \
   "SELECT 1 FROM information_schema.tables WHERE table_name='User'" 2>/dev/null | grep -q 1; then
   echo "schema ok"
 else
-  bash "${SCRIPT_DIR}/push-paas-schema-lab.sh"
+  bash "${SCRIPT_DIR}/lab-postgres.sh" schema
 fi
 
 if [[ -f "${ENV_FILE}" ]]; then
@@ -72,7 +72,7 @@ else
 fi
 
 echo "==> Kyverno require-non-root workload patches (frontend/postgres)"
-bash "${SCRIPT_DIR}/fix-paas-kyverno-workloads-lab.sh" || true
+bash "${SCRIPT_DIR}/lab-kyverno.sh" workloads || true
 
 echo "==> Start frontend"
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
@@ -93,7 +93,7 @@ for i in $(seq 1 12); do
 done
 
 echo "==> Platform bootstrap (Harbor cosign realm + Kyverno policy)"
-bash "${SCRIPT_DIR}/platform-bootstrap-lab.sh" || true
+bash "${SCRIPT_DIR}/lab-kyverno.sh" bootstrap || true
 if [[ -f "${ENV_FILE}" ]]; then
   ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || true
   bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh" || true
