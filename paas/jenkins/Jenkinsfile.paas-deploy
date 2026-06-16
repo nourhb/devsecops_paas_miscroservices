@@ -1656,6 +1656,7 @@ def cosignSignImageShellSnippet() {
   return '''
             set +e
             export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            export COSIGN_EXPERIMENTAL=1
             harbor_nipio_to_ip_ref() {
               local ref="$1"
               case "$ref" in
@@ -1714,8 +1715,10 @@ def cosignSignImageShellSnippet() {
                 echo "[cosign] WARN: nip.io sign needs IP fallback but crane missing"
                 return 1
               }
-              echo "[cosign] Harbor HTTP nip.io — sign via IP ref ${ip_ref}"
-              "${crane}" copy --insecure "${nip_ref}" "${ip_ref}" >/dev/null 2>&1 || true
+              echo "[cosign] Harbor HTTP nip.io — sign via IP ref ${ip_ref} (no full-image crane copy)"
+              if ! "${crane}" digest --insecure "${ip_ref}" >/dev/null 2>&1; then
+                echo "[cosign] WARN: IP manifest missing — run ensure-harbor-nipio-cosign-lab.sh after build"
+              fi
               local ip_digest nip_repo ip_repo
               ip_digest="$(resolve_digest_ref "${ip_ref}" || true)"
               nip_repo="${nip_ref%%@*}"
@@ -1748,8 +1751,15 @@ def cosignSignImageShellSnippet() {
             sign_img() {
               local ref="$1"
               local out rc attempt
-              for attempt in 1 2 3; do
-                if [ -n "${INSEC}" ]; then
+              local ip_ref
+              ip_ref="$(harbor_nipio_to_ip_ref "${ref}" 2>/dev/null || true)"
+              if [ -n "${ip_ref}" ]; then
+                ref="${ip_ref}"
+              fi
+              for attempt in 1 2; do
+                if command -v timeout >/dev/null 2>&1; then
+                  out="$(timeout 120 "${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
+                elif [ -n "${INSEC}" ]; then
                   out="$("${COSIGN_EXE}" sign --yes ${INSEC} --key "${COSIGN_KEY}" "${ref}" 2>&1)"
                 else
                   out="$("${COSIGN_EXE}" sign --yes --key "${COSIGN_KEY}" "${ref}" 2>&1)"
@@ -1762,19 +1772,15 @@ def cosignSignImageShellSnippet() {
                   echo "[cosign] WARN: ${ref} already signed (rekor 409) — OK"
                   return 0
                 fi
-                if echo "${out}" | grep -qE 'connection refused|ECONNREFUSED|timed out'; then
-                  if [ "${attempt}" -lt 3 ]; then
-                    echo "[cosign] WARN: registry unreachable (attempt ${attempt}/3), retry in 10s…"
-                    sleep 10
+                if echo "${out}" | grep -qE 'connection refused|ECONNREFUSED|timed out|HTTP response to HTTPS|server gave HTTP'; then
+                  echo "${out}"
+                  if [ "${attempt}" -lt 2 ]; then
+                    echo "[cosign] WARN: sign retry (${attempt}/2) in 5s…"
+                    sleep 5
                     continue
                   fi
-                  echo "[cosign] WARN: could not sign ${ref} (Harbor unreachable) — image push OK, deploy continues"
+                  echo "[cosign] WARN: could not sign ${ref} — image push OK, deploy continues"
                   return 0
-                fi
-                if echo "${out}" | grep -qE 'HTTP response to HTTPS|server gave HTTP'; then
-                  echo "${out}"
-                  sign_nipio_via_ip "${ref}" && return 0
-                  return "${rc}"
                 fi
                 echo "${out}"
                 return "${rc}"
@@ -1786,6 +1792,7 @@ def cosignSignImageShellSnippet() {
               local d=""
               if [ -f paas-artifacts/image-digest-ref.txt ]; then
                 d="$(tr -d '\\r\\n' < paas-artifacts/image-digest-ref.txt)"
+                d="$(harbor_nipio_to_ip_ref "${d}" 2>/dev/null || printf '%s' "${d}")"
               fi
               if [ -z "${d}" ] && [ -n "${CRANE_BIN:-}" ] && [ -x "${CRANE_BIN}" ]; then
                 d="$("${CRANE_BIN}" digest "${img}" 2>/dev/null | tr -d '\\r\\n' || true)"
@@ -1815,16 +1822,21 @@ def cosignSignImageShellSnippet() {
               return 1
             }
             COSIGN_KEY="${COSIGN_KEY_FILE:-${LAB_KEY:-paas-cosign-private.key}}"
-            DIGEST="$(resolve_digest_ref "${COSIGN_IMG}" || true)"
+            LAB_SIGN_REF="$(harbor_nipio_to_ip_ref "${COSIGN_IMG}" 2>/dev/null || printf '%s' "${COSIGN_IMG}")"
+            if [ "${LAB_SIGN_REF}" != "${COSIGN_IMG}" ]; then
+              echo "[cosign] lab Harbor HTTP: sign IP ref ${LAB_SIGN_REF} (artifact stays ${COSIGN_IMG})"
+            fi
+            DIGEST="$(resolve_digest_ref "${LAB_SIGN_REF}" || true)"
             if [ -n "${DIGEST}" ]; then
               echo "[cosign] signing digest ${DIGEST}"
               echo "PAAS_COSIGN_DIGEST=${DIGEST}"
               sign_img "${DIGEST}" || true
               mkdir -p paas-artifacts
               echo "PAAS_COSIGN_DIGEST=${DIGEST}" >> paas-artifacts/cosign-meta.txt
+            else
+              echo "[cosign] signing tag ${LAB_SIGN_REF}"
+              sign_img "${LAB_SIGN_REF}" || true
             fi
-            echo "[cosign] signing tag ${COSIGN_IMG}"
-            sign_img "${COSIGN_IMG}" || true
             exit 0
           '''
 }
@@ -1931,6 +1943,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
   println '[paas-jenkinsfile] marker=cosign-nipio-ip-fallback-20260615 (HTTP Harbor: sign IP + crane copy .sig to nip.io)'
   println '[paas-jenkinsfile] marker=cosign-no-tlog-upload-flag-20260615 (new cosign rejects --tlog-upload=false with signing-config)'
+  println '[paas-jenkinsfile] marker=cosign-ip-first-timeout-20260615 (skip nip.io HTTPS + no crane image copy; timeout 120s)'
   println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
   println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
   println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'
@@ -2869,21 +2882,28 @@ EOF
         "CRANE_BIN=${craneBinCosign}"
       ]
       def cosignSignSh = cosignSignImageShellSnippet()
+      def runCosignSign = {
+        timeout(time: 8, unit: 'MINUTES') {
+          sh cosignSignSh
+        }
+      }
       if (credId) {
         withCredentials([file(credentialsId: credId, variable: "COSIGN_KEY_FILE")]) {
           withEnv(cosignEnvBase) {
-            sh cosignSignSh
+            runCosignSign()
           }
         }
       } else if (fileExists(labKeyPath)) {
         println "[cosign] Using lab key file ${labKeyPath}"
         withEnv(cosignEnvBase + ["LAB_KEY=${labKeyPath}"]) {
-          sh cosignSignSh
+          runCosignSign()
         }
       } else {
         writeFile file: "paas-cosign-private.key", text: pemFromEnv
         withEnv(cosignEnvBase) {
-          sh "chmod 600 paas-cosign-private.key\n${cosignSignSh}\nrm -f paas-cosign-private.key"
+          timeout(time: 8, unit: 'MINUTES') {
+            sh "chmod 600 paas-cosign-private.key\n${cosignSignSh}\nrm -f paas-cosign-private.key"
+          }
         }
       }
       paasStepOk(9, 'cosign', cosignImageRef ? "sign attempted for ${cosignImageRef}" : 'no image to sign')
