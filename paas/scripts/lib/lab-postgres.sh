@@ -5,7 +5,7 @@ PAAS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
 MANIFEST="${PAAS_DIR}/k8s-manifests/lab/postgres-in-paas.yaml"
 FRONTEND_DIR="${PAAS_DIR}/frontend"
-DB_URL='postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?options=-c%20lc_messages%3DC'
+DB_URL='postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC'
 IMAGE="${IMAGE:-paas-db-push:local}"
 DOCKERFILE_DB="${FRONTEND_DIR}/Dockerfile.db"
 

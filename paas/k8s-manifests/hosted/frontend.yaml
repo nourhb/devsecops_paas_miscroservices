@@ -47,7 +47,7 @@ spec:
             - sh
             - -c
             - |
-              until nc -z postgres.paas.svc.cluster.local 5432; do
+              until nc -z postgres 5432; do
                 echo "waiting for postgres..."
                 sleep 3
               done

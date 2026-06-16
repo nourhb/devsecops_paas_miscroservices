@@ -16,9 +16,22 @@ else
 fi
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   DB_URL="$(kubectl exec -n "${PAAS_NS}" deploy/frontend -- printenv DATABASE_URL 2>/dev/null || true)"
-  [[ "${DB_URL}" == *postgres.paas.svc.cluster.local* ]] && ok "DATABASE_URL" || fail "bad DATABASE_URL"
+  if [[ "${DB_URL}" == *@postgres:* || "${DB_URL}" == *postgres.paas.svc.cluster.local* ]]; then
+    ok "DATABASE_URL"
+  else
+    fail "bad DATABASE_URL"
+  fi
 else
   fail "no frontend deploy"
+fi
+if kubectl exec -n "${PAAS_NS}" deploy/frontend -- node -e "
+const n=require('net');const s=n.connect(5432,'postgres');
+s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));
+setTimeout(()=>process.exit(1),8000);
+" >/dev/null 2>&1; then
+  ok "frontend TCP postgres:5432"
+else
+  fail "frontend cannot reach postgres:5432 (run: bash paas/scripts/lab.sh db-repair)"
 fi
 if kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -tAc \
   "SELECT 1 FROM information_schema.tables WHERE table_name='User'" 2>/dev/null | grep -q 1; then
@@ -39,5 +52,5 @@ if [[ "${FAIL}" -eq 0 ]]; then
   echo "http://${NODE_IP}:${PAAS_PORT}/login"
   exit 0
 fi
-echo "run: bash paas/scripts/lab.sh start"
+echo "run: bash paas/scripts/lab.sh db-repair"
 exit 1

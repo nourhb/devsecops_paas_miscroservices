@@ -8,6 +8,7 @@ usage() {
   echo "  start     Recover PaaS after reboot"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
+  echo "  db-repair Fix frontend -> Postgres TCP connectivity"
   echo "  health    Quick health check"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
@@ -25,6 +26,8 @@ case "$cmd" in
     bash "$LIB/lab-kyverno.sh" bootstrap ;;
   harbor)
     bash "$LIB/lab-harbor.sh" recover ;;
+  db-repair)
+    bash "$LIB/lab-paas-db-repair.sh" ;;
   health|check)
     bash "$LIB/check-paas-lab-health.sh" ;;
   env)
