@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { prisma } from "@/server/db/prisma";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/server/http/errors";

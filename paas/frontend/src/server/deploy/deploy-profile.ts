@@ -1,4 +1,4 @@
-import { resolveBuildPlan, type BuildProfile } from "@/server/build-planner";
+import { resolveBuildPlan, type BuildProfile } from "@/server/build/build-planner";
 
 export interface DeployProfileSpec {
     profile: BuildProfile;

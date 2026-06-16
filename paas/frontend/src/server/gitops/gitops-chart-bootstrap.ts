@@ -3,7 +3,7 @@ import { buildAppIngressHost } from "@/server/deploy/app-public-url";
 import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { resolveDeploymentStrategy } from "@/server/gitops/gitops-blue-green";
 import { resolveDeployProfileSpec, type DeployProfileSpec } from "@/server/deploy/deploy-profile";
-import type { BuildProfile } from "@/server/build-planner";
+import type { BuildProfile } from "@/server/build/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";

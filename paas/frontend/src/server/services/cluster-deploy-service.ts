@@ -1,10 +1,10 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
-import { buildMetadataLines, formatArtifactReference } from "@/server/build-metadata";
+import { buildMetadataLines, formatArtifactReference } from "@/server/build/build-metadata";
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
 import { probeAppUrlLiveQuick, probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
@@ -216,7 +216,7 @@ async function runRollingGitOpsPromote(
     projectName: string,
     destNamespace: string,
     artifactRef: string,
-    gitopsOptions: { buildProfile: import("@/server/build-planner").BuildProfile; buildEnv: Record<string, string> | null },
+    gitopsOptions: { buildProfile: import("@/server/build/build-planner").BuildProfile; buildEnv: Record<string, string> | null },
     containerPort: number,
     label: string,
     fastComplete?: FastCompleteParams

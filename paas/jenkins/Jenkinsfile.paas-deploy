@@ -1390,7 +1390,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
             _harbor_ok=1
             break
           fi
-          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (attempt ${_try}/6) — 502 = run: bash paas/scripts/recover-harbor-registry-lab.sh"
+          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (attempt ${_try}/6) — 502 = run: bash paas/scripts/lab.sh harbor"
           sleep 20
         done
         if [ "${_harbor_ok}" != "1" ]; then
@@ -1639,7 +1639,7 @@ PAAS_START
       if [ "\${_crane_rc}" = "0" ]; then
         break
       fi
-      echo "[image] WARN: crane append failed (rc=\${_crane_rc}); Harbor 502? bash paas/scripts/recover-harbor-registry-lab.sh"
+      echo "[image] WARN: crane append failed (rc=\${_crane_rc}); Harbor 502? bash paas/scripts/lab.sh harbor"
       if [ "\${_crane_attempt}" -ge "\${_crane_max}" ]; then
         exit "\${_crane_rc}"
       fi
@@ -1957,7 +1957,7 @@ def runPaasDeploy = {
   env.JENKINS_PAAS_FAST_PIPELINE = "false"
   println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${fastParam} effective=false (security steps always run)"
   if (fastParam.equalsIgnoreCase('true')) {
-    println "[paas] WARN: JENKINS_PAAS_FAST_PIPELINE=true was requested but ignored — run bash paas/scripts/enable-full-pipeline-ui-lab.sh if job default is stale"
+    println "[paas] WARN: JENKINS_PAAS_FAST_PIPELINE=true was requested but ignored — run bash paas/scripts/lab.sh jenkins if job default is stale"
   }
   if (env.PROJECT_BUILD_ENV_B64?.trim()) {
     println "[env] PROJECT_BUILD_ENV_B64 length=${env.PROJECT_BUILD_ENV_B64.trim().length()} (Application environment + public URL)"
@@ -2618,7 +2618,7 @@ exit 0
                 break
               fi
               if grep -qE 'SocketTimeoutException|Read timed out|values\\.protobuf' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
-                echo "[sonar] WARN: Sonar API timeout — retry in 30s (bash paas/scripts/recover-sonarqube-lab.sh if persistent)"
+                echo "[sonar] WARN: Sonar API timeout — retry in 30s (check Sonar at SONAR_BASE_URL if persistent)"
                 sleep 30
                 continue
               fi
@@ -2643,7 +2643,7 @@ exit 0
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; bash paas/scripts/diagnose-sonar-jenkins-lab.sh")
+            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; verify SONAR_BASE_URL and SONAR_TOKEN in PaaS env")
           }
         }
         return

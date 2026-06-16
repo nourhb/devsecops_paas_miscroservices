@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { writeAuditLog } from "@/server/audit/audit-log";
-import { getBuildBackend } from "@/server/build-backend";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { getBuildBackend } from "@/server/build/build-backend";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { IntegrationError } from "@/server/http/errors";
 import { created, fail, ok } from "@/server/http/response";
 import { enforceRateLimit } from "@/server/http/rate-limit";

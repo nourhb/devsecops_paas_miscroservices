@@ -10,6 +10,33 @@ paas/
 │   ├── lab/          Postgres, RBAC (cluster bootstrap)
 │   └── kyverno/      Image signing policies
 └── scripts/          Local VM lab only (not used in hosted production)
+    ├── lab.sh        Operator entry point (lab VM only)
+    ├── dev.sh        Local frontend dev
+    └── lib/          Internal lab helpers (not run directly)
+```
+
+### Frontend layout (`paas/frontend/src/`)
+
+```
+src/
+├── app/              Next.js routes and API handlers
+│   ├── (auth)/       Login, register, password reset
+│   ├── (dashboard)/  Projects, pipeline, deployments, security, monitoring
+│   └── api/          REST API (projects, deploy, jenkins, k8s, webhooks)
+├── components/       React UI (build, dashboard, pipeline, layout, ui)
+├── hooks/            Client hooks (auth, routing)
+├── lib/              Client API client, auth, shared labels
+├── server/           Server-only domain logic
+│   ├── auth/         Sessions, mail, guards
+│   ├── build/        Build planner, Jenkins/Tekton backends, metadata
+│   ├── deploy/       Images, Harbor, reachability
+│   ├── gitops/       Chart bootstrap, GitHub commits
+│   ├── help/         Pipeline help catalog and service
+│   ├── jenkins/      Jenkinsfile sync, step verification
+│   ├── projects/     Project CRUD, secrets, languages
+│   ├── security/     Cosign, policy gate, JWT
+│   └── services/     Deployments, Argo CD, dashboard, cluster deploy
+└── types/            Shared TypeScript types
 ```
 
 ## Hosted production (no shell scripts)
@@ -80,12 +107,17 @@ Or `bash paas/scripts/dev.sh` on a dev machine.
 
 ## Local VM lab (optional)
 
-`paas/scripts/lab.sh` is only for the VirtualBox k3s lab when you need manual recovery without CI. Not required for hosted production.
+`paas/scripts/lab.sh` is the **only** operator entry point for the VirtualBox k3s lab. Everything under `paas/scripts/lib/` is internal plumbing. Not required for hosted production.
 
 | Command | Purpose |
 |---------|---------|
-| `lab.sh start` | Recover after VM reboot |
-| `lab.sh frontend` | Rebuild frontend image on lab VM |
+| `lab.sh start` | Recover after VM reboot (postgres, env, frontend, harbor, kyverno) |
+| `lab.sh env` | Sync `docker-compose.env` → `paas-frontend-env` secret |
+| `lab.sh jenkins` | Push Jenkinsfile to Jenkins + rebuild frontend |
+| `lab.sh frontend` | Rebuild and roll out frontend image only |
+| `lab.sh health` | Quick API / postgres / UI check |
+| `lab.sh harbor` | Recover Harbor registry (502 / crane push failures) |
+| `lab.sh bootstrap` | Harbor mirrors + Kyverno cosign + require-non-root |
 | `lab.sh heal <p> <b>` | Manual GitOps fix (hosted: use UI deploy instead) |
 
 ## Env file

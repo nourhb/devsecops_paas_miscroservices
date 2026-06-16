@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/prisma";
-import { parseBuildMetadata } from "@/server/build-metadata";
+import { parseBuildMetadata } from "@/server/build/build-metadata";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import { env } from "@/server/config/env";
 import type { ArtifactListResponse, ArtifactRecord } from "@/types";

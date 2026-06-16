@@ -320,7 +320,7 @@ echo "==> Heal ${PROJECT_NAME} build :${TAG} targetPort=${TARGET_PORT}"
 echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
 echo "==> Kyverno lab policy (Audit unless COSIGN_LAB_ENFORCE_SIGNED=true)"
-COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${LIB}/apply-kyverno-cosign-lab.sh"
+COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${LIB}/lab-kyverno.sh" apply
 enforce_lab_policy_audit_and_exclude_namespace "${NS}"
 if [[ -f "${ENV_FILE}" ]]; then
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"

@@ -3,7 +3,7 @@ import { requireAuth } from "@/server/auth/auth-guard";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import { getProjectById } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-import { resolveBuildPlan } from "@/server/build-planner";
+import { resolveBuildPlan } from "@/server/build/build-planner";
 import { ValidationError } from "@/server/http/errors";
 import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 import { TtlCache } from "@/server/http/ttl-cache";

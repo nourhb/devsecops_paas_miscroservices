@@ -1,6 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { env } from "@/server/config/env";
-import type { BuildProfile } from "@/server/build-planner";
+import type { BuildProfile } from "@/server/build/build-planner";
 import {
     applyBlueGreenInactiveImage,
     applyRollingImage,

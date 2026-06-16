@@ -15,7 +15,31 @@ else
   echo "WARN: node not on PATH — skip embed"
 fi
 echo "==> Push pipeline to Jenkins job paas-deploy"
-JENKINSFILE="$(bash "${SCRIPT_DIR}/resolve-jenkinsfile-lab.sh")"
+resolve_jenkinsfile_lab() {
+  local jenkinsfile="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
+  local marker="${JENKINSFILE_MARKER:-nginx-conf-writefile-20260611}"
+  local raw_url="${JENKINSFILE_RAW_URL:-https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy}"
+  local fresh="/tmp/Jenkinsfile.paas-deploy.${marker}.lab"
+  has_marker() {
+    local f="$1"
+    [[ -f "${f}" ]] && grep -qF "${marker}" "${f}" && grep -qF 'writeNginxPaasDefaultConf' "${f}"
+  }
+  if has_marker "${jenkinsfile}"; then
+    echo "${jenkinsfile}"
+    return 0
+  fi
+  echo "WARN: ${jenkinsfile} missing ${marker} — git pull" >&2
+  git -C "${REPO_ROOT}" pull --ff-only 2>/dev/null || true
+  if has_marker "${jenkinsfile}"; then
+    echo "${jenkinsfile}"
+    return 0
+  fi
+  echo "WARN: fetching Jenkinsfile from ${raw_url}" >&2
+  curl -fsSL --retry 3 --connect-timeout 30 "${raw_url}" -o "${fresh}" || { echo "ERROR: curl failed for ${raw_url}" >&2; return 1; }
+  has_marker "${fresh}" || { echo "ERROR: Downloaded Jenkinsfile still missing ${marker}" >&2; return 1; }
+  echo "${fresh}"
+}
+JENKINSFILE="$(resolve_jenkinsfile_lab)"
 export JENKINSFILE
 load_jenkins_creds_for_sync() {
   local env_file="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"

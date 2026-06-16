@@ -7,6 +7,7 @@ usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
+  echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  health    Quick health check"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
@@ -21,7 +22,9 @@ case "$cmd" in
   start|recover)
     bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
   bootstrap)
-    bash "$LIB/platform-bootstrap-lab.sh" ;;
+    bash "$LIB/lab-kyverno.sh" bootstrap ;;
+  harbor)
+    bash "$LIB/lab-harbor.sh" recover ;;
   health|check)
     bash "$LIB/check-paas-lab-health.sh" ;;
   env)
@@ -33,7 +36,6 @@ case "$cmd" in
   repair)
     bash "$LIB/repair-gitops-app-lab.sh" "${2:?usage: lab.sh repair <project-slug> [tag]}" "${3:-655}" ;;
   fix-gitops)
-    # shellcheck source=lib/gitops-lab-lib.sh
     source "$LIB/gitops-lab-lib.sh"
     gitops_fix_repo_lab ;;
   heal)
@@ -42,7 +44,7 @@ case "$cmd" in
     REPO_ROOT="$(cd "$DIR/../.." && pwd)"
     git -C "${REPO_ROOT}" pull origin main 2>/dev/null || true
     export COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}"
-    bash "$LIB/apply-kyverno-cosign-lab.sh"
+    bash "$LIB/lab-kyverno.sh" apply
     bash "$LIB/ensure-harbor-nipio-cosign-lab.sh" "${2:?usage: lab.sh deploy <project-slug> <build> [port]}" "${3:?}" || true
     bash "$DIR/heal-project-deploy-lab.sh" "${2}" "${3}" "${4:-3000}" ;;
   ultimate)
@@ -57,12 +59,11 @@ case "$cmd" in
     echo " Ultimate deploy: ${PROJECT_NAME} :${TAG} :${TARGET_PORT}"
     echo " URL: ${URL}"
     echo "=============================================="
-    bash "$LIB/recover-harbor-registry-lab.sh" || true
-    # shellcheck source=lib/gitops-lab-lib.sh
+    bash "$LIB/lab-harbor.sh" recover || true
     source "$LIB/gitops-lab-lib.sh"
     gitops_fix_repo_lab
     bash "$LIB/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}"
-    bash "$LIB/apply-kyverno-cosign-lab.sh"
+    bash "$LIB/lab-kyverno.sh" apply
     bash "$LIB/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}"
     bash "$DIR/heal-project-deploy-lab.sh" "${PROJECT_NAME}" "${TAG}" "${TARGET_PORT}"
     echo ""
