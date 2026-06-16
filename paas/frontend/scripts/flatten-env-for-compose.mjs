@@ -62,7 +62,15 @@ function main() {
         process.exit(1);
     }
     const text = readFileSync(inputPath, "utf8");
-    const entries = parseLooseEnv(text);
+    const parsed = parseLooseEnv(text);
+    const byKey = new Map();
+    for (const [key, value] of parsed) {
+        if (byKey.has(key)) {
+            console.warn(`WARN: duplicate ${key} in ${inputPath} — using last value`);
+        }
+        byKey.set(key, value);
+    }
+    const entries = [...byKey.entries()];
     const header = "";
     const body = entries.map(([k, v]) => `${k}=${escapeForComposeLine(v)}`).join("\n");
     writeFileSync(outputPath, `${header}${body}\n`, "utf8");

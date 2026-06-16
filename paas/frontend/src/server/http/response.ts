@@ -10,8 +10,7 @@ function friendlyDbBootMessage(raw: string): string | null {
     if (!/can't reach database server|connection refused|ECONNREFUSED|P1001|P1017|connection pool/i.test(raw)) {
         return null;
     }
-    return "Database is still starting after reboot. Wait 2–3 minutes and try again. " +
-        "On the lab VM run: bash paas/scripts/lab.sh start.";
+    return "Database is still starting. Wait a few minutes and try again, or check the Postgres workload in the paas namespace.";
 }
 
 export function fail(error: unknown) {

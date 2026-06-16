@@ -1,0 +1,73 @@
+name: PaaS hosting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "paas/**"
+      - ".github/workflows/paas-hosting.yml"
+  workflow_dispatch:
+
+env:
+  FRONTEND_IMAGE: paas/frontend
+  DB_PUSH_IMAGE: paas/frontend-db
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build images
+        env:
+          REGISTRY: ${{ secrets.PAAS_REGISTRY }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          PREFIX="${REGISTRY:-local}"
+          FRONTEND="${PREFIX}/${FRONTEND_IMAGE}:${TAG}"
+          DB_PUSH="${PREFIX}/${DB_PUSH_IMAGE}:${TAG}"
+          docker build -f paas/frontend/Dockerfile -t "${FRONTEND}" paas
+          docker build -f paas/frontend/Dockerfile.db -t "${DB_PUSH}" paas
+          echo "FRONTEND_IMAGE=${FRONTEND}" >> "$GITHUB_ENV"
+          echo "DB_PUSH_IMAGE=${DB_PUSH}" >> "$GITHUB_ENV"
+
+      - name: Log in to container registry
+        if: ${{ secrets.PAAS_REGISTRY != '' }}
+        env:
+          REGISTRY: ${{ secrets.PAAS_REGISTRY }}
+          REGISTRY_USER: ${{ secrets.PAAS_REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.PAAS_REGISTRY_PASSWORD }}
+        run: |
+          echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+
+      - name: Push images
+        if: ${{ secrets.PAAS_REGISTRY != '' }}
+        run: |
+          docker push "${FRONTEND_IMAGE}"
+          docker push "${DB_PUSH_IMAGE}"
+
+      - name: Configure kubectl
+        if: ${{ secrets.KUBE_CONFIG != '' && secrets.PAAS_REGISTRY != '' }}
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p "${HOME}/.kube"
+          printf '%s' "${KUBE_CONFIG}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Sync database schema
+        if: ${{ secrets.KUBE_CONFIG != '' && secrets.PAAS_REGISTRY != '' }}
+        run: |
+          kubectl delete job paas-prisma-push -n paas --ignore-not-found
+          sed "s|paas/frontend-db:latest|${DB_PUSH_IMAGE}|g" paas/k8s-manifests/hosted/prisma-migrate-job.yaml | kubectl apply -f -
+          kubectl wait --for=condition=complete job/paas-prisma-push -n paas --timeout=300s
+
+      - name: Roll out frontend
+        if: ${{ secrets.KUBE_CONFIG != '' && secrets.PAAS_REGISTRY != '' }}
+        run: |
+          kubectl set image deployment/frontend frontend="${FRONTEND_IMAGE}" -n paas
+          kubectl rollout status deployment/frontend -n paas --timeout=600s

@@ -32,5 +32,5 @@ if [[ "${FAIL}" -eq 0 ]]; then
   echo "http://${NODE_IP}:${PAAS_PORT}/login"
   exit 0
 fi
-echo "run: bash paas/scripts/recover-paas-after-k3s-restart.sh"
+echo "run: bash paas/scripts/lab.sh start"
 exit 1

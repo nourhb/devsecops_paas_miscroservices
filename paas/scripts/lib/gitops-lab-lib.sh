@@ -136,3 +136,19 @@ gitops_pull_rebase_resolve_apps() {
   git rebase --abort 2>/dev/null || true
   return 1
 }
+
+gitops_fix_repo_lab() {
+  local lib_dir repo_root env_file gitops auth_url github_token
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "${lib_dir}/../../.." && pwd)"
+  env_file="${ENV_FILE:-${repo_root}/paas/frontend/docker-compose.env}"
+  gitops="${GITOPS:-${HOME}/gitops}"
+  auth_url=""
+  if [[ -f "${env_file}" ]]; then
+    github_token="$(grep -E '^GITOPS_REPO_TOKEN=' "${env_file}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+    [[ -n "${github_token}" ]] && auth_url="https://${github_token}@github.com/nourhb/gitops.git"
+  fi
+  echo "==> Reset ${gitops} to origin/main (drops local commits + conflict markers)"
+  gitops_reset_to_origin_main "${gitops}" main "${auth_url}"
+  echo "OK: $(cd "${gitops}" && git status --short --branch | head -1)"
+}

@@ -51,7 +51,7 @@ def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} missing one of {CRANE_MARKERS} (Step 6 still breaks Next.js 16 with --no-lint).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -68,7 +68,7 @@ def assert_jenkinsfile_env_loader_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing {ENV_SAFE_DOTENV_LOADER_MARKER} "
             "(build fails when EMAIL_PASS has spaces — old . ./.env loader).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -85,7 +85,7 @@ def assert_jenkinsfile_cosign_digest_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing {COSIGN_DIGEST_MARKER} "
             "(Step 9 must sign digest for Kyverno).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -102,7 +102,7 @@ def assert_jenkinsfile_sonar_step5_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing {SONAR_STEP5_MARKER} "
             "(Step 5 needs JAVA_HOME + returnStatus + scanner log).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -110,7 +110,7 @@ def assert_jenkinsfile_sonar_step5_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} still uses /tmp sonar log + returnStdout pattern.\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -118,7 +118,7 @@ def assert_jenkinsfile_sonar_step5_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} missing SonarScanner CLI 6 auth ({SONAR_LOGIN_MARKER} / {SONAR_LOGIN_JENKINSFILE_MARKER}).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -128,7 +128,7 @@ def assert_jenkinsfile_nginx_conf_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing {NGINX_CONF_WRITEFILE_MARKER} "
             "(SPA/Angular Step 6 fails: MissingPropertyException: uri in Groovy GString).\n"
             "  git pull\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -145,7 +145,7 @@ def assert_jenkinsfile_multi_framework_fix(groovy: str, path: Path) -> None:
             f"ERROR: {path} missing one of {MULTI_FRAMEWORK_MARKERS} "
             "(legacy Angular/Python need Node16 defer Step3 + crane runtime stack).\n"
             "  git pull\n"
-            "  python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full",
+            "  python3 paas/scripts/lib/create_jenkins_paas_deploy_job.py --force --force-full",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -161,7 +161,7 @@ def assert_jenkinsfile_mutate_fix(groovy: str, path: Path) -> None:
         print(
             f"ERROR: {path} still has broken crane mutate (--cmd=-c with nested quotes).\n"
             "  git pull origin main\n"
-            "  bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "  bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -436,8 +436,8 @@ def refuse_stale_groovy_overwrite(existing_xml: str, groovy: str) -> None:
                 f"ERROR: refusing to overwrite Jenkins job — source Jenkinsfile is STALE "
                 f"(job has {marker!r}, file does not).\n"
                 "  JENKINSFILE=/tmp/Jenkinsfile.paas-deploy "
-                "python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full\n"
-                "  Or: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+                "bash paas/scripts/lab.sh jenkins\n"
+                "  Or: JENKINSFILE=/tmp/Jenkinsfile.paas-deploy python3 paas/scripts/lib/create_jenkins_paas_deploy_job.py --force --force-full",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -632,7 +632,7 @@ def main() -> int:
             if not verify_job_script_markers(verify_cfg):
                 print(
                     f"WARN: job script missing {NGINX_CONF_WRITEFILE_MARKER} — "
-                    "run bash paas/scripts/sync-jenkins-pipeline-from-repo.sh before deploying",
+                    "run bash paas/scripts/lab.sh jenkins before deploying",
                     file=sys.stderr,
                 )
             for name in FORCE_ENV_PARAM_DEFAULTS:
@@ -667,7 +667,7 @@ def main() -> int:
             file=sys.stderr,
         )
         print(
-            "Run: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+            "Run: bash paas/scripts/lab.sh jenkins",
             file=sys.stderr,
         )
         return 1
@@ -718,7 +718,7 @@ def main() -> int:
                 print(
                     f"ERROR: POST succeeded but job script still missing required markers "
                     f"({NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}).\n"
-                    "  JENKINSFILE=/path/to/Jenkinsfile.paas-deploy bash paas/scripts/sync-jenkins-pipeline-from-repo.sh",
+                    "  JENKINSFILE=/path/to/Jenkinsfile.paas-deploy bash paas/scripts/lab.sh jenkins",
                     file=sys.stderr,
                 )
                 return 1

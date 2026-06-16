@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
@@ -111,7 +111,7 @@ echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
 if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}"; then
   echo "OK: repo Jenkinsfile has ${SONAR_STEP5_MARKER}"
 else
-  echo "FAIL: missing ${SONAR_STEP5_MARKER} — run: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "FAIL: missing ${SONAR_STEP5_MARKER} — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 echo ""
@@ -128,19 +128,19 @@ if [[ -z "${CFG}" ]]; then
 fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
   echo "FAIL: Jenkins still has OLD Step 6 (npx next build --no-lint in crane path)"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if jenkins_job_has_broken_mutate "${CFG}"; then
   echo "FAIL: Jenkins still has BROKEN crane mutate (--cmd with nested quotes — Step 6 always fails)"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   echo "      Then redeploy (new build); console must show: [image] crane mutate OK"
   exit 1
 fi
 if jenkins_text_has_mutate_fix "${CFG}"; then
   echo "OK: Jenkins job has Step 6 mutate fix (start-paas.sh)"
 elif jenkins_text_has_crane_fix "${CFG}"; then
-  echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}" \
@@ -149,7 +149,7 @@ if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}" \
   echo "OK: Jenkins job has env-safe .env loader (Node)"
 else
   echo "FAIL: Jenkins job missing ${ENV_LOADER_MARKER} (builds fail on EMAIL_PASS with spaces)"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if echo "${CFG}" | grep -qF 'Do not use ". ./.env"'; then
@@ -161,7 +161,7 @@ fi
 if echo "${CFG}" | grep -qF "${COSIGN_DIGEST_MARKER}"; then
   echo "OK: Jenkins job has ${COSIGN_DIGEST_MARKER}"
 elif echo "${CFG}" | grep -qF 'digest ref unavailable (crane/triangulate); tag sign only'; then
-  echo "FAIL: Jenkins job still has OLD Step 9 cosign (tag-only) — run bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "FAIL: Jenkins job still has OLD Step 9 cosign (tag-only) — run bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}" \
@@ -170,7 +170,7 @@ if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}" \
   || echo "${CFG}" | grep -qF 'pick_sonar_url'; then
   echo "OK: Jenkins job has Sonar Step 5 fix (${SONAR_STEP5_MARKER})"
 else
-  echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 SONAR_LOGIN_MARKERS=( 'sonar-scanner-cli6-login-20260607' 'sonar.login' "printf 'sonar.login" )
@@ -184,15 +184,15 @@ done
 if [[ "${sonar_login_ok}" -eq 1 ]]; then
   echo "OK: Jenkins job has SonarScanner CLI 6 login (sonar.login)"
 else
-  echo "FAIL: Jenkins job missing sonar.login — scp Jenkinsfile or: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
-  echo "      Then: python3 paas/scripts/create_jenkins_paas_deploy_job.py --force --force-full"
+  echo "FAIL: Jenkins job missing sonar.login — scp Jenkinsfile or: bash paas/scripts/lab.sh jenkins"
+  echo "      Then: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if echo "${CFG}" | grep -qF "${NGINX_CONF_MARKER}" && echo "${CFG}" | grep -qF 'writeNginxPaasDefaultConf'; then
   echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
 else
   echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   echo "      Then Build with Parameters — do NOT Replay old builds"
   exit 1
 fi
@@ -201,11 +201,11 @@ if echo "${CFG}" | grep -qF "${SCA_FULL_MARKER}" && echo "${CFG}" | grep -qF 'fu
 elif echo "${CFG}" | grep -qF 'sca-npm-install-nolock-20260611' \
   || echo "${CFG}" | grep -qF '--package-lock-only' && echo "${CFG}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; then
   echo "FAIL: Jenkins job has OLD/broken Step 4 SCA (package-lock-only or partial patch)"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
 else
   echo "FAIL: Jenkins job missing ${SCA_FULL_MARKER}"
-  echo "Fix: bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+  echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if jenkins_text_has_crane_fix "${CFG}"; then
@@ -219,5 +219,5 @@ if jenkins_text_has_mutate_fix "${CFG}" && { echo "${CFG}" | grep -qF 'foregroun
   echo "OK: Jenkins job has Step 6a + mutate fix (marker string not found in XML, but script content matches)"
   exit 0
 fi
-echo "FAIL: Jenkins job script missing Step 6 mutate fix — run bash paas/scripts/sync-jenkins-pipeline-from-repo.sh"
+echo "FAIL: Jenkins job script missing Step 6 mutate fix — run bash paas/scripts/lab.sh jenkins"
 exit 1

@@ -2,71 +2,98 @@
 
 ```
 paas/
-├── scripts/          Lab operations (entry: lab.sh)
 ├── frontend/         Next.js UI and API
-│   ├── src/app/      Routes and API handlers
-│   ├── src/components/
-│   ├── src/lib/      Client helpers
-│   ├── src/server/   Backend services
-│   ├── prisma/       Database schema
-│   └── scripts/      Build and env helpers
 ├── jenkins/          Jenkinsfile.paas-deploy
 ├── gitops/           Helm chart bootstrap (simple-app)
-└── k8s-manifests/    Postgres, RBAC, Kyverno policies
+├── k8s-manifests/
+│   ├── hosted/       PaaS platform Deployment (production)
+│   ├── lab/          Postgres, RBAC (cluster bootstrap)
+│   └── kyverno/      Image signing policies
+└── scripts/          Local VM lab only (not used in hosted production)
 ```
 
-## Daily lab
+## Hosted production (no shell scripts)
 
-```bash
-bash paas/scripts/lab.sh start
-bash paas/scripts/lab.sh health
-bash paas/scripts/lab.sh env
-bash paas/scripts/lab.sh jenkins
-bash paas/scripts/lab.sh heal <project> <build> [port]
-```
+Everything runs from the UI and CI/CD:
 
-Local frontend: `bash paas/scripts/dev.sh`
+| What | How |
+|------|-----|
+| **Deploy user apps** | PaaS UI → Jenkins build → GitOps commit → Argo CD sync (automatic) |
+| **Deploy PaaS UI** | Push to `main` → GitHub Actions builds image → rolls out to cluster |
+| **Database schema** | CI runs `prisma db push` Job in-cluster before frontend rollout |
+| **Config / secrets** | Kubernetes Secret `paas-frontend-env` (from your env file once) |
 
-## Scripts layout
+### One-time cluster bootstrap
 
-You only run **`lab.sh`** (one entry point). Everything else is called automatically.
+**Existing lab VM** (you already have `deployment/frontend` + `frontend-service` on port 30100): skip `hosted/` — use `bash paas/scripts/lab.sh start` after reboot.
 
-| You run | Purpose |
-|---------|---------|
-| `lab.sh start` | After VM reboot — Postgres, frontend, Harbor/Kyverno bootstrap |
-| `lab.sh health` | Quick check frontend + Postgres |
-| `lab.sh env` | Push `docker-compose.env` into the frontend pod |
-| `lab.sh jenkins` | Sync Jenkinsfile to Jenkins + rebuild frontend image |
-| `lab.sh frontend` | Rebuild frontend image only (UI code changes) |
-| `lab.sh heal <p> <b> [port]` | Fix a project deploy (GitOps + Argo + rollout) |
-| `lab.sh deploy <p> <b> [port]` | git pull + Kyverno + cosign + heal |
-| `lab.sh ultimate <p> <b> [port]` | Full repair when lab is broken, then heal |
-| `lab.sh repair <slug> [tag]` | Rebuild broken GitOps Helm chart for one app |
-| `lab.sh fix-gitops` | Reset `~/gitops` to `origin/main` |
-| `lab.sh bootstrap` | Harbor HTTP + cosign realm + Kyverno (no reboot) |
-| `dev.sh` | Local Next.js on your laptop (not the cluster) |
-
-Internal helpers (28 files) — do not run by hand unless debugging:
-
-- **Recover chain:** `recover-paas-after-k3s-restart.sh`, `deploy-paas-postgres-lab.sh`, `wait-for-postgres-lab.sh`, `push-paas-schema-lab.sh`, `fix-paas-kyverno-workloads-lab.sh`
-- **Harbor/Kyverno:** `platform-bootstrap-lab.sh`, `normalize-harbor-env-lab.sh`, `configure-k3s-harbor-http-lab.sh`, `recover-harbor-registry-lab.sh`, `fix-harbor-cosign-realm-lab.sh`, `apply-kyverno-cosign-lab.sh`, `ensure-harbor-nipio-cosign-lab.sh`
-- **GitOps:** `gitops-lab-lib.sh`, `push-gitops-lab.sh`, `repair-gitops-app-lab.sh`, `fix-gitops-repo-lab.sh`, `heal-project-deploy-lab.sh`, `ultimate-project-deploy-lab.sh`
-- **Jenkins/UI:** `sync-jenkins-pipeline-from-repo.sh`, `resolve-jenkinsfile-lab.sh`, `create_jenkins_paas_deploy_job.py`, `verify-jenkins-paas-deploy-job-lab.sh`, `sync-paas-jenkinsfile-configmap-k8s.sh`, `rebuild-paas-frontend-lab.sh`, `sync-paas-frontend-env-k8s.sh`, `check-paas-lab-health.sh`
-
-Removed as unused: `heal-paas-frontend-lab.sh` (same as `lab.sh start` + `lab.sh frontend`).
-
-## One-time cluster setup
+**New production cluster** (greenfield):
 
 ```bash
 kubectl apply -f paas/k8s-manifests/lab/
 kubectl apply -f paas/k8s-manifests/kyverno/
+kubectl apply -f paas/k8s-manifests/hosted/
+kubectl create secret generic paas-frontend-env \
+  --from-env-file=paas/frontend/docker-compose.env \
+  -n paas
 ```
 
-## Env
+Set `DATABASE_URL` in that secret to `postgresql://postgres:…@postgres.paas.svc.cluster.local:5432/paas`.
+
+If `kubectl create secret` fails with duplicate keys, regenerate a deduped env file:
+
+```bash
+cd paas/frontend && npm run env:compose
+kubectl create secret generic paas-frontend-env \
+  --from-env-file=docker-compose.env -n paas --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### GitHub Actions secrets
+
+| Secret | Purpose |
+|--------|---------|
+| `PAAS_REGISTRY` | e.g. `harbor.example.com/paas` |
+| `PAAS_REGISTRY_USER` | Registry username |
+| `PAAS_REGISTRY_PASSWORD` | Registry password |
+| `KUBE_CONFIG` | Base64-encoded kubeconfig for deploy |
+
+Workflow: `.github/workflows/paas-hosting.yml` — runs on every push to `main` under `paas/`.
+
+### Production env flags
+
+In `paas-frontend-env` secret:
+
+- `KUBERNETES_ENABLED=true`
+- `PAAS_STRICT_INTEGRATIONS=true`
+- `JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=true` (syncs Jenkinsfile from embedded copy — no manual script)
+- `GITOPS_REPO_URL`, `GITOPS_REPO_TOKEN`, `ARGOCD_*`, `HARBOR_*`, `JENKINS_*`
+
+User project deploys need no SSH and no `lab.sh` — promotion is handled by `cluster-deploy-service` and `jenkins-deployment-reconcile`.
+
+## Local development
+
+```bash
+cd paas/frontend && npm install && npm run dev
+```
+
+Or `bash paas/scripts/dev.sh` on a dev machine.
+
+## Local VM lab (optional)
+
+`paas/scripts/lab.sh` is only for the VirtualBox k3s lab when you need manual recovery without CI. Not required for hosted production.
+
+| Command | Purpose |
+|---------|---------|
+| `lab.sh start` | Recover after VM reboot |
+| `lab.sh frontend` | Rebuild frontend image on lab VM |
+| `lab.sh heal <p> <b>` | Manual GitOps fix (hosted: use UI deploy instead) |
+
+## Env file
 
 Edit `paas/frontend/.env`, then:
 
 ```bash
 cd paas/frontend && npm run env:compose
-bash paas/scripts/lab.sh env
+kubectl create secret generic paas-frontend-env \
+  --from-env-file=docker-compose.env -n paas --dry-run=client -o yaml | kubectl apply -f -
 ```

@@ -437,7 +437,7 @@ export default function PipelinePage() {
             <strong className="text-foreground">GitOps</strong> — GitHub <span className="font-mono text-xs">apps/&lt;project&gt;/values.yaml</span> updated; deploy log shows <span className="font-mono text-xs">PAAS_DEPLOY_VERIFY step=gitops status=OK</span>.
           </li>
           <li>
-            <strong className="text-foreground">Cluster</strong> — on the master: <span className="font-mono text-xs">bash paas/scripts/heal-project-deploy-lab.sh &lt;project&gt; &lt;build&gt;</span>.
+            <strong className="text-foreground">Cluster</strong> — PaaS promotes automatically after Jenkins <span className="font-mono text-xs">SUCCESS</span> (GitOps + Argo CD). Watch the deployment log for <span className="font-mono text-xs">PAAS_DEPLOY_VERIFY</span> and status <span className="font-mono text-xs">SUCCESS</span>.
           </li>
           <li>
             <strong className="text-foreground">App URL</strong> — open the nip.io link from the deployment row (requires ingress in gitops values).
