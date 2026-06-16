@@ -4,6 +4,7 @@ import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
+import { withPrismaRetry } from "@/server/db/prisma-retry";
 import { ApiError, UnauthorizedError, ValidationError } from "@/server/http/errors";
 import { signToken } from "@/server/security/jwt";
 import { createRawAuthToken, hashAuthToken } from "@/server/auth/auth-tokens";
@@ -118,21 +119,21 @@ async function getPasswordResetToken(token: string) {
     return rows[0] || null;
 }
 async function getAuthUserByEmail(email: string) {
-    const rows = await prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
+    const rows = await withPrismaRetry(() => prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
         SELECT "id", "email", "fullName", "passwordHash", "keycloakSub", "role", "emailVerifiedAt"
         FROM "User"
         WHERE "email" = ${email}
         LIMIT 1
-    `);
+    `));
     return rows[0] || null;
 }
 export async function getAuthUserById(userId: string) {
-    const rows = await prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
+    const rows = await withPrismaRetry(() => prisma.$queryRaw<AuthUserLookupRow[]>(Prisma.sql `
         SELECT "id", "email", "fullName", "passwordHash", "keycloakSub", "role", "emailVerifiedAt"
         FROM "User"
         WHERE "id" = ${userId}
         LIMIT 1
-    `);
+    `));
     return rows[0] || null;
 }
 async function sendVerificationEmail(user: {

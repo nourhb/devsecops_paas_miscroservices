@@ -100,13 +100,12 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
     if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
   done
 ' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
-if grep -qE '^SONAR_TOKEN=' "${ENV_FILE}" && grep -qE '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}"; then
-  :
-else
-  echo ""
-  echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN and/or DEPENDENCY_TRACK_API_KEY."
-  echo "      Jenkins Steps 4–5 will skip Sonar/Dependency-Track until these are set."
-  echo "      Run: bash paas/scripts/lab.sh jenkins"
+if ! grep -qE '^SONAR_TOKEN=' "${ENV_FILE}"; then
+  echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN — Jenkins Step 5 (Sonar) may skip."
+  SECURITY_OK=0
+fi
+if ! grep -qE '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}"; then
+  echo "WARN: ${ENV_FILE} is missing DEPENDENCY_TRACK_API_KEY — Jenkins Step 4 (SBOM/DT) may skip."
   SECURITY_OK=0
 fi
 echo ""
