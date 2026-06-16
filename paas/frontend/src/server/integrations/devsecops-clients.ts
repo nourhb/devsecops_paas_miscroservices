@@ -4,6 +4,7 @@ import { buildDeployImageRepository, deployImageRepositoryMatchesProject } from 
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { IntegrationError } from "@/server/http/errors";
 import { integrationFetch, type IntegrationFetchOptions } from "@/server/http/integration-fetch";
+import { isKubernetesServiceProxyUrl, kubernetesAuthenticatedFetch, prometheusKubernetesProxyBases } from "@/server/integrations/kubernetes-client";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syntheticStagesWhenWfapiUnavailable } from "@/lib/paas-deploy-jenkins-stages";
 import { type PipelineStepCheck, parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
@@ -2205,6 +2206,7 @@ function prometheusBaseUrls(): string[] {
         || (env.APPS_PUBLIC_LAB_NODE_IP || "").trim();
     const probeUrl = (env.PROMETHEUS_PROBE_URL || "").trim();
     const baseUrl = (env.PROMETHEUS_BASE_URL || "").trim();
+    const k8sProxy = prometheusKubernetesProxyBases();
     const inCluster = [
         "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
         "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
@@ -2214,7 +2216,7 @@ function prometheusBaseUrls(): string[] {
     const nodePortUrls = nodeIp
         ? [`http://${nodeIp}:30536`, `http://${nodeIp}:30083`]
         : [];
-    const candidates = [];
+    const candidates = [...k8sProxy];
     if (probeUrl) {
         candidates.push(probeUrl);
     }
@@ -2241,6 +2243,9 @@ function prometheusFetchOptions(base: string): IntegrationFetchOptions {
     }
 }
 function prometheusFetch(base: string): IntegrationFetchFn {
+    if (isKubernetesServiceProxyUrl(base)) {
+        return (url, init) => kubernetesAuthenticatedFetch(url, init ?? {}, 20_000);
+    }
     const options = prometheusFetchOptions(base);
     return (url, init) => integrationFetch(url, init, options);
 }

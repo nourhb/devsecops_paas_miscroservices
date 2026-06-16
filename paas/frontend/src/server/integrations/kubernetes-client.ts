@@ -1,8 +1,14 @@
 import * as k8s from "@kubernetes/client-node";
 import type { V1Pod } from "@kubernetes/client-node";
 import fs from "node:fs";
+import { Agent, fetch as undiciFetch } from "undici";
 import { env } from "@/server/config/env";
 import { TtlCache } from "@/server/http/ttl-cache";
+const kubeInsecureAgent = new Agent({
+    connect: {
+        rejectUnauthorized: false
+    }
+});
 let coreApi: k8s.CoreV1Api | null | undefined;
 let customObjectsApi: k8s.CustomObjectsApi | null | undefined;
 let appsApi: k8s.AppsV1Api | null | undefined;
@@ -115,6 +121,61 @@ export function getAppsV1Api(): k8s.AppsV1Api | null {
     }
     appsApi = kc.makeApiClient(k8s.AppsV1Api);
     return appsApi;
+}
+export function isKubernetesServiceProxyUrl(url: string): boolean {
+    return /\/api\/v1\/namespaces\/[^/]+\/services\/[^/]+\/proxy(?:\/|$)/.test(url);
+}
+export function prometheusKubernetesProxyBases(): string[] {
+    if (env.KUBERNETES_ENABLED !== "true") {
+        return [];
+    }
+    const apiHost = process.env.KUBERNETES_SERVICE_HOST;
+    if (!apiHost) {
+        return [];
+    }
+    const apiPort = process.env.KUBERNETES_SERVICE_PORT || "443";
+    const namespace = (process.env.PROMETHEUS_K8S_NAMESPACE || "monitoring").trim();
+    const serviceNames = [
+        process.env.PROMETHEUS_K8S_SERVICE || "kube-prometheus-stack-prometheus",
+        "prometheus-service"
+    ].map((value) => value.trim()).filter(Boolean);
+    return [...new Set(serviceNames)].map((serviceName) => `https://${apiHost}:${apiPort}/api/v1/namespaces/${namespace}/services/http:${serviceName}:9090/proxy`);
+}
+export async function kubernetesAuthenticatedFetch(url: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<Response> {
+    const kc = getKubeConfig();
+    if (!kc) {
+        throw new Error("Kubernetes API client not configured");
+    }
+    const opts: k8s.RequestOpts = {
+        url,
+        method: init.method || "GET"
+    };
+    await kc.applyToRequest(opts);
+    const headers = new Headers(init.headers as HeadersInit);
+    if (opts.headers) {
+        for (const [key, value] of Object.entries(opts.headers)) {
+            if (value !== undefined) {
+                headers.set(key, Array.isArray(value) ? value.join(", ") : String(value));
+            }
+        }
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error(`Kubernetes request timed out after ${timeoutMs}ms`)), timeoutMs);
+    try {
+        const skipTls = env.KUBE_TLS_SKIP_VERIFY === "true" || Boolean(process.env.KUBERNETES_SERVICE_HOST);
+        if (skipTls) {
+            return await undiciFetch(url, {
+                ...init,
+                headers,
+                signal: controller.signal,
+                dispatcher: kubeInsecureAgent
+            } as Parameters<typeof undiciFetch>[1]) as unknown as Response;
+        }
+        return await fetch(url, { ...init, headers, signal: controller.signal });
+    }
+    finally {
+        clearTimeout(timer);
+    }
 }
 function podBucket(pod: V1Pod): "running" | "failed" | "pending" | "succeeded" | "other" {
     const phase = pod.status?.phase;
