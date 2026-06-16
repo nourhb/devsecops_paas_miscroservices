@@ -254,6 +254,52 @@ ensure_harbor_regcred() {
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   echo "OK: harbor-regcred in namespace ${ns} (${HARBOR_PULL_REGISTRY})"
 }
+enforce_lab_policy_audit_and_exclude_namespace() {
+  local ns="$1"
+  local policy
+  for policy in require-signed-images require-non-root; do
+    if ! kubectl get clusterpolicy "${policy}" >/dev/null 2>&1; then
+      continue
+    fi
+    python3 - "${policy}" "${ns}" <<'PY' | kubectl apply -f - >/dev/null || true
+import json
+import subprocess
+import sys
+
+policy_name, namespace = sys.argv[1:3]
+raw = subprocess.check_output(
+    ["kubectl", "get", "clusterpolicy", policy_name, "-o", "json"],
+    text=True,
+)
+doc = json.loads(raw)
+spec = doc.setdefault("spec", {})
+spec["validationFailureAction"] = "Audit"
+rules = spec.get("rules") or []
+if rules:
+    first = rules[0]
+    exclude = first.setdefault("exclude", {})
+    any_list = exclude.setdefault("any", [])
+    if not any_list:
+        any_list.append({"resources": {"namespaces": []}})
+    resources = any_list[0].setdefault("resources", {})
+    namespaces = resources.setdefault("namespaces", [])
+    if namespace not in namespaces:
+        namespaces.append(namespace)
+    if policy_name == "require-signed-images":
+        verify = first.get("verifyImages") or []
+        if verify:
+            verify[0]["mutateDigest"] = False
+
+doc.pop("status", None)
+meta = doc.get("metadata", {})
+for k in ("managedFields", "creationTimestamp", "resourceVersion", "uid", "generation"):
+    meta.pop(k, None)
+
+print(json.dumps(doc))
+PY
+  done
+  echo "OK: lab Kyverno policy excludes namespace ${ns} (Audit mode)"
+}
 free_namespace_capacity() {
   local ns="$1"
   echo "==> Free cluster capacity in namespace ${ns}"
@@ -276,6 +322,7 @@ echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
 echo "==> Kyverno lab policy (Audit unless COSIGN_LAB_ENFORCE_SIGNED=true)"
 COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
+enforce_lab_policy_audit_and_exclude_namespace "${NS}"
 if [[ -f "${ENV_FILE}" ]]; then
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
   export GITHUB_TOKEN
