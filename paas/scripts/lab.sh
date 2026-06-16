@@ -32,7 +32,7 @@ case "$cmd" in
     bash "$LIB/check-paas-lab-health.sh" ;;
   env)
     bash "$LIB/sync-cosign-public-key-env.sh" || true
-    (cd "${DIR}/../frontend" && npm run env:compose)
+    bash "$LIB/compose-paas-frontend-env.sh"
     bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
     bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;

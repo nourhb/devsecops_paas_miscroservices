@@ -2200,25 +2200,29 @@ export function isPrometheusConfigured(): boolean {
     return prometheusBaseUrls().length > 0;
 }
 function prometheusBaseUrls(): string[] {
-    const nodeIp = process.env.NODE_IP?.trim()
-        || process.env.LAB_NODE_IP?.trim()
-        || env.APPS_PUBLIC_LAB_NODE_IP?.trim();
-    const explicit = [
-        env.PROMETHEUS_PROBE_URL?.trim(),
-        env.PROMETHEUS_BASE_URL?.trim()
-    ].filter((value): value is string => Boolean(value));
-    const nodePortUrls = nodeIp
-        ? [`http://${nodeIp}:30536`, `http://${nodeIp}:30083`]
-        : [];
+    const nodeIp = (process.env.NODE_IP || "").trim()
+        || (process.env.LAB_NODE_IP || "").trim()
+        || (env.APPS_PUBLIC_LAB_NODE_IP || "").trim();
+    const probeUrl = (env.PROMETHEUS_PROBE_URL || "").trim();
+    const baseUrl = (env.PROMETHEUS_BASE_URL || "").trim();
     const inCluster = [
         "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
         "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
         "http://prometheus-service.monitoring.svc.cluster.local:9090",
         "http://prometheus-operated.monitoring.svc.cluster.local:9090"
     ];
-    const candidates = nodeIp
-        ? [...explicit, ...nodePortUrls, ...inCluster]
-        : [...explicit, ...inCluster, ...nodePortUrls];
+    const nodePortUrls = nodeIp
+        ? [`http://${nodeIp}:30536`, `http://${nodeIp}:30083`]
+        : [];
+    const candidates = [];
+    if (probeUrl) {
+        candidates.push(probeUrl);
+    }
+    candidates.push(...inCluster);
+    if (baseUrl) {
+        candidates.push(baseUrl);
+    }
+    candidates.push(...nodePortUrls);
     return [...new Set(candidates.map((value) => value.replace(/\/$/, "")))];
 }
 function prometheusFetchOptions(base: string): IntegrationFetchOptions {
