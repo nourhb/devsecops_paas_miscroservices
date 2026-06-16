@@ -25,6 +25,7 @@ spec:
                 - simple-app
                 - harbor
                 - jenkins
+                - monitoring
                 - kube-system
                 - kyverno
                 - ingress-nginx

@@ -23,6 +23,7 @@ spec:
                 - harbor
                 - jenkins
                 - cicd
+                - monitoring
                 - kube-system
                 - kyverno
                 - ingress-nginx
