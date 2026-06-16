@@ -80,7 +80,7 @@ function main() {
             .replace("@postgres.paas.svc.cluster.local:5432", "@postgres:5432");
         if (k8sDb !== v) {
             console.warn("WARN: DATABASE_URL host adjusted for in-cluster Postgres service");
-            entries[dbIdx] = ["DATABASE_URL", k8sDb];
+            byKey.set("DATABASE_URL", k8sDb);
         }
     }
     const labHost = (() => {
@@ -89,21 +89,30 @@ function main() {
         return m ? m[1] : null;
     })();
     if (labHost && labHost !== "host.docker.internal") {
-        for (let i = 0; i < entries.length; i++) {
-            const [k, v] = entries[i];
+        for (const [k, v] of [...byKey.entries()]) {
             if (!/_BASE_URL$|_PROBE_URL$/.test(k) || !v.includes("host.docker.internal")) {
                 continue;
             }
             const rewritten = v.replace(/host\.docker\.internal/g, labHost);
             if (rewritten !== v) {
                 console.warn(`WARN: ${k} host.docker.internal -> ${labHost} for Kubernetes PaaS`);
-                entries[i] = [k, rewritten];
+                byKey.set(k, rewritten);
             }
         }
     }
+    const labNodeIp = byKey.get("APPS_PUBLIC_LAB_NODE_IP") || byKey.get("NODE_IP") || labHost || "";
+    if (labNodeIp && !byKey.get("PROMETHEUS_BASE_URL")?.trim()) {
+        byKey.set("PROMETHEUS_BASE_URL", `http://${labNodeIp}:30536`);
+        console.warn(`WARN: PROMETHEUS_BASE_URL defaulted to http://${labNodeIp}:30536 (kube-prometheus-stack NodePort)`);
+    }
+    if (labNodeIp && !byKey.get("PROMETHEUS_PROBE_URL")?.trim()) {
+        byKey.set("PROMETHEUS_PROBE_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc:9090");
+        console.warn("WARN: PROMETHEUS_PROBE_URL defaulted to in-cluster kube-prometheus-stack service");
+    }
+    const entriesOut = [...byKey.entries()];
     const header = "";
-    const body = entries.map(([k, v]) => `${k}=${escapeForComposeLine(v)}`).join("\n");
+    const body = entriesOut.map(([k, v]) => `${k}=${escapeForComposeLine(v)}`).join("\n");
     writeFileSync(outputPath, `${header}${body}\n`, "utf8");
-    console.log(`Wrote ${outputPath} (${entries.length} variables)`);
+    console.log(`Wrote ${outputPath} (${entriesOut.length} variables)`);
 }
 main();

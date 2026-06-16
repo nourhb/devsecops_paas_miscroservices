@@ -102,6 +102,10 @@ ip_signed() {
   fi
   sig_ok "$SRC_SIG" && { printf '%s' "$SRC_SIG"; return 0; }
   sig_ok "$TAG_SIG" && { printf '%s' "$TAG_SIG"; return 0; }
+  if [ -x "$COSIGN" ] && "$COSIGN" tree --allow-insecure-registry "$SRC_D" 2>/dev/null | grep -qi signature; then
+    printf '%s' "$SRC_D"
+    return 0
+  fi
   return 1
 }
 copy_sig() {
@@ -130,6 +134,10 @@ sign_ip_image() {
     echo "[cosign-lab] IP signature ref: $TRI"
     return 0
   fi
+  if [ -x "$COSIGN" ] && "$COSIGN" tree --allow-insecure-registry "$SRC_D" 2>/dev/null | grep -qi signature; then
+    echo "[cosign-lab] IP signature present (cosign tree on digest)"
+    return 0
+  fi
   echo "ERROR: cosign sign did not create Harbor signature (rc digest=$rc1 tag=$rc2)" >&2
   return 1
 }
@@ -153,6 +161,23 @@ if [ -z "$IP_TRI" ]; then
   sign_ip_image
   IP_TRI=$(ip_signed)
 fi
+case "$IP_TRI" in
+  *@sha256:*)
+    if [ -x "$COSIGN" ] && "$COSIGN" tree --allow-insecure-registry "$DST_REPO@${IP_TRI#*@}" 2>/dev/null | grep -qi signature; then
+      echo "OK: cosign signature on nip.io digest (cosign tree)"
+      exit 0
+    fi
+    DST_D="$DST_REPO@${IP_TRI#*@}"
+    if copy_sig "$(sig_ref "$SRC_REPO" "$(digest_hex "$IP_TRI")")" "$(sig_ref "$DST_REPO" "$(digest_hex "$IP_TRI")")"; then
+      echo "OK: crane copied digest .sig to nip.io"
+      exit 0
+    fi
+    if [ -x "$COSIGN" ] && "$COSIGN" tree --allow-insecure-registry "$SRC_D" 2>/dev/null | grep -qi signature; then
+      echo "OK: IP digest signed (nip.io copy skipped; Kyverno Audit / cluster pulls IP ref)"
+      exit 0
+    fi
+    ;;
+esac
 DST_TRI=$(nipio_dst_for_tri "$IP_TRI")
 if copy_sig "$IP_TRI" "$DST_TRI"; then
   echo "OK: crane copied cosign signature to nip.io"

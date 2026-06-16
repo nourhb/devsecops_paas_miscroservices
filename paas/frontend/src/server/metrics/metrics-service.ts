@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/prisma";
 import type { ProjectMonitoringSnapshot, RuntimeMetrics } from "@/types";
 import { getProjectById } from "@/server/projects/project-service";
-import { cosignClient, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
+import { cosignClient, isPrometheusConfigured, prometheusClient, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { aggregatePodCountsAcrossNamespaces, getClusterNodeCount, listNamespacePods, getNamespacePodSummary, type ClusterPodRecord } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";
 const METRICS_COSIGN_TIMEOUT_MS = 12000;
@@ -89,7 +89,7 @@ export async function getProjectMonitoringSnapshot(projectId: string): Promise<P
         },
         runtime,
         prometheus: {
-            configured: Boolean(env.PROMETHEUS_BASE_URL?.trim() || env.PROMETHEUS_PROBE_URL?.trim()),
+            configured: isPrometheusConfigured(),
             rangeError: range.error,
             durationSeconds: 3600,
             stepSeconds: 60,
