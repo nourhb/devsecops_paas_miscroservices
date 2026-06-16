@@ -11,6 +11,8 @@ fi
 echo "==> Embed Jenkinsfile into frontend bundle"
 if command -v node >/dev/null 2>&1; then
   node "${EMBED}" || echo "WARN: embed-jenkinsfile failed — Jenkins sync still uses ${JENKINSFILE}"
+  git -C "${REPO_ROOT}" checkout -- paas/frontend/src/server/jenkins/embedded-jenkinsfile.ts 2>/dev/null \
+    || true
 else
   echo "WARN: node not on PATH — skip embed"
 fi

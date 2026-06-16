@@ -28,6 +28,13 @@ else
 fi
 HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 15 "http://${NODE_IP}:${PAAS_PORT}/login" 2>/dev/null || echo 000)"
 [[ "${HTTP}" == "200" || "${HTTP}" == "307" || "${HTTP}" == "308" ]] && ok "UI ${HTTP}" || fail "UI ${HTTP}"
+API_HEALTH="$(curl -sS --connect-timeout 15 "http://${NODE_IP}:${PAAS_PORT}/api/health" 2>/dev/null || echo '{}')"
+if echo "${API_HEALTH}" | grep -q '"connected":true'; then
+  ok "Prisma from frontend pod"
+else
+  DB_ERR="$(echo "${API_HEALTH}" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p' | head -1)"
+  fail "Prisma from frontend pod${DB_ERR:+ ($DB_ERR)}"
+fi
 if [[ "${FAIL}" -eq 0 ]]; then
   echo "http://${NODE_IP}:${PAAS_PORT}/login"
   exit 0
