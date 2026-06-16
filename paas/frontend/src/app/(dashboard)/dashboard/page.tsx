@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, 
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -464,9 +465,12 @@ export default function DashboardPage() {
                   <TableCell><Badge variant={statusVariant(project.podStatus)}>{project.podStatus}</Badge></TableCell>
                   <TableCell className="max-w-[220px] truncate font-mono text-xs">{project.imageTag || "\u2014"}</TableCell>
                   <TableCell className="pr-6 text-right">
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`/projects/${project.id}`}>Manage</Link>
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <PipelineHelpTrigger projectId={project.id} variant="table"/>
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/projects/${project.id}`}>Manage</Link>
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>))}
               </TableBody>

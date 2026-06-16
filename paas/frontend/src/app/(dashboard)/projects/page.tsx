@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { projectApi } from "@/lib/api";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import type { Project } from "@/types";
 export default function ProjectsPage() {
     const queryClient = useQueryClient();
@@ -93,6 +94,7 @@ export default function ProjectsPage() {
                         <Button size="sm" variant="outline" asChild>
                           <Link href={`/monitoring/${p.id}`}>Monitoring</Link>
                         </Button>
+                        <PipelineHelpTrigger projectId={p.id} variant="table"/>
                         <Button size="sm" variant="outline" asChild>
                           <Link href={`/projects/${p.id}/edit`}>Edit</Link>
                         </Button>

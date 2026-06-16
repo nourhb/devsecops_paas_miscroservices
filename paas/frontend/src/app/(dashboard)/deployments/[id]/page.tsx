@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
@@ -35,6 +36,7 @@ export default function DeploymentDetailPage() {
     const query = useQuery({
         queryKey: ["deployment", deploymentId],
         queryFn: () => pipelineApi.getDeployment(deploymentId),
+        enabled: Boolean(deploymentId),
         refetchInterval: (q) => {
             const s = q.state.data?.status?.toUpperCase();
             return s === "PENDING" || s === "DEPLOYING" ? 4000 : false;
@@ -66,10 +68,18 @@ export default function DeploymentDetailPage() {
       </div>);
     }
     if (query.isError || !query.data) {
+        const errorMessage = query.isError
+            ? queryHttpMessage(query.error, "Could not load this deployment.")
+            : "Deployment not found.";
+        const notFound = query.isError && queryHttpMessage(query.error, "").toLowerCase().includes("not found");
         return (<Card className="border-danger/30">
         <CardHeader>
-          <CardTitle>Deployment not found</CardTitle>
-          <CardDescription>You may not have access, or the ID is invalid.</CardDescription>
+          <CardTitle>{notFound ? "Deployment not found" : "Could not open deployment"}</CardTitle>
+          <CardDescription>
+            {notFound
+                ? "You may not have access, or the ID is invalid."
+                : errorMessage}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Button variant="outline" asChild>
@@ -133,6 +143,7 @@ export default function DeploymentDetailPage() {
               {cancelMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<StopCircle className="mr-2 h-4 w-4"/>)}
               Cancel Jenkins run
             </Button>) : null}
+          <PipelineHelpTrigger projectId={d.projectId} variant="header" attention={isFailed}/>
         </div>
       </header>
 
@@ -172,20 +183,25 @@ export default function DeploymentDetailPage() {
 
       {isFailed ? (<Card className="border-danger/50 bg-danger/10">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-danger flex flex-wrap items-center gap-2">
-              Deployment failed
-            </CardTitle>
-            <CardDescription className="text-danger/90">
-              {d.failureReason ? (<>
-                  <span className="font-semibold text-foreground">
-                    {deploymentFailureStageLabel(d.failureReason)}
-                  </span>
-                  {d.failureMessage ? (<>
-                      {" \u2014 "}
-                      <span className="text-foreground/90">{d.failureMessage}</span>
-                    </>) : null}
-                </>) : d.failureMessage ? (<span className="text-foreground/90">{d.failureMessage}</span>) : ("See console output below for details.")}
-            </CardDescription>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base text-danger flex flex-wrap items-center gap-2">
+                  Deployment failed
+                </CardTitle>
+                <CardDescription className="text-danger/90">
+                  {d.failureReason ? (<>
+                      <span className="font-semibold text-foreground">
+                        {deploymentFailureStageLabel(d.failureReason)}
+                      </span>
+                      {d.failureMessage ? (<>
+                          {" \u2014 "}
+                          <span className="text-foreground/90">{d.failureMessage}</span>
+                        </>) : null}
+                    </>) : d.failureMessage ? (<span className="text-foreground/90">{d.failureMessage}</span>) : ("See console output below for details.")}
+                </CardDescription>
+              </div>
+              <PipelineHelpTrigger projectId={d.projectId} variant="inline" attention/>
+            </div>
           </CardHeader>
         </Card>) : null}
 

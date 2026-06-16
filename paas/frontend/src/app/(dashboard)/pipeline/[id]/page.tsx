@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-parse";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
@@ -125,6 +126,7 @@ export default function PipelinePage() {
             queryClient.invalidateQueries({ queryKey: ["status", projectId] });
             queryClient.invalidateQueries({ queryKey: ["project", projectId] });
             queryClient.invalidateQueries({ queryKey: ["jenkins-pipeline-stages", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["pipeline-help", projectId] });
             toast.success(data.message || "Build triggered");
         },
         onError: (e: unknown) => {
@@ -152,6 +154,7 @@ export default function PipelinePage() {
             queryClient.invalidateQueries({ queryKey: ["status", projectId] });
             queryClient.invalidateQueries({ queryKey: ["argocd", projectId] });
             queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+            queryClient.invalidateQueries({ queryKey: ["pipeline-help", projectId] });
             toast.success(data.message || "Deployment finished");
         },
         onError: (e: unknown) => {
@@ -274,7 +277,8 @@ export default function PipelinePage() {
             </p>) : null}
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <PipelineHelpTrigger projectId={projectId} variant="header" attention={deployFailed || !buildOk} onRebuild={() => deployMutation.mutate()} rebuildPending={deployMutation.isPending}/>
           <Badge variant={buildHeaderBadgeVariant(displayBuild)}>Build: {displayBuild}</Badge>
           <Badge variant={deployOk ? "success" : deployFailed ? "danger" : "outline"}>
             Deploy: {lastDs}

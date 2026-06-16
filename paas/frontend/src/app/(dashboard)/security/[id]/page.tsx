@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { projectApi, securityApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
 import type { SecurityIntegrationProbeStatus } from "@/types";
@@ -79,6 +80,7 @@ export default function SecurityPage() {
           <CardDescription>{errMsg}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2 text-sm">
+          <PipelineHelpTrigger projectId={projectId} variant="inline"/>
           <Button variant="outline" size="sm" onClick={() => securityQuery.refetch()}>
             Retry
           </Button>
@@ -93,13 +95,16 @@ export default function SecurityPage() {
     const buildCtx = data.buildContext;
     const deployFailed = (buildCtx?.deploymentStatus || "").toUpperCase() === "FAILED";
     return (<div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold">
           Security Overview: {displayName}
         </h2>
-        <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
-          Sonar Quality Gate: {data.qualityGateStatus}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <PipelineHelpTrigger projectId={projectId} variant="header" attention={deployFailed}/>
+          <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
+            Sonar Quality Gate: {data.qualityGateStatus}
+          </Badge>
+        </div>
       </div>
 
       {deployFailed ? (<Card className="border-danger/30 bg-danger/5">

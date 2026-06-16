@@ -1,6 +1,9 @@
+"use client";
 import { SideNav } from "@/components/layout/side-nav";
 import { TopNav } from "@/components/layout/top-nav";
+import { ProjectPipelineHelpDock } from "@/components/pipeline/project-pipeline-help-dock";
 import { TooltipProvider } from "@/components/ui/tooltip";
+
 export function AppShell({ children }: {
     children: React.ReactNode;
 }) {
@@ -11,6 +14,7 @@ export function AppShell({ children }: {
           <TopNav />
           <main className="p-4 lg:p-6">{children}</main>
         </div>
+        <ProjectPipelineHelpDock />
       </div>
     </TooltipProvider>);
 }

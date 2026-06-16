@@ -196,36 +196,49 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
     if (!meta) {
         return;
     }
+    const console = (await jenkinsClient.getBuildConsoleText(projectName, projectId, buildNum, "deploy")) ?? deployment.logs ?? "";
+    const logTail = console.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
     if (!terminalBuild(meta)) {
         await prisma.deployment.update({
             where: { id: deploymentId },
             data: {
                 status: DeploymentJobStatus.DEPLOYING,
                 jenkinsBuildNumber: buildNum,
+                logs: logTail,
                 ...clearDeploymentFailureFields()
             }
         });
         await updateProject(projectId, {
             lastDeploymentStatus: "DEPLOYING",
-            buildStatus: "BUILDING"
+            buildStatus: "BUILDING",
+            deploymentLogs: logTail
         });
         monitorDeployment(deploymentId, buildNum);
         return;
     }
-    const console = (await jenkinsClient.getBuildConsoleText(projectName, projectId, buildNum, "deploy")) ?? deployment.logs ?? "";
-    const logTail = console.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
     if (meta.result === "SUCCESS") {
-        try {
-            await promoteDeploymentAfterJenkinsSuccess(deploymentId, projectId, projectName, buildNum, logTail);
-        }
-        catch (error) {
+        await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: {
+                status: DeploymentJobStatus.DEPLOYING,
+                jenkinsBuildNumber: buildNum,
+                logs: logTail,
+                ...clearDeploymentFailureFields()
+            }
+        });
+        await updateProject(projectId, {
+            lastDeploymentStatus: "PROMOTING",
+            buildStatus: "SUCCESS",
+            deploymentLogs: logTail
+        });
+        void promoteDeploymentAfterJenkinsSuccess(deploymentId, projectId, projectName, buildNum, logTail).catch(async (error) => {
             const msg = error instanceof Error ? error.message : String(error);
             await recordDeploymentFailure(deploymentId, projectId, {
                 reason: DeploymentFailureReason.UNKNOWN,
                 message: `[reconcile] Post-build promotion failed: ${msg}`,
                 logs: `${logTail}\n\n[reconcile] ${msg}`.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS)
             });
-        }
+        });
         return;
     }
     const msg = jenkinsResultUserMessage(meta.result, logTail);
