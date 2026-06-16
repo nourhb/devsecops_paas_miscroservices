@@ -10,6 +10,8 @@ usage() {
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"
   echo "  health    Quick health check"
+  echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
+  echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
@@ -30,6 +32,10 @@ case "$cmd" in
     bash "$LIB/lab-paas-db-repair.sh" ;;
   health|check)
     bash "$LIB/check-paas-lab-health.sh" ;;
+  prometheus|prom)
+    bash "$LIB/lab-prometheus-recover.sh" ;;
+  probe-prometheus)
+    bash "$LIB/probe-prometheus-lab.sh" ;;
   env)
     bash "$LIB/sync-cosign-public-key-env.sh" || true
     bash "$LIB/compose-paas-frontend-env.sh"

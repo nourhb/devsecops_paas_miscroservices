@@ -81,7 +81,11 @@ kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$
   }
 }
 PATCH
-)"
+)" || true
+if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.serviceAccountName}' 2>/dev/null | grep -qx paas-frontend; then
+  echo "==> Force serviceAccountName=paas-frontend on deployment/${DEPLOY_NAME}"
+  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
+fi
 REPLICAS="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
 if [[ "${PAAS_SKIP_ROLLOUT:-}" == "1" ]] || [[ "${REPLICAS}" -eq 0 ]]; then
   echo "==> Skip rollout (replicas=${REPLICAS}); pod will pick up env on next start"
