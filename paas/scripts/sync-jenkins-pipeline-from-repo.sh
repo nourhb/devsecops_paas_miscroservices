@@ -35,4 +35,10 @@ bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh" || true
 if command -v kubectl >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" 2>/dev/null || true
 fi
+echo "==> Rebuild PaaS frontend image (TypeScript promote/artifact fixes require docker build, not rollout restart)"
+if [[ "${SKIP_FRONTEND_REBUILD:-false}" != "true" ]] && [[ -f "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" ]]; then
+  bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" || echo "WARN: frontend rebuild failed — run: bash paas/scripts/rebuild-paas-frontend-lab.sh"
+else
+  echo "WARN: skipped frontend rebuild (set SKIP_FRONTEND_REBUILD=false to enable)"
+fi
 echo "OK: Jenkins job updated."

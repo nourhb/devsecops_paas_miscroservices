@@ -8,7 +8,7 @@ usage() {
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  health    Quick health check"
   echo "  env       Sync docker-compose.env to the frontend pod"
-  echo "  jenkins   Sync Jenkinsfile to the paas-deploy job"
+  echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
   echo "  heal      Patch GitOps values + Argo sync + rollout"
