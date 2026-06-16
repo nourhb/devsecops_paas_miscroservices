@@ -9,7 +9,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { projectApi, securityApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
 import type { SecurityIntegrationProbeStatus } from "@/types";
@@ -80,7 +79,6 @@ export default function SecurityPage() {
           <CardDescription>{errMsg}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2 text-sm">
-          <PipelineHelpTrigger projectId={projectId} variant="inline"/>
           <Button variant="outline" size="sm" onClick={() => securityQuery.refetch()}>
             Retry
           </Button>
@@ -100,7 +98,6 @@ export default function SecurityPage() {
           Security Overview: {displayName}
         </h2>
         <div className="flex flex-wrap items-center gap-2">
-          <PipelineHelpTrigger projectId={projectId} variant="header" attention={deployFailed}/>
           <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
             Sonar Quality Gate: {data.qualityGateStatus}
           </Badge>

@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dockerApi, projectApi } from "@/lib/api";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import type { ContainerImageRecord } from "@/types";
 export default function DockerPage() {
     const params = useParams<{
@@ -54,7 +53,6 @@ export default function DockerPage() {
             </p>) : projectQuery.isLoading ? (<Skeleton className="mt-2 h-4 w-48"/>) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <PipelineHelpTrigger projectId={projectId} variant="header"/>
           <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
             {buildMutation.isPending ? "Building\u2026" : "Build image"}
           </Button>

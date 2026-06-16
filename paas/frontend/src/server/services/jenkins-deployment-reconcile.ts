@@ -5,7 +5,7 @@ import { env } from "@/server/config/env";
 import { parseBuildMetadata } from "@/server/build-metadata";
 import { getBuildBackend } from "@/server/build-backend";
 import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
-import { promoteDeploymentAfterJenkinsSuccess } from "@/server/services/cluster-deploy-service";
+import { promoteDeploymentAfterJenkinsSuccess, tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
@@ -230,6 +230,9 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
             buildStatus: "SUCCESS",
             deploymentLogs: logTail
         });
+        if (await tryCompleteDeploymentIfLive(deploymentId)) {
+            return;
+        }
         void promoteDeploymentAfterJenkinsSuccess(deploymentId, projectId, projectName, buildNum, logTail).catch(async (error) => {
             const msg = error instanceof Error ? error.message : String(error);
             await recordDeploymentFailure(deploymentId, projectId, {

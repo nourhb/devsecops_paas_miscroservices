@@ -9,6 +9,7 @@ usage() {
   echo "  health    Quick health check"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
+  echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
   echo "  heal      Patch GitOps values + Argo sync + rollout"
@@ -26,6 +27,8 @@ case "$cmd" in
     bash "$DIR/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
     bash "$DIR/sync-jenkins-pipeline-from-repo.sh" ;;
+  frontend)
+    bash "$DIR/rebuild-paas-frontend-lab.sh" ;;
   repair)
     bash "$DIR/repair-gitops-app-lab.sh" "${2:?usage: lab.sh repair <project-slug> [tag]}" "${3:-655}" ;;
   fix-gitops)

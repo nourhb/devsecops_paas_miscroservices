@@ -10,7 +10,6 @@ GITOPS="${GITOPS:-${HOME}/gitops}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_HOST="harbor.${NODE_IP}.nip.io"
 HARBOR_PORT="${HARBOR_NODEPORT:-30002}"
-# Kubelet/containerd must pull via IP:port (HTTP). nip.io host triggers HTTPS pull errors on lab Harbor.
 HARBOR_PULL_REGISTRY="${NODE_IP}:${HARBOR_PORT}"
 ARGOCD_APP_PREFIX="${ARGOCD_APP_PREFIX:-paas}"
 VALUES="${GITOPS}/apps/${PROJECT_NAME}/values.yaml"
@@ -18,7 +17,6 @@ NS="${PROJECT_NAME}"
 APP="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
 IMAGE="${HARBOR_PULL_REGISTRY}/paas/${PROJECT_NAME}:${TAG}"
 URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
-# shellcheck source=gitops-lab-lib.sh
 source "${SCRIPT_DIR}/gitops-lab-lib.sh"
 argo_sync_app_kubectl() {
   local app="$1"
@@ -344,7 +342,6 @@ from pathlib import Path
 import yaml
 path, tag, node_ip, name, port, harbor_port = sys.argv[1:7]
 port = int(port)
-# Cluster pulls use IP:port (HTTP Harbor). Jenkins/cosign use harbor.<ip>.nip.io separately.
 repo = f"{node_ip}:{harbor_port}/paas/{name}"
 
 def pull_repo(r: str) -> str:

@@ -14,7 +14,7 @@ import { resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { buildEnvJenkinsTriggerLog } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
-import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
+import { promoteDeploymentAfterBuildSuccess, tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { extractJenkinsRunFromLogs } from "@/server/services/jenkins-deployment-reconcile";
 function jenkinsConfigured(): boolean {
@@ -345,6 +345,9 @@ export class JenkinsBuildBackend implements BuildBackend {
                             return;
                         }
                         try {
+                            if (await tryCompleteDeploymentIfLive(args.deploymentId)) {
+                                return;
+                            }
                             await promoteDeploymentAfterBuildSuccess(args.deploymentId, projectId, projectName, {
                                 provider: this.provider,
                                 runId: String(activeBuildNum),

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
 import { useProjectIdFromRoute } from "@/hooks/use-project-id-from-route";
 import { useAuth } from "@/hooks/use-auth";
 export function TopNav() {
@@ -23,7 +23,7 @@ export function TopNav() {
         </p>
       </div>
       <div className="flex items-center gap-2">
-        {projectId ? <PipelineHelpTrigger projectId={projectId} variant="header" attention className="border-primary/40 bg-primary/10 text-foreground hover:bg-primary/20"/> : null}
+        {projectId ? <PipelineHelpTrigger projectId={projectId} variant="header" className="border-primary/40 bg-primary/10 text-foreground hover:bg-primary/20"/> : null}
         <Button variant="outline" size="sm" className="lg:hidden" asChild>
           <Link href="/integrations">
             <LayoutGrid className="h-4 w-4"/>

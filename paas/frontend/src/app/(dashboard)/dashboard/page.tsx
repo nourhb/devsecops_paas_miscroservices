@@ -5,7 +5,7 @@ import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, 
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Shared GitOps lab helpers (source from other scripts; do not execute directly).
 gitops_abort_rebase() {
   local repo="${1:?repo path}"
   [[ -d "${repo}/.git" ]] || return 0
@@ -64,7 +63,6 @@ gitops_push_main() {
   popd >/dev/null
 }
 
-# Drop local commits/conflicts and match origin/main (lab repair always rewrites apps/<slug>).
 gitops_reset_to_origin_main() {
   local repo="${1:?repo path}"
   local branch="${2:-main}"

@@ -18,7 +18,6 @@ resolve_image_repo() {
     printf '%s\n' "${IMAGE%:*}"
     return
   fi
-  # Valid refs look like host:port/path/name:tag — keep host:port/path/name.
   if [[ "${current}" == */* ]]; then
     printf '%s\n' "${current%:*}"
     return

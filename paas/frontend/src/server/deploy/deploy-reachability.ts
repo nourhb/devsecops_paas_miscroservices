@@ -61,6 +61,32 @@ async function probeSingleUrl(url: string, perAttemptMs: number): Promise<{
     return { ok: false, statusCode: lastStatus, error: lastError };
 }
 
+export async function probeAppUrlLiveQuick(url: string): Promise<{
+    reachable: boolean;
+    statusCode: number | null;
+}> {
+    const trimmed = url.trim();
+    if (!trimmed) {
+        return { reachable: false, statusCode: null };
+    }
+    const ms = env.APPS_REACHABILITY_TIMEOUT_MS;
+    for (const method of ["HEAD", "GET"] as const) {
+        try {
+            const response = await fetch(trimmed, {
+                method,
+                redirect: "follow",
+                signal: AbortSignal.timeout(ms)
+            });
+            if (response.status >= 200 && response.status < 400) {
+                return { reachable: true, statusCode: response.status };
+            }
+        }
+        catch {
+        }
+    }
+    return { reachable: false, statusCode: null };
+}
+
 export async function probeAppUrlReachability(url: string, options?: {
     timeoutMs?: number;
     maxAttempts?: number;
