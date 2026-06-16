@@ -12,6 +12,7 @@ import { assertProjectAccess, getProjectById, updateProject } from "@/server/pro
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { reconcileJenkinsDeploymentRecord } from "@/server/services/jenkins-deployment-reconcile";
+import { tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
 import { effectiveMaxConcurrentJenkinsDeploys, jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import type { ActionResponse, RecentDeploymentListItem, UserRole } from "@/types";
 function effectiveTriggerUserId(jwtUserId: string): string | null {
@@ -316,6 +317,7 @@ export async function getDeploymentForUser(deploymentId: string, userId: string,
     await assertProjectAccess(row.projectId, userId, role, { includeDeleted: true });
     if (row.status === DeploymentJobStatus.PENDING || row.status === DeploymentJobStatus.DEPLOYING) {
         await reconcileJenkinsDeploymentRecord(deploymentId);
+        await tryCompleteDeploymentIfLive(deploymentId);
     }
     const fresh = await prisma.deployment.findUnique({
         where: { id: deploymentId },

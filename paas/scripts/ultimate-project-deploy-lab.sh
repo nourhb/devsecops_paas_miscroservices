@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One-shot lab deploy: Kyverno HTTP Harbor + GitOps chart + cluster rollout (uses GITOPS_REPO_TOKEN for push).
 set -euo pipefail
 PROJECT_NAME="${1:?usage: ultimate-project-deploy-lab.sh <project-slug> <jenkins-build> [port]}"
 TAG="${2:?usage: ultimate-project-deploy-lab.sh <project-slug> <jenkins-build> [port]}"

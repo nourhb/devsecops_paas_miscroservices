@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
+import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help-provider";
 import { deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
@@ -187,6 +187,7 @@ export default function ProjectDetailsPage() {
             });
         }
     });
+    usePipelineHelpRebuild(() => deployMutation.mutate(), deployMutation.isPending);
     const rollbackMutation = useMutation({
         mutationFn: () => pipelineApi.rollback(projectId),
         onSuccess: (data) => {
@@ -320,7 +321,6 @@ export default function ProjectDetailsPage() {
         </div>
 
         <div className="flex flex-wrap items-start gap-2 xl:justify-end">
-          <PipelineHelpTrigger projectId={projectId} variant="header" attention={deployLabel.toUpperCase().includes("FAIL") || buildLabel.toUpperCase().includes("FAIL")} onRebuild={() => deployMutation.mutate()} rebuildPending={deployMutation.isPending}/>
           <Badge className="h-9 max-w-full justify-center px-3 py-1.5" variant={statusBadgeVariant(lastDs, [
             "SUCCESS",
             "DEPLOYED"

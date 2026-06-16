@@ -351,6 +351,7 @@ function sleep(ms: number): Promise<void> {
 export async function waitForArgoApplicationReady(projectName: string, options?: {
     timeoutMs?: number;
     pollMs?: number;
+    earlyExit?: () => Promise<boolean>;
 }): Promise<{
     logs: string;
     ready: boolean;
@@ -360,6 +361,10 @@ export async function waitForArgoApplicationReady(projectName: string, options?:
     const deadline = Date.now() + timeoutMs;
     const lines: string[] = [];
     while (Date.now() < deadline) {
+        if (options?.earlyExit && await options.earlyExit()) {
+            lines.push("[argocd] Stopped waiting — application URL is already reachable");
+            return { logs: lines.join("\n"), ready: true };
+        }
         const status = await getArgoApplicationStatus(projectName);
         const health = String(status.health || "").toLowerCase();
         const sync = String(status.syncStatus || "").toLowerCase();

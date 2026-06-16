@@ -114,7 +114,6 @@ async function resolveLogs(projectId: string, projectName: string): Promise<{
             }
         }
         catch {
-            // keep stored logs
         }
     }
     const deploymentFailed = recent?.status === "FAILED";

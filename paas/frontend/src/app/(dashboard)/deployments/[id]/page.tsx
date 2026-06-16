@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
 import { pipelineApi, projectApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
@@ -39,7 +38,7 @@ export default function DeploymentDetailPage() {
         enabled: Boolean(deploymentId),
         refetchInterval: (q) => {
             const s = q.state.data?.status?.toUpperCase();
-            return s === "PENDING" || s === "DEPLOYING" ? 4000 : false;
+            return s === "PENDING" || s === "DEPLOYING" ? 3000 : false;
         }
     });
     const cancelMutation = useMutation({
@@ -58,7 +57,10 @@ export default function DeploymentDetailPage() {
         queryKey: ["app-reachability", query.data?.projectId],
         queryFn: () => projectApi.getAppReachability(query.data!.projectId),
         enabled: Boolean(query.data?.url && query.data?.projectId) && !shouldSkipAppReachabilityProbe(query.data?.url),
-        refetchInterval: 15000
+        refetchInterval: () => {
+            const deployBusy = query.data?.status?.toUpperCase();
+            return deployBusy === "PENDING" || deployBusy === "DEPLOYING" ? 3000 : 15000;
+        }
     });
     if (query.isLoading) {
         return (<div className="space-y-6">
@@ -99,6 +101,7 @@ export default function DeploymentDetailPage() {
     const isPending = statusU === "PENDING";
     const canCancelJenkins = (isPending || isDeploying) && (!d.buildProvider || d.buildProvider === "jenkins");
     const isFailed = statusU === "FAILED";
+    const appAlreadyLive = Boolean(reachQuery.data?.reachable) && (isDeploying || isPending);
     return (<div className="space-y-8">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-muted">
         <Link href="/projects" className="hover:text-foreground">
@@ -143,7 +146,6 @@ export default function DeploymentDetailPage() {
               {cancelMutation.isPending ? (<Loader2 className="mr-2 h-4 w-4 animate-spin"/>) : (<StopCircle className="mr-2 h-4 w-4"/>)}
               Cancel Jenkins run
             </Button>) : null}
-          <PipelineHelpTrigger projectId={d.projectId} variant="header" attention={isFailed}/>
         </div>
       </header>
 
@@ -169,14 +171,16 @@ export default function DeploymentDetailPage() {
           </CardContent>
         </Card>) : null}
 
-      {isDeploying ? (<Card className="border-warning/40 bg-warning/10">
+      {isDeploying ? (<Card className={appAlreadyLive ? "border-success/40 bg-success/10" : "border-warning/40 bg-warning/10"}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-warning flex flex-wrap items-center gap-2">
+            <CardTitle className={`text-base flex flex-wrap items-center gap-2 ${appAlreadyLive ? "text-success" : "text-warning"}`}>
               <Loader2 className="h-4 w-4 animate-spin"/>
-              Publishing to cluster
+              {appAlreadyLive ? "App is live — confirming deploy status" : "Publishing to cluster"}
             </CardTitle>
             <CardDescription className="text-foreground/90">
-              Jenkins may already show SUCCESS — this page stays on DEPLOYING until GitOps, Argo CD, and the live URL check finish.
+              {appAlreadyLive
+                ? "Jenkins finished and your URL already responds. This should flip to DEPLOYED in a few seconds."
+                : "Jenkins may already show SUCCESS — PaaS is syncing GitOps and Argo CD before marking the deployment complete."}
             </CardDescription>
           </CardHeader>
         </Card>) : null}
@@ -200,7 +204,6 @@ export default function DeploymentDetailPage() {
                     </>) : d.failureMessage ? (<span className="text-foreground/90">{d.failureMessage}</span>) : ("See console output below for details.")}
                 </CardDescription>
               </div>
-              <PipelineHelpTrigger projectId={d.projectId} variant="inline" attention/>
             </div>
           </CardHeader>
         </Card>) : null}

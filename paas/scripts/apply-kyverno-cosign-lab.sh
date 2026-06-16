@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Lab Kyverno cosign policy: HTTP Harbor creds + public key from env.
-# Enforce mode ONLY when shell exports COSIGN_LAB_ENFORCE_SIGNED=true (not docker-compose COSIGN_ENFORCE_SIGNED).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -14,7 +12,6 @@ HARBOR_REGISTRY="${HARBOR_HOST}:${HARBOR_NODEPORT}"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-Harbor12345}"
 KYVERNO_NS="${KYVERNO_NS:-kyverno}"
-# Shell env only — default Audit so PaaS deploys are never blocked in lab unless explicitly opted in.
 LAB_ENFORCE="${COSIGN_LAB_ENFORCE_SIGNED:-false}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -47,7 +44,6 @@ enforce = lab_enforce.strip().lower() in ("true", "1", "yes")
 policy = yaml.safe_load(Path(src_path).read_text(encoding="utf-8"))
 policy["spec"]["validationFailureAction"] = "Enforce" if enforce else "Audit"
 verify = policy["spec"]["rules"][0]["verifyImages"][0]
-# Kyverno rejects Audit + mutateDigest:true (admission webhook validate-policy).
 verify["mutateDigest"] = True if enforce else False
 verify["imageRegistryCredentials"] = {
     "allowInsecureRegistry": True,
@@ -66,7 +62,6 @@ PY
 )"
 
 apply_cluster_policy() {
-  # Strategic merge apply can leave mutateDigest:true when switching Enforce→Audit.
   if kubectl get clusterpolicy require-signed-images >/dev/null 2>&1; then
     kubectl replace -f "${POLICY_OUT}" --force
   else
@@ -83,7 +78,6 @@ patch_lab_kyverno_mode() {
   ]"
 }
 
-# Enforce→Audit fails apply while mutateDigest stays true — patch live policy first.
 if [[ "${ACTION}" == "Audit" ]] && kubectl get clusterpolicy require-signed-images >/dev/null 2>&1; then
   CURRENT_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || true)"
   CURRENT_MD="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.rules[0].verifyImages[0].mutateDigest}' 2>/dev/null || true)"

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Copy cosign .sig artifact IP -> harbor.<nip>.nip.io (Kyverno verifies nip.io ref).
 set -euo pipefail
 PROJECT_SLUG="${1:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"
 IMAGE_TAG="${2:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"
@@ -33,7 +32,6 @@ jenkins_pod() {
     | grep -i jenkins | grep -v Terminating | head -1 || true
 }
 
-# Quoted heredoc — host must not expand remote shell variables (set -u false-OK bug).
 jenkins_remote_script() {
   cat <<'EOS'
 set -e

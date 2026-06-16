@@ -13,7 +13,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { argocdApi, kubernetesApi, monitoringApi, pipelineApi } from "@/lib/api";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import type { MonitoringKubernetesPod } from "@/types";
 import { cn } from "@/lib/utils";
 const chartCpu = "#0ea5e9";
@@ -167,7 +166,6 @@ export default function MonitoringPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <PipelineHelpTrigger projectId={projectId} variant="header"/>
           {snapshotQuery.isFetching && snapshotQuery.data ? (<span className="flex items-center gap-1 text-xs text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin"/>
               Refreshing

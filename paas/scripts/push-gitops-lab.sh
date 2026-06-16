@@ -7,7 +7,6 @@ GITOPS="${GITOPS:-${HOME}/gitops}"
 BRANCH="${GITOPS_BRANCH:-main}"
 REMOTE_HOST="${GITOPS_REMOTE_HOST:-github.com/nourhb/gitops.git}"
 COMMIT_MSG="${1:-}"
-# shellcheck source=gitops-lab-lib.sh
 source "${SCRIPT_DIR}/gitops-lab-lib.sh"
 [[ -d "${GITOPS}/.git" ]] || {
   echo "ERROR: clone first: git clone https://${REMOTE_HOST} ${GITOPS}" >&2

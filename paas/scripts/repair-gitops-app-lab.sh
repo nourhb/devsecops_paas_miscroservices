@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Repair a GitOps Helm app directory (fixes "roll dice app" invalid K8s names from old bootstrap).
 set -euo pipefail
 PROJECT_SLUG="${1:?usage: repair-gitops-app-lab.sh <project-slug e.g. roll-dice-app> [image-tag]}"
 IMAGE_TAG="${2:-655}"
@@ -19,7 +18,6 @@ IMAGE="${HARBOR_HOST}:${HARBOR_PORT}/paas/${PROJECT_SLUG}:${IMAGE_TAG}"
 [[ -d "${GITOPS}/.git" ]] || { echo "ERROR: clone gitops to ${GITOPS}" >&2; exit 1; }
 [[ -d "${REF_CHART}" ]] || { echo "ERROR: missing reference chart ${REF_CHART}" >&2; exit 1; }
 
-# shellcheck source=gitops-lab-lib.sh
 source "${SCRIPT_DIR}/gitops-lab-lib.sh"
 AUTH_URL=""
 if [[ -f "${REPO_ROOT}/paas/frontend/docker-compose.env" ]]; then

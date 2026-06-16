@@ -7,7 +7,7 @@ import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
 import { buildMetadataLines, formatArtifactReference } from "@/server/build-metadata";
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
-import { probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
+import { probeAppUrlLiveQuick, probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
 import {
     blueGreenDeploymentNameCandidates,
@@ -48,11 +48,83 @@ function blueGreenDeployEnabled(): boolean {
     return resolveDeploymentStrategy(null) === "BlueGreen";
 }
 
+interface FastCompleteParams {
+    deploymentId: string;
+    projectId: string;
+    projectName: string;
+    destNamespace: string;
+    artifactRef: string;
+    sections: string[];
+}
+
+async function tryFastCompleteDeployment(params: FastCompleteParams): Promise<boolean> {
+    if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+        return false;
+    }
+    const appUrl = buildAppPublicUrl(params.projectName);
+    let reachability = await probeAppUrlLiveQuick(appUrl);
+    if (!reachability.reachable) {
+        reachability = await probeAppUrlReachability(appUrl, {
+            maxAttempts: 2,
+            delayMs: 1000,
+            namespace: params.destNamespace,
+            projectName: params.projectName
+        });
+    }
+    if (!reachability.reachable) {
+        return false;
+    }
+    const viaNote = "via" in reachability && reachability.via === "in_cluster" ? " (in-cluster probe)" : "";
+    params.sections.push(`[deploy] Fast complete: ${appUrl} HTTP ${reachability.statusCode ?? "?"}${viaNote}`);
+    params.sections.push(`PAAS_DEPLOY_VERIFY step=url status=OK detail=${appUrl} HTTP ${reachability.statusCode ?? "?"} (fast-path)`);
+    const okLog = tail(params.sections.join("\n"));
+    await prismaDeploymentUpdate(params.deploymentId, {
+        status: DeploymentJobStatus.DEPLOYED,
+        logs: okLog,
+        url: appUrl,
+        ...clearDeploymentFailureFields()
+    });
+    await updateProject(params.projectId, {
+        lastDeploymentStatus: "DEPLOYED",
+        buildStatus: "READY",
+        deploymentLogs: okLog,
+        imageTag: params.artifactRef,
+        url: appUrl
+    });
+    return true;
+}
+
+export async function tryCompleteDeploymentIfLive(deploymentId: string): Promise<boolean> {
+    if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+        return false;
+    }
+    const row = await prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        include: { project: true }
+    });
+    if (!row || row.status !== DeploymentJobStatus.DEPLOYING) {
+        return false;
+    }
+    const { projectName, id: projectId, namespace } = row.project;
+    const destNamespace = namespace?.trim() || projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const artifactRef = row.project.imageTag?.trim() || `${buildDeployImageRepository(projectName)}:${row.jenkinsBuildNumber ?? "latest"}`;
+    const sections = [(row.logs ?? "").trim(), "", "[deploy] Live URL detected while status=DEPLOYING — completing early"].filter(Boolean);
+    return tryFastCompleteDeployment({
+        deploymentId,
+        projectId,
+        projectName,
+        destNamespace,
+        artifactRef,
+        sections
+    });
+}
+
 async function appendArgoSyncAndWait(
     sections: string[],
     projectName: string,
-    destNamespace: string
-): Promise<{ argoSyncOk: boolean; shouldAbort: boolean }> {
+    destNamespace: string,
+    fastComplete?: FastCompleteParams
+): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; fastCompleted?: boolean }> {
     let argoSyncOk = false;
     try {
         const argo = await syncArgoApplication(projectName, destNamespace);
@@ -79,7 +151,15 @@ async function appendArgoSyncAndWait(
         }
     }
     if (argoSyncOk || env.PAAS_STRICT_INTEGRATIONS !== "true") {
-        const argoWait = await waitForArgoApplicationReady(projectName, { timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS });
+        if (fastComplete && await tryFastCompleteDeployment(fastComplete)) {
+            return { argoSyncOk, shouldAbort: false, fastCompleted: true };
+        }
+        const argoWait = await waitForArgoApplicationReady(projectName, {
+            timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS,
+            earlyExit: fastComplete
+                ? async () => tryFastCompleteDeployment(fastComplete)
+                : undefined
+        });
         sections.push(argoWait.logs);
         if (argoWait.ready) {
             sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK detail=Healthy+Synced");
@@ -137,8 +217,9 @@ async function runRollingGitOpsPromote(
     artifactRef: string,
     gitopsOptions: { buildProfile: import("@/server/build-planner").BuildProfile; buildEnv: Record<string, string> | null },
     containerPort: number,
-    label: string
-): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; workloadReady: boolean }> {
+    label: string,
+    fastComplete?: FastCompleteParams
+): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; workloadReady: boolean; fastCompleted?: boolean }> {
     sections.push(`[deploy] strategy=Rolling${label ? ` ${label}` : ""}`);
     const git = await commitHelmValuesGitHub(projectName, artifactRef, {
         ...gitopsOptions,
@@ -147,7 +228,13 @@ async function runRollingGitOpsPromote(
     sections.push(`[gitops] rolling committed ${git.ref}`);
     sections.push(`PAAS_DEPLOY_VERIFY step=gitops_rolling status=OK detail=${git.ref}`);
     sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-    const argo = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+    if (fastComplete && await tryFastCompleteDeployment(fastComplete)) {
+        return { argoSyncOk: true, shouldAbort: false, workloadReady: true, fastCompleted: true };
+    }
+    const argo = await appendArgoSyncAndWait(sections, projectName, destNamespace, fastComplete);
+    if (argo.fastCompleted) {
+        return { argoSyncOk: argo.argoSyncOk, shouldAbort: false, workloadReady: true, fastCompleted: true };
+    }
     if (argo.shouldAbort) {
         return { argoSyncOk: argo.argoSyncOk, shouldAbort: true, workloadReady: false };
     }
@@ -322,6 +409,17 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
         buildProfile: deployProfile.profile,
         buildEnv: augmentBuildEnvForPipeline(projectName, resolveBuildEnvFromStorage(projectRow?.buildEnv))
     };
+    const fastComplete: FastCompleteParams = {
+        deploymentId,
+        projectId,
+        projectName,
+        destNamespace,
+        artifactRef,
+        sections
+    };
+    if (await tryFastCompleteDeployment(fastComplete)) {
+        return;
+    }
     const blueGreen = blueGreenDeployEnabled();
     let argoSyncOk = false;
     let workloadReady = false;
@@ -335,7 +433,10 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
             sections.push(`[gitops] inactive slot committed ${gitInactive.ref}`);
             sections.push(`PAAS_DEPLOY_VERIFY step=gitops_inactive status=OK detail=${gitInactive.ref}`);
             sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-            const argoInactive = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+            const argoInactive = await appendArgoSyncAndWait(sections, projectName, destNamespace, fastComplete);
+            if (argoInactive.fastCompleted) {
+                return;
+            }
             if (argoInactive.shouldAbort) {
                 await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green inactive deploy.");
                 return;
@@ -356,8 +457,12 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
                     artifactRef,
                     gitopsOptions,
                     deployProfile.containerPort,
-                    "(fallback after BlueGreen failure)"
+                    "(fallback after BlueGreen failure)",
+                    fastComplete
                 );
+                if (rolling.fastCompleted) {
+                    return;
+                }
                 argoSyncOk = rolling.argoSyncOk;
                 workloadReady = rolling.workloadReady;
                 if (rolling.shouldAbort) {
@@ -376,7 +481,10 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
                 sections.push(`[gitops] traffic switch committed ${gitFlip.ref} active=${gitFlip.blueGreen?.activeSlot ?? "?"}`);
                 sections.push(`PAAS_DEPLOY_VERIFY step=gitops_flip status=OK detail=${gitFlip.ref}`);
                 sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
-                const argoFlip = await appendArgoSyncAndWait(sections, projectName, destNamespace);
+                const argoFlip = await appendArgoSyncAndWait(sections, projectName, destNamespace, fastComplete);
+                if (argoFlip.fastCompleted) {
+                    return;
+                }
                 if (argoFlip.shouldAbort) {
                     await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD sync failed during blue-green traffic switch.");
                     return;
@@ -392,8 +500,12 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
                 artifactRef,
                 gitopsOptions,
                 deployProfile.containerPort,
-                ""
+                "",
+                fastComplete
             );
+            if (rolling.fastCompleted) {
+                return;
+            }
             if (rolling.shouldAbort) {
                 await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, "Argo CD application did not become Healthy and Synced in time.");
                 return;

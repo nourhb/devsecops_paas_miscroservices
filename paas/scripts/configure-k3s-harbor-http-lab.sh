@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Configure k3s/containerd to pull Harbor over HTTP (lab). Run on control-plane; restarts k3s agents.
 set -euo pipefail
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_PORT="${HARBOR_NODEPORT:-30002}"
