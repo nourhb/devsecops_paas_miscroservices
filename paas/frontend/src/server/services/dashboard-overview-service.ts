@@ -126,8 +126,8 @@ const emptySeverity: SeverityBreakdown = {
     medium: 0,
     low: 0
 };
-const SECURITY_SAMPLE_LIMIT = 10;
-const SECURITY_METRICS_BUDGET_MS = 12_000;
+const SECURITY_SAMPLE_LIMIT = 8;
+const SECURITY_METRICS_BUDGET_MS = 22_000;
 const dashboardOverviewCache = new TtlCache<DashboardOverview>(25_000);
 
 function sleep(ms: number): Promise<void> {

@@ -21,6 +21,29 @@ function argocdNamespace(): string {
     return (process.env.ARGOCD_NAMESPACE || "argocd").trim() || "argocd";
 }
 
+function inferArgoHealth(status?: {
+    health?: { status?: string; message?: string };
+    sync?: { status?: string };
+    resources?: Array<{ health?: { status?: string } }>;
+}): string {
+    const explicit = status?.health?.status?.trim();
+    if (explicit && explicit !== "Unknown") {
+        return explicit;
+    }
+    const sync = status?.sync?.status?.trim();
+    if (sync === "Synced") {
+        const resources = status?.resources ?? [];
+        if (resources.length === 0 || resources.every((r) => (r.health?.status || "Healthy") === "Healthy")) {
+            return "Healthy";
+        }
+    }
+    const message = status?.health?.message?.toLowerCase() ?? "";
+    if (message.includes("successfully synced")) {
+        return "Healthy";
+    }
+    return explicit || "Unknown";
+}
+
 async function patchArgoApplication(appName: string, body: Record<string, unknown>): Promise<void> {
     const api = getCustomObjectsApi();
     if (!api) {
@@ -66,13 +89,14 @@ export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
             ) => Promise<unknown>;
         }).getNamespacedCustomObject("argoproj.io", "v1alpha1", namespace, "applications", appName)) as {
             status?: {
-                health?: { status?: string };
+                health?: { status?: string; message?: string };
                 sync?: { status?: string };
+                resources?: Array<{ health?: { status?: string } }>;
             };
         };
         return {
             ok: true,
-            health: body.status?.health?.status ?? "Unknown",
+            health: inferArgoHealth(body.status),
             syncStatus: body.status?.sync?.status ?? "Unknown",
             logs: `[argocd-k8s] Read Application "${appName}" status from namespace ${namespace}.`
         };
