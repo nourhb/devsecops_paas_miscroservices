@@ -2197,20 +2197,27 @@ export class DockerHubClient {
 const PROM_DEFAULT_CPU_QUERY = "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))";
 const PROM_DEFAULT_MEMORY_QUERY = "100 * (1 - (avg(node_memory_MemAvailable_bytes) / avg(node_memory_MemTotal_bytes)))";
 function prometheusBaseUrls(): string[] {
+    const nodeIp = process.env.NODE_IP?.trim() || process.env.LAB_NODE_IP?.trim();
     const candidates = [
         "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+        "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
+        "http://prometheus-service.monitoring.svc.cluster.local:9090",
         "http://prometheus-operated.monitoring.svc.cluster.local:9090",
-        "http://prometheus-k8s.monitoring.svc.cluster.local:9090",
         env.PROMETHEUS_PROBE_URL?.trim(),
-        env.PROMETHEUS_BASE_URL?.trim()
+        env.PROMETHEUS_BASE_URL?.trim(),
+        nodeIp ? `http://${nodeIp}:30536` : "",
+        nodeIp ? `http://${nodeIp}:30083` : ""
     ].filter((value): value is string => Boolean(value));
     return [...new Set(candidates.map((value) => value.replace(/\/$/, "")))];
 }
 function prometheusFetchOptions(base: string): IntegrationFetchOptions {
     try {
         const host = new URL(base).hostname.toLowerCase();
+        const bypass = host.endsWith(".svc.cluster.local")
+            || host.endsWith(".svc")
+            || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
         return {
-            bypassHostRemap: host.endsWith(".svc.cluster.local") || host.endsWith(".svc"),
+            bypassHostRemap: bypass,
             timeoutMs: 20_000
         };
     }
