@@ -967,6 +967,54 @@ def coerceHarborHostForCosign(String host) {
   return h
 }
 
+def harborIpRegistryHostFromNipio(String host) {
+  if (!host?.trim()) {
+    return host ?: ''
+  }
+  def h = host.trim()
+  def m = (h =~ /^harbor\.(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\.nip\.io(?::(\d+))?$/)
+  if (m.matches()) {
+    def ip = m.group(1)
+    def port = m.group(2) ?: ''
+    return port ? "${ip}:${port}" : ip
+  }
+  return h
+}
+
+def harborClusterPullImageRef(String imageRef) {
+  def ref = (imageRef ?: '').trim()
+  if (!ref) {
+    return ref
+  }
+  def digestAt = ref.indexOf('@sha256:')
+  if (digestAt > 0) {
+    def repoPart = ref.substring(0, digestAt)
+    def digest = ref.substring(digestAt)
+    def slash = repoPart.indexOf('/')
+    if (slash > 0) {
+      def host = repoPart.substring(0, slash)
+      def path = repoPart.substring(slash)
+      return "${harborIpRegistryHostFromNipio(host)}${path}${digest}".toLowerCase()
+    }
+  }
+  def slash = ref.indexOf('/')
+  def lastColon = ref.lastIndexOf(':')
+  if (slash > 0 && lastColon > slash && lastColon < ref.length() - 1) {
+    def repoPart = ref.substring(0, lastColon)
+    def tag = ref.substring(lastColon)
+    def repoSlash = repoPart.indexOf('/')
+    def host = repoPart.substring(0, repoSlash)
+    def path = repoPart.substring(repoSlash)
+    return "${harborIpRegistryHostFromNipio(host)}${path}${tag}".toLowerCase()
+  }
+  if (slash > 0) {
+    def host = ref.substring(0, slash)
+    def path = ref.substring(slash)
+    return "${harborIpRegistryHostFromNipio(host)}${path}".toLowerCase()
+  }
+  return ref.toLowerCase()
+}
+
 def coerceImageRefRegistryHost(String imageRef) {
   def ref = (imageRef ?: '').trim()
   if (!ref) {
@@ -1944,6 +1992,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=cosign-nipio-ip-fallback-20260615 (HTTP Harbor: sign IP + crane copy .sig to nip.io)'
   println '[paas-jenkinsfile] marker=cosign-no-tlog-upload-flag-20260615 (new cosign rejects --tlog-upload=false with signing-config)'
   println '[paas-jenkinsfile] marker=cosign-ip-first-timeout-20260615 (skip nip.io HTTPS + no crane image copy; timeout 120s)'
+  println '[paas-jenkinsfile] marker=paas-build-complete-cluster-pull-20260615 (PAAS_BUILD_COMPLETE image=IP for kubelet pull)'
   println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
   println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
   println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'
@@ -3003,7 +3052,11 @@ EOF
     println "IMAGE_NAME=${imageName} PROJECT_ID=${projectId} BUILD_NUMBER=${env.BUILD_NUMBER}"
     paasStepOk(12, 'archive', 'Jenkins archived sca/** and paas-artifacts/**; GitOps+Argo sync runs in PaaS after build')
     def buildResult = currentBuild.currentResult ?: 'SUCCESS'
-    println "PAAS_BUILD_COMPLETE result=${buildResult} image=${artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
+    def promoteImage = harborClusterPullImageRef(artifactImage ?: '')
+    if (promoteImage && promoteImage != artifactImage) {
+      println "[paas] PAAS_BUILD_COMPLETE uses cluster-pull image ${promoteImage} (push ref ${artifactImage})"
+    }
+    println "PAAS_BUILD_COMPLETE result=${buildResult} image=${promoteImage ?: artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
 }

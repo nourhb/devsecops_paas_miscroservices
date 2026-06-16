@@ -92,6 +92,12 @@ export function buildDeployImageRepositoryForClusterPull(projectName: string): s
     return deployImageRepositoryForClusterPull(buildDeployImageRepository(projectName));
 }
 
+export function harborImageRepoPath(imageRef: string): string {
+    const repo = normalizeDeployImageRepositoryRef(imageRef).toLowerCase();
+    const slash = repo.indexOf("/");
+    return slash >= 0 ? repo.slice(slash + 1) : repo;
+}
+
 export function deployImageRepositoryMatchesProject(imageRef: string, projectName: string): boolean {
     const expected = buildDeployImageRepository(projectName);
     const actual = imageRef;
@@ -99,6 +105,9 @@ export function deployImageRepositoryMatchesProject(imageRef: string, projectNam
         return true;
     }
     if (deployImageRepositoryForClusterPull(actual) === deployImageRepositoryForClusterPull(expected)) {
+        return true;
+    }
+    if (harborImageRepoPath(actual) === harborImageRepoPath(expected)) {
         return true;
     }
     const short = sanitizeDeployImageName(projectName);
