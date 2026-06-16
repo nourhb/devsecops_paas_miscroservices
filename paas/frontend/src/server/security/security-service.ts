@@ -273,7 +273,7 @@ function buildIntegrationProbes(input: {
                             input.policyEngine === "Kyverno" &&
                             (!input.kyvernoEnforcedPolicies.includes("require-signed-images") ||
                                 !input.kyvernoEnforcedPolicies.includes("require-non-root"))
-                            ? "Kyverno ClusterPolicies not in Enforce (or PaaS RBAC cannot list clusterpolicies — run enable-paas-kubernetes-lab.sh)."
+                            ? "Kyverno ClusterPolicies not in Enforce (or PaaS RBAC cannot list clusterpolicies — check cluster policy sync)."
                             : "Policy requirements not met (e.g. unsigned image)."
         }
     ];

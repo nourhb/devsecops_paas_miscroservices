@@ -3,7 +3,7 @@ set -euo pipefail
 PROJECT_SLUG="${1:?usage: repair-gitops-app-lab.sh <project-slug e.g. roll-dice-app> [image-tag]}"
 IMAGE_TAG="${2:-655}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 GITOPS="${GITOPS:-${HOME}/gitops}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 HARBOR_PORT="${HARBOR_NODEPORT:-30002}"
@@ -84,7 +84,6 @@ fi
 
 echo ""
 echo "Next on VM:"
-echo "  bash paas/scripts/fix-harbor-cosign-realm-lab.sh"
-echo "  bash paas/scripts/apply-kyverno-cosign-lab.sh"
+echo "  bash paas/scripts/lab.sh bootstrap"
 echo "  kubectl annotate application ${FULLNAME} -n argocd argocd.argoproj.io/refresh=hard --overwrite"
-echo "  bash paas/scripts/heal-project-deploy-lab.sh ${PROJECT_SLUG} ${IMAGE_TAG} 3000"
+echo "  bash paas/scripts/lab.sh heal ${PROJECT_SLUG} ${IMAGE_TAG} 3000"

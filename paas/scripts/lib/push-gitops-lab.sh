@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 GITOPS="${GITOPS:-${HOME}/gitops}"
 BRANCH="${GITOPS_BRANCH:-main}"
@@ -46,7 +46,7 @@ elif ! git diff --quiet || ! git diff --cached --quiet; then
   echo "WARN: uncommitted changes in ${GITOPS}" >&2
   git status --short
   echo "Re-run with a commit message, e.g.:" >&2
-  echo "  bash paas/scripts/push-gitops-lab.sh 'chore: blue-green helm templates'" >&2
+  echo "  bash paas/scripts/lib/push-gitops-lab.sh 'chore: blue-green helm templates'" >&2
   popd >/dev/null
   exit 1
 fi
@@ -55,7 +55,7 @@ git fetch "${AUTH_URL}" "${BRANCH}" 2>/dev/null || git fetch origin "${BRANCH}"
 if git rev-parse "origin/${BRANCH}" >/dev/null 2>&1; then
   gitops_abort_rebase "${GITOPS}"
   if ! gitops_pull_rebase_resolve_apps "${AUTH_URL}" "${BRANCH}"; then
-    echo "ERROR: git pull --rebase failed — run: bash paas/scripts/repair-gitops-app-lab.sh <slug>" >&2
+    echo "ERROR: git pull --rebase failed — run: bash paas/scripts/lab.sh repair <slug>" >&2
     popd >/dev/null
     exit 1
   fi

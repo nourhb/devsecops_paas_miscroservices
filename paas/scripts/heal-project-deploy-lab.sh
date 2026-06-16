@@ -4,6 +4,7 @@ PROJECT_NAME="${1:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuild
 TAG="${2:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber>}"
 TARGET_PORT="${3:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB="${SCRIPT_DIR}/lib"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 GITOPS="${GITOPS:-${HOME}/gitops}"
@@ -17,7 +18,7 @@ NS="${PROJECT_NAME}"
 APP="${ARGOCD_APP_PREFIX}-${PROJECT_NAME}"
 IMAGE="${HARBOR_PULL_REGISTRY}/paas/${PROJECT_NAME}:${TAG}"
 URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
-source "${SCRIPT_DIR}/gitops-lab-lib.sh"
+source "${LIB}/gitops-lab-lib.sh"
 argo_sync_app_kubectl() {
   local app="$1"
   local ns="${ARGOCD_NAMESPACE:-argocd}"
@@ -224,11 +225,11 @@ fi
 [[ -d "${GITOPS}/.git" ]] || { echo "ERROR: clone gitops to ${GITOPS}" >&2; exit 1; }
 if [[ ! -f "${VALUES}" ]] || gitops_file_has_conflicts "${VALUES}"; then
   echo "==> Missing or conflicted ${VALUES} — bootstrap chart from repo"
-  bash "${SCRIPT_DIR}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}" || exit 1
+  bash "${LIB}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}" || exit 1
 elif pushd "${GITOPS}" >/dev/null && [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null || true)" ]]; then
   popd >/dev/null
   echo "==> GitOps repo has unresolved merge conflicts — full repair"
-  bash "${SCRIPT_DIR}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}" || exit 1
+  bash "${LIB}/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}" || exit 1
 else
   popd >/dev/null 2>/dev/null || true
 fi
@@ -319,7 +320,7 @@ echo "==> Heal ${PROJECT_NAME} build :${TAG} targetPort=${TARGET_PORT}"
 echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
 echo "==> Kyverno lab policy (Audit unless COSIGN_LAB_ENFORCE_SIGNED=true)"
-COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh"
+COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${LIB}/apply-kyverno-cosign-lab.sh"
 enforce_lab_policy_audit_and_exclude_namespace "${NS}"
 if [[ -f "${ENV_FILE}" ]]; then
   GITHUB_TOKEN="$(grep -E '^GITOPS_REPO_TOKEN=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
@@ -399,18 +400,18 @@ print(f"OK values: Rolling image={repo}:{tag} service.targetPort={port}")
 PY
 free_namespace_capacity "${NS}"
 echo "==> Push GitOps to GitHub"
-if ! bash "${SCRIPT_DIR}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
-  echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/push-gitops-lab.sh)"
+if ! bash "${LIB}/push-gitops-lab.sh" "chore(heal): ${PROJECT_NAME} :${TAG} port ${TARGET_PORT}"; then
+  echo "WARN: GitOps push failed — continuing with kubectl remediation (run: bash paas/scripts/lab.sh fix-gitops)"
 fi
 echo "==> Cosign nip.io signature (best-effort; skipped when Kyverno Audit)"
 KYVERNO_ACTION="$(kubectl get clusterpolicy require-signed-images -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || echo Audit)"
 if [[ "${KYVERNO_ACTION}" == "Enforce" ]]; then
-  bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || {
+  bash "${LIB}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || {
     echo "ERROR: cosign required (Kyverno Enforce) but signature missing on nip.io" >&2
     exit 1
   }
 else
-  bash "${SCRIPT_DIR}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || \
+  bash "${LIB}/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}" || \
     echo "WARN: cosign best-effort failed — deploy continues (Kyverno ${KYVERNO_ACTION})"
 fi
 free_namespace_capacity "${NS}"
@@ -466,6 +467,6 @@ if [[ "${HTTP}" =~ ^[23] ]]; then
   echo "OK — open ${URL}"
 else
   echo "WARN — still not HTTP 2xx/3xx"
-  echo "  bash paas/scripts/push-gitops-lab.sh"
+  echo "  bash paas/scripts/lab.sh fix-gitops"
   echo "  kubectl logs -n ${NS} -l app.kubernetes.io/instance=${APP} --tail=80"
 fi

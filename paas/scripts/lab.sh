@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB="${DIR}/lib"
 cmd="${1:-}"
 usage() {
   echo "usage: lab.sh <command>"
@@ -18,32 +19,67 @@ usage() {
 }
 case "$cmd" in
   start|recover)
-    bash "$DIR/recover-paas-after-k3s-restart.sh" ;;
+    bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
   bootstrap)
-    bash "$DIR/platform-bootstrap-lab.sh" ;;
+    bash "$LIB/platform-bootstrap-lab.sh" ;;
   health|check)
-    bash "$DIR/check-paas-lab-health.sh" ;;
+    bash "$LIB/check-paas-lab-health.sh" ;;
   env)
-    bash "$DIR/sync-paas-frontend-env-k8s.sh" ;;
+    bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
-    bash "$DIR/sync-jenkins-pipeline-from-repo.sh" ;;
+    bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   frontend)
-    bash "$DIR/rebuild-paas-frontend-lab.sh" ;;
+    bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   repair)
-    bash "$DIR/repair-gitops-app-lab.sh" "${2:?usage: lab.sh repair <project-slug> [tag]}" "${3:-655}" ;;
+    bash "$LIB/repair-gitops-app-lab.sh" "${2:?usage: lab.sh repair <project-slug> [tag]}" "${3:-655}" ;;
   fix-gitops)
-    bash "$DIR/fix-gitops-repo-lab.sh" ;;
+    # shellcheck source=lib/gitops-lab-lib.sh
+    source "$LIB/gitops-lab-lib.sh"
+    gitops_fix_repo_lab ;;
   heal)
     bash "$DIR/heal-project-deploy-lab.sh" "${2:?usage: lab.sh heal <project-slug> <build> [port]}" "${3:?}" "${4:-3000}" ;;
   deploy)
     REPO_ROOT="$(cd "$DIR/../.." && pwd)"
     git -C "${REPO_ROOT}" pull origin main 2>/dev/null || true
     export COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}"
-    bash "$DIR/apply-kyverno-cosign-lab.sh"
-    bash "$DIR/ensure-harbor-nipio-cosign-lab.sh" "${2:?usage: lab.sh deploy <project-slug> <build> [port]}" "${3:?}" || true
+    bash "$LIB/apply-kyverno-cosign-lab.sh"
+    bash "$LIB/ensure-harbor-nipio-cosign-lab.sh" "${2:?usage: lab.sh deploy <project-slug> <build> [port]}" "${3:?}" || true
     bash "$DIR/heal-project-deploy-lab.sh" "${2}" "${3}" "${4:-3000}" ;;
   ultimate)
-    bash "$DIR/ultimate-project-deploy-lab.sh" "${2:?usage: lab.sh ultimate <project-slug> <build> [port]}" "${3:?}" "${4:-3000}" ;;
+    PROJECT_NAME="${2:?usage: lab.sh ultimate <project-slug> <build> [port]}"
+    TAG="${3:?usage: lab.sh ultimate <project-slug> <build> [port]}"
+    TARGET_PORT="${4:-3000}"
+    NODE_IP="${NODE_IP:-192.168.56.129}"
+    APP="paas-${PROJECT_NAME}"
+    NS="${PROJECT_NAME}"
+    URL="http://${PROJECT_NAME}.${NODE_IP}.nip.io:30659/"
+    echo "=============================================="
+    echo " Ultimate deploy: ${PROJECT_NAME} :${TAG} :${TARGET_PORT}"
+    echo " URL: ${URL}"
+    echo "=============================================="
+    bash "$LIB/recover-harbor-registry-lab.sh" || true
+    # shellcheck source=lib/gitops-lab-lib.sh
+    source "$LIB/gitops-lab-lib.sh"
+    gitops_fix_repo_lab
+    bash "$LIB/repair-gitops-app-lab.sh" "${PROJECT_NAME}" "${TAG}"
+    bash "$LIB/apply-kyverno-cosign-lab.sh"
+    bash "$LIB/ensure-harbor-nipio-cosign-lab.sh" "${PROJECT_NAME}" "${TAG}"
+    bash "$DIR/heal-project-deploy-lab.sh" "${PROJECT_NAME}" "${TAG}" "${TARGET_PORT}"
+    echo ""
+    echo "=============================================="
+    HTTP="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" 2>/dev/null || echo '?')"
+    echo "HTTP ${URL} => ${HTTP}"
+    kubectl get application "${APP}" -n argocd 2>/dev/null || true
+    kubectl get deploy,pods -n "${NS}" 2>/dev/null || true
+    if [[ "${HTTP}" =~ ^[23] ]]; then
+      echo "OK — app is up"
+    else
+      echo "Diagnostics:"
+      echo "  kubectl describe application ${APP} -n argocd | tail -25"
+      echo "  kubectl get events -n ${NS} --sort-by=.lastTimestamp | tail -15"
+    fi
+    echo "=============================================="
+    ;;
   ""|-h|--help|help)
     usage
     exit 0 ;;
