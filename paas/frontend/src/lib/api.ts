@@ -1,5 +1,5 @@
 import apiClient, { PIPELINE_TRIGGER_TIMEOUT_MS } from "@/lib/api-client";
-import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot, UpdateProfileRequest, UpdateProfileResponse } from "@/types";
+import type { ActionResponse, ArgoCdStatus, ArtifactListResponse, ArtifactRecord, AuthResponse, AuthSessionResponse, AuthStatusResponse, ContainerImageRecord, AppReachabilityResponse, DependencyTrackMetricsResponse, DeployPipelineReadinessResponse, DashboardOverviewResponse, DeploymentPollResponse, DeploymentSummary, RecentDeploymentsListResponse, LoginRequest, PipelineHelpResponse, Project, CreateProjectResponse, ProjectRequest, RegisterRequest, RepositoryLanguageDetectionResponse, RuntimeMetrics, SecurityMetrics, PlatformIntegrationsResponse, PlatformToolingResponse, ProjectMonitoringSnapshot, UpdateProfileRequest, UpdateProfileResponse } from "@/types";
 export interface DashboardMetrics {
     cluster: {
         nodeCount: number;
@@ -259,6 +259,10 @@ export const pipelineApi = {
     },
     cancelDeployment: async (deploymentId: string) => {
         const { data } = await apiClient.post<ActionResponse>(`/api/deployments/${deploymentId}/cancel`);
+        return data;
+    },
+    getPipelineHelp: async (projectId: string): Promise<PipelineHelpResponse> => {
+        const { data } = await apiClient.get<PipelineHelpResponse>(`/api/projects/${projectId}/pipeline-help`);
         return data;
     }
 };

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-modal";
 import { projectApi } from "@/lib/api";
 import { formatBuildEnvText, parseBuildEnvText } from "@/lib/project-build-env";
 export default function EditProjectPage() {
@@ -71,7 +72,10 @@ export default function EditProjectPage() {
         return <p className="text-sm text-danger">Project not found or access denied.</p>;
     }
     const p = projectQuery.data;
-    return (<div className="mx-auto max-w-3xl">
+    return (<div className="mx-auto max-w-3xl space-y-4">
+      <div className="flex justify-end">
+        <PipelineHelpTrigger projectId={projectId} variant="header"/>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">

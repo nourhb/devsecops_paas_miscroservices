@@ -33,7 +33,10 @@
     hsl(var(--background));
 }
 
-  border-color: hsl(var(--border));
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
 }
 
 body {

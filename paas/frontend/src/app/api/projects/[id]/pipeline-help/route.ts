@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
+import { getPipelineHelp } from "@/server/help/pipeline-help-service";
+import { assertProjectAccess } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-import { getDeploymentForUser } from "@/server/services/deployment-service";
+
 export const runtime = "nodejs";
+
 export async function GET(request: NextRequest, { params }: {
     params: {
         id: string;
@@ -10,8 +13,9 @@ export async function GET(request: NextRequest, { params }: {
 }) {
     try {
         const auth = await requireAuth(request, ["ADMIN", "DEVELOPER"]);
-        const payload = await getDeploymentForUser(params.id, auth.userId, auth.role);
-        return ok(payload);
+        await assertProjectAccess(params.id, auth.userId, auth.role);
+        const response = await getPipelineHelp(params.id);
+        return ok(response);
     }
     catch (error) {
         return fail(error);
