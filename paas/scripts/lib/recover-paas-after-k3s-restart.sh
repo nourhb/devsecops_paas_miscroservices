@@ -68,7 +68,7 @@ if [[ -f "${ENV_FILE}" ]]; then
   }
 else
   kubectl set env deployment/frontend -n "${PAAS_NS}" \
-    DATABASE_URL='postgresql://postgres:root@postgres.paas.svc.cluster.local:5432/paas?options=-c%20lc_messages%3DC'
+    DATABASE_URL='postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC'
 fi
 
 echo "==> Kyverno require-non-root workload patches (frontend/postgres)"

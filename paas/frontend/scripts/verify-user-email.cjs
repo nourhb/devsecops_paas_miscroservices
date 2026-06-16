@@ -1,6 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 async function main() {
-    const email = process.argv[2]?.trim().toLowerCase();
+    const raw = process.argv[2];
+    const email = raw ? String(raw).trim().toLowerCase() : "";
     if (!email) {
         console.error("Usage: node scripts/verify-user-email.cjs <email>");
         process.exit(1);

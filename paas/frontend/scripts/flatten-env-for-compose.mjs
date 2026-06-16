@@ -75,11 +75,11 @@ function main() {
     if (dbIdx >= 0) {
         const [, v] = entries[dbIdx];
         const k8sDb = v
-            .replace("@postgres:5432", "@postgres.paas.svc.cluster.local:5432")
-            .replace("@localhost:5432", "@postgres.paas.svc.cluster.local:5432")
-            .replace("@127.0.0.1:5432", "@postgres.paas.svc.cluster.local:5432");
+            .replace("@localhost:5432", "@postgres:5432")
+            .replace("@127.0.0.1:5432", "@postgres:5432")
+            .replace("@postgres.paas.svc.cluster.local:5432", "@postgres:5432");
         if (k8sDb !== v) {
-            console.warn("WARN: DATABASE_URL uses docker-compose host — rewriting for Kubernetes PaaS");
+            console.warn("WARN: DATABASE_URL host adjusted for in-cluster Postgres service");
             entries[dbIdx] = ["DATABASE_URL", k8sDb];
         }
     }

@@ -52,7 +52,12 @@ spec:
             runAsNonRoot: true
             runAsUser: 70
             allowPrivilegeEscalation: false
-          args: ["postgres", "-c", "lc_messages=C"]
+          args:
+            - postgres
+            - -c
+            - listen_addresses=*
+            - -c
+            - lc_messages=C
           env:
             - name: POSTGRES_USER
               value: postgres
