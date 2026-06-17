@@ -25,6 +25,7 @@ usage() {
   echo "  frontend-heal     Unpin frontend nodeSelector + restore UI :30100"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
+  echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
@@ -84,6 +85,8 @@ case "$cmd" in
     bash "$LIB/lab-emergency-unblock.sh" ;;
   break-loop|stop-loop|break)
     bash "$LIB/lab-break-loop.sh" ;;
+  worker2|worker2-heal)
+    bash "$LIB/lab-worker2-heal.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   repair)
