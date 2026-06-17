@@ -87,12 +87,27 @@ if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec
   kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
 fi
 REPLICAS="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+ROLLOUT_FAILED=0
 if [[ "${PAAS_SKIP_ROLLOUT:-}" == "1" ]] || [[ "${REPLICAS}" -eq 0 ]]; then
   echo "==> Skip rollout (replicas=${REPLICAS}); pod will pick up env on next start"
 else
   echo "==> Rollout"
   kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}"
-  kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s
+  if ! kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s; then
+    ROLLOUT_FAILED=1
+    FRONTEND_IMAGE="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+    echo ""
+    echo "WARN: frontend rollout timed out (secret/env may still be updated)."
+    echo "  deployment image: ${FRONTEND_IMAGE:-unknown}"
+    kubectl get pods -n "${PAAS_NS}" -l app=frontend -o wide 2>/dev/null || true
+    kubectl get events -n "${PAAS_NS}" --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' 2>/dev/null | tail -8 || true
+    echo ""
+    echo "If the new pod is ImagePullBackOff / ErrImageNeverPull (image was pruned from k3s):"
+    echo "  bash paas/scripts/lab.sh frontend"
+    echo "Or force-delete a stuck Terminating pod, then re-run:"
+    echo "  kubectl delete pod -n ${PAAS_NS} -l app=frontend --force --grace-period=0"
+    echo "  bash paas/scripts/lab.sh env"
+  fi
 fi
 echo "==> SMTP in pod (values hidden)"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
@@ -110,6 +125,14 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
     if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
   done
 ' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
+echo "==> Prometheus / Kubernetes in pod"
+kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
+  for v in KUBERNETES_ENABLED PROMETHEUS_BASE_URL PROMETHEUS_PROBE_URL; do
+    eval "val=\$$v"
+    if [ -n "$val" ]; then echo "$v=$val"; else echo "$v=MISSING"; fi
+  done
+  if [ -n "$KUBERNETES_SERVICE_HOST" ]; then echo "KUBERNETES_SERVICE_HOST=set"; else echo "KUBERNETES_SERVICE_HOST=MISSING"; fi
+' 2>/dev/null || echo "WARN: could not exec into pod yet"
 if ! grep -qE '^SONAR_TOKEN=' "${ENV_FILE}"; then
   echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN — Jenkins Step 5 (Sonar) may skip."
   SECURITY_OK=0
@@ -126,3 +149,6 @@ else
 fi
 echo "Register/mail: API should return mailDelivery=smtp when SMTP_* are set."
 echo "If mail still fails: kubectl logs -n ${PAAS_NS} deploy/${DEPLOY_NAME} --tail=80 | grep -E 'auth-mail|register|SMTP|EAUTH'"
+if [[ "${ROLLOUT_FAILED}" -eq 1 ]]; then
+  exit 1
+fi
