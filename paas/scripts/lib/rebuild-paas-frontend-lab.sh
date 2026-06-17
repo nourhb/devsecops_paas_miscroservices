@@ -37,6 +37,29 @@ if [[ "${FORCE_FRONTEND_REBUILD:-false}" == "true" ]] || [[ "${NO_CACHE:-false}"
 fi
 docker build "${BUILD_ARGS[@]}" -f "${REPO_ROOT}/paas/frontend/Dockerfile" -t "${TARGET_IMAGE}" "${REPO_ROOT}/paas"
 
+harbor_push_image() {
+  local img="$1"
+  local node_ip="${NODE_IP:-192.168.56.129}"
+  local harbor_port="${HARBOR_NODEPORT:-30002}"
+  local harbor_user="${HARBOR_USER:-admin}"
+  local harbor_pass="${HARBOR_PASS:-Harbor12345}"
+  local registry="${node_ip}:${harbor_port}"
+  if [[ "${img}" != "${registry}"/* ]]; then
+    echo "==> Skip Harbor push (image not under ${registry})"
+    return 0
+  fi
+  echo "==> Push to Harbor (survives local image prune)"
+  if ! echo "${harbor_pass}" | docker login "${registry}" -u "${harbor_user}" --password-stdin 2>/dev/null; then
+    echo "WARN: Harbor docker login failed — image only in local docker/containerd" >&2
+    return 0
+  fi
+  docker push "${img}" || echo "WARN: docker push ${img} failed" >&2
+  docker tag "${img}" "${IMAGE_REPO}:latest"
+  docker push "${IMAGE_REPO}:latest" 2>/dev/null || true
+}
+
+harbor_push_image "${TARGET_IMAGE}"
+
 echo "==> Load image into k3s containerd (lab)"
 if command -v k3s >/dev/null 2>&1; then
   docker save "${TARGET_IMAGE}" | sudo k3s ctr images import -

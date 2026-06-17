@@ -452,6 +452,7 @@ if [[ "${TARGET_PORT}" == "8000" ]]; then
 fi
 echo "==> Wait rollout"
 kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || true
+bash "${LIB}/lab-stale-pod-cleanup.sh" 2>/dev/null || true
 echo "==> Pods"
 kubectl get deploy,pods -n "${NS}" -o wide 2>/dev/null || true
 echo "==> Recent pod events / logs"
