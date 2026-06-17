@@ -4,7 +4,10 @@ MON_NS="${PROMETHEUS_K8S_NAMESPACE:-monitoring}"
 
 echo "==> Node disk / pressure"
 df -h / /var/lib/rancher 2>/dev/null || df -h /
-kubectl get nodes -o custom-columns=NAME:.metadata.name,DISK:.status.conditions[?(@.type==\"DiskPressure\")].status,MEM:.status.conditions[?(@.type==\"MemoryPressure\")].status,READY:.status.conditions[?(@.type==\"Ready\")].status 2>/dev/null || true
+kubectl describe node master 2>/dev/null | grep -A6 'Conditions:' || kubectl get nodes 2>/dev/null || true
+echo "==> k3s storage (PVC data often dominates disk use)"
+sudo du -sh /var/lib/rancher/k3s/storage 2>/dev/null || true
+kubectl get pvc -n "${MON_NS}" 2>/dev/null || true
 
 echo "==> Evicted / failed pods (monitoring)"
 kubectl get pods -n "${MON_NS}" --field-selector status.phase=Failed 2>/dev/null || true
