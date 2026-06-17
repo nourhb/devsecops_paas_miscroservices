@@ -1,33 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-delete_pods_matching() {
+bulk_delete_ns() {
   local ns="$1"
-  local field_selector="${2:-}"
-  local extra_grep="${3:-}"
-  local args=(-n "${ns}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
-  if [[ -n "${field_selector}" ]]; then
-    args=(--field-selector "${field_selector}" "${args[@]}")
-  fi
-  kubectl get pods "${args[@]}" 2>/dev/null | while read -r pod; do
-    [[ -z "${pod}" ]] && continue
-    if [[ -n "${extra_grep}" ]] && ! kubectl get pod -n "${ns}" "${pod}" -o wide 2>/dev/null | grep -qE "${extra_grep}"; then
-      continue
-    fi
-    echo "==> delete pod/${pod} -n ${ns}"
-    kubectl delete pod -n "${ns}" "${pod}" --ignore-not-found --wait=false 2>/dev/null || true
-  done
+  local count
+  count="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  [[ "${count}" == "0" ]] && return 0
+  echo "==> ${ns}: bulk delete ${count} Failed pods"
+  kubectl delete pods -n "${ns}" --field-selector=status.phase=Failed \
+    --force --grace-period=0 --wait=false 2>/dev/null || true
 }
 
-echo "==> Remove Failed / Evicted / unknown-status pods (all namespaces)"
+echo "==> Remove Failed / Evicted pods (bulk per namespace — not one-by-one)"
 for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
   [[ "${ns}" == kube-* ]] && continue
-  delete_pods_matching "${ns}" "status.phase=Failed" || true
-  kubectl get pods -n "${ns}" 2>/dev/null | awk '/Evicted|ContainerStatusUnknown|Error|ImagePullBackOff|ErrImageNeverPull/ {print $1}' | while read -r pod; do
-    [[ -z "${pod}" || "${pod}" == NAME ]] && continue
-    echo "==> delete stale pod/${pod} -n ${ns}"
-    kubectl delete pod -n "${ns}" "${pod}" --ignore-not-found --wait=false --force --grace-period=0 2>/dev/null || true
-  done
+  bulk_delete_ns "${ns}"
 done
 
-echo "OK stale pod cleanup done"
+echo "OK stale pod cleanup done (evicted pods delete in background)"

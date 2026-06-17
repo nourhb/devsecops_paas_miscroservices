@@ -15,6 +15,29 @@ echo "=============================================="
 echo " lab-guard — prevent disk / image / monitoring regressions"
 echo "=============================================="
 
+echo "==> Kyverno webhook fail-open"
+bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || warn "kyverno webhook guard failed"
+
+echo "==> Frontend schedule (no master pin / Never pull)"
+if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
+  NS_JSON="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
+  if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then
+    warn "frontend nodeSelector present — unpinning"
+    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
+      -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
+      || kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' || true
+  else
+    ok "no frontend nodeSelector"
+  fi
+  FPOL="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
+  if [[ "${FPOL}" == "Never" ]]; then
+    warn "frontend imagePullPolicy=Never — switching to IfNotPresent"
+    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
+      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
+  fi
+fi
+
 echo "==> Disk usage"
 df -h / /var/lib/rancher 2>/dev/null | tail -n +2 || df -h /
 DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
@@ -82,7 +105,13 @@ echo "==> PaaS health"
 if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
   ok "paas health"
 else
-  fail "paas health check failed"
+  warn "paas health failed — attempting db-repair"
+  bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+  if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
+    ok "paas health after db-repair"
+  else
+    fail "paas health check failed"
+  fi
 fi
 
 echo "=============================================="

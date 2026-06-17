@@ -2,6 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MON_NS="${PROMETHEUS_K8S_NAMESPACE:-monitoring}"
+QUICK="${PAAS_DISK_QUICK:-0}"
 
 echo "==> Node disk / pressure"
 df -h / /var/lib/rancher 2>/dev/null || df -h /
@@ -12,6 +13,24 @@ kubectl get pvc -A --sort-by=.spec.resources.requests.storage 2>/dev/null | tail
 
 echo "==> Stale pods (all namespaces — evicted/Failed/ImagePullBackOff)"
 bash "${SCRIPT_DIR}/lab-stale-pod-cleanup.sh"
+
+if [[ "${QUICK}" == "1" || "${1:-}" == "quick" ]]; then
+  echo "==> Quick mode — no image pulls, no prometheus recover"
+  sudo journalctl --vacuum-size=100M 2>/dev/null || true
+  DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+  if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 85 ]]; then
+    echo "WARN: disk at ${DISK_PCT}% — run: bash paas/scripts/lab.sh disk-emergency"
+  fi
+  exit 0
+fi
+
+DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 88 && "${PAAS_DISK_FORCE:-}" != "1" ]]; then
+  echo "ERROR: disk at ${DISK_PCT}% — full monitoring-disk is unsafe (can pull images and worsen pressure)." >&2
+  echo "  Use: bash paas/scripts/lab.sh disk-emergency" >&2
+  echo "  Or:  PAAS_DISK_FORCE=1 bash paas/scripts/lab.sh monitoring-disk" >&2
+  exit 1
+fi
 
 echo "==> Safe image prune (never docker image prune -af)"
 bash "${SCRIPT_DIR}/lab-safe-image-prune.sh" prune
