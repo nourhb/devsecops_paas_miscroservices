@@ -10,7 +10,6 @@ RUN apk add --no-cache libc6-compat openssl
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY jenkins/Jenkinsfile.paas-deploy /tmp/Jenkinsfile.paas-deploy
-COPY jenkins/Jenkinsfile.paas-deploy-stages.groovy /tmp/Jenkinsfile.paas-deploy-stages.groovy
 COPY frontend .
 ENV PAAS_JENKINSFILE=/tmp/Jenkinsfile.paas-deploy
 RUN node scripts/embed-jenkinsfile.mjs && mkdir -p public && npx prisma generate && npm run build
@@ -30,9 +29,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy
-COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy-stages.groovy /app/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy
-COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy-stages.groovy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy
 COPY gitops/apps/simple-app /app/paas-bundled/paas/gitops/apps/simple-app
 USER nextjs
 EXPOSE 3000

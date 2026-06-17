@@ -44,12 +44,8 @@ OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
 def read_jenkinsfile_bundle(main_path: Path) -> tuple[str, str, str]:
     main = main_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    stages_path = main_path.parent / "Jenkinsfile.paas-deploy-stages.groovy"
-    stages = ""
-    if stages_path.is_file():
-        stages = stages_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    return main, stages, f"{main}\n{stages}"
-def assert_jenkinsfile_twelve_steps(groovy_bundle: str, stages_path: Path) -> None:
+    return main, "", main
+def assert_jenkinsfile_twelve_steps(groovy_bundle: str, jenkinsfile_path: Path) -> None:
     if TWELVE_STEPS_MARKER not in groovy_bundle:
         print(
             f"ERROR: Jenkinsfile bundle missing {TWELVE_STEPS_MARKER}.\n"
@@ -61,17 +57,16 @@ def assert_jenkinsfile_twelve_steps(groovy_bundle: str, stages_path: Path) -> No
         token = f'stage("Step {step} —'
         if token not in groovy_bundle:
             print(
-                f"ERROR: missing {token} in stages file ({stages_path}).\n"
+                f"ERROR: missing {token} in Jenkinsfile ({jenkinsfile_path}).\n"
                 "  git pull && bash paas/scripts/lab.sh jenkins",
                 file=sys.stderr,
             )
             sys.exit(1)
 def verify_job_script_markers(cfg_xml: str) -> bool:
-    if PAAS_DEPLOY_STAGES_LOAD_MARKER not in cfg_xml and "load paasDeployStagesPath" not in cfg_xml:
-        if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
-            return False
-    if SCA_FULL_INSTALL_MARKER not in cfg_xml and "paas-deploy-stages.groovy" in cfg_xml:
-        return PAAS_DEPLOY_STAGES_LOAD_MARKER in cfg_xml or "load paasDeployStagesPath" in cfg_xml
+    if "load paasDeployStagesPath" in cfg_xml or PAAS_DEPLOY_STAGES_LOAD_MARKER in cfg_xml:
+        return False
+    if "def runPaasDeploy" not in cfg_xml:
+        return False
     if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
         return False
     if SCA_FULL_INSTALL_MARKER not in cfg_xml:
@@ -691,26 +686,20 @@ def main() -> int:
         if not jenkinsfile.is_file():
             print(f"ERROR: missing {jenkinsfile}", file=sys.stderr)
             return 1
-        groovy_main, groovy_stages, groovy_bundle = read_jenkinsfile_bundle(jenkinsfile)
+        groovy_main, _, groovy_bundle = read_jenkinsfile_bundle(jenkinsfile)
         if not groovy_main.strip():
             print("ERROR: empty Jenkinsfile", file=sys.stderr)
             return 1
-        if not groovy_stages.strip():
-            print(f"ERROR: missing stages file next to {jenkinsfile}", file=sys.stderr)
-            return 1
-        assert_jenkinsfile_twelve_steps(groovy_bundle, jenkinsfile.parent / "Jenkinsfile.paas-deploy-stages.groovy")
-        stages_path = jenkinsfile.parent / "Jenkinsfile.paas-deploy-stages.groovy"
-        stages_text = stages_path.read_text(encoding="utf-8")
-        if "runPaasDeploy" in stages_text:
-            print("ERROR: stages file contains runPaasDeploy wrapper — fix Jenkinsfile.paas-deploy-stages.groovy", file=sys.stderr)
-            sys.exit(1)
-        if stages_text.count("{") != stages_text.count("}"):
+        if "load paasDeployStagesPath" in groovy_main:
             print(
-                f"ERROR: brace mismatch in {stages_path} "
-                f"({{={stages_text.count('{')} }}={stages_text.count('}')})",
+                "ERROR: Jenkinsfile still uses split load() layout — run paas/jenkins/merge-monolithic-jenkinsfile.py",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            return 1
+        if "def runPaasDeploy" not in groovy_main:
+            print("ERROR: Jenkinsfile missing def runPaasDeploy", file=sys.stderr)
+            return 1
+        assert_jenkinsfile_twelve_steps(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_crane_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_mutate_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_env_loader_fix(groovy_bundle, jenkinsfile)
@@ -778,16 +767,19 @@ def main() -> int:
         if verify_code == 200:
             if not verify_job_script_markers(verify_cfg):
                 print(
-                    f"ERROR: POST succeeded but job script still missing required markers "
-                    f"({PAAS_DEPLOY_STAGES_LOAD_MARKER} or legacy inline markers).\n"
+                    "ERROR: POST succeeded but job script still missing required markers "
+                    f"(def runPaasDeploy + {NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}).\n"
                     "  JENKINSFILE=/path/to/Jenkinsfile.paas-deploy bash paas/scripts/lab.sh jenkins",
                     file=sys.stderr,
                 )
                 return 1
-            if PAAS_DEPLOY_STAGES_LOAD_MARKER in verify_cfg or "load paasDeployStagesPath" in verify_cfg:
-                print(f"OK: job script loads stages via {JENKINS_STAGES_REMOTE_PATH}")
-            else:
-                print(f"OK: job script contains {NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}")
+            if "load paasDeployStagesPath" in verify_cfg or PAAS_DEPLOY_STAGES_LOAD_MARKER in verify_cfg:
+                print(
+                    "ERROR: Jenkins job still uses split load() layout — re-run bash paas/scripts/lab.sh jenkins",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"OK: job script is monolithic (def runPaasDeploy + Steps 1-12)")
             for name in (
                 "SONAR_HOST_URL",
                 "SONAR_TOKEN",

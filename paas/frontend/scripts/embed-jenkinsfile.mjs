@@ -23,41 +23,32 @@ if (!src) {
     process.exit(1);
 }
 
-const groovyMain = fs.readFileSync(src, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-const stagesPath = path.resolve(path.dirname(src), "Jenkinsfile.paas-deploy-stages.groovy");
-const groovyStages = fs.existsSync(stagesPath)
-    ? fs.readFileSync(stagesPath, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
-    : "";
-const groovyBundle = `${groovyMain}\n${groovyStages}`;
-const wrapperRequired = [
+const groovy = fs.readFileSync(src, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+const required = [
     "writeNginxPaasDefaultConf",
     "detectProjectFrameworkFromPackageText",
-    "load paasDeployStagesPath",
-    "def paasStepOk"
-];
-const bundleRequired = [
+    "def runPaasDeploy",
+    "def paasStepOk",
     "PAAS_BUILD_COMPLETE",
     "Step 1 — Params validation",
     "Step 12 — GitOps",
     "env-safe-dotenv-loader-20260601"
 ];
-for (const token of wrapperRequired) {
-    if (!groovyMain.includes(token)) {
-        console.error(`embed-jenkinsfile: missing ${token} in wrapper ${src}`);
+for (const token of required) {
+    if (!groovy.includes(token)) {
+        console.error(`embed-jenkinsfile: missing ${token} in ${src}`);
         process.exit(1);
     }
 }
-for (const token of bundleRequired) {
-    if (!groovyBundle.includes(token)) {
-        console.error(`embed-jenkinsfile: missing ${token} (main=${src}, stages=${stagesPath})`);
-        process.exit(1);
-    }
+if (groovy.includes("load paasDeployStagesPath")) {
+    console.error(`embed-jenkinsfile: split Jenkinsfile layout detected in ${src} — merge monolithic first`);
+    process.exit(1);
 }
 
 const out = path.resolve(__dirname, "../src/server/jenkins/embedded-jenkinsfile.ts");
 fs.writeFileSync(
     out,
-    `export const EMBEDDED_JENKINSFILE_GROOVY = ${JSON.stringify(groovyMain)} as const;\n`
+    `export const EMBEDDED_JENKINSFILE_GROOVY = ${JSON.stringify(groovy)} as const;\n`
 );
 
-console.log(`embed-jenkinsfile: wrote ${out} (wrapper ${groovyMain.length} bytes + stages ${groovyStages.length} bytes from ${src})`);
+console.log(`embed-jenkinsfile: wrote ${out} (${groovy.length} bytes from ${src})`);
