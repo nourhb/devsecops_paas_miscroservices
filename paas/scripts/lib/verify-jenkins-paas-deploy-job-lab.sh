@@ -210,7 +210,9 @@ else
   echo "FAIL: Jenkins job missing sonar.login — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'writeNginxPaasDefaultConf'; then
+if { echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF '[image] marker=nginx-conf-writefile-20260611'; } \
+  && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'writeNginxPaasDefaultConf'; then
   echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
 else
   echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"

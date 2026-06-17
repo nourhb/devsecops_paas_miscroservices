@@ -52,20 +52,52 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
   withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
     sh '''
       set +e
-      DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${DT_BASE%/}/api/v1/bom" \
-        -H "X-Api-Key: ${DT_KEY}" \
-        -F "autoCreate=true" \
-        -F "projectName=${DT_PROJECT}" \
-        -F "projectTags=${DT_PROJECT_TAG}" \
-        -F "projectVersion=${DT_VERSION}" \
-        -F "bom=@sca/bom.json" 2>&1)" || true
-      DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
-      DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
+      pick_dt_base() {
+        for u in \
+          "${DT_BASE}" \
+          "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
+          "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
+          "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080"
+        do
+          [ -z "$u" ] && continue
+          if curl -fsS -m 10 "${u%/}/api/version" >/dev/null 2>&1; then
+            echo "$u"
+            return 0
+          fi
+        done
+        echo "${DT_BASE}"
+      }
+      DT_BASE_PICKED="$(pick_dt_base)"
+      echo "[sca] Dependency-Track base=${DT_BASE_PICKED}"
+      DT_HTTP=""
+      DT_BODY=""
+      for _dt_try in 1 2 3; do
+        DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${DT_BASE_PICKED%/}/api/v1/bom" \
+          -H "X-Api-Key: ${DT_KEY}" \
+          -F "autoCreate=true" \
+          -F "projectName=${DT_PROJECT}" \
+          -F "projectTags=${DT_PROJECT_TAG}" \
+          -F "projectVersion=${DT_VERSION}" \
+          -F "bom=@sca/bom.json" 2>&1)" || true
+        DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
+        DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
+        if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
+          break
+        fi
+        if [ "${DT_HTTP}" = "000" ] || [ "${DT_HTTP}" = "502" ] || [ "${DT_HTTP}" = "503" ] || [ "${DT_HTTP}" = "504" ]; then
+          if [ "${_dt_try}" -lt 3 ]; then
+            echo "[sca] Dependency-Track transient HTTP ${DT_HTTP} (attempt ${_dt_try}/3) — retry in 10s"
+            sleep 10
+            continue
+          fi
+        fi
+        break
+      done
       if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
       else
-        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — rotate DEPENDENCY_TRACK_API_KEY if 401"
+        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) via ${DT_BASE_PICKED} — rotate DEPENDENCY_TRACK_API_KEY if 401"
         printf '%s\n' "${DT_BODY}" | head -c 800
         echo ""
         echo "PAAS_STEP_WARN step=4 id=dependency-track msg=Dependency-Track upload HTTP ${DT_HTTP:-?}"
