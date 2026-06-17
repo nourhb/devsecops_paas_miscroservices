@@ -86,19 +86,26 @@ if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec
   echo "==> Force serviceAccountName=paas-frontend on deployment/${DEPLOY_NAME}"
   kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
 fi
-NS_JSON="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
-if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then
-  echo "==> Remove nodeSelector from deployment/${DEPLOY_NAME} (lab: avoids master eviction storms)"
-  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
-    -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
-    || kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic \
-      -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' || true
-fi
-FPOL="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
-if [[ "${FPOL}" == "Never" && "${PAAS_PIN_MASTER:-}" != "1" ]]; then
-  echo "==> imagePullPolicy Never -> IfNotPresent (unless PAAS_PIN_MASTER=1)"
-  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
-    -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
+if [[ "${PAAS_UNPIN_FRONTEND:-}" == "1" ]]; then
+  NS_JSON="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
+  if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then
+    echo "==> Remove nodeSelector from deployment/${DEPLOY_NAME} (PAAS_UNPIN_FRONTEND=1)"
+    kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
+      -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
+      || kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' || true
+  fi
+  FPOL="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
+  if [[ "${FPOL}" == "Never" ]]; then
+    echo "==> imagePullPolicy Never -> IfNotPresent (PAAS_UNPIN_FRONTEND=1)"
+    kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
+      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
+  fi
+else
+  CUR_IMAGE="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+  if [[ "${CUR_IMAGE}" == *paas-frontend:recovery* || "${CUR_IMAGE}" == docker.io/library/paas-frontend:* ]]; then
+    echo "==> Keep master-local image schedule (recovery image — do not unpin on env sync)"
+  fi
 fi
 REPLICAS="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
 ROLLOUT_FAILED=0
