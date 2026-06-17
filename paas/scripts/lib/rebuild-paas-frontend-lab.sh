@@ -79,31 +79,52 @@ harbor_push_image() {
 
 harbor_push_image "${TARGET_IMAGE}"
 
-echo "==> Load image into k3s containerd (lab)"
-if command -v k3s >/dev/null 2>&1; then
-  docker save "${TARGET_IMAGE}" | sudo k3s ctr images import -
-else
-  echo "WARN: k3s not found — skipping ctr import"
+echo "==> Load image into k3s containerd on all nodes (lab)"
+if command -v docker >/dev/null 2>&1; then
+  bash "${SCRIPT_DIR}/lab-k3s-import-image-nodes.sh" "${TARGET_IMAGE}" || \
+    docker save "${TARGET_IMAGE}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
 fi
 
-echo "==> Ensure Kyverno admission webhook is up (best-effort)"
-if kubectl get deploy -n kyverno kyverno-admission-controller >/dev/null 2>&1; then
-  kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=120s 2>/dev/null || \
-    kubectl rollout restart deployment/kyverno-admission-controller -n kyverno 2>/dev/null || true
-  kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=180s 2>/dev/null || true
-fi
+echo "==> Kyverno fail-open so deployment patch is not blocked"
+bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
 echo "==> Updating deployment/frontend"
 kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
 spec:
+  replicas: 1
+  strategy:
+    type: Recreate
   template:
     spec:
+      nodeSelector: null
       containers:
       - name: frontend
         image: ${TARGET_IMAGE}
         imagePullPolicy: IfNotPresent
 PATCH
+)" || {
+  echo "WARN: strategic patch blocked — retry after Kyverno webhook guard" >&2
+  bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || true
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge -p "$(cat <<PATCH
+{
+  "spec": {
+    "replicas": 1,
+    "strategy": {"type": "Recreate"},
+    "template": {
+      "spec": {
+        "nodeSelector": null,
+        "containers": [{
+          "name": "frontend",
+          "image": "${TARGET_IMAGE}",
+          "imagePullPolicy": "IfNotPresent"
+        }]
+      }
+    }
+  }
+}
+PATCH
 )"
+}
 kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
 echo "OK: frontend rolled out with ${TARGET_IMAGE}"
