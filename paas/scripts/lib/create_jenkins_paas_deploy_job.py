@@ -699,6 +699,18 @@ def main() -> int:
             print(f"ERROR: missing stages file next to {jenkinsfile}", file=sys.stderr)
             return 1
         assert_jenkinsfile_twelve_steps(groovy_bundle, jenkinsfile.parent / "Jenkinsfile.paas-deploy-stages.groovy")
+        stages_path = jenkinsfile.parent / "Jenkinsfile.paas-deploy-stages.groovy"
+        stages_text = stages_path.read_text(encoding="utf-8")
+        if "runPaasDeploy" in stages_text:
+            print("ERROR: stages file contains runPaasDeploy wrapper — fix Jenkinsfile.paas-deploy-stages.groovy", file=sys.stderr)
+            sys.exit(1)
+        if stages_text.count("{") != stages_text.count("}"):
+            print(
+                f"ERROR: brace mismatch in {stages_path} "
+                f"({{={stages_text.count('{')} }}={stages_text.count('}')})",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         assert_jenkinsfile_crane_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_mutate_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_env_loader_fix(groovy_bundle, jenkinsfile)

@@ -10,10 +10,7 @@ if [[ ! -f "${STAGES}" ]]; then
   echo "ERROR: missing ${STAGES}" >&2
   exit 1
 fi
-if ! grep -qF 'stage("Step 12 —' "${STAGES}"; then
-  echo "ERROR: stages file missing Step 12 — git pull" >&2
-  exit 1
-fi
+bash "${REPO_ROOT}/paas/jenkins/validate-stages-groovy.sh" "${STAGES}"
 
 jenkins_running_pod() {
   kubectl get pods -n "${JENKINS_NS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \

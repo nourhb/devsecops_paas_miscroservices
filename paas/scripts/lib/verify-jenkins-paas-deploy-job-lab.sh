@@ -123,6 +123,11 @@ else
   echo "FAIL: missing ${STAGES_FILE} or Step 12 — git pull"
   exit 1
 fi
+if grep -qE 'runPaasDeploy|def runPaasDeploy' "${STAGES_FILE}"; then
+  echo "FAIL: stages file contains runPaasDeploy wrapper — fix Jenkinsfile.paas-deploy-stages.groovy"
+  exit 1
+fi
+bash "${REPO_ROOT}/paas/jenkins/validate-stages-groovy.sh" "${STAGES_FILE}"
 echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
 if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}" || grep -qF "${SONAR_STEP5_MARKER}" "${STAGES_FILE}"; then
   echo "OK: repo Jenkinsfile has ${SONAR_STEP5_MARKER}"

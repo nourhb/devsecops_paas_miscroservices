@@ -1150,15 +1150,4 @@ EOF
     println "PAAS_BUILD_COMPLETE result=${buildResult} image=${promoteImage ?: artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
-}
 
-if (!agentLabel || agentLabel == 'built-in') {
-  println "[paas] node: default Built-In Node (agentLabel=${agentLabel ?: 'empty'})"
-  node {
-    runPaasDeploy()
-  }
-} else {
-  println "[paas] node: agentLabel=${agentLabel}"
-  node(agentLabel) {
-    runPaasDeploy()
-  }
