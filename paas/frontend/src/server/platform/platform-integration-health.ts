@@ -462,14 +462,12 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         case "dependency-track": {
             const dtBase = href.replace(/\/+$/, "");
             const bypassDt = probeHostIsRemapSource(dtBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            const probeInit = !realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY)
-                ? {}
-                : {
-                    headers: {
-                        "X-Api-Key": env.DEPENDENCY_TRACK_API_KEY.trim()
-                    }
-                };
-            return httpProbe(joinUrl(dtBase, "/api/version"), probeInit, {
+            const node = labNodeBase();
+            return probeMany([
+                "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080",
+                dtBase,
+                node ? `${node}:31428` : ""
+            ], "/api/version", {
                 itemId: item.id,
                 bypassHostRemap: bypassDt
             });

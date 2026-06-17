@@ -28,6 +28,7 @@ MUTATE_FIX_MARKERS=(
 ENV_LOADER_MARKER='env-safe-dotenv-loader-20260601'
 COSIGN_DIGEST_MARKER='cosign-digest-crane-bin-20260602'
 NGINX_CONF_MARKER='nginx-conf-writefile-20260611'
+DT_API_SERVER_MARKER='dt-api-server-svc-20260617'
 SCA_FULL_MARKER='sca-npm-install-full-20260611'
 BROKEN_ENV_LOADER_PATTERN='. ./.env'
 if [[ -f "${ENV_FILE}" ]]; then
@@ -111,6 +112,13 @@ if jenkinsfile_has_marker "${SCA_FULL_MARKER}" && jenkinsfile_has_marker 'full n
   echo "OK: repo Jenkinsfile has ${SCA_FULL_MARKER}"
 else
   echo "FAIL: missing ${SCA_FULL_MARKER} — git pull"
+  exit 1
+fi
+echo "==> Local Jenkinsfile contains Step 4 Dependency-Track in-cluster api-server fix?"
+if jenkinsfile_has_marker "${DT_API_SERVER_MARKER}" && jenkinsfile_has_marker 'dtrack-dependency-track-api-server'; then
+  echo "OK: repo Jenkinsfile has ${DT_API_SERVER_MARKER}"
+else
+  echo "FAIL: missing ${DT_API_SERVER_MARKER} — git pull and bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 SONAR_STEP5_MARKER="paas-artifacts/sonar-scanner.log"
@@ -215,10 +223,21 @@ if { echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" \
   && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'writeNginxPaasDefaultConf'; then
   echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
 else
-  echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"
-  echo "Fix: bash paas/scripts/lab.sh jenkins"
-  echo "      Then Build with Parameters — do NOT Replay old builds"
-  exit 1
+  STAGES_OK=0
+  if echo "${CFG}" | grep -qF 'load paasDeployStagesPath'; then
+    JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
+    JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
+    if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF 'writeNginxPaasDefaultConf' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+      STAGES_OK=1
+      echo "OK: stages file on ${JNS}/${JPOD} has writeNginxPaasDefaultConf (load() layout)"
+    fi
+  fi
+  if [[ "${STAGES_OK}" -eq 0 ]]; then
+    echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"
+    echo "Fix: bash paas/scripts/lab.sh jenkins"
+    echo "      Then Build with Parameters — do NOT Replay old builds"
+    exit 1
+  fi
 fi
 if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
   echo "OK: Jenkins job has ${SCA_FULL_MARKER} (Step 4 SBOM for vite projects without lockfile)"

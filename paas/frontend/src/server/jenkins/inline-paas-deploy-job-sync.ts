@@ -16,6 +16,8 @@ const ENV_BACKED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
     SONAR_TOKEN: env.SONAR_TOKEN,
     DEPENDENCY_TRACK_BASE_URL: env.DEPENDENCY_TRACK_BASE_URL,
     DEPENDENCY_TRACK_API_KEY: env.DEPENDENCY_TRACK_API_KEY,
+    JENKINS_DEPENDENCY_TRACK_BASE_URL: process.env.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim()
+        || "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080",
     NVD_API_KEY: env.NVD_API_KEY,
     ZAP_TARGET_URL: env.ZAP_TARGET_URL,
     BUILD_PACKAGE_PROXY_URL: env.BUILD_PACKAGE_PROXY_URL,
@@ -59,6 +61,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["SONAR_TOKEN", ""],
     ["DEPENDENCY_TRACK_BASE_URL", ""],
     ["DEPENDENCY_TRACK_API_KEY", ""],
+    ["JENKINS_DEPENDENCY_TRACK_BASE_URL", "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"],
     ["NVD_API_KEY", ""],
     ["ZAP_TARGET_URL", ""],
     ["BUILD_PACKAGE_PROXY_URL", ""],

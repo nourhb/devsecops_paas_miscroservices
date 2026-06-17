@@ -50,7 +50,9 @@ load_jenkins_creds_for_sync() {
       [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
       local key="${line%%=*}"
       case "${key}" in
-        JENKINS_USERNAME|JENKINS_API_TOKEN|JENKINS_USER|JENKINS_TOKEN|JENKINS_BASE_URL|JENKINS_PROBE_URL)
+        JENKINS_USERNAME|JENKINS_API_TOKEN|JENKINS_USER|JENKINS_TOKEN|JENKINS_BASE_URL|JENKINS_PROBE_URL|\
+        DEPENDENCY_TRACK_BASE_URL|DEPENDENCY_TRACK_API_KEY|JENKINS_DEPENDENCY_TRACK_BASE_URL|\
+        SONAR_BASE_URL|SONAR_TOKEN|SONAR_HOST_URL)
           export "${line}"
           ;;
       esac
@@ -61,7 +63,9 @@ load_jenkins_creds_for_sync() {
   if [[ -z "${JENKINS_USERNAME:-}" || -z "${JENKINS_API_TOKEN:-}" ]]; then
     if command -v kubectl >/dev/null 2>&1 && kubectl get secret paas-frontend-env -n "${PAAS_NS:-paas}" >/dev/null 2>&1; then
       local ns="${PAAS_NS:-paas}"
-      for key in JENKINS_USERNAME JENKINS_API_TOKEN JENKINS_USER JENKINS_TOKEN; do
+      for key in JENKINS_USERNAME JENKINS_API_TOKEN JENKINS_USER JENKINS_TOKEN \
+        DEPENDENCY_TRACK_BASE_URL DEPENDENCY_TRACK_API_KEY JENKINS_DEPENDENCY_TRACK_BASE_URL \
+        SONAR_BASE_URL SONAR_TOKEN SONAR_HOST_URL; do
         local val
         val="$(kubectl get secret paas-frontend-env -n "${ns}" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
         [[ -n "${val}" ]] && export "${key}=${val}"
@@ -72,8 +76,11 @@ load_jenkins_creds_for_sync() {
   fi
 }
 load_jenkins_creds_for_sync
+bash "${SCRIPT_DIR}/lab-dependency-track.sh" || { echo "ERROR: Dependency-Track not ready — fix above, then re-run lab.sh jenkins" >&2; exit 1; }
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
+ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" 2>/dev/null || true
 echo "==> Disable stale inline Jenkinsfile sync on trigger"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 if [[ -f "${ENV_FILE}" ]]; then
@@ -88,6 +95,10 @@ else
   echo "WARN: ${ENV_FILE} missing"
 fi
 bash "${SCRIPT_DIR}/verify-jenkins-paas-deploy-job-lab.sh" || true
+bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh" || {
+  echo "ERROR: Jenkins stages file on cluster is stale — re-run: bash paas/scripts/lab.sh jenkins" >&2
+  exit 1
+}
 if command -v kubectl >/dev/null 2>&1; then
   bash "${SCRIPT_DIR}/sync-paas-jenkinsfile-configmap-k8s.sh" 2>/dev/null || true
 fi
