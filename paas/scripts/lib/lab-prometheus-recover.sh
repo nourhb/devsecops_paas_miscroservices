@@ -69,7 +69,11 @@ scale_up_monitoring_stack() {
   fi
   scale_if_zero statefulset prometheus-kube-prometheus-stack-prometheus 1
   scale_if_zero statefulset alertmanager-kube-prometheus-stack-alertmanager 1
-  scale_if_zero deployment kube-prometheus-stack-grafana 1
+  if [[ "${PROMETHEUS_RECOVER_SKIP_GRAFANA:-}" != "1" ]]; then
+    scale_if_zero deployment kube-prometheus-stack-grafana "${PROMETHEUS_RECOVER_GRAFANA_REPLICAS:-1}"
+  else
+    echo "==> Skip grafana scale (PROMETHEUS_RECOVER_SKIP_GRAFANA=1)"
+  fi
   scale_if_zero deployment kube-prometheus-stack-kube-state-metrics 1
   if kubectl get prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" >/dev/null 2>&1; then
     kubectl annotate prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" \

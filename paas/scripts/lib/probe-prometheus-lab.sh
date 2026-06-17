@@ -32,6 +32,28 @@ if [[ -n "${FP}" ]]; then
     fi
     echo "WARN failed ${url}"
   done
+
+  echo "==> Kubernetes API service proxy from frontend pod (PaaS app path)"
+  if kubectl exec -n "${PAAS_NS}" "${FP}" -- node -e "
+const fs=require('fs');
+const host=process.env.KUBERNETES_SERVICE_HOST;
+const port=process.env.KUBERNETES_SERVICE_PORT||443;
+const ns='${MON_NS}';
+const svc='kube-prometheus-stack-prometheus';
+const path='/api/v1/namespaces/'+ns+'/services/http:'+svc+':9090/proxy/-/ready';
+if(!host){console.error('KUBERNETES_SERVICE_HOST missing');process.exit(2);}
+const token=fs.readFileSync('/var/run/secrets/kubernetes.io/serviceaccount/token','utf8').trim();
+const https=require('https');
+const req=https.get({hostname:host,port,path,headers:{Authorization:'Bearer '+token},rejectUnauthorized:false},res=>{
+  let d='';res.on('data',c=>d+=c);res.on('end',()=>{process.stdout.write(d);process.exit(/ready/i.test(d)?0:1);});
+});
+req.on('error',e=>{console.error(e.message);process.exit(1);});
+setTimeout(()=>process.exit(1),15000);
+" 2>/dev/null | grep -qi ready; then
+    echo "OK frontend pod -> k8s API proxy -> ${MON_NS}/kube-prometheus-stack-prometheus"
+    exit 0
+  fi
+  echo "WARN frontend pod k8s proxy failed (check KUBERNETES_ENABLED=true and paas-frontend RBAC)"
 else
   echo "WARN: no frontend pod in ${PAAS_NS}"
 fi
