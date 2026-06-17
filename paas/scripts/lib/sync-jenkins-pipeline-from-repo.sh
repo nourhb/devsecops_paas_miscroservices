@@ -22,27 +22,23 @@ resolve_jenkinsfile_lab() {
   local marker="${JENKINSFILE_MARKER:-nginx-conf-writefile-20260611}"
   local raw_url="${JENKINSFILE_RAW_URL:-https://raw.githubusercontent.com/nourhb/devsecops_paas_miscroservices/main/paas/jenkins/Jenkinsfile.paas-deploy}"
   local fresh="/tmp/Jenkinsfile.paas-deploy.${marker}.lab"
-  local stages="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
   has_marker() {
     local f="$1"
-    [[ -f "${f}" ]] && grep -qF "${marker}" "${f}" && grep -qF 'writeNginxPaasDefaultConf' "${f}"
+    [[ -f "${f}" ]] && grep -qF "${marker}" "${f}" && grep -qF 'writeNginxPaasDefaultConf' "${f}" && grep -qF 'def runPaasDeploy' "${f}"
   }
-  has_bundle_marker() {
-    has_marker "${jenkinsfile}" || has_marker "${stages}"
-  }
-  if has_bundle_marker; then
+  if has_marker "${jenkinsfile}"; then
     echo "${jenkinsfile}"
     return 0
   fi
-  echo "WARN: ${jenkinsfile} / stages missing ${marker} — git pull" >&2
+  echo "WARN: ${jenkinsfile} missing ${marker} — git pull" >&2
   git -C "${REPO_ROOT}" pull --ff-only 2>/dev/null || true
-  if has_bundle_marker; then
+  if has_marker "${jenkinsfile}"; then
     echo "${jenkinsfile}"
     return 0
   fi
   echo "WARN: fetching Jenkinsfile from ${raw_url}" >&2
   curl -fsSL --retry 3 --connect-timeout 30 "${raw_url}" -o "${fresh}" || { echo "ERROR: curl failed for ${raw_url}" >&2; return 1; }
-  has_marker "${fresh}" || has_marker "${stages}" || { echo "ERROR: Downloaded Jenkinsfile still missing ${marker}" >&2; return 1; }
+  has_marker "${fresh}" || { echo "ERROR: Downloaded Jenkinsfile still missing ${marker}" >&2; return 1; }
   echo "${fresh}"
 }
 JENKINSFILE="$(resolve_jenkinsfile_lab)"
