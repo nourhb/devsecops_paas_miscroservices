@@ -13,6 +13,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 DEFAULT_JENKINSFILE = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy"
+DEFAULT_JENKINSFILE_STAGES = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy-stages.groovy"
+JENKINS_STAGES_REMOTE_PATH = "/var/jenkins_home/paas/paas-deploy-stages.groovy"
+PAAS_DEPLOY_STAGES_LOAD_MARKER = "paas-deploy-stages-load-20260617"
+TWELVE_STEPS_MARKER = "steps-1-2-3-4-5-6-7-8-9-10-11-12-202602"
 LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
 CRANE_MARKERS = (
     "crane-next16-202605-j48300-split",
@@ -38,7 +42,36 @@ NGINX_CONF_WRITEFILE_MARKER = "nginx-conf-writefile-20260611"
 SCA_FULL_INSTALL_MARKER = "sca-npm-install-full-20260611"
 OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign only"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
+def read_jenkinsfile_bundle(main_path: Path) -> tuple[str, str, str]:
+    main = main_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    stages_path = main_path.parent / "Jenkinsfile.paas-deploy-stages.groovy"
+    stages = ""
+    if stages_path.is_file():
+        stages = stages_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return main, stages, f"{main}\n{stages}"
+def assert_jenkinsfile_twelve_steps(groovy_bundle: str, stages_path: Path) -> None:
+    if TWELVE_STEPS_MARKER not in groovy_bundle:
+        print(
+            f"ERROR: Jenkinsfile bundle missing {TWELVE_STEPS_MARKER}.\n"
+            "  git pull origin main",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    for step in range(1, 13):
+        token = f'stage("Step {step} —'
+        if token not in groovy_bundle:
+            print(
+                f"ERROR: missing {token} in stages file ({stages_path}).\n"
+                "  git pull && bash paas/scripts/lab.sh jenkins",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 def verify_job_script_markers(cfg_xml: str) -> bool:
+    if PAAS_DEPLOY_STAGES_LOAD_MARKER not in cfg_xml and "load paasDeployStagesPath" not in cfg_xml:
+        if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
+            return False
+    if SCA_FULL_INSTALL_MARKER not in cfg_xml and "paas-deploy-stages.groovy" in cfg_xml:
+        return PAAS_DEPLOY_STAGES_LOAD_MARKER in cfg_xml or "load paasDeployStagesPath" in cfg_xml
     if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
         return False
     if SCA_FULL_INSTALL_MARKER not in cfg_xml:
@@ -652,22 +685,29 @@ def main() -> int:
         return 0
     if minimal:
         groovy = MINIMAL_GROOVY
+        groovy_bundle = MINIMAL_GROOVY
         print("Mode: --minimal (small pipeline; replace later via PaaS sync or UI)")
     else:
         if not jenkinsfile.is_file():
             print(f"ERROR: missing {jenkinsfile}", file=sys.stderr)
             return 1
-        groovy = jenkinsfile.read_text(encoding="utf-8").replace("\r\n", "\n")
-        if not groovy.strip():
+        groovy_main, groovy_stages, groovy_bundle = read_jenkinsfile_bundle(jenkinsfile)
+        if not groovy_main.strip():
             print("ERROR: empty Jenkinsfile", file=sys.stderr)
             return 1
-        assert_jenkinsfile_crane_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_mutate_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_env_loader_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_cosign_digest_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_sonar_step5_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_multi_framework_fix(groovy, jenkinsfile)
-        assert_jenkinsfile_nginx_conf_fix(groovy, jenkinsfile)
+        if not groovy_stages.strip():
+            print(f"ERROR: missing stages file next to {jenkinsfile}", file=sys.stderr)
+            return 1
+        assert_jenkinsfile_twelve_steps(groovy_bundle, jenkinsfile.parent / "Jenkinsfile.paas-deploy-stages.groovy")
+        assert_jenkinsfile_crane_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_mutate_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_env_loader_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_cosign_digest_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_sonar_step5_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_multi_framework_fix(groovy_bundle, jenkinsfile)
+        assert_jenkinsfile_nginx_conf_fix(groovy_bundle, jenkinsfile)
+        groovy = groovy_main
+    groovy_bundle_check = groovy_bundle if not minimal else groovy
     code, pm_body = client.call("/pluginManager/api/json?depth=1")
     pipeline_markers = ("workflow-job", "workflow-cps", "workflow-aggregator")
     if code == 200 and not any(m in pm_body for m in pipeline_markers):
@@ -690,7 +730,7 @@ def main() -> int:
     if code == 200 and force:
         cfg_code, existing_cfg = client.call(job_cfg)
         if cfg_code == 200 and existing_cfg.strip():
-            refuse_stale_groovy_overwrite(existing_cfg, groovy)
+            refuse_stale_groovy_overwrite(existing_cfg, groovy_bundle_check)
         if force_full:
             mode = "full-document"
             print(f"Updating existing job '{job}' ({len(xml)} bytes, {mode} — params + no concurrent builds)")
@@ -698,7 +738,7 @@ def main() -> int:
             if (
                 cfg_code == 200
                 and existing_cfg.strip()
-                and not existing_config_needs_full_push(existing_cfg, groovy)
+                and not existing_config_needs_full_push(existing_cfg, groovy_bundle_check)
             ):
                 merged = merge_groovy_into_existing_config_xml(existing_cfg, groovy)
                 merged = ensure_job_parameters(merged)
@@ -727,12 +767,15 @@ def main() -> int:
             if not verify_job_script_markers(verify_cfg):
                 print(
                     f"ERROR: POST succeeded but job script still missing required markers "
-                    f"({NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}).\n"
+                    f"({PAAS_DEPLOY_STAGES_LOAD_MARKER} or legacy inline markers).\n"
                     "  JENKINSFILE=/path/to/Jenkinsfile.paas-deploy bash paas/scripts/lab.sh jenkins",
                     file=sys.stderr,
                 )
                 return 1
-            print(f"OK: job script contains {NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}")
+            if PAAS_DEPLOY_STAGES_LOAD_MARKER in verify_cfg or "load paasDeployStagesPath" in verify_cfg:
+                print(f"OK: job script loads stages via {JENKINS_STAGES_REMOTE_PATH}")
+            else:
+                print(f"OK: job script contains {NGINX_CONF_WRITEFILE_MARKER} + {SCA_FULL_INSTALL_MARKER}")
             for name in (
                 "SONAR_HOST_URL",
                 "SONAR_TOKEN",

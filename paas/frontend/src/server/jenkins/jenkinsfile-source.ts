@@ -7,10 +7,14 @@ export const EMBEDDED_JENKINSFILE_ROOT = "/app/paas-jenkinsfile-embedded";
 export const BUNDLED_JENKINSFILE_ROOT = "/app/paas-bundled";
 
 export function jenkinsfileIsValidPaasDeploy(groovy: string): boolean {
+    const hasLoadStages = groovy.includes("load paasDeployStagesPath")
+        || groovy.includes("paas-deploy-stages-load-20260617");
+    const hasInlineSteps = groovy.includes("Step 12 — GitOps") && groovy.includes("def paasStepOk");
     return groovy.includes("PAAS_BUILD_COMPLETE")
         && groovy.includes("writeNginxPaasDefaultConf")
         && groovy.includes("Step 1 — Params validation")
-        && groovy.includes("def paasStepOk");
+        && groovy.includes("def paasStepOk")
+        && (hasLoadStages || hasInlineSteps);
 }
 
 export function jenkinsfileHasMultiFrameworkMarker(groovy: string): boolean {

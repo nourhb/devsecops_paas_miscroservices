@@ -107,8 +107,16 @@ else
   exit 1
 fi
 SONAR_STEP5_MARKER="paas-artifacts/sonar-scanner.log"
+STAGES_FILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
+echo "==> Local Jenkinsfile stages (Steps 1-12 for Blue Ocean)?"
+if [[ -f "${STAGES_FILE}" ]] && grep -qF 'stage("Step 12 —' "${STAGES_FILE}"; then
+  echo "OK: stages file has Step 12"
+else
+  echo "FAIL: missing ${STAGES_FILE} or Step 12 — git pull"
+  exit 1
+fi
 echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
-if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}"; then
+if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}" || grep -qF "${SONAR_STEP5_MARKER}" "${STAGES_FILE}"; then
   echo "OK: repo Jenkinsfile has ${SONAR_STEP5_MARKER}"
 else
   echo "FAIL: missing ${SONAR_STEP5_MARKER} — run: bash paas/scripts/lab.sh jenkins"
@@ -207,6 +215,19 @@ else
   echo "FAIL: Jenkins job missing ${SCA_FULL_MARKER}"
   echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
+fi
+if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
+  echo "OK: Jenkins job loads Steps 1-12 from paas-deploy-stages.groovy (Blue Ocean fix)"
+  if command -v kubectl >/dev/null 2>&1; then
+    if bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh" 2>/dev/null; then
+      echo "OK: stages file installed on Jenkins"
+    else
+      echo "WARN: could not install stages file — run: bash paas/scripts/lab.sh jenkins"
+    fi
+  fi
+  echo ""
+  echo "Trigger a NEW build (not Replay) — Blue Ocean should show Steps 1-12."
+  exit 0
 fi
 if jenkins_text_has_crane_fix "${CFG}"; then
   echo "OK: Jenkins job ${JOB} is up to date ($(wc -c <<< "${CFG}") bytes config)"
