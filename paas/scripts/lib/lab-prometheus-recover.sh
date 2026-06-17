@@ -16,8 +16,13 @@ if [[ ! -f "${require_non_root}" ]] || ! grep -q 'monitoring' "${require_non_roo
 fi
 
 apply_kyverno_policies() {
+  if ! kubectl get endpoints -n kyverno kyverno-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
+    echo "==> Kyverno admission webhook down — restart before policy replace"
+    kubectl rollout restart deployment/kyverno-admission-controller -n kyverno 2>/dev/null || true
+    kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=180s 2>/dev/null || true
+  fi
   echo "==> Apply Kyverno policies (monitoring namespace must be excluded)"
-  kubectl replace -f "${require_non_root}" --force
+  kubectl replace -f "${require_non_root}" --force || kubectl apply -f "${require_non_root}"
   if [[ -f "${require_signed}" ]]; then
     COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" \
       bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh" || {
@@ -115,26 +120,24 @@ kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=alertmanager --igno
 kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=grafana --ignore-not-found --wait=false 2>/dev/null || true
 kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=kube-state-metrics --ignore-not-found --wait=false 2>/dev/null || true
 
-echo "==> Wait up to 6 min for operator + prometheus endpoints"
-for i in $(seq 1 36); do
-  for svc in kube-prometheus-stack-operator kube-prometheus-stack-prometheus prometheus-operated prometheus-service; do
-    ip="$(kubectl get endpoints -n "${MON_NS}" "${svc}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-    if [[ -n "${ip}" ]]; then
-      echo "OK ${svc} endpoint ${ip}"
-      kubectl get pods -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator' || true
-      if curl -fsS --connect-timeout 5 "http://${NODE_IP}:30536/-/ready" >/dev/null 2>&1; then
+echo "==> Wait up to 8 min for prometheus pod 2/2 + service endpoint"
+for i in $(seq 1 48); do
+  prom_phase="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+  prom_ip="$(kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+  pod_ip="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
+  if [[ "${prom_phase}" == "True" ]]; then
+    if [[ -n "${prom_ip}" ]] || { [[ -n "${pod_ip}" ]] && curl -fsS --connect-timeout 5 "http://${pod_ip}:9090/-/ready" 2>/dev/null | grep -qi ready; }; then
+      echo "OK prometheus-kube-prometheus-stack-prometheus-0 Ready; endpoint=${prom_ip:-$pod_ip}"
+      if curl -fsS --connect-timeout 5 "http://${NODE_IP}:30536/-/ready" 2>/dev/null | grep -qi ready; then
         echo "OK NodePort :30536 ready"
-      elif curl -fsS --connect-timeout 5 "http://${NODE_IP}:30083/-/ready" >/dev/null 2>&1; then
-        echo "OK NodePort :30083 ready"
       fi
       exit 0
     fi
-  done
+  fi
   if (( i % 6 == 0 )); then
-    echo "... still waiting (${i}0s)"
-    kubectl get sts,deploy -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
-    kubectl get pods -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
-    kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -3 || true
+    echo "... still waiting (${i}0s) ready=${prom_phase:-False} endpoint=${prom_ip:-none} pod=${pod_ip:-none}"
+    kubectl get pods -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 2>/dev/null || true
+    kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus 2>/dev/null || true
   fi
   sleep 10
 done
