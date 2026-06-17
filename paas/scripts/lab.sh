@@ -12,7 +12,9 @@ usage() {
   echo "  health    Quick health check"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
-  echo "  monitoring-disk  Prune images + clear evicted pods when nodes are under disk pressure"
+  echo "  monitoring-disk  Safe disk cleanup (no docker prune -af) + stale pods"
+  echo "  guard         Full lab hardening check (disk, images, Prometheus, health)"
+  echo "  guard-cron    Show/install 6-hourly guard cron on the VM"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
@@ -39,6 +41,10 @@ case "$cmd" in
     bash "$LIB/probe-prometheus-lab.sh" ;;
   monitoring-disk|disk-heal)
     bash "$LIB/lab-monitoring-disk-heal.sh" ;;
+  guard)
+    bash "$LIB/lab-guard.sh" ;;
+  guard-cron)
+    bash "$LIB/lab-guard-cron.sh" "${2:-show}" ;;
   env)
     bash "$LIB/sync-cosign-public-key-env.sh" || true
     bash "$LIB/compose-paas-frontend-env.sh"

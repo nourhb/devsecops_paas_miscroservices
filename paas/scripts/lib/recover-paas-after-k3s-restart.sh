@@ -99,5 +99,8 @@ if [[ -f "${ENV_FILE}" ]]; then
   bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh" || true
 fi
 
+echo "==> Lab guard (images, Prometheus, stale pods)"
+bash "${SCRIPT_DIR}/lab-guard.sh" || echo "WARN: lab-guard reported issues — run: bash paas/scripts/lab.sh guard"
+
 echo ""
 echo "OK — PaaS login: http://${NODE_IP}:30100/login"
