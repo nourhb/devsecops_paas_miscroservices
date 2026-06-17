@@ -14,6 +14,7 @@
   env.SONAR_HOST_URL = (params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: "").trim()
   env.SONAR_TOKEN = (params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: "").trim()
   env.NVD_API_KEY = (params.NVD_API_KEY?.trim() ?: env.NVD_API_KEY ?: "").trim()
+  env.JENKINS_DEPENDENCY_TRACK_BASE_URL = (params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_BASE_URL = (params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_API_KEY = (params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: "").trim()
   env.ARTIFACTORY_URL = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()

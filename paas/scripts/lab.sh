@@ -17,6 +17,7 @@ usage() {
   echo "  guard-cron    Show/install 6-hourly guard cron on the VM"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
+  echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
@@ -51,6 +52,8 @@ case "$cmd" in
     bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
     bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
+  dependency-track|dtrack)
+    bash "$LIB/lab-dependency-track.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   repair)

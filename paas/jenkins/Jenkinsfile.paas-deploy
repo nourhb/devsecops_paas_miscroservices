@@ -39,65 +39,99 @@ def paasStepFail(int step, String id, String msg) {
 def paasStepSkip(int step, String reason) { println "PAAS_STEP_SKIP step=${step} reason=${reason.take(500)}" }
 
 def uploadBomToDependencyTrack(String projId, String dtProjectName, String branchOrVersionLabel) {
-  def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ""
+  def inClusterDt = 'http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080'
+  def jenkinsDtBase = params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: inClusterDt
+  def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ''
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
   def ver = "${branchOrVersionLabel}-${env.BUILD_NUMBER}"
   def dtName = (dtProjectName ?: projId).trim()
-  if (!dtBase || !dtKey) {
-    paasStepFail(4, 'dependency-track', 'DEPENDENCY_TRACK_BASE_URL and DEPENDENCY_TRACK_API_KEY are required')
+  if (!dtKey) {
+    paasStepFail(4, 'dependency-track', 'DEPENDENCY_TRACK_API_KEY is required')
   }
   if (!fileExists("sca/bom.json")) {
     paasStepFail(4, 'dependency-track', 'sca/bom.json missing — SBOM required before upload')
   }
-  withEnv(["DT_BASE=${dtBase}", "DT_KEY=${dtKey}", "DT_VERSION=${ver}", "DT_PROJECT=${dtName}", "DT_PROJECT_TAG=${projId}"]) {
+  withEnv([
+    "JENKINS_DT_BASE=${jenkinsDtBase}",
+    "DT_BASE=${dtBase}",
+    "DT_KEY=${dtKey}",
+    "DT_VERSION=${ver}",
+    "DT_PROJECT=${dtName}",
+    "DT_PROJECT_TAG=${projId}"
+  ]) {
     sh '''
       set +e
-      pick_dt_base() {
+      echo "[paas-jenkinsfile] marker=dt-api-server-svc-20260617 (in-cluster api-server svc; multi-base SBOM upload)"
+      dt_probe_ok() {
+        u="$1"
+        [ -z "$u" ] && return 1
+        curl -fsS -m 10 "${u%/}/api/version" >/dev/null 2>&1
+      }
+      dt_upload_candidates() {
         for u in \
-          "${DT_BASE}" \
+          "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080" \
+          "http://dtrack-dependency-track-api-server.dependency-track:8080" \
+          "${JENKINS_DT_BASE}" \
           "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
           "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
-          "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080"
+          "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080" \
+          "${DT_BASE}"
         do
           [ -z "$u" ] && continue
-          if curl -fsS -m 10 "${u%/}/api/version" >/dev/null 2>&1; then
-            echo "$u"
-            return 0
-          fi
-        done
-        echo "${DT_BASE}"
+          printf '%s\n' "$u"
+        done | awk '!seen[$0]++'
       }
-      DT_BASE_PICKED="$(pick_dt_base)"
-      echo "[sca] Dependency-Track base=${DT_BASE_PICKED}"
-      DT_HTTP=""
-      DT_BODY=""
-      for _dt_try in 1 2 3; do
-        DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${DT_BASE_PICKED%/}/api/v1/bom" \
-          -H "X-Api-Key: ${DT_KEY}" \
-          -F "autoCreate=true" \
-          -F "projectName=${DT_PROJECT}" \
-          -F "projectTags=${DT_PROJECT_TAG}" \
-          -F "projectVersion=${DT_VERSION}" \
-          -F "bom=@sca/bom.json" 2>&1)" || true
-        DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
-        DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
-        if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
+      DT_BASE_PICKED=""
+      while IFS= read -r _dt_probe; do
+        if dt_probe_ok "${_dt_probe}"; then
+          DT_BASE_PICKED="${_dt_probe}"
           break
         fi
-        if [ "${DT_HTTP}" = "000" ] || [ "${DT_HTTP}" = "502" ] || [ "${DT_HTTP}" = "503" ] || [ "${DT_HTTP}" = "504" ]; then
-          if [ "${_dt_try}" -lt 3 ]; then
-            echo "[sca] Dependency-Track transient HTTP ${DT_HTTP} (attempt ${_dt_try}/3) — retry in 10s"
-            sleep 10
-            continue
+      done <<EOF
+$(dt_upload_candidates)
+EOF
+      if [ -z "${DT_BASE_PICKED}" ]; then
+        DT_BASE_PICKED="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
+        echo "[sca] Dependency-Track /api/version probe failed on all bases — will still try upload via ${DT_BASE_PICKED}"
+      else
+        echo "[sca] Dependency-Track base=${DT_BASE_PICKED}"
+      fi
+      DT_HTTP=""
+      DT_BODY=""
+      DT_UPLOAD_BASE=""
+      while IFS= read -r _dt_base; do
+        [ -z "${_dt_base}" ] && continue
+        for _dt_try in 1 2 3; do
+          DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${_dt_base%/}/api/v1/bom" \
+            -H "X-Api-Key: ${DT_KEY}" \
+            -F "autoCreate=true" \
+            -F "projectName=${DT_PROJECT}" \
+            -F "projectTags=${DT_PROJECT_TAG}" \
+            -F "projectVersion=${DT_VERSION}" \
+            -F "bom=@sca/bom.json" 2>&1)" || true
+          DT_HTTP="$(printf '%s' "${DT_RESP}" | sed -n 's/^__HTTP__//p' | tail -1)"
+          DT_BODY="$(printf '%s' "${DT_RESP}" | sed '/^__HTTP__/d')"
+          if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
+            DT_UPLOAD_BASE="${_dt_base}"
+            break 2
           fi
-        fi
-        break
-      done
+          if [ "${DT_HTTP}" = "000" ] || [ "${DT_HTTP}" = "502" ] || [ "${DT_HTTP}" = "503" ] || [ "${DT_HTTP}" = "504" ]; then
+            if [ "${_dt_try}" -lt 3 ]; then
+              echo "[sca] Dependency-Track transient HTTP ${DT_HTTP} via ${_dt_base} (attempt ${_dt_try}/3) — retry in 10s"
+              sleep 10
+              continue
+            fi
+          fi
+          break
+        done
+      done <<EOF
+$(dt_upload_candidates)
+EOF
       if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
-        echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) project=${DT_PROJECT} version=${DT_VERSION}"
+        echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) base=${DT_UPLOAD_BASE:-${DT_BASE_PICKED}} project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
       else
-        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) via ${DT_BASE_PICKED} — rotate DEPENDENCY_TRACK_API_KEY if 401"
+        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) last base=${DT_BASE_PICKED} — rotate DEPENDENCY_TRACK_API_KEY if 401; ensure dtrack API server pod is Running"
         printf '%s\n' "${DT_BODY}" | head -c 800
         echo ""
         echo "PAAS_STEP_WARN step=4 id=dependency-track msg=Dependency-Track upload HTTP ${DT_HTTP:-?}"
@@ -1956,6 +1990,7 @@ def runPaasDeploy = {
   env.SONAR_HOST_URL = (params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: "").trim()
   env.SONAR_TOKEN = (params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: "").trim()
   env.NVD_API_KEY = (params.NVD_API_KEY?.trim() ?: env.NVD_API_KEY ?: "").trim()
+  env.JENKINS_DEPENDENCY_TRACK_BASE_URL = (params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_BASE_URL = (params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_API_KEY = (params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: "").trim()
   env.ARTIFACTORY_URL = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()

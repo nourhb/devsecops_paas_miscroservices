@@ -15,6 +15,7 @@ DEFAULT_ENV = REPO_ROOT / "paas" / "frontend" / "docker-compose.env"
 DEFAULT_JENKINSFILE = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy"
 DEFAULT_JENKINSFILE_STAGES = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-deploy-stages.groovy"
 JENKINS_STAGES_REMOTE_PATH = "/var/jenkins_home/paas/paas-deploy-stages.groovy"
+DT_STAGES_MARKER = "dt-api-server-svc-20260617"
 PAAS_DEPLOY_STAGES_LOAD_MARKER = "paas-deploy-stages-load-20260617"
 TWELVE_STEPS_MARKER = "steps-1-2-3-4-5-6-7-8-9-10-11-12-202602"
 LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
@@ -78,21 +79,25 @@ def build_load_wrapper() -> str:
     return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
 println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} (Steps 1-12 via load inside node — Blue Ocean shows all stages)'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
+def paasRequireFreshStages = {{
+  if (!fileExists(paasDeployStagesPath)) {{
+    error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
+  }}
+  def stagesText = readFile(paasDeployStagesPath)
+  if (!stagesText.contains('{DT_STAGES_MARKER}')) {{
+    error("Stale ${{paasDeployStagesPath}} (missing {DT_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
+  }}
+  load paasDeployStagesPath
+}}
 if (!agentLabel || agentLabel == 'built-in') {{
   println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
   node {{
-    if (!fileExists(paasDeployStagesPath)) {{
-      error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
-    }}
-    load paasDeployStagesPath
+    paasRequireFreshStages()
   }}
 }} else {{
   println "[paas] node: agentLabel=${{agentLabel}}"
   node(agentLabel) {{
-    if (!fileExists(paasDeployStagesPath)) {{
-      error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
-    }}
-    load paasDeployStagesPath
+    paasRequireFreshStages()
   }}
 }}
 """
@@ -283,6 +288,7 @@ FORCE_ENV_PARAM_DEFAULTS: frozenset[str] = frozenset(
         "SONAR_TOKEN",
         "DEPENDENCY_TRACK_BASE_URL",
         "DEPENDENCY_TRACK_API_KEY",
+        "JENKINS_DEPENDENCY_TRACK_BASE_URL",
     }
 )
 ENV_PARAM_DEFAULTS: dict[str, str] = {
@@ -298,6 +304,7 @@ ENV_PARAM_DEFAULTS: dict[str, str] = {
     "SONAR_TOKEN": "SONAR_TOKEN",
     "DEPENDENCY_TRACK_BASE_URL": "DEPENDENCY_TRACK_BASE_URL",
     "DEPENDENCY_TRACK_API_KEY": "DEPENDENCY_TRACK_API_KEY",
+    "JENKINS_DEPENDENCY_TRACK_BASE_URL": "JENKINS_DEPENDENCY_TRACK_BASE_URL",
     "NVD_API_KEY": "NVD_API_KEY",
     "ZAP_TARGET_URL": "ZAP_TARGET_URL",
     "BUILD_PACKAGE_PROXY_URL": "BUILD_PACKAGE_PROXY_URL",
@@ -330,6 +337,7 @@ FULL_PARAMETER_DEFINITIONS: list[tuple[str, str]] = [
     ("SONAR_TOKEN", ""),
     ("DEPENDENCY_TRACK_BASE_URL", ""),
     ("DEPENDENCY_TRACK_API_KEY", ""),
+    ("JENKINS_DEPENDENCY_TRACK_BASE_URL", ""),
     ("NVD_API_KEY", ""),
     ("ZAP_TARGET_URL", ""),
     ("BUILD_PACKAGE_PROXY_URL", ""),
@@ -464,6 +472,8 @@ def merge_env_param_defaults_force(
     for param_name in force_names or FORCE_ENV_PARAM_DEFAULTS:
         env_key = ENV_PARAM_DEFAULTS.get(param_name, param_name)
         val = (os.environ.get(env_key) or os.environ.get(param_name) or "").strip()
+        if not val and param_name == "JENKINS_DEPENDENCY_TRACK_BASE_URL":
+            val = "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
         if not val:
             continue
         out = force_job_parameter_default(out, param_name, val)
@@ -798,6 +808,7 @@ def main() -> int:
                 "SONAR_TOKEN",
                 "DEPENDENCY_TRACK_BASE_URL",
                 "DEPENDENCY_TRACK_API_KEY",
+                "JENKINS_DEPENDENCY_TRACK_BASE_URL",
             ):
                 if job_defines_string_parameter(verify_cfg, name):
                     print(f"OK: job parameter {name} defined")
