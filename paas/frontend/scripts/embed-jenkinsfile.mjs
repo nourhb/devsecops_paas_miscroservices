@@ -29,15 +29,25 @@ const groovyStages = fs.existsSync(stagesPath)
     ? fs.readFileSync(stagesPath, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
     : "";
 const groovyBundle = `${groovyMain}\n${groovyStages}`;
-const required = [
-    "PAAS_BUILD_COMPLETE",
+const wrapperRequired = [
     "writeNginxPaasDefaultConf",
     "detectProjectFrameworkFromPackageText",
+    "load paasDeployStagesPath",
+    "def paasStepOk"
+];
+const bundleRequired = [
+    "PAAS_BUILD_COMPLETE",
     "Step 1 — Params validation",
     "Step 12 — GitOps",
-    "load paasDeployStagesPath"
+    "env-safe-dotenv-loader-20260601"
 ];
-for (const token of required) {
+for (const token of wrapperRequired) {
+    if (!groovyMain.includes(token)) {
+        console.error(`embed-jenkinsfile: missing ${token} in wrapper ${src}`);
+        process.exit(1);
+    }
+}
+for (const token of bundleRequired) {
     if (!groovyBundle.includes(token)) {
         console.error(`embed-jenkinsfile: missing ${token} (main=${src}, stages=${stagesPath})`);
         process.exit(1);

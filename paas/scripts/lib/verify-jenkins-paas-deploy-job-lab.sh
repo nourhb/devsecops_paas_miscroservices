@@ -3,6 +3,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
+STAGES_FILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
+jenkinsfile_bundle() {
+  cat "${JENKINSFILE}" "${STAGES_FILE}" 2>/dev/null || cat "${JENKINSFILE}"
+}
+jenkinsfile_has_marker() {
+  local marker="$1"
+  grep -qF "${marker}" "${JENKINSFILE}" 2>/dev/null \
+    || grep -qF "${marker}" "${STAGES_FILE}" 2>/dev/null
+}
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
 JOB="paas-deploy"
@@ -65,49 +74,48 @@ jenkins_job_has_broken_mutate() {
   return 1
 }
 echo "==> Local Jenkinsfile contains crane-path fix?"
-if jenkins_text_has_crane_fix "$(cat "${JENKINSFILE}")"; then
+if jenkins_text_has_crane_fix "$(jenkinsfile_bundle)"; then
   echo "OK: repo Jenkinsfile has crane-path fix"
 else
-  echo "FAIL: missing crane-next16 marker in ${JENKINSFILE} — git pull origin main"
+  echo "FAIL: missing crane-next16 marker in Jenkinsfile bundle — git pull origin main"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains Step 6 mutate fix (start-paas.sh)?"
-if jenkins_text_has_mutate_fix "$(cat "${JENKINSFILE}")"; then
+if jenkins_text_has_mutate_fix "$(jenkinsfile_bundle)"; then
   echo "OK: repo Jenkinsfile has crane mutate fix"
 else
-  echo "FAIL: missing monorepo-app-root-20260531 / start-paas.sh in ${JENKINSFILE} — git pull origin main"
+  echo "FAIL: missing monorepo-app-root-20260531 / start-paas.sh in Jenkinsfile bundle — git pull origin main"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains env-safe dotenv loader?"
-if grep -qF "${ENV_LOADER_MARKER}" "${JENKINSFILE}"; then
+if jenkinsfile_has_marker "${ENV_LOADER_MARKER}"; then
   echo "OK: repo Jenkinsfile has ${ENV_LOADER_MARKER}"
 else
-  echo "FAIL: missing ${ENV_LOADER_MARKER} in ${JENKINSFILE} — git pull"
+  echo "FAIL: missing ${ENV_LOADER_MARKER} in Jenkinsfile bundle — git pull"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains cosign digest signing fix?"
-if grep -qF "${COSIGN_DIGEST_MARKER}" "${JENKINSFILE}"; then
+if jenkinsfile_has_marker "${COSIGN_DIGEST_MARKER}"; then
   echo "OK: repo Jenkinsfile has ${COSIGN_DIGEST_MARKER}"
 else
-  echo "FAIL: missing ${COSIGN_DIGEST_MARKER} in ${JENKINSFILE} — git pull"
+  echo "FAIL: missing ${COSIGN_DIGEST_MARKER} in Jenkinsfile bundle — git pull"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains SPA/Angular nginx conf fix (writeFile, no Groovy \$uri)?"
-if grep -qF "${NGINX_CONF_MARKER}" "${JENKINSFILE}" && grep -qF 'writeNginxPaasDefaultConf' "${JENKINSFILE}"; then
+if jenkinsfile_has_marker "${NGINX_CONF_MARKER}" && jenkinsfile_has_marker 'writeNginxPaasDefaultConf'; then
   echo "OK: repo Jenkinsfile has ${NGINX_CONF_MARKER}"
 else
   echo "FAIL: missing ${NGINX_CONF_MARKER} / writeNginxPaasDefaultConf — git pull"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains Step 4 SCA full npm install fix?"
-if grep -qF "${SCA_FULL_MARKER}" "${JENKINSFILE}" && grep -qF 'full npm install then cyclonedx-npm' "${JENKINSFILE}"; then
+if jenkinsfile_has_marker "${SCA_FULL_MARKER}" && jenkinsfile_has_marker 'full npm install then cyclonedx-npm'; then
   echo "OK: repo Jenkinsfile has ${SCA_FULL_MARKER}"
 else
-  echo "FAIL: missing ${SCA_FULL_MARKER} — scp Jenkinsfile from dev machine or git pull"
+  echo "FAIL: missing ${SCA_FULL_MARKER} — git pull"
   exit 1
 fi
 SONAR_STEP5_MARKER="paas-artifacts/sonar-scanner.log"
-STAGES_FILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
 echo "==> Local Jenkinsfile stages (Steps 1-12 for Blue Ocean)?"
 if [[ -f "${STAGES_FILE}" ]] && grep -qF 'stage("Step 12 —' "${STAGES_FILE}"; then
   echo "OK: stages file has Step 12"

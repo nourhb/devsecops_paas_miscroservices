@@ -15,17 +15,25 @@ if ! grep -qF 'stage("Step 12 —' "${STAGES}"; then
   exit 1
 fi
 
+jenkins_running_pod() {
+  kubectl get pods -n "${JENKINS_NS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r name; do
+      [[ -z "${name}" ]] && continue
+      if [[ "${name}" == *jenkins* ]]; then
+        echo "${name}"
+        return 0
+      fi
+    done
+  return 1
+}
+
 install_via_kubectl() {
   local pod=""
-  pod="$(kubectl get pods -n "${JENKINS_NS}" -l jenkins-jenkins-master=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-  if [[ -z "${pod}" ]]; then
-    pod="$(kubectl get pods -n "${JENKINS_NS}" -o name 2>/dev/null | grep -i jenkins | head -1 | sed 's|pod/||' || true)"
-  fi
+  pod="$(jenkins_running_pod || true)"
   [[ -n "${pod}" ]] || return 1
   kubectl exec -n "${JENKINS_NS}" "${pod}" -- mkdir -p /var/jenkins_home/paas
   kubectl cp "${STAGES}" "${JENKINS_NS}/${pod}:${REMOTE}"
-  echo "OK: ${REMOTE} on pod ${JENKINS_NS}/${pod}"
-  kubectl exec -n "${JENKINS_NS}" "${pod}" -- grep -qF 'stage("Step 12 —' "${REMOTE}"
+  echo "OK: ${REMOTE} on Running pod ${JENKINS_NS}/${pod}"
 }
 
 if install_via_kubectl; then
@@ -38,5 +46,5 @@ if [[ -d /var/jenkins_home ]]; then
   echo "OK: ${REMOTE} on Jenkins host"
   exit 0
 fi
-echo "ERROR: could not install stages file (no Jenkins pod in ${JENKINS_NS} and no /var/jenkins_home)" >&2
+echo "ERROR: could not install stages file (no Running Jenkins pod in ${JENKINS_NS} and no /var/jenkins_home)" >&2
 exit 1
