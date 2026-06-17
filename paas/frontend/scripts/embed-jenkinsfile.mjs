@@ -23,16 +23,23 @@ if (!src) {
     process.exit(1);
 }
 
-const groovy = fs.readFileSync(src, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+const groovyMain = fs.readFileSync(src, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+const stagesPath = path.resolve(path.dirname(src), "Jenkinsfile.paas-deploy-stages.groovy");
+const groovyStages = fs.existsSync(stagesPath)
+    ? fs.readFileSync(stagesPath, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+    : "";
+const groovyBundle = `${groovyMain}\n${groovyStages}`;
 const required = [
     "PAAS_BUILD_COMPLETE",
     "writeNginxPaasDefaultConf",
     "detectProjectFrameworkFromPackageText",
-    "Step 1 — Params validation"
+    "Step 1 — Params validation",
+    "Step 12 — GitOps",
+    "load paasDeployStagesPath"
 ];
 for (const token of required) {
-    if (!groovy.includes(token)) {
-        console.error(`embed-jenkinsfile: missing ${token} in ${src}`);
+    if (!groovyBundle.includes(token)) {
+        console.error(`embed-jenkinsfile: missing ${token} (main=${src}, stages=${stagesPath})`);
         process.exit(1);
     }
 }
@@ -40,7 +47,7 @@ for (const token of required) {
 const out = path.resolve(__dirname, "../src/server/jenkins/embedded-jenkinsfile.ts");
 fs.writeFileSync(
     out,
-    `export const EMBEDDED_JENKINSFILE_GROOVY = ${JSON.stringify(groovy)} as const;\n`
+    `export const EMBEDDED_JENKINSFILE_GROOVY = ${JSON.stringify(groovyMain)} as const;\n`
 );
 
-console.log(`embed-jenkinsfile: wrote ${out} (${groovy.length} bytes from ${src})`);
+console.log(`embed-jenkinsfile: wrote ${out} (wrapper ${groovyMain.length} bytes + stages ${groovyStages.length} bytes from ${src})`);

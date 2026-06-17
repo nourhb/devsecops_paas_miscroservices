@@ -73,6 +73,7 @@ load_jenkins_creds_for_sync() {
 }
 load_jenkins_creds_for_sync
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 echo "==> Disable stale inline Jenkinsfile sync on trigger"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 if [[ -f "${ENV_FILE}" ]]; then
