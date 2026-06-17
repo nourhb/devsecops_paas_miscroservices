@@ -147,6 +147,11 @@ if [[ -z "${CFG}" ]]; then
   echo "FAIL: could not fetch config.xml from ${JENKINS_URL}"
   exit 1
 fi
+if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
+  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+else
+  REMOTE_CHECK_TEXT="${CFG}"
+fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
   echo "FAIL: Jenkins still has OLD Step 6 (npx next build --no-lint in crane path)"
   echo "Fix: bash paas/scripts/lab.sh jenkins"
@@ -164,31 +169,31 @@ elif jenkins_text_has_crane_fix "${CFG}"; then
   echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-if echo "${CFG}" | grep -qF "${ENV_LOADER_MARKER}" \
-  || echo "${CFG}" | grep -qF 'env-decode-node-20260601' \
-  || echo "${CFG}" | grep -qF 'paasSourceBuildEnvShellSnippet'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${ENV_LOADER_MARKER}" \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'env-decode-node-20260601' \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'paasSourceBuildEnvShellSnippet'; then
   echo "OK: Jenkins job has env-safe .env loader (Node)"
 else
   echo "FAIL: Jenkins job missing ${ENV_LOADER_MARKER} (builds fail on EMAIL_PASS with spaces)"
   echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-if echo "${CFG}" | grep -qF 'Do not use ". ./.env"'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF 'Do not use ". ./.env"'; then
   echo "OK: Jenkins job uses Node .env loader (not raw . ./.env)"
-elif echo "${CFG}" | grep -qF "${BROKEN_ENV_LOADER_PATTERN}"; then
+elif echo "${REMOTE_CHECK_TEXT}" | grep -qF "${BROKEN_ENV_LOADER_PATTERN}"; then
   echo "FAIL: Jenkins job still sources ${BROKEN_ENV_LOADER_PATTERN} — run sync-jenkins-pipeline-from-repo.sh"
   exit 1
 fi
-if echo "${CFG}" | grep -qF "${COSIGN_DIGEST_MARKER}"; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${COSIGN_DIGEST_MARKER}"; then
   echo "OK: Jenkins job has ${COSIGN_DIGEST_MARKER}"
-elif echo "${CFG}" | grep -qF 'digest ref unavailable (crane/triangulate); tag sign only'; then
+elif echo "${REMOTE_CHECK_TEXT}" | grep -qF 'digest ref unavailable (crane/triangulate); tag sign only'; then
   echo "FAIL: Jenkins job still has OLD Step 9 cosign (tag-only) — run bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-if echo "${CFG}" | grep -qF "${SONAR_STEP5_MARKER}" \
-  || echo "${CFG}" | grep -qF 'sonar-scanner.log' \
-  || echo "${CFG}" | grep -qF 'sonar-scanner&#47;log' \
-  || echo "${CFG}" | grep -qF 'pick_sonar_url'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SONAR_STEP5_MARKER}" \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'sonar-scanner.log' \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'sonar-scanner&#47;log' \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'pick_sonar_url'; then
   echo "OK: Jenkins job has Sonar Step 5 fix (${SONAR_STEP5_MARKER})"
 else
   echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/lab.sh jenkins"
@@ -197,7 +202,7 @@ fi
 SONAR_LOGIN_MARKERS=( 'sonar-scanner-cli6-login-20260607' 'sonar.login' "printf 'sonar.login" )
 sonar_login_ok=0
 for m in "${SONAR_LOGIN_MARKERS[@]}"; do
-  if echo "${CFG}" | grep -qF "${m}"; then
+  if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${m}"; then
     sonar_login_ok=1
     break
   fi
@@ -209,7 +214,7 @@ else
   echo "      Then: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-if echo "${CFG}" | grep -qF "${NGINX_CONF_MARKER}" && echo "${CFG}" | grep -qF 'writeNginxPaasDefaultConf'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'writeNginxPaasDefaultConf'; then
   echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
 else
   echo "FAIL: Jenkins job missing ${NGINX_CONF_MARKER} — Step 6 fails: MissingPropertyException: uri"
@@ -217,10 +222,10 @@ else
   echo "      Then Build with Parameters — do NOT Replay old builds"
   exit 1
 fi
-if echo "${CFG}" | grep -qF "${SCA_FULL_MARKER}" && echo "${CFG}" | grep -qF 'full npm install then cyclonedx-npm'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
   echo "OK: Jenkins job has ${SCA_FULL_MARKER} (Step 4 SBOM for vite projects without lockfile)"
-elif echo "${CFG}" | grep -qF 'sca-npm-install-nolock-20260611' \
-  || echo "${CFG}" | grep -qF '--package-lock-only' && echo "${CFG}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; then
+elif echo "${REMOTE_CHECK_TEXT}" | grep -qF 'sca-npm-install-nolock-20260611' \
+  || echo "${REMOTE_CHECK_TEXT}" | grep -qF '--package-lock-only' && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; then
   echo "FAIL: Jenkins job has OLD/broken Step 4 SCA (package-lock-only or partial patch)"
   echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
