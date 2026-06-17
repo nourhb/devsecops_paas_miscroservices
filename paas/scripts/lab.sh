@@ -13,11 +13,18 @@ usage() {
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
   echo "  monitoring-disk  Safe disk cleanup (no docker prune -af) + stale pods"
+  echo "                   Use: monitoring-disk quick — skip slow cluster-wide image pulls"
   echo "  guard         Full lab hardening check (disk, images, Prometheus, health)"
-  echo "  guard-cron    Show/install 6-hourly guard cron on the VM"
+  echo "  guard-cron    Show/install auto-heal cron (watchdog 10m + guard 6h)"
+  echo "  watchdog      Lightweight auto-heal (disk, kyverno, postgres, storms)"
+  echo "  harden        One-shot: unpin frontend, db-repair, cron, health"
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
+  echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
+  echo "  frontend-heal     Unpin frontend nodeSelector + restore UI :30100"
+  echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
+  echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
@@ -41,19 +48,42 @@ case "$cmd" in
   probe-prometheus)
     bash "$LIB/probe-prometheus-lab.sh" ;;
   monitoring-disk|disk-heal)
-    bash "$LIB/lab-monitoring-disk-heal.sh" ;;
+    bash "$LIB/lab-monitoring-disk-heal.sh" "${2:-}" ;;
+  disk-emergency|free-disk)
+    bash "$LIB/lab-disk-emergency-free.sh" ;;
+  frontend-minimal|minimal-frontend)
+    bash "$LIB/lab-frontend-minimal-deploy.sh" ;;
   guard)
     bash "$LIB/lab-guard.sh" ;;
   guard-cron)
     bash "$LIB/lab-guard-cron.sh" "${2:-show}" ;;
+  watchdog|watch)
+    bash "$LIB/lab-watchdog.sh" ;;
+  harden|fortify)
+    bash "$LIB/lab-harden.sh" ;;
   env)
     bash "$LIB/sync-cosign-public-key-env.sh" || true
     bash "$LIB/compose-paas-frontend-env.sh"
+    LAB_DT_ENV_ONLY=true bash "$LIB/lab-dependency-track.sh" || true
     bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
     bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   dependency-track|dtrack)
     bash "$LIB/lab-dependency-track.sh" ;;
+  dt-bootstrap|dependency-track-bootstrap)
+    bash "$LIB/bootstrap-dependency-track-lab.sh" ;;
+  frontend-heal)
+    bash "$LIB/lab-frontend-schedule-heal.sh" ;;
+  frontend-unstick|unstick-frontend)
+    bash "$LIB/lab-frontend-rollout-unstick.sh" ;;
+  frontend-recover)
+    bash "$LIB/lab-frontend-recover.sh" ;;
+  frontend-stop|stop-storm)
+    bash "$LIB/lab-frontend-stop-storm.sh" ;;
+  emergency|unblock)
+    bash "$LIB/lab-emergency-unblock.sh" ;;
+  break-loop|stop-loop|break)
+    bash "$LIB/lab-break-loop.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   repair)

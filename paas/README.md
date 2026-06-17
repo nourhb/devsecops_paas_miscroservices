@@ -116,9 +116,47 @@ Or `bash paas/scripts/dev.sh` on a dev machine.
 | `lab.sh jenkins` | Push Jenkinsfile to Jenkins + rebuild frontend |
 | `lab.sh frontend` | Rebuild and roll out frontend image only |
 | `lab.sh health` | Quick API / postgres / UI check |
+| `lab.sh harden` | **Run once** — unpin frontend, db-repair, install auto-heal cron |
+| `lab.sh watchdog` | Auto-heal disk / Kyverno / postgres / pod storms (cron every 10 min) |
+| `lab.sh guard` | Full check: images, Prometheus, stale pods, health (cron every 6 h) |
+| `lab.sh emergency` | Kyverno unblock + disk + postgres + frontend heal |
+| `lab.sh disk-emergency` | Free disk safely (no `docker prune -af`) |
 | `lab.sh harbor` | Recover Harbor registry (502 / crane push failures) |
 | `lab.sh bootstrap` | Harbor mirrors + Kyverno cosign + require-non-root |
 | `lab.sh heal <p> <b>` | Manual GitOps fix (hosted: use UI deploy instead) |
+
+### Outage prevention (lab VM)
+
+Run **once** after any recovery or fresh clone:
+
+```bash
+cd ~/devsecops_paas_miscroservices
+git pull
+bash paas/scripts/lab.sh harden
+```
+
+This installs:
+
+- **Watchdog cron** (every 10 min) — stops frontend eviction storms when disk ≥90%, removes dead Kyverno webhooks, auto `db-repair` when Postgres is unreachable, unpins `nodeSelector` on frontend
+- **Guard cron** (every 6 h) — safe image prune, Prometheus recover, full health check
+
+**Never run on a full disk:**
+
+| Command | Why |
+|---------|-----|
+| `docker system prune -af` | Deletes images tags deployments still reference |
+| `monitoring-disk` (full) when disk ≥88% | Can pull images and make disk worse — use `disk-emergency` or `monitoring-disk quick` |
+| `crictl rmi --prune` without `lab-safe-image-prune` | May remove `paas-frontend` from containerd |
+| `kubectl patch` with `nodeSelector: master` + `imagePullPolicy: Never` | Eviction storm when master hits DiskPressure |
+
+**If UI shows "Database is still starting":**
+
+```bash
+bash paas/scripts/lab.sh db-repair
+bash paas/scripts/lab.sh health
+```
+
+Logs: `/var/log/paas-lab-watchdog.log`, `/var/log/paas-lab-guard.log`
 
 ## Env file
 

@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kyverno_admission_up() {
+  kubectl get endpoints -n kyverno kyverno-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .
+}
+
+kyverno_webhooks_present() {
+  kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep -qi kyverno \
+    || kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep -qi kyverno
+}
+
+remove_kyverno_webhooks() {
+  local w removed=0
+  for w in $(kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep -i kyverno || true); do
+    echo "delete ${w}"
+    kubectl delete "${w}" --ignore-not-found --wait=false || true
+    removed=1
+  done
+  for w in $(kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep -i kyverno || true); do
+    echo "delete ${w}"
+    kubectl delete "${w}" --ignore-not-found --wait=false || true
+    removed=1
+  done
+  [[ "${removed}" -eq 1 ]]
+}
+
+restart_kyverno_admission() {
+  if ! kubectl get ns kyverno >/dev/null 2>&1; then
+    return 0
+  fi
+  kubectl rollout restart deployment/kyverno-admission-controller -n kyverno 2>/dev/null || true
+  kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=180s 2>/dev/null || true
+}
+
+case "${1:-guard}" in
+  guard)
+    if kyverno_admission_up; then
+      echo "OK: kyverno admission service has endpoints"
+      exit 0
+    fi
+    if ! kyverno_webhooks_present; then
+      echo "OK: kyverno down but no blocking webhooks registered"
+      restart_kyverno_admission
+      exit 0
+    fi
+    echo "WARN: kyverno admission DOWN but webhooks still registered — removing fail-closed hooks"
+    remove_kyverno_webhooks
+    restart_kyverno_admission
+    echo "OK: kyverno webhooks cleared (lab fail-open until admission is healthy)"
+    ;;
+  status)
+    if kyverno_admission_up; then
+      echo "kyverno: up"
+    else
+      echo "kyverno: down"
+    fi
+    if kyverno_webhooks_present; then
+      echo "webhooks: present"
+    else
+      echo "webhooks: none"
+    fi
+    ;;
+  *)
+    echo "usage: lab-kyverno-webhook-guard.sh [guard|status]" >&2
+    exit 1
+    ;;
+esac
