@@ -53,9 +53,28 @@ harbor_push_image() {
     echo "WARN: Harbor docker login failed — image only in local docker/containerd" >&2
     return 0
   fi
-  docker push "${img}" || echo "WARN: docker push ${img} failed" >&2
+  local ok=0
+  for attempt in 1 2 3; do
+    if docker push "${img}"; then
+      ok=1
+      break
+    fi
+    if [[ "${attempt}" -lt 3 ]]; then
+      echo "WARN: docker push ${img} failed (attempt ${attempt}/3) — retry in 10s" >&2
+      sleep 10
+    fi
+  done
+  if [[ "${ok}" -ne 1 ]]; then
+    echo "WARN: docker push ${img} failed after 3 attempts" >&2
+  fi
   docker tag "${img}" "${IMAGE_REPO}:latest"
-  docker push "${IMAGE_REPO}:latest" 2>/dev/null || true
+  for attempt in 1 2 3; do
+    if docker push "${IMAGE_REPO}:latest" 2>/dev/null; then
+      break
+    fi
+    [[ "${attempt}" -lt 3 ]] || true
+    sleep 5
+  done
 }
 
 harbor_push_image "${TARGET_IMAGE}"
