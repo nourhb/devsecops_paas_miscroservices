@@ -64,7 +64,7 @@ def assert_jenkinsfile_twelve_steps(groovy_bundle: str, jenkinsfile_path: Path) 
             sys.exit(1)
 def verify_job_script_markers(cfg_xml: str) -> bool:
     if "load paasDeployStagesPath" in cfg_xml or PAAS_DEPLOY_STAGES_LOAD_MARKER in cfg_xml:
-        return False
+        return True
     if "def runPaasDeploy" not in cfg_xml:
         return False
     if NGINX_CONF_WRITEFILE_MARKER not in cfg_xml or "writeNginxPaasDefaultConf" not in cfg_xml:
@@ -74,6 +74,28 @@ def verify_job_script_markers(cfg_xml: str) -> bool:
     if "full npm install then cyclonedx-npm" not in cfg_xml:
         return False
     return True
+def build_load_wrapper() -> str:
+    return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
+println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} (Steps 1-12 via load inside node — Blue Ocean shows all stages)'
+def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
+if (!agentLabel || agentLabel == 'built-in') {{
+  println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
+  node {{
+    if (!fileExists(paasDeployStagesPath)) {{
+      error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
+    }}
+    load paasDeployStagesPath
+  }}
+}} else {{
+  println "[paas] node: agentLabel=${{agentLabel}}"
+  node(agentLabel) {{
+    if (!fileExists(paasDeployStagesPath)) {{
+      error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
+    }}
+    load paasDeployStagesPath
+  }}
+}}
+"""
 def assert_jenkinsfile_crane_fix(groovy: str, path: Path) -> None:
     if not any(m in groovy for m in CRANE_MARKERS):
         print(
@@ -690,12 +712,6 @@ def main() -> int:
         if not groovy_main.strip():
             print("ERROR: empty Jenkinsfile", file=sys.stderr)
             return 1
-        if "load paasDeployStagesPath" in groovy_main:
-            print(
-                "ERROR: Jenkinsfile still uses split load() layout — run paas/jenkins/merge-monolithic-jenkinsfile.py",
-                file=sys.stderr,
-            )
-            return 1
         if "def runPaasDeploy" not in groovy_main:
             print("ERROR: Jenkinsfile missing def runPaasDeploy", file=sys.stderr)
             return 1
@@ -707,7 +723,7 @@ def main() -> int:
         assert_jenkinsfile_sonar_step5_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_multi_framework_fix(groovy_bundle, jenkinsfile)
         assert_jenkinsfile_nginx_conf_fix(groovy_bundle, jenkinsfile)
-        groovy = groovy_main
+        groovy = build_load_wrapper()
     groovy_bundle_check = groovy_bundle if not minimal else groovy
     code, pm_body = client.call("/pluginManager/api/json?depth=1")
     pipeline_markers = ("workflow-job", "workflow-cps", "workflow-aggregator")
@@ -774,12 +790,9 @@ def main() -> int:
                 )
                 return 1
             if "load paasDeployStagesPath" in verify_cfg or PAAS_DEPLOY_STAGES_LOAD_MARKER in verify_cfg:
-                print(
-                    "ERROR: Jenkins job still uses split load() layout — re-run bash paas/scripts/lab.sh jenkins",
-                    file=sys.stderr,
-                )
-                return 1
-            print(f"OK: job script is monolithic (def runPaasDeploy + Steps 1-12)")
+                print(f"OK: job script loads stages via {JENKINS_STAGES_REMOTE_PATH}")
+            else:
+                print(f"OK: job script is monolithic (def runPaasDeploy + Steps 1-12)")
             for name in (
                 "SONAR_HOST_URL",
                 "SONAR_TOKEN",
