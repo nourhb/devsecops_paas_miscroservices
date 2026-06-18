@@ -151,8 +151,10 @@ if [[ -z "${CFG}" ]]; then
   echo "FAIL: could not fetch config.xml from ${JENKINS_URL}"
   exit 1
 fi
-if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
-  echo "OK: Jenkins job uses load() split layout (Blue Ocean 12-step view)"
+if echo "${CFG}" | grep -qF 'paas-blueocean-12steps-20260618' || echo "${CFG}" | grep -qF 'runPaasStep12()'; then
+  echo "OK: Jenkins job uses Blue Ocean 12-step outer stages layout"
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
+  echo "WARN: Jenkins job uses legacy load()-only layout (Blue Ocean shows ~5 stages) — run: bash paas/scripts/lab.sh jenkins"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 else
   REMOTE_CHECK_TEXT="${CFG}"
