@@ -17,6 +17,21 @@ DEFAULT_JENKINSFILE_STAGES = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-
 JENKINS_STAGES_REMOTE_PATH = "/var/jenkins_home/paas/paas-deploy-stages.groovy"
 DT_STAGES_MARKER = "dt-api-server-svc-20260617"
 PAAS_DEPLOY_STAGES_LOAD_MARKER = "paas-deploy-stages-load-20260617"
+PAAS_BLUEOCEAN_CLOSURES_MARKER = "paas-blueocean-12closures-20260619"
+PAAS_DEPLOY_STAGE_SPECS: list[tuple[int, str]] = [
+    (1, "Params validation"),
+    (2, "Checkout du code (Git / GitHub)"),
+    (3, "Construction de l'application"),
+    (4, "Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)"),
+    (5, "Tests SAST (SonarQube)"),
+    (6, "Création de l'image Docker"),
+    (7, "Packaging du chart Helm"),
+    (8, "Publication des artefacts (Artifactory)"),
+    (9, "Signature de l'image (Cosign)"),
+    (10, "DAST (OWASP ZAP baseline)"),
+    (11, "Publication charts Helm (OCI → Harbor)"),
+    (12, "GitOps (Argo CD) & archivage Jenkins"),
+]
 TWELVE_STEPS_MARKER = "steps-1-2-3-4-5-6-7-8-9-10-11-12-202602"
 LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
 CRANE_MARKERS = (
@@ -75,29 +90,43 @@ def verify_job_script_markers(cfg_xml: str) -> bool:
     if "full npm install then cyclonedx-npm" not in cfg_xml:
         return False
     return True
-def build_load_wrapper() -> str:
-    return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
-println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} (Steps 1-12 via load inside node — Blue Ocean shows all stages)'
-def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
-def paasRequireFreshStages = {{
-  if (!fileExists(paasDeployStagesPath)) {{
+def build_node_body() -> str:
+    stage_lines = "\n".join(
+        f'  stage("Step {num} — {title}") {{ paas.runPaasStep{num:02d}() }}'
+        for num, title in PAAS_DEPLOY_STAGE_SPECS
+    )
+    return f"""  if (!fileExists(paasDeployStagesPath)) {{
     error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
   }}
   def stagesText = readFile(paasDeployStagesPath)
+  if (!stagesText.contains('{PAAS_BLUEOCEAN_CLOSURES_MARKER}') || !stagesText.contains('def runPaasStep12 = {{')) {{
+    error("Stale ${{paasDeployStagesPath}} (missing {PAAS_BLUEOCEAN_CLOSURES_MARKER}) — run: bash paas/scripts/lab.sh jenkins-stages")
+  }}
+  if (!stagesText.contains('return this')) {{
+    error("Stale ${{paasDeployStagesPath}} (missing return this) — run: bash paas/scripts/lab.sh jenkins-stages")
+  }}
   if (!stagesText.contains('{DT_STAGES_MARKER}')) {{
     error("Stale ${{paasDeployStagesPath}} (missing {DT_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
   }}
-  load paasDeployStagesPath
-}}
+  def paas = load paasDeployStagesPath
+  paas.paasDeployInit()
+{stage_lines}"""
+
+
+def build_load_wrapper() -> str:
+    body = build_node_body()
+    return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
+println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} ({PAAS_BLUEOCEAN_CLOSURES_MARKER} — 12 Blue Ocean stages via closures)'
+def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 if (!agentLabel || agentLabel == 'built-in') {{
   println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
   node {{
-    paasRequireFreshStages()
+{body}
   }}
 }} else {{
   println "[paas] node: agentLabel=${{agentLabel}}"
   node(agentLabel) {{
-    paasRequireFreshStages()
+{body}
   }}
 }}
 """

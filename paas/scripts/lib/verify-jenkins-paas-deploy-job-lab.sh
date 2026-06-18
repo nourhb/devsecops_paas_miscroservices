@@ -188,7 +188,10 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 REMOTE_CHECK_TEXT="${CFG}"
-if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
+if echo "${CFG}" | grep -qF 'paas.runPaasStep12()' && echo "${CFG}" | grep -qF 'paas-blueocean-12closures-20260619'; then
+  echo "OK: Jenkins job uses 12 Blue Ocean outer stages (closures layout)"
+  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
   echo "OK: Jenkins job uses June 17 load() layout (build #756 era)"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 elif echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
