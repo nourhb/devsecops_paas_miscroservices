@@ -85,17 +85,29 @@ fi
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
-ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" 2>/dev/null || true
 echo "==> Disable stale inline Jenkinsfile sync on trigger"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
+FRONTEND_ENV="${REPO_ROOT}/paas/frontend/.env"
 if [[ -f "${ENV_FILE}" ]]; then
   if grep -q '^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=' "${ENV_FILE}" 2>/dev/null; then
     sed -i 's|^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=.*|JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false|' "${ENV_FILE}"
   else
     echo 'JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false' >> "${ENV_FILE}"
   fi
-  ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" 2>/dev/null || \
-    echo "WARN: sync-paas-frontend-env-k8s.sh failed"
+  if [[ -f "${FRONTEND_ENV}" ]]; then
+    if grep -q '^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=' "${FRONTEND_ENV}" 2>/dev/null; then
+      sed -i 's|^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=.*|JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false|' "${FRONTEND_ENV}"
+    else
+      echo 'JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false' >> "${FRONTEND_ENV}"
+    fi
+  fi
+  if [[ "${PAAS_SKIP_ENV_SYNC:-}" == "1" ]]; then
+    echo "SKIP: frontend env sync (PAAS_SKIP_ENV_SYNC=1 — run lab.sh env-quick separately)"
+  else
+    PAAS_SKIP_ROLLOUT="${PAAS_SKIP_ROLLOUT:-1}" \
+      ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || \
+      echo "WARN: sync-paas-frontend-env-k8s.sh failed"
+  fi
 else
   echo "WARN: ${ENV_FILE} missing"
 fi
