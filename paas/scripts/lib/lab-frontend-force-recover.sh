@@ -83,10 +83,12 @@ kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout
           "operator": "Exists",
           "effect": "NoSchedule"
         }],
+        "serviceAccountName": "paas-frontend",
         "containers": [{
           "name": "frontend",
           "image": "${IMG}",
           "imagePullPolicy": "Never",
+          "envFrom": [{"secretRef": {"name": "paas-frontend-env"}}],
           "env": [{"name": "DATABASE_URL", "value": "${DB_URL}"}]
         }]
       }
@@ -130,6 +132,7 @@ echo "api/health HTTP ${HTTP}"
 if [[ "${HTTP}" == "200" ]]; then
   bash "${SCRIPT_DIR}/check-paas-lab-health.sh" || true
 else
+  echo "If HTTP 500: re-attach env secret — bash paas/scripts/lab.sh env-quick"
   echo "If ErrImageNeverPull: docker images | grep paas-frontend  then re-run this script"
   echo "If Evicted: free disk below 88% then re-run"
 fi
