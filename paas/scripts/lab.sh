@@ -22,7 +22,7 @@ usage() {
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
-  echo "  frontend-heal     Unpin frontend nodeSelector + restore UI :30100"
+  echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
