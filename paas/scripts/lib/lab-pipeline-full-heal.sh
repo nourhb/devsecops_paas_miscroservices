@@ -67,13 +67,13 @@ read_env_sonar_url() {
 }
 
 verify_twelve_stages_on_jenkins() {
-  local count
-  count="$(kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -c 'def runPaasStep' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null || echo 0)"
-  if [[ "${count}" -ge 12 ]]; then
-    ok "Jenkins stages file has ${count} runPaasStepNN functions (expect 12)"
+  if kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
+    grep -qF 'def runPaasDeploy = {' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
+    && kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
+    grep -qF 'paas-monolithic-runPaasDeploy-20260618' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+    ok "Jenkins stages file has monolithic runPaasDeploy closure"
   else
-    fail "Jenkins stages file has ${count} stages (expect 12) — run: bash paas/scripts/lab.sh jenkins"
+    fail "Jenkins stages file missing monolithic runPaasDeploy — run: bash paas/scripts/lab.sh jenkins-stages"
   fi
 }
 
