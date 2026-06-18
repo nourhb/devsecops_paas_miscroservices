@@ -3,31 +3,32 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
+STAGES_LOCAL="${PAAS_GENERATED_STAGES_PATH:-/var/tmp/paas-deploy-stages.groovy}"
+STAGES_REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
 jenkinsfile_bundle() {
   cat "${JENKINSFILE}"
 }
-jenkins_effective_pipeline_text() {
-  local text
-  text="$(jenkinsfile_bundle)"
-  if [[ -f /var/tmp/paas-deploy-stages.groovy ]]; then
-    text="${text}"$'\n'"$(cat /var/tmp/paas-deploy-stages.groovy)"
-  elif command -v kubectl >/dev/null 2>&1; then
-    local ns pod remote
-    remote="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
+jenkins_pipeline_has_marker() {
+  local marker="$1"
+  local path
+  for path in "${JENKINSFILE}" "${STAGES_LOCAL}"; do
+    [[ -f "${path}" ]] || continue
+    grep -qF "${marker}" "${path}" 2>/dev/null && return 0
+  done
+  if command -v kubectl >/dev/null 2>&1; then
+    local ns pod
     for ns in "${JENKINS_K8S_NAMESPACE:-cicd}" cicd jenkins; do
       pod="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
       [[ -n "${pod}" ]] || continue
-      if kubectl exec -n "${ns}" "${pod}" -- test -f "${remote}" 2>/dev/null; then
-        text="${text}"$'\n'"$(kubectl exec -n "${ns}" "${pod}" -- cat "${remote}" 2>/dev/null || true)"
-        break
+      if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${marker}" "${STAGES_REMOTE}" 2>/dev/null; then
+        return 0
       fi
     done
   fi
-  printf '%s' "${text}"
+  return 1
 }
 jenkinsfile_has_marker() {
-  local marker="$1"
-  grep -qF "${marker}" "${JENKINSFILE}" 2>/dev/null
+  jenkins_pipeline_has_marker "$1"
 }
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 JENKINS_URL="${JENKINS_URL:-http://127.0.0.1:30090}"
@@ -55,8 +56,18 @@ if [[ -f "${ENV_FILE}" ]]; then
   JENKINS_URL="${JENKINS_PROBE_URL:-${JENKINS_URL:-http://127.0.0.1:30090}}"
 fi
 jenkins_text_has_crane_fix() {
-  local text="$1"
-  local m
+  local text="${1:-}"
+  local m path
+  if [[ -z "${text}" ]]; then
+    for m in "${CRANE_MARKERS[@]}"; do
+      jenkins_pipeline_has_marker "${m}" && return 0
+    done
+    for path in "${JENKINSFILE}" "${STAGES_LOCAL}"; do
+      [[ -f "${path}" ]] || continue
+      grep -qE 'crane-next16[-&#45;]+202605' "${path}" 2>/dev/null && return 0
+    done
+    return 1
+  fi
   for m in "${CRANE_MARKERS[@]}"; do
     if echo "${text}" | grep -qF "${m}"; then
       return 0
@@ -72,8 +83,14 @@ jenkins_job_has_stale_step6() {
   echo "${cfg}" | grep -qF 'run_with_keepalive npx next build --no-lint'
 }
 jenkins_text_has_mutate_fix() {
-  local text="$1"
+  local text="${1:-}"
   local m
+  if [[ -z "${text}" ]]; then
+    for m in "${MUTATE_FIX_MARKERS[@]}"; do
+      jenkins_pipeline_has_marker "${m}" && return 0
+    done
+    return 1
+  fi
   for m in "${MUTATE_FIX_MARKERS[@]}"; do
     if echo "${text}" | grep -qF "${m}"; then
       return 0
@@ -92,14 +109,14 @@ jenkins_job_has_broken_mutate() {
   return 1
 }
 echo "==> Local Jenkinsfile contains crane-path fix?"
-if jenkins_text_has_crane_fix "$(jenkins_effective_pipeline_text)"; then
+if jenkins_text_has_crane_fix; then
   echo "OK: repo Jenkinsfile has crane-path fix"
 else
   echo "FAIL: missing crane-next16 marker in Jenkinsfile — git pull origin main"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains Step 6 mutate fix (start-paas.sh)?"
-if jenkins_text_has_mutate_fix "$(jenkins_effective_pipeline_text)"; then
+if jenkins_text_has_mutate_fix; then
   echo "OK: repo Jenkinsfile has crane mutate fix"
 else
   echo "FAIL: missing monorepo-app-root-20260531 / start-paas.sh in Jenkinsfile — git pull origin main"
