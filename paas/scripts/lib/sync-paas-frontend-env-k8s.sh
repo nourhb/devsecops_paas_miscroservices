@@ -11,6 +11,13 @@ RBAC_MANIFEST="${RBAC_MANIFEST:-${REPO_ROOT}/paas/k8s-manifests/lab/paas-fronten
 umask 077
 FILTERED="$(mktemp "${TMPDIR:-/tmp}/paas-frontend-env.XXXXXX")"
 trap 'rm -f "${FILTERED}"' EXIT
+KUBECTL_TIMEOUT="${KUBECTL_TIMEOUT:-60s}"
+kubectl_apply() {
+  kubectl apply --validate=false --request-timeout="${KUBECTL_TIMEOUT}" "$@"
+}
+kubectl_patch() {
+  kubectl patch --request-timeout="${KUBECTL_TIMEOUT}" "$@"
+}
 
 echo "==> Kyverno webhook guard (dead admission blocks envFrom patches)"
 PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
@@ -21,7 +28,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 fi
 if [[ -f "${RBAC_MANIFEST}" ]]; then
   echo "==> Apply frontend RBAC (pods/logs + Prometheus service proxy)"
-  kubectl apply -f "${RBAC_MANIFEST}"
+  kubectl_apply -f "${RBAC_MANIFEST}"
 fi
 if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" >/dev/null 2>&1; then
   echo "ERROR: deployment/${DEPLOY_NAME} not found in namespace ${PAAS_NS}" >&2
@@ -64,10 +71,10 @@ echo "==> Secret ${SECRET_NAME} from ${ENV_FILE} ($(wc -l < "${FILTERED}") keys)
 kubectl create secret generic "${SECRET_NAME}" \
   --from-env-file="${FILTERED}" \
   -n "${PAAS_NS}" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl_apply -f -
 echo "==> Attach envFrom secret to deployment/${DEPLOY_NAME}"
 attach_env_from() {
-  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
+  kubectl_patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
 {
   "spec": {
     "template": {
@@ -105,21 +112,21 @@ fi
 echo "OK: envFrom ${SECRET_NAME} attached"
 if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.serviceAccountName}' 2>/dev/null | grep -qx paas-frontend; then
   echo "==> Force serviceAccountName=paas-frontend on deployment/${DEPLOY_NAME}"
-  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
+  kubectl_patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
 fi
 if [[ "${PAAS_UNPIN_FRONTEND:-}" == "1" ]]; then
   NS_JSON="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
   if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then
     echo "==> Remove nodeSelector from deployment/${DEPLOY_NAME} (PAAS_UNPIN_FRONTEND=1)"
-    kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
+    kubectl_patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
       -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
-      || kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic \
+      || kubectl_patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic \
         -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' || true
   fi
   FPOL="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
   if [[ "${FPOL}" == "Never" ]]; then
     echo "==> imagePullPolicy Never -> IfNotPresent (PAAS_UNPIN_FRONTEND=1)"
-    kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
+    kubectl_patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json \
       -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
   fi
 else

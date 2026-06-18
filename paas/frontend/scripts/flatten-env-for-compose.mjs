@@ -127,9 +127,27 @@ function main() {
         byKey.set("PROMETHEUS_BASE_URL", PROM_IN_CLUSTER);
         console.warn(`WARN: PROMETHEUS_BASE_URL defaulted to ${PROM_IN_CLUSTER}`);
     }
-    if (labNodeIp && !envTrim(byKey, "KUBERNETES_ENABLED")) {
+    if labNodeIp && !envTrim(byKey, "KUBERNETES_ENABLED")) {
         byKey.set("KUBERNETES_ENABLED", "true");
         console.warn("WARN: KUBERNETES_ENABLED defaulted to true for lab");
+    }
+    const JENKINS_NODEPORT = 30090;
+    const isInClusterJenkinsUrl = (url) => {
+        const u = String(url || "").trim();
+        if (!u) {
+            return false;
+        }
+        return (/jenkins-service|\.svc\.cluster\.local/i.test(u) && !/:30090/i.test(u))
+            || /^https?:\/\/10\.\d+\.\d+\.\d+:8080\/?$/i.test(u);
+    };
+    const jenkinsBase = envTrim(byKey, "JENKINS_BASE_URL") || envTrim(byKey, "JENKINS_URL");
+    if (labNodeIp && isInClusterJenkinsUrl(jenkinsBase)) {
+        const nodeJenkins = `http://${labNodeIp}:${JENKINS_NODEPORT}`;
+        byKey.set("JENKINS_BASE_URL", nodeJenkins);
+        if (byKey.has("JENKINS_URL")) {
+            byKey.set("JENKINS_URL", nodeJenkins);
+        }
+        console.warn(`WARN: JENKINS_BASE_URL in-cluster/dead clusterIP -> ${nodeJenkins} (frontend pod uses node NodePort)`);
     }
     const entriesOut = [...byKey.entries()];
     const header = "";
