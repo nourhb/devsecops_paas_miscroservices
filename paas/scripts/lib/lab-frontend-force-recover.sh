@@ -12,36 +12,63 @@ echo " lab-frontend-force-recover"
 echo "=============================================="
 df -h / | tail -1
 
+image_on_node() {
+  sudo k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery' \
+    || sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'
+}
+
+import_recovery_image() {
+  local src="" candidate
+  for candidate in "${IMG}" "paas-frontend:recovery" "docker.io/library/paas-frontend:recovery"; do
+    if docker image inspect "${candidate}" >/dev/null 2>&1; then
+      src="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${src}" ]]; then
+    echo "ERROR: paas-frontend:recovery not in docker — rebuild on master:" >&2
+    echo "  docker images | grep paas-frontend" >&2
+    echo "  # or: bash paas/scripts/lab.sh frontend  (long build)" >&2
+    return 1
+  fi
+  echo "==> Import ${src} into k3s containerd (fixes ErrImageNeverPull)"
+  docker save "${src}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null
+  sudo k3s ctr -n k8s.io images tag "${src}" "${IMG}" 2>/dev/null || true
+  sudo k3s ctr -n k8s.io images tag "${src}" "paas-frontend:recovery" 2>/dev/null || true
+  sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
+}
+
+echo "==> Image on master (before any slow kubectl work)"
+if ! image_on_node; then
+  import_recovery_image || exit 1
+else
+  echo "OK: recovery image already in containerd"
+  sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
+fi
+
 PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
-echo "==> Scale frontend to 0 + drop old ReplicaSets (speeds API)"
-kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=0 --request-timeout=45s 2>/dev/null || true
-kubectl rollout pause deployment/frontend -n "${PAAS_NS}" 2>/dev/null || true
+echo "==> Scale frontend to 0 + drop old ReplicaSets"
+set +e
+kubectl rollout resume deployment/frontend -n "${PAAS_NS}" --request-timeout=30s 2>/dev/null
+kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=0 --request-timeout=45s 2>/dev/null
 kubectl get rs -n "${PAAS_NS}" -l app=frontend -o name --request-timeout=45s 2>/dev/null \
-  | xargs -r kubectl delete --request-timeout=45s --wait=false 2>/dev/null || true
+  | xargs -r kubectl delete --request-timeout=45s --wait=false 2>/dev/null
+kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false \
+  --request-timeout=30s 2>/dev/null
 
-echo "==> Chunk-delete Failed pods in ${PAAS_NS} (max 30 batches)"
-for _ in $(seq 1 30); do
+echo "==> Chunk-delete Failed pods in ${PAAS_NS} (max 20 batches; API timeouts OK)"
+for _ in $(seq 1 20); do
   batch="$(kubectl get pods -n "${PAAS_NS}" --field-selector=status.phase=Failed -o name \
-    --request-timeout=30s 2>/dev/null | head -200)"
+    --request-timeout=25s 2>/dev/null | head -150)" || batch=""
   [[ -z "${batch}" ]] && break
   echo "${batch}" | xargs -r kubectl delete --request-timeout=45s --force --grace-period=0 --wait=false \
     2>/dev/null || true
   sleep 1
 done
+set -e
 
-echo "==> Ensure image on master containerd"
-if ! sudo k3s ctr -n k8s.io images ls -q 2>/dev/null | grep -qF 'paas-frontend:recovery'; then
-  if docker image inspect "${IMG}" >/dev/null 2>&1; then
-    docker save "${IMG}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
-  else
-    echo "ERROR: ${IMG} missing from docker and containerd — rebuild on master first" >&2
-    exit 1
-  fi
-fi
-sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep paas-frontend || true
-
-echo "==> Patch deployment (Recreate, master, Never pull, revisionHistoryLimit 0)"
+echo "==> Patch deployment (Recreate, master, Never pull)"
 kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "$(cat <<PATCH
 {
   "spec": {
@@ -69,22 +96,29 @@ kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout
 PATCH
 )" || exit 1
 
-kubectl rollout resume deployment/frontend -n "${PAAS_NS}" 2>/dev/null || true
-
-echo "==> Wait for Running pod (events — not describe -l app=frontend)"
-for i in $(seq 1 60); do
-  phase="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend \
+echo "==> Wait for Running pod"
+for i in $(seq 1 48); do
+  set +e
+  reason="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend \
     --field-selector=status.phase!=Failed \
-    -o jsonpath='{.items[0].status.phase}' --request-timeout=20s 2>/dev/null || true)"
+    -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' \
+    --request-timeout=20s 2>/dev/null)" || reason=""
   ready="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend \
     --field-selector=status.phase=Running \
-    -o jsonpath='{.items[0].status.containerStatuses[0].ready}' --request-timeout=20s 2>/dev/null || true)"
-  echo "  [${i}/60] phase=${phase:-none} ready=${ready:-false}"
-  [[ "${ready}" == "true" ]] && break
-  if [[ "${phase}" == "Evicted" || "${phase}" == "Failed" ]]; then
-    kubectl get events -n "${PAAS_NS}" --sort-by='.lastTimestamp' --request-timeout=20s 2>/dev/null | tail -8 || true
-    echo "WARN: pod evicted/failed — disk may still be >= 90%; run: bash paas/scripts/lab.sh disk-emergency"
+    -o jsonpath='{.items[0].status.containerStatuses[0].ready}' \
+    --request-timeout=20s 2>/dev/null)" || ready=""
+  phase="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend \
+    --field-selector=status.phase!=Failed \
+    -o jsonpath='{.items[0].status.phase}' --request-timeout=20s 2>/dev/null)" || phase=""
+  set -e
+  echo "  [${i}/48] phase=${phase:-none} ready=${ready:-false} reason=${reason:-}"
+  if [[ "${reason}" == "ErrImageNeverPull" ]]; then
+    echo "==> ErrImageNeverPull — re-import image and delete pod"
+    import_recovery_image || true
+    kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false \
+      --request-timeout=30s 2>/dev/null || true
   fi
+  [[ "${ready}" == "true" ]] && break
   sleep 5
 done
 
@@ -96,6 +130,6 @@ echo "api/health HTTP ${HTTP}"
 if [[ "${HTTP}" == "200" ]]; then
   bash "${SCRIPT_DIR}/check-paas-lab-health.sh" || true
 else
-  echo "If still 000: kubectl get endpoints frontend-service -n ${PAAS_NS}"
-  echo "If Evicted: free disk below 88% then re-run this script"
+  echo "If ErrImageNeverPull: docker images | grep paas-frontend  then re-run this script"
+  echo "If Evicted: free disk below 88% then re-run"
 fi
