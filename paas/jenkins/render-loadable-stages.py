@@ -10,14 +10,25 @@ STAGE_RE = re.compile(r'^\s*stage\("Step (\d+) — (.+)"\) \{\s*$')
 BUNDLE_MARKER = "STAGES_BUNDLE_VERSION=paas-blueocean-12steps-20260618"
 
 
-def strip_trailing_stage_brace(body_lines: list[str]) -> list[str]:
-    """Drop blank lines and the stage() wrapper's closing brace (2-space indent)."""
-    lines = list(body_lines)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if lines and re.match(r"^  }\s*$", lines[-1]):
-        lines.pop()
-    return lines
+def extract_step_body(lines: list[str], start_i: int, end_i: int) -> list[str]:
+    """Stage body = inner lines + inter-stage tail; drop the stage() wrapper's closing `  }`."""
+    chunk = lines[start_i + 1 : end_i]
+    inner: list[str] = []
+    tail: list[str] = []
+    closed = False
+    for line in chunk:
+        if not closed and re.match(r"^  }\s*$", line):
+            closed = True
+            continue
+        if closed:
+            tail.append(line)
+        else:
+            inner.append(line)
+    while tail and not tail[0].strip():
+        tail.pop(0)
+    while tail and not tail[-1].strip():
+        tail.pop()
+    return inner + tail
 
 
 def split_stages_body(stages_text: str) -> tuple[list[str], list[tuple[int, str, list[str]]]]:
@@ -33,7 +44,7 @@ def split_stages_body(stages_text: str) -> tuple[list[str], list[tuple[int, str,
     steps: list[tuple[int, str, list[str]]] = []
     for idx, (start_i, num, title) in enumerate(hits):
         end_i = hits[idx + 1][0] if idx + 1 < len(hits) else len(lines)
-        body = strip_trailing_stage_brace(lines[start_i + 1 : end_i])
+        body = extract_step_body(lines, start_i, end_i)
         steps.append((num, title, body))
     return init_lines, steps
 
@@ -46,9 +57,10 @@ def emit_function(name: str, body_lines: list[str]) -> str:
 
 
 def validate_step_body(num: int, title: str, body_lines: list[str]) -> None:
-    if body_lines and re.match(r"^  }\s*$", body_lines[-1]):
+    body = "\n".join(body_lines)
+    if re.search(r"\n  \}\n(\s*\n)?  [a-zA-Z\"']", body):
         raise SystemExit(
-            f"ERROR: Step {num} ({title}) still has stage() closing brace — fix strip_trailing_stage_brace"
+            f"ERROR: Step {num} ({title}) still has stage() wrapper brace before tail code"
         )
 
 
