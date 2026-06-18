@@ -151,13 +151,16 @@ if [[ -z "${CFG}" ]]; then
   echo "FAIL: could not fetch config.xml from ${JENKINS_URL}"
   exit 1
 fi
-if echo "${CFG}" | grep -qF 'paas-blueocean-12steps-20260618' || echo "${CFG}" | grep -qF 'runPaasStep12()'; then
-  echo "OK: Jenkins job uses Blue Ocean 12-step outer stages layout"
-elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
-  echo "WARN: Jenkins job uses legacy load()-only layout (Blue Ocean shows ~5 stages) — run: bash paas/scripts/lab.sh jenkins"
+REMOTE_CHECK_TEXT="${CFG}"
+if echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
+  echo "OK: Jenkins job uses monolithic runPaasDeploy() layout (June 17)"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
-else
-  REMOTE_CHECK_TEXT="${CFG}"
+elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paasDeployInit()'; then
+  echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh jenkins"
+  exit 1
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
+  echo "WARN: Jenkins job uses legacy load()-only layout — run: bash paas/scripts/lab.sh jenkins"
+  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
   echo "FAIL: Jenkins still has OLD Step 6 (npx next build --no-lint in crane path)"

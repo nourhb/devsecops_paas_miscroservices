@@ -31,7 +31,7 @@ verify_remote_stages() {
   kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
     grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
     && kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
-      grep -qF 'def runPaasStep12' "${REMOTE}" 2>/dev/null
+      grep -qF 'def runPaasDeploy = {' "${REMOTE}" 2>/dev/null
 }
 
 install_via_exec_tee() {
@@ -93,12 +93,12 @@ if ! grep -qF 'def coerceHarborHostForCosign' "${GENERATED}"; then
   echo "ERROR: generated stages file missing helpers (coerceHarborHostForCosign)" >&2
   exit 1
 fi
-if ! grep -qF 'def runPaasStep12' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing runPaasStep12" >&2
+if ! grep -qF 'def runPaasDeploy = {' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing runPaasDeploy closure" >&2
   exit 1
 fi
-if ! grep -qF 'paas-blueocean-12steps-20260618' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing Blue Ocean 12-step bundle marker" >&2
+if ! grep -qF 'paas-monolithic-runPaasDeploy-20260618' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing monolithic bundle marker" >&2
   exit 1
 fi
 if ! grep -qF 'return this' "${GENERATED}"; then

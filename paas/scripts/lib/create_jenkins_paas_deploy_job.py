@@ -18,6 +18,7 @@ JENKINS_STAGES_REMOTE_PATH = "/var/jenkins_home/paas/paas-deploy-stages.groovy"
 DT_STAGES_MARKER = "dt-api-server-svc-20260617"
 PAAS_DEPLOY_STAGES_LOAD_MARKER = "paas-deploy-stages-load-20260617"
 PAAS_BLUEOCEAN_STAGES_MARKER = "paas-blueocean-12steps-20260618"
+PAAS_MONOLITHIC_STAGES_MARKER = "paas-monolithic-runPaasDeploy-20260618"
 PAAS_DEPLOY_STAGE_SPECS: list[tuple[int, str]] = [
     (1, "Params validation"),
     (2, "Checkout du code (Git / GitHub)"),
@@ -126,16 +127,12 @@ def verify_job_script_markers(cfg_xml: str) -> bool:
         return False
     return True
 def build_node_body() -> str:
-    stage_lines = "\n".join(
-        f'  stage("Step {num} — {title}") {{ paas.runPaasStep{num:02d}() }}'
-        for num, title in PAAS_DEPLOY_STAGE_SPECS
-    )
     return f"""  if (!fileExists(paasDeployStagesPath)) {{
     error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
   }}
   def stagesText = readFile(paasDeployStagesPath)
-  if (!stagesText.contains('{PAAS_BLUEOCEAN_STAGES_MARKER}') || !stagesText.contains('def runPaasStep12')) {{
-    error("Stale ${{paasDeployStagesPath}} (missing {PAAS_BLUEOCEAN_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
+  if (!stagesText.contains('{PAAS_MONOLITHIC_STAGES_MARKER}') || !stagesText.contains('def runPaasDeploy = {{')) {{
+    error("Stale ${{paasDeployStagesPath}} (missing {PAAS_MONOLITHIC_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins-stages")
   }}
   if (!stagesText.contains('return this')) {{
     error("Stale ${{paasDeployStagesPath}} (missing return this) — run: bash paas/scripts/lab.sh jenkins-stages")
@@ -144,14 +141,13 @@ def build_node_body() -> str:
     error("Stale ${{paasDeployStagesPath}} (missing {DT_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
   }}
   def paas = load paasDeployStagesPath
-  paas.paasDeployInit()
-{stage_lines}"""
+  paas.runPaasDeploy()"""
 
 
 def build_load_wrapper() -> str:
     body = build_node_body()
     return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
-println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} ({PAAS_BLUEOCEAN_STAGES_MARKER} — 12 stages in main script for Blue Ocean)'
+println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} ({PAAS_MONOLITHIC_STAGES_MARKER} — monolithic runPaasDeploy closure)'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 if (!agentLabel || agentLabel == 'built-in') {{
   println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
