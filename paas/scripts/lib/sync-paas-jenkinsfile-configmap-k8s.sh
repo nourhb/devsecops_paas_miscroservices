@@ -86,6 +86,10 @@ else
 EOF
 )"
 fi
-kubectl rollout restart deployment/"${DEPLOY}" -n "${NS}"
-kubectl rollout status deployment/"${DEPLOY}" -n "${NS}" --timeout=300s
+if [[ "${SKIP_FRONTEND_REBUILD:-false}" == "true" ]] || [[ "${SKIP_FRONTEND_ROLLOUT:-}" == "1" ]]; then
+  echo "==> Skip frontend rollout restart (SKIP_FRONTEND_REBUILD/SKIP_FRONTEND_ROLLOUT)"
+else
+  kubectl rollout restart deployment/"${DEPLOY}" -n "${NS}"
+  kubectl rollout status deployment/"${DEPLOY}" -n "${NS}" --timeout=300s
+fi
 echo "OK: PaaS inline sync will read Jenkinsfile from ConfigMap (monorepo-app-root-20260531)"
