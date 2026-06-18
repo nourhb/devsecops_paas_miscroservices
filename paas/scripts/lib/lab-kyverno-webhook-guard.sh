@@ -50,7 +50,11 @@ case "${1:-guard}" in
     fi
     echo "WARN: kyverno admission DOWN but webhooks still registered — removing fail-closed hooks"
     remove_kyverno_webhooks
-    restart_kyverno_admission
+    if [[ "${PAAS_SKIP_KYVERNO_RESTART:-}" != "1" ]]; then
+      restart_kyverno_admission
+    else
+      echo "SKIP: kyverno restart (PAAS_SKIP_KYVERNO_RESTART=1)"
+    fi
     echo "OK: kyverno webhooks cleared (lab fail-open until admission is healthy)"
     ;;
   status)
