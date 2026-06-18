@@ -110,10 +110,19 @@ main() {
   echo " lab-pipeline-full-heal — 12-step paas-deploy"
   echo "=============================================="
 
-  step "1/7 Kyverno (unblock patches)"
+  step "1/8 Kyverno (unblock patches)"
   ensure_kyverno_unblocked
 
-  step "2/7 SonarQube pod"
+  step "2/8 Postgres (frontend needs postgres:5432)"
+  if PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh"; then
+    ok "Postgres reachable from frontend pod"
+  else
+    warn "db-repair failed — trying worker2 (PVC node)"
+    bash "${SCRIPT_DIR}/lab-worker2-heal.sh" || true
+    PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || fail "Postgres still down"
+  fi
+
+  step "3/8 SonarQube pod"
   if kubectl get pods -n sonarqube --request-timeout=30s 2>/dev/null | grep -q Running; then
     ok "SonarQube pod Running"
   else
@@ -122,7 +131,7 @@ main() {
     FAIL=1
   fi
 
-  step "3/7 SONAR_TOKEN"
+  step "4/8 SONAR_TOKEN"
   local token url
   token="${SONAR_TOKEN:-$(read_env_sonar_token)}"
   url="$(read_env_sonar_url)"
@@ -150,7 +159,7 @@ main() {
     exit 1
   fi
 
-  step "4/7 Jenkins + stages (12 steps)"
+  step "5/8 Jenkins + stages (12 steps)"
   if ! curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 "http://${NODE_IP}:30090/login" | grep -qE '200|403'; then
     bash "${SCRIPT_DIR}/lab-jenkins-recover.sh" recover || fail "Jenkins not up"
   else
@@ -161,11 +170,11 @@ main() {
   verify_twelve_stages_on_jenkins
   bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh" || FAIL=1
 
-  step "5/7 Frontend env secret + rollout"
+  step "6/8 Frontend env secret + rollout"
   sync_env_to_cluster
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force
 
-  step "6/7 Jenkins pod → Sonar"
+  step "7/8 Jenkins pod → Sonar"
   local jtok="${token}"
   if kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
     curl -sS -m 15 -u "${jtok}:" "http://${NODE_IP}:${SONAR_PORT}/api/authentication/validate" 2>/dev/null \
@@ -186,7 +195,7 @@ main() {
     fi
   fi
 
-  step "7/7 Harbor (Step 6+ needs registry)"
+  step "8/8 Harbor (Step 6+ needs registry)"
   bash "${SCRIPT_DIR}/lab-harbor.sh" recover 2>/dev/null || warn "Harbor recover skipped — image push may fail at Step 6"
 
   echo ""
