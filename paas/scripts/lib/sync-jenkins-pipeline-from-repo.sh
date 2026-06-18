@@ -76,7 +76,12 @@ load_jenkins_creds_for_sync() {
   fi
 }
 load_jenkins_creds_for_sync
-bash "${SCRIPT_DIR}/lab-dependency-track.sh" || { echo "ERROR: Dependency-Track not ready — fix above, then re-run lab.sh jenkins" >&2; exit 1; }
+if [[ "${LAB_DT_SKIP_HEAL:-false}" == "true" ]]; then
+  echo "SKIP: Dependency-Track (LAB_DT_SKIP_HEAL=true)"
+elif ! bash "${SCRIPT_DIR}/lab-dependency-track.sh"; then
+  echo "WARN: Dependency-Track heal incomplete — Jenkins sync continues; Step 4 may fail until API server is Running"
+  LAB_DT_ENV_ONLY=true bash "${SCRIPT_DIR}/lab-dependency-track.sh" || true
+fi
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
