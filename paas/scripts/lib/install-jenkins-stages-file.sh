@@ -59,6 +59,10 @@ if ! grep -qF 'paas-blueocean-12steps-20260618' "${GENERATED}"; then
   echo "ERROR: generated stages file missing Blue Ocean 12-step bundle marker" >&2
   exit 1
 fi
+if grep -qE $'\n  }\n}\ndef runPaasStep' "${GENERATED}"; then
+  echo "ERROR: generated stages has extra stage() brace before runPaasStep — fix render-loadable-stages.py" >&2
+  exit 1
+fi
 if ! grep -qF 'dt_upload_candidates' "${GENERATED}"; then
   echo "ERROR: generated stages still has legacy pick_dt_base — update Jenkinsfile.paas-deploy" >&2
   exit 1
