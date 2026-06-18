@@ -188,12 +188,12 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 REMOTE_CHECK_TEXT="${CFG}"
-if echo "${CFG}" | grep -qF 'paas.runPaasStep12()' && echo "${CFG}" | grep -qF 'paas-blueocean-12closures-20260619'; then
-  echo "OK: Jenkins job uses 12 Blue Ocean outer stages (closures layout)"
+if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
+  echo "OK: Jenkins job uses June 17 inline load() layout (build #756 / #778 era)"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
-elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
-  echo "OK: Jenkins job uses June 17 load() layout (build #756 era)"
-  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+elif echo "${CFG}" | grep -qF 'paas.paasDeployInit()' || echo "${CFG}" | grep -qF 'paas.runPaasStep12()'; then
+  echo "FAIL: Jenkins job uses broken split/closure layout — run: bash paas/scripts/lab.sh rollback-june17"
+  exit 1
 elif echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
   echo "OK: Jenkins job uses monolithic runPaasDeploy() layout"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"

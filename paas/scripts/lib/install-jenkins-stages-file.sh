@@ -31,7 +31,7 @@ verify_remote_stages() {
   kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
     grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
     && kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
-      grep -qF 'def runPaasStep12 = {' "${REMOTE}" 2>/dev/null
+      grep -qF 'stage("Step 12 —' "${REMOTE}" 2>/dev/null
 }
 
 install_via_exec_tee() {
@@ -93,20 +93,16 @@ if ! grep -qF 'def coerceHarborHostForCosign' "${GENERATED}"; then
   echo "ERROR: generated stages file missing helpers (coerceHarborHostForCosign)" >&2
   exit 1
 fi
-if ! grep -qF 'def runPaasStep12 = {' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing runPaasStep12 closure" >&2
+if ! grep -qF 'stage("Step 12 —' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing Step 12" >&2
   exit 1
 fi
-if ! grep -qF 'paas-blueocean-12closures-20260619' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing Blue Ocean closures bundle marker" >&2
+if ! grep -qF "${DT_MARKER}" "${GENERATED}"; then
+  echo "ERROR: generated stages file missing ${DT_MARKER}" >&2
   exit 1
 fi
-if ! grep -qF 'return this' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing return this" >&2
-  exit 1
-fi
-if grep -qE 'def paasDeployInit\(\)|def runPaasStep01\(\)' "${GENERATED}"; then
-  echo "ERROR: generated stages uses broken method syntax — update render-loadable-stages.py" >&2
+if grep -qF 'def paasDeployInit' "${GENERATED}" || grep -qF 'return this' "${GENERATED}"; then
+  echo "ERROR: stages file must use June 17 inline load layout (no split closures)" >&2
   exit 1
 fi
 if ! grep -qF 'dt_upload_candidates' "${GENERATED}"; then
