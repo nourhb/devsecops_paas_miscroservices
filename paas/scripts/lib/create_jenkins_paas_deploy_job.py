@@ -17,22 +17,6 @@ DEFAULT_JENKINSFILE_STAGES = REPO_ROOT / "paas" / "jenkins" / "Jenkinsfile.paas-
 JENKINS_STAGES_REMOTE_PATH = "/var/jenkins_home/paas/paas-deploy-stages.groovy"
 DT_STAGES_MARKER = "dt-api-server-svc-20260617"
 PAAS_DEPLOY_STAGES_LOAD_MARKER = "paas-deploy-stages-load-20260617"
-PAAS_BLUEOCEAN_STAGES_MARKER = "paas-blueocean-12steps-20260618"
-PAAS_MONOLITHIC_STAGES_MARKER = "paas-monolithic-runPaasDeploy-20260618"
-PAAS_DEPLOY_STAGE_SPECS: list[tuple[int, str]] = [
-    (1, "Params validation"),
-    (2, "Checkout du code (Git / GitHub)"),
-    (3, "Construction de l'application"),
-    (4, "Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)"),
-    (5, "Tests SAST (SonarQube)"),
-    (6, "Création de l'image Docker"),
-    (7, "Packaging du chart Helm"),
-    (8, "Publication des artefacts (Artifactory)"),
-    (9, "Signature de l'image (Cosign)"),
-    (10, "DAST (OWASP ZAP baseline)"),
-    (11, "Publication charts Helm (OCI → Harbor)"),
-    (12, "GitOps (Argo CD) & archivage Jenkins"),
-]
 TWELVE_STEPS_MARKER = "steps-1-2-3-4-5-6-7-8-9-10-11-12-202602"
 LAB_JENKINSFILE_STAGING = Path("/tmp/Jenkinsfile.paas-deploy")
 CRANE_MARKERS = (
@@ -59,41 +43,6 @@ NGINX_CONF_WRITEFILE_MARKER = "nginx-conf-writefile-20260611"
 SCA_FULL_INSTALL_MARKER = "sca-npm-install-full-20260611"
 OLD_COSIGN_STEP9_SNIPPET = "digest ref unavailable (crane/triangulate); tag sign only"
 BROKEN_MUTATE_SNIPPET = "--cmd=-c"
-STALE_DT_NODEPORTS = frozenset({"32313"})
-
-def discover_dt_nodeport_lab() -> str:
-    import subprocess
-
-    for args in (
-        [
-            "kubectl",
-            "get",
-            "svc",
-            "-n",
-            "dependency-track",
-            "dtrack-dependency-track-api-server",
-            "-o",
-            "jsonpath={.spec.ports[0].nodePort}",
-        ],
-        [
-            "kubectl",
-            "get",
-            "svc",
-            "-n",
-            "dependency-track",
-            "-l",
-            "app.kubernetes.io/component=api-server",
-            "-o",
-            "jsonpath={.items[0].spec.ports[0].nodePort}",
-        ],
-    ):
-        try:
-            out = subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-        if out and out != "null":
-            return out
-    return ""
 def read_jenkinsfile_bundle(main_path: Path) -> tuple[str, str, str]:
     main = main_path.read_text(encoding="utf-8").replace("\r\n", "\n")
     return main, "", main
@@ -126,38 +75,29 @@ def verify_job_script_markers(cfg_xml: str) -> bool:
     if "full npm install then cyclonedx-npm" not in cfg_xml:
         return False
     return True
-def build_node_body() -> str:
-    return f"""  if (!fileExists(paasDeployStagesPath)) {{
+def build_load_wrapper() -> str:
+    return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
+println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} (Steps 1-12 via load inside node — Blue Ocean shows all stages)'
+def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
+def paasRequireFreshStages = {{
+  if (!fileExists(paasDeployStagesPath)) {{
     error("Missing ${{paasDeployStagesPath}} — run: bash paas/scripts/lab.sh jenkins")
   }}
   def stagesText = readFile(paasDeployStagesPath)
-  if (!stagesText.contains('{PAAS_MONOLITHIC_STAGES_MARKER}') || !stagesText.contains('def runPaasDeploy = {{')) {{
-    error("Stale ${{paasDeployStagesPath}} (missing {PAAS_MONOLITHIC_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins-stages")
-  }}
-  if (!stagesText.contains('return this')) {{
-    error("Stale ${{paasDeployStagesPath}} (missing return this) — run: bash paas/scripts/lab.sh jenkins-stages")
-  }}
   if (!stagesText.contains('{DT_STAGES_MARKER}')) {{
     error("Stale ${{paasDeployStagesPath}} (missing {DT_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
   }}
-  def paas = load paasDeployStagesPath
-  paas.runPaasDeploy()"""
-
-
-def build_load_wrapper() -> str:
-    body = build_node_body()
-    return f"""def paasDeployStagesPath = '{JENKINS_STAGES_REMOTE_PATH}'
-println '[paas-jenkinsfile] marker={PAAS_DEPLOY_STAGES_LOAD_MARKER} ({PAAS_MONOLITHIC_STAGES_MARKER} — monolithic runPaasDeploy closure)'
-def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
+  load paasDeployStagesPath
+}}
 if (!agentLabel || agentLabel == 'built-in') {{
   println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
   node {{
-{body}
+    paasRequireFreshStages()
   }}
 }} else {{
   println "[paas] node: agentLabel=${{agentLabel}}"
   node(agentLabel) {{
-{body}
+    paasRequireFreshStages()
   }}
 }}
 """
@@ -532,11 +472,6 @@ def merge_env_param_defaults_force(
     for param_name in force_names or FORCE_ENV_PARAM_DEFAULTS:
         env_key = ENV_PARAM_DEFAULTS.get(param_name, param_name)
         val = (os.environ.get(env_key) or os.environ.get(param_name) or "").strip()
-        if param_name == "DEPENDENCY_TRACK_BASE_URL" and (":32313" in val or not val):
-            np = discover_dt_nodeport_lab()
-            if np:
-                node_ip = os.environ.get("NODE_IP", "192.168.56.129").strip()
-                val = f"http://{node_ip}:{np}"
         if not val and param_name == "JENKINS_DEPENDENCY_TRACK_BASE_URL":
             val = "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
         if not val:

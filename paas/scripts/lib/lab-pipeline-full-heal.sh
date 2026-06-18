@@ -68,12 +68,12 @@ read_env_sonar_url() {
 
 verify_twelve_stages_on_jenkins() {
   if kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -qF 'def runPaasDeploy = {' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
+    grep -qF 'stage("Step 12 —' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
     && kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -qF 'paas-monolithic-runPaasDeploy-20260618' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
-    ok "Jenkins stages file has monolithic runPaasDeploy closure"
+    grep -qF 'dt-api-server-svc-20260617' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+    ok "Jenkins stages file has Step 12 + dt-api-server marker (June 17 layout)"
   else
-    fail "Jenkins stages file missing monolithic runPaasDeploy — run: bash paas/scripts/lab.sh jenkins-stages"
+    fail "Jenkins stages file stale — run: bash paas/scripts/lab.sh rollback-june17"
   fi
 }
 
