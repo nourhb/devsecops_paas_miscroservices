@@ -50,10 +50,11 @@ def split_stages_body(stages_text: str) -> tuple[list[str], list[tuple[int, str,
 
 
 def emit_function(name: str, body_lines: list[str]) -> str:
+    """Jenkins load() exposes def name() { } to the parent script; not def name = { } closures."""
     if not body_lines:
-        return f"def {name} = {{}}\n"
+        return f"def {name}() {{}}\n"
     body = "\n".join(body_lines)
-    return f"def {name} = {{\n{body}\n}}\n"
+    return f"def {name}() {{\n{body}\n}}\n"
 
 
 def validate_step_body(num: int, title: str, body_lines: list[str]) -> None:
