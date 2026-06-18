@@ -11,6 +11,10 @@ RBAC_MANIFEST="${RBAC_MANIFEST:-${REPO_ROOT}/paas/k8s-manifests/lab/paas-fronten
 umask 077
 FILTERED="$(mktemp "${TMPDIR:-/tmp}/paas-frontend-env.XXXXXX")"
 trap 'rm -f "${FILTERED}"' EXIT
+
+echo "==> Kyverno webhook guard (dead admission blocks envFrom patches)"
+PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
+
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: env file not found: ${ENV_FILE}" >&2
   exit 1
@@ -62,7 +66,8 @@ kubectl create secret generic "${SECRET_NAME}" \
   -n "${PAAS_NS}" \
   --dry-run=client -o yaml | kubectl apply -f -
 echo "==> Attach envFrom secret to deployment/${DEPLOY_NAME}"
-kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
+attach_env_from() {
+  kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
 {
   "spec": {
     "template": {
@@ -81,7 +86,23 @@ kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=strategic -p "$
   }
 }
 PATCH
-)" || true
+)"
+}
+if ! attach_env_from; then
+  echo "WARN: envFrom patch blocked — clearing Kyverno webhooks and retrying"
+  PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
+  attach_env_from || {
+    echo "ERROR: could not attach envFrom ${SECRET_NAME} to deployment/${DEPLOY_NAME}" >&2
+    exit 1
+  }
+fi
+HAS_ENVFROM="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" \
+  -o jsonpath="{.spec.template.spec.containers[?(@.name=='${CONTAINER_NAME}')].envFrom[0].secretRef.name}" 2>/dev/null || true)"
+if [[ "${HAS_ENVFROM}" != "${SECRET_NAME}" ]]; then
+  echo "ERROR: deployment missing envFrom secret ${SECRET_NAME} (got: ${HAS_ENVFROM:-none})" >&2
+  exit 1
+fi
+echo "OK: envFrom ${SECRET_NAME} attached"
 if ! kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.serviceAccountName}' 2>/dev/null | grep -qx paas-frontend; then
   echo "==> Force serviceAccountName=paas-frontend on deployment/${DEPLOY_NAME}"
   kubectl patch deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" --type=json -p='[{"op":"replace","path":"/spec/template/spec/serviceAccountName","value":"paas-frontend"}]'
@@ -130,6 +151,13 @@ else
     echo "  bash paas/scripts/lab.sh env"
   fi
 fi
+echo "==> Core auth env in pod"
+kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
+  for v in JWT_SECRET JENKINS_BASE_URL JENKINS_USERNAME JENKINS_API_TOKEN DATABASE_URL; do
+    eval "val=\$$v"
+    if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
+  done
+' 2>/dev/null || echo "WARN: could not exec into pod yet — wait for rollout, then re-run"
 echo "==> SMTP in pod (values hidden)"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   for v in SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER MAIL_FROM APP_BASE_URL; do
