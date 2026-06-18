@@ -6,6 +6,25 @@ JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 jenkinsfile_bundle() {
   cat "${JENKINSFILE}"
 }
+jenkins_effective_pipeline_text() {
+  local text
+  text="$(jenkinsfile_bundle)"
+  if [[ -f /var/tmp/paas-deploy-stages.groovy ]]; then
+    text="${text}"$'\n'"$(cat /var/tmp/paas-deploy-stages.groovy)"
+  elif command -v kubectl >/dev/null 2>&1; then
+    local ns pod remote
+    remote="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
+    for ns in "${JENKINS_K8S_NAMESPACE:-cicd}" cicd jenkins; do
+      pod="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
+      [[ -n "${pod}" ]] || continue
+      if kubectl exec -n "${ns}" "${pod}" -- test -f "${remote}" 2>/dev/null; then
+        text="${text}"$'\n'"$(kubectl exec -n "${ns}" "${pod}" -- cat "${remote}" 2>/dev/null || true)"
+        break
+      fi
+    done
+  fi
+  printf '%s' "${text}"
+}
 jenkinsfile_has_marker() {
   local marker="$1"
   grep -qF "${marker}" "${JENKINSFILE}" 2>/dev/null
@@ -73,14 +92,14 @@ jenkins_job_has_broken_mutate() {
   return 1
 }
 echo "==> Local Jenkinsfile contains crane-path fix?"
-if jenkins_text_has_crane_fix "$(jenkinsfile_bundle)"; then
+if jenkins_text_has_crane_fix "$(jenkins_effective_pipeline_text)"; then
   echo "OK: repo Jenkinsfile has crane-path fix"
 else
   echo "FAIL: missing crane-next16 marker in Jenkinsfile — git pull origin main"
   exit 1
 fi
 echo "==> Local Jenkinsfile contains Step 6 mutate fix (start-paas.sh)?"
-if jenkins_text_has_mutate_fix "$(jenkinsfile_bundle)"; then
+if jenkins_text_has_mutate_fix "$(jenkins_effective_pipeline_text)"; then
   echo "OK: repo Jenkinsfile has crane mutate fix"
 else
   echo "FAIL: missing monorepo-app-root-20260531 / start-paas.sh in Jenkinsfile — git pull origin main"
