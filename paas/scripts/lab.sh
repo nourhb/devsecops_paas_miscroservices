@@ -22,6 +22,7 @@ usage() {
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  env-quick Sync env only (skip Dependency-Track — use when k8s API is slow)"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
+  echo "  jenkins-stages  Render + install paas-deploy-stages.groovy (no frontend rebuild)"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
@@ -82,6 +83,8 @@ case "$cmd" in
     bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
     LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
+  jenkins-stages|stages)
+    bash "$LIB/install-jenkins-stages-file.sh" ;;
   jenkins-recover|recover-jenkins)
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
   dependency-track|dtrack)
