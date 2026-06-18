@@ -141,8 +141,12 @@ if [[ "${PAAS_SKIP_ROLLOUT:-}" == "1" ]] || [[ "${REPLICAS}" -eq 0 ]]; then
   echo "==> Skip rollout (replicas=${REPLICAS}); pod will pick up env on next start"
 else
   echo "==> Rollout"
-  kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}"
-  if ! kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s; then
+  if ! kubectl rollout restart deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --request-timeout="${KUBECTL_TIMEOUT}"; then
+    echo "WARN: rollout restart patch failed — delete frontend pod"
+    kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 \
+      --request-timeout="${KUBECTL_TIMEOUT}" --wait=false 2>/dev/null || true
+  fi
+  if ! kubectl rollout status deployment/"${DEPLOY_NAME}" -n "${PAAS_NS}" --timeout=600s --request-timeout="${KUBECTL_TIMEOUT}"; then
     ROLLOUT_FAILED=1
     FRONTEND_IMAGE="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
     echo ""
