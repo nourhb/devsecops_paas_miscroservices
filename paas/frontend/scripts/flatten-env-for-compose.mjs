@@ -127,7 +127,7 @@ function main() {
         byKey.set("PROMETHEUS_BASE_URL", PROM_IN_CLUSTER);
         console.warn(`WARN: PROMETHEUS_BASE_URL defaulted to ${PROM_IN_CLUSTER}`);
     }
-    if labNodeIp && !envTrim(byKey, "KUBERNETES_ENABLED")) {
+    if (labNodeIp && !envTrim(byKey, "KUBERNETES_ENABLED")) {
         byKey.set("KUBERNETES_ENABLED", "true");
         console.warn("WARN: KUBERNETES_ENABLED defaulted to true for lab");
     }
