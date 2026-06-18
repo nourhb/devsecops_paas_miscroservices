@@ -31,7 +31,7 @@ verify_remote_stages() {
   kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
     grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
     && kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
-      grep -qF 'def runPaasDeploy = {' "${REMOTE}" 2>/dev/null
+      grep -qF 'stage("Step 12 —' "${REMOTE}" 2>/dev/null
 }
 
 install_via_exec_tee() {
@@ -93,16 +93,16 @@ if ! grep -qF 'def coerceHarborHostForCosign' "${GENERATED}"; then
   echo "ERROR: generated stages file missing helpers (coerceHarborHostForCosign)" >&2
   exit 1
 fi
-if ! grep -qF 'def runPaasDeploy = {' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing runPaasDeploy closure" >&2
+if ! grep -qF 'stage("Step 12 —' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing Step 12" >&2
   exit 1
 fi
-if ! grep -qF 'paas-monolithic-runPaasDeploy-20260618' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing monolithic bundle marker" >&2
+if ! grep -qF "${DT_MARKER}" "${GENERATED}"; then
+  echo "ERROR: generated stages file missing ${DT_MARKER}" >&2
   exit 1
 fi
-if ! grep -qF 'return this' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing 'return this' (Jenkins load binding)" >&2
+if grep -qF 'def paasDeployInit' "${GENERATED}" || grep -qF 'def runPaasStep01' "${GENERATED}"; then
+  echo "ERROR: generated stages file uses broken split layout — run: git pull && bash paas/scripts/lab.sh rollback-june17" >&2
   exit 1
 fi
 if ! grep -qF 'dt_upload_candidates' "${GENERATED}"; then

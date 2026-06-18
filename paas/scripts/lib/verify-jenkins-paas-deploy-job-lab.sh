@@ -188,8 +188,11 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 REMOTE_CHECK_TEXT="${CFG}"
-if echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
-  echo "OK: Jenkins job uses monolithic runPaasDeploy() layout (June 17)"
+if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
+  echo "OK: Jenkins job uses June 17 load() layout (build #756 era)"
+  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+elif echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
+  echo "OK: Jenkins job uses monolithic runPaasDeploy() layout"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paasDeployInit()'; then
   echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh jenkins"
