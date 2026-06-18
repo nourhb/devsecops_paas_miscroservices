@@ -20,7 +20,8 @@ kubectl_patch() {
 }
 
 echo "==> Kyverno webhook guard (dead admission blocks envFrom patches)"
-PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
+PAAS_FORCE_KYVERNO_UNBLOCK="${PAAS_FORCE_KYVERNO_UNBLOCK:-1}" \
+  PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "ERROR: env file not found: ${ENV_FILE}" >&2
