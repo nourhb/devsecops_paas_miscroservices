@@ -17,9 +17,12 @@ while IFS= read -r img; do
   docker rmi "${img}" 2>/dev/null || true
 done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^(jenkins/|quay.io/argoproj|prom/|postgres:|portainer/|hashicorp/vault|openpolicyagent/|nginx:alpine)' || true)
 
-echo "==> containerd unused images (protected tags first)"
-bash "${SCRIPT_DIR}/lab-safe-image-prune.sh" prune || true
+DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+echo "==> Disk ${DISK_PCT}% — prune dangling only (never pull images in emergency)"
+PAAS_SKIP_IMAGE_PULL=1 bash "${SCRIPT_DIR}/lab-safe-image-prune.sh" prune || true
 sudo journalctl --vacuum-size=100M 2>/dev/null || true
+pkill -f 'docker pull' 2>/dev/null || true
+docker builder prune -af 2>/dev/null || true
 
 echo "==> Bulk delete Failed pods (all namespaces)"
 for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do

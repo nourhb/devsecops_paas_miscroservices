@@ -13,8 +13,25 @@ image_in_containerd() {
     sudo k3s ctr -n k8s.io images ls -q 2>/dev/null | grep -qF "${ref##*/}"
 }
 
+disk_use_pct() {
+  df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}'
+}
+
+should_skip_image_pull() {
+  if [[ "${PAAS_SKIP_IMAGE_PULL:-}" == "1" ]]; then
+    return 0
+  fi
+  local pct
+  pct="$(disk_use_pct)"
+  [[ -n "${pct}" && "${pct}" -ge 85 ]]
+}
+
 ensure_protected_images_local() {
   local still_missing=0
+  if should_skip_image_pull; then
+    echo "SKIP: no registry/docker pulls (disk $(disk_use_pct)% or PAAS_SKIP_IMAGE_PULL=1)"
+    return 0
+  fi
   while IFS= read -r img; do
     [[ -z "${img}" ]] && continue
     if image_in_containerd "${img}"; then
