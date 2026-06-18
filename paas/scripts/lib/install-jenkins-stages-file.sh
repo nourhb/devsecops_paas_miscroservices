@@ -32,7 +32,8 @@ jenkins_running_namespace() {
 
 verify_remote_stages() {
   local ns="$1" pod="$2"
-  kubectl exec -n "${ns}" "${pod}" -- grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null
+  kubectl exec -n "${ns}" "${pod}" -- grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
+    && kubectl exec -n "${ns}" "${pod}" -- grep -qF 'def runPaasStep12' "${REMOTE}" 2>/dev/null
 }
 
 install_to_pod() {
@@ -46,16 +47,16 @@ install_to_pod() {
 }
 
 python3 "${REPO_ROOT}/paas/jenkins/render-loadable-stages.py" > "${GENERATED}"
-if ! grep -qF 'stage("Step 12 —' "${GENERATED}"; then
-  echo "ERROR: generated stages file missing Step 12" >&2
-  exit 1
-fi
 if ! grep -qF 'def coerceHarborHostForCosign' "${GENERATED}"; then
   echo "ERROR: generated stages file missing helpers (coerceHarborHostForCosign)" >&2
   exit 1
 fi
-if ! grep -qF "${DT_MARKER}" "${GENERATED}"; then
-  echo "ERROR: generated stages file missing ${DT_MARKER} — git pull on dev machine" >&2
+if ! grep -qF 'def runPaasStep12' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing runPaasStep12" >&2
+  exit 1
+fi
+if ! grep -qF 'paas-blueocean-12steps-20260618' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing Blue Ocean 12-step bundle marker" >&2
   exit 1
 fi
 if ! grep -qF 'dt_upload_candidates' "${GENERATED}"; then

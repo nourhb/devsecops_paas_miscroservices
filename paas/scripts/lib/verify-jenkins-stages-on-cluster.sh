@@ -18,8 +18,9 @@ while read -r ns pod; do
   FOUND=1
   echo "-- ${ns}/${pod}"
   if kubectl exec -n "${ns}" "${pod}" -- test -f "${REMOTE}" 2>/dev/null; then
-    if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null; then
-      echo "OK: ${REMOTE} has ${DT_MARKER}"
+    if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
+      && kubectl exec -n "${ns}" "${pod}" -- grep -qF 'def runPaasStep12' "${REMOTE}" 2>/dev/null; then
+      echo "OK: ${REMOTE} has ${DT_MARKER} + runPaasStep12 (Blue Ocean 12-step layout)"
     else
       echo "FAIL: ${REMOTE} exists but missing ${DT_MARKER} (stale — run bash paas/scripts/lab.sh jenkins)"
       FAIL=1

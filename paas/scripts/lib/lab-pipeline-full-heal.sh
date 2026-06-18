@@ -69,9 +69,9 @@ read_env_sonar_url() {
 verify_twelve_stages_on_jenkins() {
   local count
   count="$(kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -c 'stage("Step' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null || echo 0)"
+    grep -c 'def runPaasStep' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null || echo 0)"
   if [[ "${count}" -ge 12 ]]; then
-    ok "Jenkins stages file has ${count} stage() blocks (expect 12)"
+    ok "Jenkins stages file has ${count} runPaasStepNN functions (expect 12)"
   else
     fail "Jenkins stages file has ${count} stages (expect 12) — run: bash paas/scripts/lab.sh jenkins"
   fi
