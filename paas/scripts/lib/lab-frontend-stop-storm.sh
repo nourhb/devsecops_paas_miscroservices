@@ -12,10 +12,11 @@ kubectl get rs -n "${PAAS_NS}" -l app=frontend -o name 2>/dev/null | while read 
 done
 
 echo "==> Bulk delete frontend pods (background — do not wait for each pod)"
-kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false 2>/dev/null || true
-kubectl delete pods -n "${PAAS_NS}" --field-selector=status.phase=Failed --force --grace-period=0 --wait=false 2>/dev/null || true
+kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false \
+  --request-timeout=30s 2>/dev/null || true
+kubectl delete pods -n "${PAAS_NS}" --field-selector=status.phase=Failed --force --grace-period=0 --wait=false \
+  --request-timeout=30s 2>/dev/null || true
 
-sleep 3
-LEFT="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend --no-headers 2>/dev/null | wc -l | tr -d ' ')"
-echo "frontend pods remaining: ${LEFT} (Terminating pods clear in background)"
+LEFT="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend --no-headers --request-timeout=15s 2>/dev/null | wc -l | tr -d ' ' || echo '?')"
+echo "frontend pods remaining: ${LEFT} (Terminating pods clear in background; skip count if API slow)"
 echo "OK: storm stopped — fix disk before: kubectl scale deployment/frontend -n ${PAAS_NS} --replicas=1"
