@@ -101,7 +101,7 @@ def main() -> int:
         validate_step_body(num, title, body)
         parts.append(emit_function(f"runPaasStep{num:02d}", body))
 
-    output = "".join(parts)
+    output = "".join(parts) + "return this\n"
     sys.stdout.buffer.write(output.encode("utf-8"))
     return 0
 

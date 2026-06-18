@@ -127,7 +127,7 @@ def verify_job_script_markers(cfg_xml: str) -> bool:
     return True
 def build_node_body() -> str:
     stage_lines = "\n".join(
-        f'  stage("Step {num} — {title}") {{ runPaasStep{num:02d}() }}'
+        f'  stage("Step {num} — {title}") {{ paas.runPaasStep{num:02d}() }}'
         for num, title in PAAS_DEPLOY_STAGE_SPECS
     )
     return f"""  if (!fileExists(paasDeployStagesPath)) {{
@@ -137,11 +137,14 @@ def build_node_body() -> str:
   if (!stagesText.contains('{PAAS_BLUEOCEAN_STAGES_MARKER}') || !stagesText.contains('def runPaasStep12')) {{
     error("Stale ${{paasDeployStagesPath}} (missing {PAAS_BLUEOCEAN_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
   }}
+  if (!stagesText.contains('return this')) {{
+    error("Stale ${{paasDeployStagesPath}} (missing return this) — run: bash paas/scripts/lab.sh jenkins-stages")
+  }}
   if (!stagesText.contains('{DT_STAGES_MARKER}')) {{
     error("Stale ${{paasDeployStagesPath}} (missing {DT_STAGES_MARKER}) — run: bash paas/scripts/lab.sh jenkins")
   }}
-  load paasDeployStagesPath
-  paasDeployInit()
+  def paas = load paasDeployStagesPath
+  paas.paasDeployInit()
 {stage_lines}"""
 
 

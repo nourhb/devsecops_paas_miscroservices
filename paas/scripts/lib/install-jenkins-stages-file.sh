@@ -101,6 +101,10 @@ if ! grep -qF 'paas-blueocean-12steps-20260618' "${GENERATED}"; then
   echo "ERROR: generated stages file missing Blue Ocean 12-step bundle marker" >&2
   exit 1
 fi
+if ! grep -qF 'return this' "${GENERATED}"; then
+  echo "ERROR: generated stages file missing 'return this' (Jenkins load binding)" >&2
+  exit 1
+fi
 if ! grep -qF 'dt_upload_candidates' "${GENERATED}"; then
   echo "ERROR: generated stages still has legacy pick_dt_base — update Jenkinsfile.paas-deploy" >&2
   exit 1
