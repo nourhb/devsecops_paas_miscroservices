@@ -45,6 +45,13 @@ def emit_function(name: str, body_lines: list[str]) -> str:
     return f"def {name} = {{\n{body}\n}}\n"
 
 
+def validate_step_body(num: int, title: str, body_lines: list[str]) -> None:
+    if body_lines and re.match(r"^  }\s*$", body_lines[-1]):
+        raise SystemExit(
+            f"ERROR: Step {num} ({title}) still has stage() closing brace — fix strip_trailing_stage_brace"
+        )
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     main_path = root / "Jenkinsfile.paas-deploy"
@@ -77,10 +84,12 @@ def main() -> int:
         vars_block,
         emit_function("paasDeployInit", init_lines),
     ]
-    for num, _title, body in steps:
+    for num, title, body in steps:
+        validate_step_body(num, title, body)
         parts.append(emit_function(f"runPaasStep{num:02d}", body))
 
-    sys.stdout.buffer.write("".join(parts).encode("utf-8"))
+    output = "".join(parts)
+    sys.stdout.buffer.write(output.encode("utf-8"))
     return 0
 
 
