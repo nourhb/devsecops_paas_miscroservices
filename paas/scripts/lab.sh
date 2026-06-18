@@ -19,7 +19,9 @@ usage() {
   echo "  watchdog      Lightweight auto-heal (disk, kyverno, postgres, storms)"
   echo "  harden        One-shot: unpin frontend, db-repair, cron, health"
   echo "  env       Sync docker-compose.env to the frontend pod"
+  echo "  env-quick Sync env only (skip Dependency-Track — use when k8s API is slow)"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
+  echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
@@ -64,13 +66,19 @@ case "$cmd" in
     bash "$LIB/lab-watchdog.sh" ;;
   harden|fortify)
     bash "$LIB/lab-harden.sh" ;;
-  env)
+  env|env-quick)
     bash "$LIB/sync-cosign-public-key-env.sh" || true
     bash "$LIB/compose-paas-frontend-env.sh"
-    LAB_DT_ENV_ONLY=true bash "$LIB/lab-dependency-track.sh" || true
+    if [[ "$cmd" == "env-quick" ]] || [[ "${PAAS_SKIP_DT:-}" == "1" ]]; then
+      echo "SKIP: Dependency-Track (env-quick / PAAS_SKIP_DT=1)"
+    else
+      LAB_DT_ENV_ONLY=true bash "$LIB/lab-dependency-track.sh" || true
+    fi
     bash "$LIB/sync-paas-frontend-env-k8s.sh" ;;
   jenkins)
-    bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
+    LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
+  jenkins-recover|recover-jenkins)
+    bash "$LIB/lab-jenkins-recover.sh" recover ;;
   dependency-track|dtrack)
     bash "$LIB/lab-dependency-track.sh" ;;
   dt-bootstrap|dependency-track-bootstrap)

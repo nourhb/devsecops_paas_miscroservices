@@ -320,8 +320,12 @@ echo " lab-dependency-track — install / heal + env sync"
 echo "=============================================="
 
 if [[ "${LAB_DT_ENV_ONLY:-false}" == "true" ]]; then
+  if ! timeout 20 kubectl get --raw=/healthz >/dev/null 2>&1; then
+    warn "k8s API slow/unreachable — skip DT env sync (run lab.sh dependency-track later)"
+    exit 0
+  fi
   sync_dt_env_urls || exit 1
-  verify_dt_api_key || exit 1
+  verify_dt_api_key || true
   echo "lab-dependency-track: env URLs synced (LAB_DT_ENV_ONLY)"
   exit 0
 fi
