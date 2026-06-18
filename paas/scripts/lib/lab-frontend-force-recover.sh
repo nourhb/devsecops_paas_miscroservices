@@ -48,6 +48,22 @@ fi
 
 PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
+postgres_ready_quick() {
+  kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .
+}
+
+echo "==> Postgres preflight (frontend on master must reach postgres Service)"
+if ! postgres_ready_quick; then
+  echo "WARN: postgres endpoints empty — running db-repair (once)"
+  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+elif ! kubectl exec -n "${PAAS_NS}" deploy/postgres --request-timeout=30s -- \
+    pg_isready -U postgres -d paas >/dev/null 2>&1; then
+  echo "WARN: postgres pod not accepting connections — restart once"
+  kubectl rollout restart deployment/postgres -n "${PAAS_NS}" --request-timeout=45s 2>/dev/null || true
+  kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=180s 2>/dev/null || true
+fi
+kubectl get endpoints postgres -n "${PAAS_NS}" -o wide 2>/dev/null || true
+
 echo "==> Scale frontend to 0 + drop old ReplicaSets"
 set +e
 kubectl rollout resume deployment/frontend -n "${PAAS_NS}" --request-timeout=30s 2>/dev/null
@@ -84,6 +100,20 @@ kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout
           "effect": "NoSchedule"
         }],
         "serviceAccountName": "paas-frontend",
+        "initContainers": [{
+          "name": "wait-postgres",
+          "image": "busybox:1.36",
+          "command": [
+            "sh",
+            "-c",
+            "until nc -z postgres 5432; do echo waiting for postgres; sleep 3; done"
+          ],
+          "securityContext": {
+            "runAsNonRoot": true,
+            "runAsUser": 1001,
+            "allowPrivilegeEscalation": false
+          }
+        }],
         "containers": [{
           "name": "frontend",
           "image": "${IMG}",
@@ -132,7 +162,8 @@ echo "api/health HTTP ${HTTP}"
 if [[ "${HTTP}" == "200" ]]; then
   bash "${SCRIPT_DIR}/check-paas-lab-health.sh" || true
 else
-  echo "If HTTP 500: re-attach env secret — bash paas/scripts/lab.sh env-quick"
+  echo "If HTTP 503/500 + prisma postgres:5432: bash paas/scripts/lab.sh db-repair"
+  echo "If HTTP 500 (env): re-attach env secret — bash paas/scripts/lab.sh env-quick"
   echo "If ErrImageNeverPull: docker images | grep paas-frontend  then re-run this script"
   echo "If Evicted: free disk below 88% then re-run"
 fi
