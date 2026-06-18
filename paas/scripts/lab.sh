@@ -37,6 +37,7 @@ usage() {
   echo "  deploy    git pull + Kyverno Audit + cosign try + heal (one-shot)"
   echo "  ultimate  Full fix: Kyverno HTTP Harbor + GitOps + deploy (one command)"
   echo "  restore   Jenkins + frontend env + pipeline (get deploy working again)"
+  echo "  pipeline-heal  Full 12-step pipeline: Sonar token + env + Jenkins + Harbor"
 }
 case "$cmd" in
   start|recover)
@@ -98,6 +99,8 @@ case "$cmd" in
     bash "$LIB/lab-emergency-unblock.sh" ;;
   restore|fix-app|back)
     bash "$LIB/lab-restore-app.sh" ;;
+  pipeline-heal|pipeline|12steps|full-pipeline)
+    bash "$LIB/lab-pipeline-full-heal.sh" ;;
   break-loop|stop-loop|break)
     bash "$LIB/lab-break-loop.sh" ;;
   worker2|worker2-heal)

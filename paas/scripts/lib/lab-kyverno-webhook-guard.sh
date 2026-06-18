@@ -5,6 +5,19 @@ kyverno_admission_up() {
   kubectl get endpoints -n kyverno kyverno-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .
 }
 
+kyverno_admission_responds() {
+  local err
+  err="$(kubectl create configmap kyverno-lab-probe --dry-run=server -n default -o name 2>&1 || true)"
+  if echo "${err}" | grep -qiE 'kyverno.*502|kyverno-svc.*fail|failed calling webhook.*kyverno'; then
+    return 1
+  fi
+  return 0
+}
+
+kyverno_admission_healthy() {
+  kyverno_admission_up && kyverno_admission_responds
+}
+
 kyverno_webhooks_present() {
   kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep -qi kyverno \
     || kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep -qi kyverno
@@ -35,6 +48,27 @@ restart_kyverno_admission() {
 
 case "${1:-guard}" in
   guard)
+    if [[ "${PAAS_FORCE_KYVERNO_UNBLOCK:-}" == "1" ]] && kyverno_webhooks_present; then
+      echo "WARN: PAAS_FORCE_KYVERNO_UNBLOCK=1 — removing Kyverno webhooks"
+      remove_kyverno_webhooks
+      echo "OK: kyverno webhooks cleared (lab fail-open)"
+      exit 0
+    fi
+    if kyverno_admission_healthy; then
+      echo "OK: kyverno admission healthy"
+      exit 0
+    fi
+    if kyverno_admission_up && ! kyverno_admission_responds; then
+      echo "WARN: kyverno has endpoints but mutate webhook returns 502 — removing fail-closed hooks"
+      remove_kyverno_webhooks
+      if [[ "${PAAS_SKIP_KYVERNO_RESTART:-}" != "1" ]]; then
+        restart_kyverno_admission
+      else
+        echo "SKIP: kyverno restart (PAAS_SKIP_KYVERNO_RESTART=1)"
+      fi
+      echo "OK: kyverno webhooks cleared after 502 probe"
+      exit 0
+    fi
     if kyverno_admission_up; then
       echo "OK: kyverno admission service has endpoints"
       exit 0
