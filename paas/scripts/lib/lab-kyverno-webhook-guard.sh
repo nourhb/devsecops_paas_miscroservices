@@ -41,7 +41,11 @@ case "${1:-guard}" in
     fi
     if ! kyverno_webhooks_present; then
       echo "OK: kyverno down but no blocking webhooks registered"
-      restart_kyverno_admission
+      if [[ "${PAAS_SKIP_KYVERNO_RESTART:-}" != "1" ]]; then
+        restart_kyverno_admission
+      else
+        echo "SKIP: kyverno restart (PAAS_SKIP_KYVERNO_RESTART=1)"
+      fi
       exit 0
     fi
     echo "WARN: kyverno admission DOWN but webhooks still registered — removing fail-closed hooks"

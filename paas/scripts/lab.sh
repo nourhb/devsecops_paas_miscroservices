@@ -23,6 +23,8 @@ usage() {
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
+  echo "  frontend-force    RS cleanup + pin recovery image when rollout hangs"
+  echo "  frontend-stop     Scale frontend to 0 + pause (stop eviction storm)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
@@ -81,6 +83,8 @@ case "$cmd" in
     bash "$LIB/lab-frontend-recover.sh" ;;
   frontend-stop|stop-storm)
     bash "$LIB/lab-frontend-stop-storm.sh" ;;
+  frontend-force|force-frontend)
+    bash "$LIB/lab-frontend-force-recover.sh" ;;
   emergency|unblock)
     bash "$LIB/lab-emergency-unblock.sh" ;;
   break-loop|stop-loop|break)
