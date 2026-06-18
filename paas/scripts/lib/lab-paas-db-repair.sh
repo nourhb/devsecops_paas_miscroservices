@@ -109,14 +109,25 @@ if [[ "${PG_NEEDS_RESTART}" -eq 1 ]]; then
   echo "==> Rollout restart postgres (once)"
   kubectl rollout restart deployment/postgres -n "${PAAS_NS}" || true
   if ! kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=180s; then
-    echo "WARN: postgres rollout slow — diagnostics (not restarting again):" >&2
-    kubectl get pods -n "${PAAS_NS}" -l app=postgres -o wide || true
-    kubectl describe pod -n "${PAAS_NS}" -l app=postgres | tail -35 || true
-    kubectl get pvc postgres-pvc -n "${PAAS_NS}" -o wide 2>/dev/null || true
-    echo "Fix root cause, then: PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair" >&2
-    exit 1
+    echo "WARN: postgres rollout slow — trying worker2 (PVC node)…" >&2
+    bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || true
+    if ! kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=180s; then
+      echo "WARN: postgres rollout still slow — diagnostics (not restarting again):" >&2
+      kubectl get pods -n "${PAAS_NS}" -l app=postgres -o wide || true
+      kubectl describe pod -n "${PAAS_NS}" -l app=postgres | tail -35 || true
+      kubectl get pvc postgres-pvc -n "${PAAS_NS}" -o wide 2>/dev/null || true
+      echo "Fix root cause, then: bash paas/scripts/lab.sh worker2" >&2
+      echo "  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair" >&2
+      exit 1
+    fi
   fi
   kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
+fi
+
+if ! postgres_endpoints_up; then
+  echo "WARN: no postgres endpoints — trying worker2 (PVC node)…" >&2
+  bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || true
+  kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=180s 2>/dev/null || true
 fi
 
 echo "==> Ensure frontend DATABASE_URL uses in-cluster service postgres:5432"
