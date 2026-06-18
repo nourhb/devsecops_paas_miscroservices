@@ -244,10 +244,16 @@ else
     exit 1
   fi
 fi
-if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
+if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" \
+  && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
   echo "OK: Jenkins job has ${SCA_FULL_MARKER} (Step 4 SBOM for vite projects without lockfile)"
+elif [[ "${STAGES_OK:-0}" -eq 1 ]] \
+  && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF "${SCA_FULL_MARKER}" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
+  && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF 'full npm install then cyclonedx-npm' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+  echo "OK: Jenkins stages file has ${SCA_FULL_MARKER} (load() layout)"
 elif echo "${CFG}" | grep -qF 'sca-npm-install-nolock-20260611' \
-  || echo "${CFG}" | grep -qF '--package-lock-only' && echo "${CFG}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; then
+  || { echo "${CFG}" | grep -qF -- '--package-lock-only' \
+    && echo "${CFG}" | grep -qF 'no lockfile — npm install then cyclonedx-npm'; }; then
   echo "FAIL: Jenkins job has OLD/broken Step 4 SCA (package-lock-only or partial patch)"
   echo "Fix: bash paas/scripts/lab.sh jenkins"
   exit 1
