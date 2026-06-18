@@ -9,6 +9,7 @@ usage() {
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"
+  echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
@@ -48,6 +49,8 @@ case "$cmd" in
     bash "$LIB/lab-harbor.sh" recover ;;
   db-repair)
     bash "$LIB/lab-paas-db-repair.sh" ;;
+  postgres)
+    bash "$LIB/lab-postgres.sh" "${2:-all}" ;;
   health|check)
     bash "$LIB/check-paas-lab-health.sh" ;;
   prometheus|prom)

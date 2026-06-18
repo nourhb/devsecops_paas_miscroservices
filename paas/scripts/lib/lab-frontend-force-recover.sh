@@ -52,17 +52,33 @@ postgres_ready_quick() {
   kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .
 }
 
+wait_postgres_ready() {
+  echo "==> Wait for postgres Service + pg_isready (max 3 min)"
+  for i in $(seq 1 36); do
+    if postgres_ready_quick && kubectl exec -n "${PAAS_NS}" deploy/postgres --request-timeout=20s -- \
+        pg_isready -U postgres -d paas >/dev/null 2>&1; then
+      echo "OK: postgres ready (${i}/36)"
+      kubectl get endpoints postgres -n "${PAAS_NS}" -o wide 2>/dev/null || true
+      return 0
+    fi
+    echo "  [${i}/36] postgres not ready yet"
+    if (( i % 6 == 0 )) && ! postgres_ready_quick; then
+      echo "==> Still no endpoints — db-repair (once)"
+      PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+    fi
+    sleep 5
+  done
+  echo "ERROR: postgres not ready — try:" >&2
+  echo "  bash paas/scripts/lab.sh worker2   # PVC is on worker2" >&2
+  echo "  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair" >&2
+  return 1
+}
+
 echo "==> Postgres preflight (frontend on master must reach postgres Service)"
-if ! postgres_ready_quick; then
-  echo "WARN: postgres endpoints empty — running db-repair (once)"
-  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
-elif ! kubectl exec -n "${PAAS_NS}" deploy/postgres --request-timeout=30s -- \
-    pg_isready -U postgres -d paas >/dev/null 2>&1; then
-  echo "WARN: postgres pod not accepting connections — restart once"
-  kubectl rollout restart deployment/postgres -n "${PAAS_NS}" --request-timeout=45s 2>/dev/null || true
-  kubectl rollout status deployment/postgres -n "${PAAS_NS}" --timeout=180s 2>/dev/null || true
+if ! wait_postgres_ready; then
+  bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || true
+  wait_postgres_ready || exit 1
 fi
-kubectl get endpoints postgres -n "${PAAS_NS}" -o wide 2>/dev/null || true
 
 echo "==> Scale frontend to 0 + drop old ReplicaSets"
 set +e
@@ -159,11 +175,32 @@ kubectl get pods -n "${PAAS_NS}" -l app=frontend \
 
 HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 "http://${NODE_IP}:30100/api/health" 2>/dev/null || echo 000)"
 echo "api/health HTTP ${HTTP}"
-if [[ "${HTTP}" == "200" ]]; then
+DB_JSON="$(curl -sS --connect-timeout 8 "http://${NODE_IP}:30100/api/health" 2>/dev/null || echo '{}')"
+echo "${DB_JSON}" | grep -o '"connected":[^,}]*' || true
+
+frontend_tcp_probe() {
+  kubectl exec -n "${PAAS_NS}" deploy/frontend --request-timeout=45s -- node -e "
+const net=require('net');
+const s=net.connect(5432,'postgres');
+s.on('connect',()=>{console.log('OK');process.exit(0)});
+s.on('error',(e)=>{console.error(e.message||e);process.exit(1)});
+setTimeout(()=>{console.error('timeout');process.exit(1)},8000);
+" 2>/dev/null
+}
+
+if [[ "${HTTP}" == "200" ]] && frontend_tcp_probe | grep -q '^OK$'; then
   bash "${SCRIPT_DIR}/check-paas-lab-health.sh" || true
 else
-  echo "If HTTP 503/500 + prisma postgres:5432: bash paas/scripts/lab.sh db-repair"
-  echo "If HTTP 500 (env): re-attach env secret — bash paas/scripts/lab.sh env-quick"
+  if ! frontend_tcp_probe | grep -q '^OK$'; then
+    echo "==> Frontend cannot TCP postgres:5432 — db-repair"
+    PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+    HTTP="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 "http://${NODE_IP}:30100/api/health" 2>/dev/null || echo 000)"
+    echo "api/health HTTP ${HTTP} (after db-repair)"
+  fi
+  echo "Note: api/health 503 with database.connected=true is OK (ArgoCD optional in lab)."
+  echo "If login shows DB unavailable: PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair"
+  echo "If postgres PVC node down: bash paas/scripts/lab.sh worker2"
+  echo "If HTTP 500 (env): bash paas/scripts/lab.sh env-quick"
   echo "If ErrImageNeverPull: docker images | grep paas-frontend  then re-run this script"
   echo "If Evicted: free disk below 88% then re-run"
 fi
