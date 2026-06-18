@@ -11,8 +11,11 @@ BUNDLE_MARKER = "STAGES_BUNDLE_VERSION=paas-blueocean-12steps-20260618"
 
 
 def strip_trailing_stage_brace(body_lines: list[str]) -> list[str]:
+    """Drop blank lines and the stage() wrapper's closing brace (2-space indent)."""
     lines = list(body_lines)
-    while lines and lines[-1].strip() == "}":
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and re.match(r"^  }\s*$", lines[-1]):
         lines.pop()
     return lines
 
