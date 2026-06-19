@@ -12,8 +12,12 @@ echo "=============================================="
 echo "==> 1/7 Kyverno fail-open when admission is down"
 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || true
 
-echo "==> 2/7 Unpin frontend (no master-only scheduling)"
-bash "${SCRIPT_DIR}/lab-frontend-schedule-heal.sh" || true
+echo "==> 2/7 Frontend safety (Recreate + master pin — no worker1 pod storms)"
+if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" apply || true
+else
+  bash "${SCRIPT_DIR}/lab-frontend-schedule-heal.sh" || true
+fi
 
 echo "==> 3/7 Postgres manifest + connectivity"
 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true

@@ -23,32 +23,11 @@ if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
         || kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic \
           -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
     fi
-  elif [[ "${CUR_IMAGE}" == *paas-frontend:recovery* ]]; then
-    echo "==> Recovery image — pin frontend on master (imagePullPolicy Never)"
-    kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge -p "$(cat <<PATCH
-{
-  "spec": {
-    "replicas": 1,
-    "strategy": {"type": "Recreate"},
-    "template": {
-      "spec": {
-        "nodeSelector": {"kubernetes.io/hostname": "master"},
-        "tolerations": [{
-          "key": "node.kubernetes.io/disk-pressure",
-          "operator": "Exists",
-          "effect": "NoSchedule"
-        }],
-        "containers": [{
-          "name": "frontend",
-          "image": "${CUR_IMAGE}",
-          "imagePullPolicy": "Never"
-        }]
-      }
-    }
-  }
-}
-PATCH
-)"
+  elif [[ "${CUR_IMAGE}" == *paas-frontend:recovery* || "${CUR_IMAGE}" == docker.io/library/paas-frontend:* || "${CUR_IMAGE}" == *paas-frontend:local-* ]]; then
+    echo "==> Local lab image — apply frontend safety (master pin + Recreate)"
+    if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+      bash "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" apply || true
+    fi
   else
     NS_JSON="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
     if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then

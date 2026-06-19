@@ -116,7 +116,10 @@ Or `bash paas/scripts/dev.sh` on a dev machine.
 | `lab.sh jenkins` | Push Jenkinsfile to Jenkins + rebuild frontend |
 | `lab.sh frontend` | Rebuild and roll out frontend image only |
 | `lab.sh health` | Quick API / postgres / UI check |
-| `lab.sh harden` | **Run once** — unpin frontend, db-repair, install auto-heal cron |
+| `lab.sh frontend-stop` | Scale frontend to 0 + pause (stop an active pod storm) |
+| `lab.sh frontend-force` | RS cleanup + pin recovery image on master |
+| `lab.sh frontend-safety` | Recreate strategy + master pin (storm prevention) |
+| `lab.sh harden` | **Run once** — frontend safety, db-repair, install auto-heal cron |
 | `lab.sh watchdog` | Auto-heal disk / Kyverno / postgres / pod storms (cron every 10 min) |
 | `lab.sh guard` | Full check: images, Prometheus, stale pods, health (cron every 6 h) |
 | `lab.sh emergency` | Kyverno unblock + disk + postgres + frontend heal |
@@ -137,8 +140,21 @@ bash paas/scripts/lab.sh harden
 
 This installs:
 
-- **Watchdog cron** (every 10 min) — stops frontend eviction storms when disk ≥90%, removes dead Kyverno webhooks, auto `db-repair` when Postgres is unreachable, unpins `nodeSelector` on frontend
+- **Frontend safety** — `Recreate` (not `RollingUpdate`), pin on **master**, `imagePullPolicy: Never` for local `paas-frontend:*` images, `revisionHistoryLimit: 0`
+- **Watchdog cron** (every 10 min) — stops frontend pod storms (>3 pods), disk pressure cleanup, Kyverno webhook guard, auto `db-repair` when Postgres is unreachable
 - **Guard cron** (every 6 h) — safe image prune, Prometheus recover, full health check
+
+**Why the pod storm happened:** watchdog/guard used to *remove* the master `nodeSelector` and switch `Never` → `IfNotPresent`, so Kubernetes scheduled frontend on worker1 where the image does not exist. `RollingUpdate` + repeated failures created hundreds of pods.
+
+**If frontend pods are exploding on worker1:**
+
+```bash
+bash paas/scripts/lab.sh frontend-stop    # scale to 0, pause, delete RS/pods
+bash paas/scripts/lab.sh frontend-force   # single pod on master with recovery image
+bash paas/scripts/lab.sh harden           # after git pull — installs safety + cron
+```
+
+**Do not** run `FORCE_FRONTEND_REBUILD=true bash paas/scripts/lab.sh frontend` during a storm — wait until only 0–1 frontend pods exist.
 
 **Never run on a full disk:**
 
@@ -147,7 +163,7 @@ This installs:
 | `docker system prune -af` | Deletes images tags deployments still reference |
 | `monitoring-disk` (full) when disk ≥88% | Can pull images and make disk worse — use `disk-emergency` or `monitoring-disk quick` |
 | `crictl rmi --prune` without `lab-safe-image-prune` | May remove `paas-frontend` from containerd |
-| `kubectl patch` with `nodeSelector: master` + `imagePullPolicy: Never` | Eviction storm when master hits DiskPressure |
+| `PAAS_UNPIN_FRONTEND=1` or manual `nodeSelector: null` on frontend | Schedules UI on worker nodes without the local image → storm |
 
 **If UI shows "Database is still starting":**
 

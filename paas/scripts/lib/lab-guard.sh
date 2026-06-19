@@ -18,23 +18,18 @@ echo "=============================================="
 echo "==> Kyverno webhook fail-open"
 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || warn "kyverno webhook guard failed"
 
-echo "==> Frontend schedule (no master pin / Never pull)"
+echo "==> Frontend schedule (master pin + Recreate — prevents worker1 pod storms)"
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
-  NS_JSON="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
-  if [[ -n "${NS_JSON}" && "${NS_JSON}" != "{}" ]]; then
-    warn "frontend nodeSelector present — unpinning"
-    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
-      -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
-      || kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}' || true
+  if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+    # shellcheck source=lab-frontend-lab-safety.sh
+    source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+    if frontend_storm_active 3; then
+      warn "frontend pod storm — stop + safety patch"
+      stop_frontend_storm_if_needed 3
+    fi
+    ensure_lab_frontend_safety && ok "frontend Recreate + master pin" || warn "frontend safety patch failed"
   else
-    ok "no frontend nodeSelector"
-  fi
-  FPOL="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
-  if [[ "${FPOL}" == "Never" ]]; then
-    warn "frontend imagePullPolicy=Never — switching to IfNotPresent"
-    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
-      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
+    ok "lab-frontend-lab-safety.sh missing — skip"
   fi
 fi
 
@@ -68,7 +63,9 @@ if [[ -n "${FRONTEND_IMAGE}" ]]; then
   FP="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
   if [[ "${FP}" == ImagePullBackOff || "${FP}" == ErrImageNeverPull ]]; then
     warn "frontend ${FP} for ${FRONTEND_IMAGE}"
-    bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" || fail "frontend rebuild failed"
+    bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" \
+      || bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" \
+      || fail "frontend recover/rebuild failed"
   else
     ok "frontend image ${FRONTEND_IMAGE}"
   fi

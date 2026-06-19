@@ -133,7 +133,12 @@ if [[ "${PAAS_UNPIN_FRONTEND:-}" == "1" ]]; then
 else
   CUR_IMAGE="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
   if [[ "${CUR_IMAGE}" == *paas-frontend:recovery* || "${CUR_IMAGE}" == docker.io/library/paas-frontend:* ]]; then
-    echo "==> Keep master-local image schedule (recovery image — do not unpin on env sync)"
+    echo "==> Keep master-local image schedule (local image — pin master on env sync)"
+    if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+      # shellcheck source=lab-frontend-lab-safety.sh
+      source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+      ensure_lab_frontend_safety 2>/dev/null || true
+    fi
   fi
 fi
 REPLICAS="$(kubectl get deployment "${DEPLOY_NAME}" -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"

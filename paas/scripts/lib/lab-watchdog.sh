@@ -39,30 +39,24 @@ setTimeout(()=>process.exit(1),5000);
 }
 
 unpin_frontend_node_selector() {
-  if ! kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
-    return 0
-  fi
-  local ns_json
-  ns_json="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector}' 2>/dev/null || true)"
-  if [[ -n "${ns_json}" && "${ns_json}" != "{}" ]]; then
-    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
-      -p='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' 2>/dev/null \
-      || kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic \
-        -p '{"spec":{"template":{"spec":{"nodeSelector":null}}}}'
-    healed "removed frontend nodeSelector (prevents master-only eviction storms)"
-  fi
+  : # removed — lab UI must stay on master (see lab-frontend-lab-safety.sh)
 }
 
 fix_frontend_image_pull_policy() {
-  if ! kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
-    return 0
-  fi
-  local policy
-  policy="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
-  if [[ "${policy}" == "Never" ]]; then
-    kubectl patch deployment frontend -n "${PAAS_NS}" --type=json \
-      -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]' 2>/dev/null || true
-    healed "frontend imagePullPolicy Never -> IfNotPresent (image can schedule on any node)"
+  : # removed — local images use imagePullPolicy Never on master
+}
+
+ensure_frontend_lab_safety() {
+  if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+    # shellcheck source=lab-frontend-lab-safety.sh
+    source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+    if frontend_storm_active 3; then
+      stop_frontend_storm_if_needed 3
+      healed "stopped frontend pod storm (>3 pods)"
+    fi
+    if ! ensure_lab_frontend_safety 2>/dev/null; then
+      log "frontend safety patch skipped or failed"
+    fi
   fi
 }
 
@@ -100,6 +94,15 @@ bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard && true
 DISK="$(disk_pct)"
 log "disk ${DISK:-?}%"
 
+FC="$(frontend_pod_count)"
+if [[ "${FC}" -gt 3 ]]; then
+  bash "${SCRIPT_DIR}/lab-frontend-stop-storm.sh" || true
+  bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || true
+  healed "frontend pod storm (${FC} pods) — stop + force recover"
+fi
+
+ensure_frontend_lab_safety
+
 if master_disk_pressure || { [[ -n "${DISK}" && "${DISK}" -ge 90 ]]; }; then
   FC="$(frontend_pod_count)"
   FR="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
@@ -119,9 +122,6 @@ if [[ -n "${DISK}" && "${DISK}" -ge 85 ]]; then
   bash "${SCRIPT_DIR}/lab-stale-pod-cleanup.sh" || true
   bash "${SCRIPT_DIR}/lab-safe-image-prune.sh" prune || true
 fi
-
-unpin_frontend_node_selector
-fix_frontend_image_pull_policy
 
 FF="$(frontend_failed_count)"
 if [[ "${FF}" -gt 5 ]]; then
@@ -149,8 +149,8 @@ if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
 
   if [[ "${WAIT_REASON}" == ImagePullBackOff || "${WAIT_REASON}" == ErrImageNeverPull ]]; then
     if [[ -n "${DISK}" && "${DISK}" -lt 88 ]]; then
-      bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" || log "frontend rebuild failed"
-      healed "rebuilt frontend image (${WAIT_REASON})"
+      bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || log "frontend-force failed"
+      healed "frontend image pull (${WAIT_REASON}) — force recover on master"
     fi
   fi
 
