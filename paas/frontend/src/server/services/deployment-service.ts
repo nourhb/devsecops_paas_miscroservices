@@ -63,7 +63,8 @@ export async function listDeploymentsForProject(projectId: string, userId: strin
             logs: true,
             url: true,
             failureReason: true,
-            failureMessage: true
+            failureMessage: true,
+            project: { select: { projectName: true } }
         }
     });
     return rows.map((r) => {
@@ -77,7 +78,7 @@ export async function listDeploymentsForProject(projectId: string, userId: strin
             buildRunId: metadata.runId ?? (r.jenkinsBuildNumber === null ? null : String(r.jenkinsBuildNumber)),
             artifactImage: metadata.artifactImage ?? null,
             artifactDigest: metadata.artifactDigest ?? null,
-            url: r.url,
+            url: resolveAppUrlForClient(r.project.projectName, r.url),
             failureReason: r.failureReason,
             failureMessage: r.failureMessage
         };

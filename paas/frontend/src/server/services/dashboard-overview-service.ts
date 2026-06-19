@@ -4,6 +4,7 @@ import { listClusterDeployments, listClusterPods, listClusterServices } from "@/
 import { listPlatformArtifacts } from "@/server/artifacts/artifact-service";
 import { getPlatformTooling } from "@/server/platform/platform-tooling";
 import { getSecurityMetrics } from "@/server/security/security-service";
+import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { TtlCache } from "@/server/http/ttl-cache";
 import type { ArtifactRecord, PlatformToolGroup, SeverityBreakdown, UserRole } from "@/types";
 function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.ProjectWhereInput {
@@ -417,7 +418,7 @@ export async function getDashboardOverview(userId: string, role: UserRole): Prom
             lastDeploymentStatus: project.lastDeploymentStatus,
             podStatus: project.podStatus,
             imageTag: project.imageTag || null,
-            url: project.url || null,
+            url: resolveAppUrlForClient(project.projectName, project.url) || null,
             updatedAt: project.updatedAt.toISOString()
         })),
         failedDeployments: failedRecent.map((r) => ({

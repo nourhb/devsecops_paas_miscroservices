@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
+import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import type { UserRole } from "@/types";
 function isLikelySyntheticLocalHostname(url: string): boolean {
@@ -21,9 +22,9 @@ export async function probeProjectAppReachability(projectId: string, userId: str
     await assertProjectAccess(projectId, userId, role);
     const project = await prisma.project.findFirst({
         where: { id: projectId, deletedAt: null },
-        select: { url: true }
+        select: { url: true, projectName: true }
     });
-    const url = project?.url?.trim() ?? null;
+    const url = resolveAppUrlForClient(project?.projectName ?? "", project?.url).trim() || null;
     if (!url) {
         return { url: null, reachable: false, statusCode: null, error: "no_url" };
     }
