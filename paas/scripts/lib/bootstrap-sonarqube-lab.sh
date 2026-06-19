@@ -123,7 +123,6 @@ main() {
   echo " bootstrap-sonarqube-lab (CLI — bypass UI loop)"
   echo "=============================================="
 
-  bash "${SCRIPT_DIR}/lab-sonarqube-recover.sh" || warn "sonar recover had warnings"
   wait_sonar_up
   ensure_admin_password
 
