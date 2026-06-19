@@ -7,6 +7,25 @@ STAGES_LOCAL="${PAAS_GENERATED_STAGES_PATH:-/var/tmp/paas-deploy-stages.groovy}"
 STAGES_REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
 jenkinsfile_bundle() {
   cat "${JENKINSFILE}"
+  for path in "${STAGES_LOCAL}"; do
+    [[ -f "${path}" ]] || continue
+    echo ""
+    echo "// --- paas-deploy-stages.groovy (load() layout) ---"
+    cat "${path}"
+  done
+  if command -v kubectl >/dev/null 2>&1; then
+    local ns pod
+    for ns in "${JENKINS_K8S_NAMESPACE:-cicd}" cicd jenkins; do
+      pod="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
+      [[ -n "${pod}" ]] || continue
+      if kubectl exec -n "${ns}" "${pod}" -- test -f "${STAGES_REMOTE}" 2>/dev/null; then
+        echo ""
+        echo "// --- ${STAGES_REMOTE} on ${ns}/${pod} ---"
+        kubectl exec -n "${ns}" "${pod}" -- cat "${STAGES_REMOTE}" 2>/dev/null || true
+        break
+      fi
+    done
+  fi
 }
 jenkins_pipeline_has_marker() {
   local marker="$1"
@@ -48,7 +67,7 @@ MUTATE_FIX_MARKERS=(
 ENV_LOADER_MARKER='env-safe-dotenv-loader-20260601'
 COSIGN_DIGEST_MARKER='cosign-digest-crane-bin-20260602'
 NGINX_CONF_MARKER='nginx-conf-writefile-20260611'
-DT_API_SERVER_MARKER='dt-api-server-svc-20260617'
+DT_API_SERVER_MARKER='helm-portable-20260619'
 SCA_FULL_MARKER='sca-npm-install-full-20260611'
 BROKEN_ENV_LOADER_PATTERN='. ./.env'
 if [[ -f "${ENV_FILE}" ]]; then
@@ -151,7 +170,7 @@ else
   exit 1
 fi
 echo "==> Local Jenkinsfile contains Step 4 Dependency-Track in-cluster api-server fix?"
-if jenkinsfile_has_marker "${DT_API_SERVER_MARKER}" && jenkinsfile_has_marker 'dtrack-dependency-track-api-server'; then
+if jenkinsfile_has_marker "${DT_API_SERVER_MARKER}" && jenkinsfile_has_marker 'dt-nodeport-first-20260619'; then
   echo "OK: repo Jenkinsfile has ${DT_API_SERVER_MARKER}"
 else
   echo "FAIL: missing ${DT_API_SERVER_MARKER} — git pull and bash paas/scripts/lab.sh jenkins"
@@ -201,7 +220,7 @@ elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paa
   echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
-  echo "WARN: Jenkins job uses legacy load()-only layout — run: bash paas/scripts/lab.sh jenkins"
+  echo "OK: Jenkins job uses June 17 inline load() layout (build #756 / #778 era)"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
@@ -251,7 +270,7 @@ else
   echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
-SONAR_LOGIN_MARKERS=( 'sonar-scanner-cli6-login-20260607' 'sonar.login' "printf 'sonar.login" )
+SONAR_LOGIN_MARKERS=( 'sonar-resilience-20260619' 'sonar-nodeport-first-20260619' 'sonar-scanner-cli6-login-20260607' "printf 'sonar.token" 'sonar.token=' )
 sonar_login_ok=0
 for m in "${SONAR_LOGIN_MARKERS[@]}"; do
   if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${m}"; then
@@ -260,9 +279,9 @@ for m in "${SONAR_LOGIN_MARKERS[@]}"; do
   fi
 done
 if [[ "${sonar_login_ok}" -eq 1 ]]; then
-  echo "OK: Jenkins job has SonarScanner CLI 6 login (sonar.login)"
+  echo "OK: Jenkins job has Sonar Step 5 (token auth + NodePort-first URL pick)"
 else
-  echo "FAIL: Jenkins job missing sonar.login — run: bash paas/scripts/lab.sh jenkins"
+  echo "FAIL: Jenkins job missing Sonar Step 5 fix — run: bash paas/scripts/lab.sh jenkins"
   exit 1
 fi
 if { echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" \
@@ -310,7 +329,16 @@ if echo "${CFG}" | grep -qF 'def runPaasDeploy'; then
   echo "Trigger a NEW build (not Replay) — full security pipeline should run."
   exit 0
 fi
-if jenkins_text_has_crane_fix "${CFG}"; then
+if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' \
+  && jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}" \
+  && jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
+  echo "OK: Jenkins job ${JOB} is up to date (load() layout + stages bundle)"
+  echo ""
+  echo "Trigger a NEW build: Jenkins → ${JOB} → Build with Parameters"
+  echo "Do NOT click Replay on old failed builds."
+  exit 0
+fi
+if jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
   echo "OK: Jenkins job ${JOB} is up to date ($(wc -c <<< "${CFG}") bytes config)"
   echo ""
   echo "Trigger a NEW build: Jenkins → ${JOB} → Build with Parameters"

@@ -209,9 +209,9 @@ sync_dt_env_urls() {
       else
         ok "${env_file} DEPENDENCY_TRACK_BASE_URL=${want_url}"
       fi
-      patch_env_key "${env_file}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${in_cluster}"
+      patch_env_key "${env_file}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${want_url}"
     done
-    ok "JENKINS_DEPENDENCY_TRACK_BASE_URL=${in_cluster}"
+    ok "JENKINS_DEPENDENCY_TRACK_BASE_URL=${want_url} (NodePort — built-in Jenkins lacks cluster DNS)"
     sync_dt_frontend_api_base_url || true
     return 0
   fi

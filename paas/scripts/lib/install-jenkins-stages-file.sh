@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
-DT_MARKER="${DT_STAGES_MARKER:-dt-api-server-svc-20260617}"
+DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260619}"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 KTO="${KUBECTL_REQUEST_TIMEOUT:-120s}"
@@ -81,6 +81,8 @@ print_manual_install() {
   echo "If API keeps resetting: sudo systemctl restart k3s && sleep 20"
 }
 
+# Keep Jenkinsfile.paas-deploy-stages.groovy in sync for editors/validators (render reads main Jenkinsfile).
+python3 "${REPO_ROOT}/paas/jenkins/split-jenkinsfile.py" 2>/dev/null || true
 python3 "${REPO_ROOT}/paas/jenkins/render-loadable-stages.py" > "${GENERATED}" || {
   echo "ERROR: render-loadable-stages.py failed (see message above)" >&2
   exit 1

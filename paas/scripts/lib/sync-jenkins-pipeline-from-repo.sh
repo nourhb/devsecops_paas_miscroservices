@@ -84,6 +84,7 @@ elif ! bash "${SCRIPT_DIR}/lab-dependency-track.sh"; then
 fi
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
+bash "${SCRIPT_DIR}/lab-jenkins-agent-tools.sh" || echo "WARN: lab-jenkins-agent-tools.sh failed (pipeline auto-installs helm/crane on first build)"
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
 echo "==> Disable stale inline Jenkinsfile sync on trigger"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
