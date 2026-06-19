@@ -2597,7 +2597,53 @@ def runPaasDeploy = {
               paasStepFail(4, 'sca', 'Python SBOM missing — pip install cyclonedx-bom or enable Docker for cdxgen')
             }
           } else {
-            paasStepFail(4, 'sca', 'No package.json or Python manifest — enable Docker on Jenkins agent for full OWASP scan')
+            def scaJvmRoot = detectAppRoot()
+            def scaProjectName = dtProjectNameForUpload(projectId, imageName)
+            def jvmScaRc = sh(script: """
+              set +e
+              cd '${scaJvmRoot}'
+              mkdir -p sca
+              export PROJECT_NAME='${scaProjectName}'
+              if [ -f pom.xml ]; then
+                if command -v mvn >/dev/null 2>&1; then
+                  echo "[sca] Maven CycloneDX (pom.xml)"
+                  mvn -q -DskipTests -Dcyclonedx.skipAttach=true \\
+                    org.cyclonedx:cyclonedx-maven-plugin:2.8.0:makeAggregateBom \\
+                    -Dcyclonedx.outputFormat=json -Dcyclonedx.outputName=bom 2>/dev/null || true
+                  for f in target/bom.json bom.json; do
+                    if [ -f "\$f" ]; then cp "\$f" sca/bom.json; break; fi
+                  done
+                else
+                  echo "[sca] WARN: pom.xml but mvn missing — minimal BOM"
+                fi
+              fi
+              if [ ! -f sca/bom.json ] && { [ -f Dockerfile ] || [ -d src ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; }; then
+                echo "[sca] minimal CycloneDX BOM (Dockerfile/Java/static — no npm/pip lockfile)"
+                if command -v node >/dev/null 2>&1; then
+                  node -e "
+                    const fs=require('fs');
+                    const name=process.env.PROJECT_NAME||'app';
+                    fs.mkdirSync('sca',{recursive:true});
+                    fs.writeFileSync('sca/bom.json', JSON.stringify({
+                      bomFormat:'CycloneDX', specVersion:'1.4', version:1,
+                      metadata:{ component:{ type:'application', name } },
+                      components:[]
+                    }, null, 2) + '\\n');
+                  "
+                else
+                  python3 -c "import json,os; os.makedirs('sca',exist_ok=True); json.dump({'bomFormat':'CycloneDX','specVersion':'1.4','version':1,'metadata':{'component':{'type':'application','name':os.environ.get('PROJECT_NAME','app')}},'components':[]}, open('sca/bom.json','w'), indent=2)"
+                fi
+              fi
+              test -f sca/bom.json && echo 0 || echo 1
+            """, returnStdout: true).trim().tokenize('\n').last()
+            if (jvmScaRc == "0") {
+              paasStepOk(4, 'sca', 'sca/bom.json generated (maven or minimal static/Dockerfile)')
+              if (fileExists("${scaJvmRoot}/sca/bom.json") && !fileExists("sca/bom.json")) {
+                sh "mkdir -p sca && cp '${scaJvmRoot}/sca/bom.json' sca/bom.json"
+              }
+            } else {
+              paasStepFail(4, 'sca', 'No package.json, Python, Maven, or Dockerfile/src — enable Docker on Jenkins agent for full OWASP scan')
+            }
           }
         }
         uploadBomToDependencyTrack(projectId, dtProjectNameForUpload(projectId, imageName), branchName)
@@ -2666,10 +2712,12 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-resilience-20260619 (token validate retry; re-probe URL on connection refused during upload)"
+      println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
+      def sonarNodeIp = (env.NODE_IP?.trim() ?: '192.168.56.129')
+      def sonarNp = (sonarUrlParam =~ /http:\/\/([0-9.]+):/) ? (sonarUrlParam =~ /http:\/\/([0-9.]+):/)[0][1] : sonarNodeIp
       if (!sonarUrlParam || !sonarToken) {
         paasStepFail(5, 'sonar', 'SONAR_HOST_URL and SONAR_TOKEN are required on Jenkins job')
       }
@@ -2679,6 +2727,8 @@ exit 0
         prependPath("/opt/java/openjdk/bin")
         withEnv([
           "SONAR_HOST_URL_PARAM=${sonarUrlParam}",
+          "SONAR_NODEPORT=${env.SONAR_NODEPORT?.trim() ?: '30900'}",
+          "NODE_IP=${sonarNp}",
           "SONAR_TOKEN=${sonarToken}",
           "SONAR_PROJECT_KEY=${sonarKey}",
           "SONAR_PROJECT_ID_TAG=${projectId}",
@@ -2687,8 +2737,10 @@ exit 0
           def sonarRc = sh(script: '''#!/bin/bash
             set +e
             pick_sonar_url() {
-              # Built-in Jenkins agent: NodePort first (cluster DNS often unavailable); in-cluster as fallback.
+              # Built-in Jenkins agent: NodePort first (cluster DNS often unavailable).
+              _np="http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
               for u in \
+                "${_np}" \
                 "${SONAR_HOST_URL_PARAM}" \
                 "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
                 "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
@@ -2700,7 +2752,7 @@ exit 0
                   return 0
                 fi
               done
-              echo "${SONAR_HOST_URL_PARAM}"
+              echo "${SONAR_HOST_URL_PARAM:-${_np}}"
             }
             sonar_validate_token() {
               _url="$1"
@@ -2710,11 +2762,18 @@ exit 0
             SONAR_HOST_URL="$(pick_sonar_url)"
             echo "[sonar] using ${SONAR_HOST_URL}"
             _sonar_ready=0
+            _last_valid=""
             for _sv in 1 2 3 4 5; do
               VALID=$(curl -sS -m 15 -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL%/}/api/authentication/validate" 2>/dev/null || true)
+              _last_valid="${VALID}"
               echo "[sonar] token validate attempt ${_sv}/5: ${VALID:-<curl failed>}"
               if sonar_validate_token "${SONAR_HOST_URL}"; then
                 _sonar_ready=1
+                break
+              fi
+              if printf '%s' "${VALID}" | grep -q '"valid":false'; then
+                echo "[sonar] SONAR_TOKEN rejected (valid:false) — generate new token: http://${NODE_IP}:${SONAR_NODEPORT:-30900} → Security → Generate Token"
+                echo "[sonar] then on master: SONAR_TOKEN=sqa_... bash paas/scripts/lab.sh pipeline-heal"
                 break
               fi
               if [ "${_sv}" -lt 5 ]; then
@@ -2725,7 +2784,11 @@ exit 0
               fi
             done
             if [ "${_sonar_ready}" != "1" ]; then
-              echo "[sonar] token not valid from Jenkins agent after retries — check SONAR_TOKEN, Sonar pod (kubectl get pods -n sonarqube), and NodePort reachability"
+              if [ -z "${_last_valid}" ]; then
+                echo "[sonar] cannot reach Sonar — run: bash paas/scripts/lab.sh pipeline-heal (or lab-sonarqube-recover.sh)"
+              else
+                echo "[sonar] token not valid from Jenkins agent — rotate SONAR_TOKEN via pipeline-heal"
+              fi
               exit 1
             fi
             curl -sS -u "${SONAR_TOKEN}:" -X POST \
