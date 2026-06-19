@@ -2,8 +2,25 @@ import { env } from "@/server/config/env";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 
 /** Lab VM IP for nip.io URLs (`http://{app}.{ip}.nip.io:30659/`). */
+function parseIpv4HostFromUrl(raw: string): string {
+    const value = raw.trim();
+    if (!value) {
+        return "";
+    }
+    try {
+        const host = new URL(value).hostname;
+        return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) ? host : "";
+    }
+    catch {
+        return "";
+    }
+}
+
 export function resolveLabNodeIp(): string {
-    return env.APPS_PUBLIC_LAB_NODE_IP.trim() || env.NODE_IP.trim();
+    return env.APPS_PUBLIC_LAB_NODE_IP.trim()
+        || env.NODE_IP.trim()
+        || parseIpv4HostFromUrl(env.APP_BASE_URL)
+        || parseIpv4HostFromUrl(env.JENKINS_BASE_URL);
 }
 
 export function resolveLabIngressHttpPort(): string {
@@ -45,14 +62,28 @@ export function buildAppIngressHost(projectName: string): string {
     const domain = env.APPS_PUBLIC_BASE_DOMAIN.trim().replace(/^\./, "").replace(/\/$/, "");
     return `${subdomain}.${domain}`;
 }
+export function isSyntheticLocalAppUrl(url: string | null | undefined): boolean {
+    const raw = (url ?? "").trim();
+    if (!raw) {
+        return false;
+    }
+    try {
+        const host = new URL(raw).hostname.toLowerCase();
+        return host.endsWith(".local") || host === "localhost" || host.endsWith(".localhost");
+    }
+    catch {
+        return false;
+    }
+}
+
 export function resolveAppUrlForClient(projectName: string, storedUrl: string | null | undefined): string {
     const canonical = buildAppPublicUrl(projectName);
-    if (allowSimulation()) {
-        return canonical;
-    }
-    if (resolveLabNodeIp()) {
-        return canonical;
-    }
     const stored = (storedUrl ?? "").trim();
+    if (allowSimulation() || resolveLabNodeIp()) {
+        return canonical;
+    }
+    if (stored && isSyntheticLocalAppUrl(stored)) {
+        return canonical;
+    }
     return stored || canonical;
 }
