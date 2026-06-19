@@ -25,6 +25,7 @@ usage() {
   echo "  jenkins-stages  Render + install paas-deploy-stages.groovy (no frontend rebuild)"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
+  echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
@@ -93,6 +94,8 @@ case "$cmd" in
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
   sonarqube|sonar-heal|sonar-recover)
     bash "$LIB/lab-sonarqube-recover.sh" ;;
+  sonar-bootstrap|bootstrap-sonar)
+    bash "$LIB/bootstrap-sonarqube-lab.sh" ;;
   jenkins-recover|recover-jenkins)
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
   dependency-track|dtrack)
