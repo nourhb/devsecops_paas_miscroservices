@@ -176,6 +176,17 @@ function main() {
     if (!envTrim(byKey, "JENKINS_NPM_SNAPSHOT_MAX_MB")) {
         byKey.set("JENKINS_NPM_SNAPSHOT_MAX_MB", "800");
     }
+    if (labNodeIp && !envTrim(byKey, "APPS_PUBLIC_LAB_NODE_IP")) {
+        byKey.set("APPS_PUBLIC_LAB_NODE_IP", labNodeIp);
+        console.warn(`WARN: APPS_PUBLIC_LAB_NODE_IP defaulted to ${labNodeIp} (nip.io app URLs)`);
+    }
+    if (labNodeIp && !envTrim(byKey, "APPS_PUBLIC_INGRESS_HTTP_PORT")) {
+        byKey.set("APPS_PUBLIC_INGRESS_HTTP_PORT", "30659");
+        console.warn("WARN: APPS_PUBLIC_INGRESS_HTTP_PORT defaulted to 30659 (Traefik NodePort)");
+    }
+    if (labNodeIp && !envTrim(byKey, "APPS_PUBLIC_URL_SCHEME")) {
+        byKey.set("APPS_PUBLIC_URL_SCHEME", "http");
+    }
     const appBase = envTrim(byKey, "APP_BASE_URL");
     if (appBase && !envTrim(byKey, "ZAP_TARGET_URL")) {
         byKey.set("ZAP_TARGET_URL", appBase);
