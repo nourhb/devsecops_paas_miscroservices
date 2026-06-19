@@ -2882,6 +2882,13 @@ exit 0
                 export SONAR_HOST_URL="${SONAR_HOST_URL}"
                 continue
               fi
+              if grep -qE 'Error 500 on.*rules/search|An error has occurred\\. Please contact your administrator' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
+                echo "[sonar] WARN: Sonar rules API HTTP 500 (server overloaded — two builds scanning at once breaks the lab VM)"
+                echo "[sonar] Wait 90s and retry (on master: bash paas/scripts/lab.sh sonarqube)"
+                sleep 90
+                SONAR_HOST_URL="$(pick_sonar_url)"
+                continue
+              fi
               break
             done
             cat "${LOG}"
