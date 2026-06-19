@@ -70,8 +70,8 @@ verify_twelve_stages_on_jenkins() {
   if kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
     grep -qF 'stage("Step 12 —' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
     && kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -qF 'dt-api-server-svc-20260617' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
-    ok "Jenkins stages file has Step 12 + dt-api-server marker (June 17 layout)"
+    grep -qF 'helm-portable-20260619' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+    ok "Jenkins stages file has Step 12 + helm-portable-20260619 marker (June 17 layout)"
   else
     fail "Jenkins stages file stale — run: bash paas/scripts/lab.sh rollback-june17"
   fi
@@ -122,11 +122,11 @@ main() {
     PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || fail "Postgres still down"
   fi
 
-  step "3/8 SonarQube pod"
-  if kubectl get pods -n sonarqube --request-timeout=30s 2>/dev/null | grep -q Running; then
-    ok "SonarQube pod Running"
+  step "3/8 SonarQube pod + NodePort health"
+  if bash "${SCRIPT_DIR}/lab-sonarqube-recover.sh"; then
+    ok "SonarQube reachable at http://${NODE_IP}:${SONAR_PORT}"
   else
-    warn "SonarQube not Running — Step 5 will fail"
+    fail "SonarQube not reachable — Step 5 will fail"
     kubectl get pods -n sonarqube --request-timeout=30s 2>/dev/null || true
     FAIL=1
   fi
@@ -169,8 +169,10 @@ main() {
     bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh"
   verify_twelve_stages_on_jenkins
   bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh" || FAIL=1
+  bash "${SCRIPT_DIR}/lab-jenkins-agent-tools.sh" || warn "Jenkins agent tools pre-install skipped"
 
   step "6/8 Frontend env secret + rollout"
+  ensure_kyverno_unblocked
   sync_env_to_cluster
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force
 

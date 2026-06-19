@@ -23,6 +23,8 @@ usage() {
   echo "  env-quick Sync env only (skip Dependency-Track — use when k8s API is slow)"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  jenkins-stages  Render + install paas-deploy-stages.groovy (no frontend rebuild)"
+  echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
+  echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
@@ -86,6 +88,10 @@ case "$cmd" in
     LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   jenkins-stages|stages)
     bash "$LIB/install-jenkins-stages-file.sh" ;;
+  jenkins-tools|agent-tools)
+    bash "$LIB/lab-jenkins-agent-tools.sh" ;;
+  sonarqube|sonar-heal|sonar-recover)
+    bash "$LIB/lab-sonarqube-recover.sh" ;;
   jenkins-recover|recover-jenkins)
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
   dependency-track|dtrack)

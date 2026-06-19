@@ -3,7 +3,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
-DT_MARKER="${DT_STAGES_MARKER:-dt-api-server-svc-20260617}"
+DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260619}"
 FAIL=0
 
 echo "==> Verify Jenkins stages bundle on cluster (${DT_MARKER})"

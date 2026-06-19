@@ -164,7 +164,7 @@ sync_env_and_jenkins() {
   for f in "${ENV_FILE}" "${DOT_ENV}"; do
     patch_env_key "${f}" "DEPENDENCY_TRACK_BASE_URL" "${api_base}"
     patch_env_key "${f}" "NEXT_PUBLIC_DEPENDENCY_TRACK_URL" "${api_base}"
-    patch_env_key "${f}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${in_cluster}"
+    patch_env_key "${f}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${api_base}"
     patch_env_key "${f}" "DEPENDENCY_TRACK_API_KEY" "${api_key}"
     ok "updated ${f}"
   done

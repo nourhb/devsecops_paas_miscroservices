@@ -16,6 +16,9 @@
   env.NVD_API_KEY = (params.NVD_API_KEY?.trim() ?: env.NVD_API_KEY ?: "").trim()
   env.JENKINS_DEPENDENCY_TRACK_BASE_URL = (params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_BASE_URL = (params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: "").trim()
+  if (!env.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() && env.DEPENDENCY_TRACK_BASE_URL?.trim()) {
+    env.JENKINS_DEPENDENCY_TRACK_BASE_URL = env.DEPENDENCY_TRACK_BASE_URL.trim()
+  }
   env.DEPENDENCY_TRACK_API_KEY = (params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: "").trim()
   env.ARTIFACTORY_URL = (params.ARTIFACTORY_URL?.trim() ?: env.ARTIFACTORY_URL ?: "").trim()
   env.ARTIFACTORY_REPOSITORY = (params.ARTIFACTORY_REPOSITORY?.trim() ?: env.ARTIFACTORY_REPOSITORY ?: "libs-release-local").trim()
@@ -27,8 +30,8 @@
   env.COSIGN_PASSWORD = (params.COSIGN_PASSWORD?.trim() ?: env.COSIGN_PASSWORD ?: "")
   env.COSIGN_ALLOW_INSECURE_REGISTRY = (params.COSIGN_ALLOW_INSECURE_REGISTRY?.trim() ?: env.COSIGN_ALLOW_INSECURE_REGISTRY ?: "").trim()
   env.HELM_OCI_PROJECT = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT ?: "paas").trim()
-  env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "").trim()
-  env.HELM_OCI_PLAIN_HTTP = (params.HELM_OCI_PLAIN_HTTP?.trim() ?: env.HELM_OCI_PLAIN_HTTP ?: "").trim()
+  env.HELM_OCI_INSECURE = (params.HELM_OCI_INSECURE?.trim() ?: env.HELM_OCI_INSECURE ?: "true").trim()
+  env.HELM_OCI_PLAIN_HTTP = (params.HELM_OCI_PLAIN_HTTP?.trim() ?: env.HELM_OCI_PLAIN_HTTP ?: "true").trim()
   env.ZAP_TARGET_URL = (params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL ?: "").trim()
   env.BUILD_PACKAGE_PROXY_URL = (params.BUILD_PACKAGE_PROXY_URL?.trim() ?: env.BUILD_PACKAGE_PROXY_URL ?: "").trim()
   env.NPM_CONFIG_REGISTRY = (params.NPM_CONFIG_REGISTRY?.trim() ?: env.NPM_CONFIG_REGISTRY ?: "").trim()
@@ -99,6 +102,8 @@
   println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
   println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
   println '[paas-jenkinsfile] marker=harbor-nipio-artifact-ref-20260615 (PAAS_ARTIFACT_IMAGE + cosign use nip.io push ref)'
+  println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
+  println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -264,7 +269,7 @@
               fi
             done
             NM_SNAP=""
-            NM_SNAP_MAX_MB="${JENKINS_NPM_SNAPSHOT_MAX_MB:-600}"
+            NM_SNAP_MAX_MB="${JENKINS_NPM_SNAPSHOT_MAX_MB:-800}"
             if [ "${JENKINS_NPM_SNAPSHOT_NODE_MODULES:-true}" != "false" ] && [ -n "${JENKINS_HOME:-}" ] && [ -n "${LOCK_HASH}" ] && [ -n "${PROJECT_ID:-}" ]; then
               NM_SNAP="${JENKINS_HOME}/.jenkins-paas-cache/nm-snap/${PROJECT_ID}/${LOCK_HASH}"
             fi
@@ -598,7 +603,7 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-scanner-cli6-login-20260607 (sonar.login+token; cluster URL; ws.timeout=300; retries)"
+      println "[paas-jenkinsfile] marker=sonar-resilience-20260619 (token validate retry; re-probe URL on connection refused during upload)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -619,27 +624,45 @@ exit 0
           def sonarRc = sh(script: '''#!/bin/bash
             set +e
             pick_sonar_url() {
-              # Prefer in-cluster Sonar (faster than NodePort; NodePort can timeout on values.protobuf).
+              # Built-in Jenkins agent: NodePort first (cluster DNS often unavailable); in-cluster as fallback.
               for u in \
+                "${SONAR_HOST_URL_PARAM}" \
                 "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
                 "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
-                "http://sonarqube.sonarqube.svc.cluster.local:9000" \
-                "${SONAR_HOST_URL_PARAM}"
+                "http://sonarqube.sonarqube.svc.cluster.local:9000"
               do
                 [ -z "$u" ] && continue
-                if curl -fsS -m 15 -u "${SONAR_TOKEN}:" "${u%/}/api/system/status" >/dev/null 2>&1; then
+                if curl -fsS -m 15 "${u%/}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
                   echo "$u"
                   return 0
                 fi
               done
               echo "${SONAR_HOST_URL_PARAM}"
             }
+            sonar_validate_token() {
+              _url="$1"
+              VALID=$(curl -sS -m 15 -u "${SONAR_TOKEN}:" "${_url%/}/api/authentication/validate" 2>/dev/null || true)
+              printf '%s' "${VALID}" | grep -q '"valid":true'
+            }
             SONAR_HOST_URL="$(pick_sonar_url)"
             echo "[sonar] using ${SONAR_HOST_URL}"
-            VALID=$(curl -sS -m 8 -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL%/}/api/authentication/validate" 2>/dev/null || true)
-            echo "[sonar] token validate: ${VALID:-<curl failed>}"
-            if ! printf '%s' "${VALID}" | grep -q '"valid":true'; then
-              echo "[sonar] token not valid from Jenkins agent — check SONAR_TOKEN and Sonar URL reachability"
+            _sonar_ready=0
+            for _sv in 1 2 3 4 5; do
+              VALID=$(curl -sS -m 15 -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL%/}/api/authentication/validate" 2>/dev/null || true)
+              echo "[sonar] token validate attempt ${_sv}/5: ${VALID:-<curl failed>}"
+              if sonar_validate_token "${SONAR_HOST_URL}"; then
+                _sonar_ready=1
+                break
+              fi
+              if [ "${_sv}" -lt 5 ]; then
+                echo "[sonar] Sonar not ready — wait 20s and re-probe URL"
+                sleep 20
+                SONAR_HOST_URL="$(pick_sonar_url)"
+                echo "[sonar] re-probe using ${SONAR_HOST_URL}"
+              fi
+            done
+            if [ "${_sonar_ready}" != "1" ]; then
+              echo "[sonar] token not valid from Jenkins agent after retries — check SONAR_TOKEN, Sonar pod (kubectl get pods -n sonarqube), and NodePort reachability"
               exit 1
             fi
             curl -sS -u "${SONAR_TOKEN}:" -X POST \
@@ -653,17 +676,33 @@ exit 0
               fi
             done
             echo "[sonar] sources=${SOURCES}"
+            if [ -f tsconfig.json ] && grep -qE '"moduleResolution"[[:space:]]*:[[:space:]]*"bundler"' tsconfig.json 2>/dev/null; then
+              echo "[sonar] Next.js/TS bundler moduleResolution — writing .sonar-tsconfig.json (nodenext for Sonar 9.9 bridge)"
+              node -e "
+                const fs=require('fs');
+                const j=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));
+                j.compilerOptions=j.compilerOptions||{};
+                j.compilerOptions.moduleResolution='nodenext';
+                if(j.compilerOptions.module==='esnext'||j.compilerOptions.module==='ESNext') j.compilerOptions.module='nodenext';
+                fs.writeFileSync('.sonar-tsconfig.json', JSON.stringify(j,null,2)+'\\n');
+              " 2>/dev/null || cp tsconfig.json .sonar-tsconfig.json
+              SONAR_TSCONFIG=.sonar-tsconfig.json
+            else
+              SONAR_TSCONFIG=
+            fi
             SP=sonar-project.properties
             rm -f "${SP}"
             {
               printf 'sonar.host.url=%s\n' "${SONAR_HOST_URL}"
               printf 'sonar.token=%s\n' "${SONAR_TOKEN}"
-              printf 'sonar.login=%s\n' "${SONAR_TOKEN}"
               printf 'sonar.projectKey=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectName=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectVersion=%s\n' "${SONAR_VERSION}"
               printf 'sonar.sources=%s\n' "${SOURCES}"
               printf 'sonar.exclusions=%s\n' '**/node_modules/**,**/.next/**,**/dist/**,**/build/**,**/.git/**,**/coverage/**,**/*.min.js'
+              if [ -n "${SONAR_TSCONFIG:-}" ]; then
+                printf 'sonar.typescript.tsconfigPath=%s\n' "${SONAR_TSCONFIG}"
+              fi
               printf 'sonar.qualitygate.wait=%s\n' 'true'
               printf 'sonar.scanner.analysisCacheEnabled=%s\n' 'false'
               printf 'sonar.ws.timeout=%s\n' '300'
@@ -698,7 +737,6 @@ exit 0
               npx --yes sonarqube-scanner@4.2.8 \
                 -Dsonar.host.url="${SONAR_HOST_URL}" \
                 -Dsonar.token="${SONAR_TOKEN}" \
-                -Dsonar.login="${SONAR_TOKEN}" \
                 -Dsonar.ws.timeout=300 \
                 > "${LOG}" 2>&1
               RC=$?
@@ -709,9 +747,13 @@ exit 0
                 RC=0
                 break
               fi
-              if grep -qE 'SocketTimeoutException|Read timed out|values\\.protobuf' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
-                echo "[sonar] WARN: Sonar API timeout — retry in 30s (check Sonar at SONAR_BASE_URL if persistent)"
-                sleep 30
+              if grep -qE 'SocketTimeoutException|Read timed out|values\\.protobuf|ConnectException|Connection refused|Failed to connect' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
+                echo "[sonar] WARN: Sonar API timeout or connection dropped — re-probe URL and retry in 45s (Sonar may restart under load; avoid parallel paas-deploy builds)"
+                sleep 45
+                SONAR_HOST_URL="$(pick_sonar_url)"
+                echo "[sonar] retry using ${SONAR_HOST_URL}"
+                sed -i "s|^sonar.host.url=.*|sonar.host.url=${SONAR_HOST_URL}|" "${SP}" 2>/dev/null || true
+                export SONAR_HOST_URL="${SONAR_HOST_URL}"
                 continue
               fi
               break
@@ -725,7 +767,7 @@ exit 0
               echo "[sonar] scanner tail:"
               tail -40 "${LOG}" 2>/dev/null || true
             fi
-            rm -f "${SP}"
+            rm -f "${SP}" .sonar-tsconfig.json
             exit "${RC}"
           ''', returnStatus: true)
           def sonarLog = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
@@ -764,7 +806,6 @@ SP="${SONAR_WS}/sonar-project.properties"
 cat > "${SP}" <<SONARPROP
 sonar.host.url=${SONAR_SCAN_HOST_URL}
 sonar.token=${SONAR_SCAN_TOKEN}
-sonar.login=${SONAR_SCAN_TOKEN}
 sonar.projectKey=${SONAR_SCAN_PROJECT_KEY}
 sonar.ws.timeout=300
 sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
@@ -898,6 +939,7 @@ echo $?
 
   stage("Step 7 — Packaging du chart Helm") {
     nonFatalStage("7. Packaging du chart Helm (aligné Jenkinsfile.paas-deploy.full)") {
+      def helmBin = ensureHelmTool()
       sh """
         set -eu
         mkdir -p paas-artifacts
@@ -908,11 +950,34 @@ BUILD_NUMBER=${env.BUILD_NUMBER}
 PAAS_ARTIFACT_IMAGE=${artifactImage}
 EOF
       """
-      if (fileExists("Chart.yaml") && commandExists("helm")) {
-        sh "mkdir -p paas-artifacts/helm && helm package . --destination paas-artifacts/helm"
+      if (fileExists("Chart.yaml")) {
+        sh "mkdir -p paas-artifacts/helm && '${helmBin}' package . --destination paas-artifacts/helm"
         println "[helm] Chart packagé : paas-artifacts/helm/*.tgz (déploiement Kubernetes via Helm / GitOps)."
       } else {
-        println "[helm] Pas de Chart.yaml à la racine ou CLI helm absente ; le packaging est délégué au dépôt GitOps du PaaS."
+        def safeName = (imageName.tokenize('/').last()?.replaceAll(/[^a-zA-Z0-9.-]/, '-') ?: 'paas-app').replaceAll(/\.+/, '-')
+        sh """
+          set -eu
+          mkdir -p paas-artifacts/helm-stub/templates paas-artifacts/helm
+          cat > paas-artifacts/helm-stub/Chart.yaml <<EOF
+apiVersion: v2
+name: ${safeName}
+description: PaaS lab stub chart (GitOps chart lives in PaaS repo)
+type: application
+version: 0.1.${env.BUILD_NUMBER}
+appVersion: "${branchName}-${env.BUILD_NUMBER}"
+EOF
+          cat > paas-artifacts/helm-stub/values.yaml <<EOF
+image:
+  repository: ${artifactImage.tokenize(':')[0]}
+  tag: ${artifactImage.contains(':') ? artifactImage.tokenize(':')[1] : 'latest'}
+projectId: ${projectId}
+EOF
+          cat > paas-artifacts/helm-stub/templates/placeholder.yaml <<EOF
+# Stub — real manifests applied by PaaS GitOps after PAAS_BUILD_COMPLETE
+EOF
+          '${helmBin}' package paas-artifacts/helm-stub --destination paas-artifacts/helm
+        """
+        println "[helm] Stub chart packagé (no Chart.yaml in app repo) → paas-artifacts/helm/*.tgz for Step 11 OCI push."
       }
       if (fileExists('paas-artifacts/release-metadata.txt')) {
         paasStepOk(7, 'helm_meta', 'paas-artifacts/release-metadata.txt written')
@@ -935,6 +1000,17 @@ EOF
       def basicUser = env.ARTIFACTORY_USERNAME?.trim() ?: ""
       def basicPass = env.ARTIFACTORY_PASSWORD?.trim() ?: ""
       if (!artiBase) {
+        def harborReg = (env.HARBOR_REGISTRY ?: params.HARBOR_REGISTRY ?: "").trim()
+        if (harborReg && fileExists('sca/bom.json')) {
+          println "[artifactory] ARTIFACTORY_URL absent — archiving sca+bundle locally only (Harbor image push is Step 6)."
+          sh '''
+            set +e
+            mkdir -p paas-artifacts/artifactory-local
+            tar -czf paas-artifacts/artifactory-local/paas-build-bundle.tgz sca paas-artifacts 2>/dev/null || true
+          '''
+          paasStepOk(8, 'artifactory', 'local bundle paas-artifacts/artifactory-local/ (set ARTIFACTORY_URL for JFrog upload)')
+          return
+        }
         println "[artifactory] ARTIFACTORY_URL absent — étape ignorée (optionnel)."
         return
       }
@@ -1062,23 +1138,46 @@ EOF
         println "[zap] ZAP_TARGET_URL absent — étape ignorée."
         return
       }
-      if (!commandExists("docker")) {
-        println "[zap] docker CLI absent — ZAP baseline ignoré."
-        return
-      }
       println "[zap] Cible DAST: ${zapTarget}"
-      withEnv(["ZAP_TARGET=${zapTarget}"]) {
-        sh '''
+      withEnv(["ZAP_TARGET=${zapTarget}", "ZAP_BUILD=${env.BUILD_NUMBER}"]) {
+        def zapRc = sh(script: '''#!/bin/bash
           set +e
           mkdir -p paas-artifacts
-          docker run --rm \
-            -v "$PWD/paas-artifacts:/zap/wrk/:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t "$ZAP_TARGET" \
-              -r /zap/wrk/zap-baseline-report.html \
-              -J /zap/wrk/zap-baseline-report.json
+          run_zap_docker() {
+            docker run --rm \
+              -v "$PWD/paas-artifacts:/zap/wrk/:rw" \
+              ghcr.io/zaproxy/zaproxy:stable \
+              zap-baseline.py -t "$ZAP_TARGET" \
+                -r /zap/wrk/zap-baseline-report.html \
+                -J /zap/wrk/zap-baseline-report.json
+          }
+          run_zap_kubectl() {
+            local ns="${ZAP_K8S_NAMESPACE:-cicd}" pod="paas-zap-${ZAP_BUILD:-0}"
+            kubectl delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
+            kubectl run "$pod" -n "$ns" --restart=Never --image=ghcr.io/zaproxy/zaproxy:stable \
+              --command -- zap-baseline.py -t "$ZAP_TARGET" -J /tmp/zap.json -r /tmp/zap.html 2>/dev/null
+            kubectl wait -n "$ns" --for=condition=Ready "pod/$pod" --timeout=120s 2>/dev/null || true
+            sleep 5
+            kubectl logs -n "$ns" "$pod" > paas-artifacts/zap-baseline-pod.log 2>&1 || true
+            kubectl exec -n "$ns" "$pod" -- cat /tmp/zap.json > paas-artifacts/zap-baseline-report.json 2>/dev/null || true
+            kubectl exec -n "$ns" "$pod" -- cat /tmp/zap.html > paas-artifacts/zap-baseline-report.html 2>/dev/null || true
+            kubectl delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
+          }
+          if command -v docker >/dev/null 2>&1; then
+            echo "[zap] using docker"
+            run_zap_docker
+          elif command -v kubectl >/dev/null 2>&1; then
+            echo "[zap] docker CLI absent — using kubectl run (lab fallback)"
+            run_zap_kubectl
+          else
+            echo "[zap] docker and kubectl absent — ZAP baseline ignoré"
+            exit 0
+          fi
           echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
-        '''
+        ''', returnStatus: true)
+        if (zapRc != 0) {
+          println "[zap] WARN: zap runner exit ${zapRc} (non-blocking)"
+        }
       }
       if (fileExists('paas-artifacts/zap-baseline-report.html')) {
         paasStepOk(10, 'zap', 'ZAP report in paas-artifacts/')
@@ -1099,33 +1198,30 @@ EOF
         println "[helm-oci] HARBOR_REGISTRY / HARBOR_USERNAME / HARBOR_PASSWORD requis — publication Helm ignorée."
         return
       }
-      if (!commandExists("helm")) {
-        println "[helm-oci] helm CLI absent — publication ignorée."
-        return
-      }
+      def helmBin = ensureHelmTool()
       if (!fileExists("paas-artifacts/helm")) {
         println "[helm-oci] Pas de paas-artifacts/helm (exécutez d'abord le packaging Step 7) — ignoré."
         return
       }
       def regHost = reg.replaceFirst("^https?://", "").replaceAll(/\/$/, "")
       def ociRef = "oci://${regHost}/${ociProj}"
-      withEnv(["HELM_OCI_REF=${ociRef}", "REG_HOST=${regHost}"]) {
+      withEnv(["HELM_OCI_REF=${ociRef}", "REG_HOST=${regHost}", "HELM_BIN=${helmBin}"]) {
         sh '''
           set +e
           shopt -s nullglob
           LOGIN_OPTS=""
-          if [ "${HELM_OCI_INSECURE:-}" = "true" ]; then LOGIN_OPTS="--insecure"; fi
+          if [ "${HELM_OCI_INSECURE:-true}" = "true" ]; then LOGIN_OPTS="--insecure"; fi
           PUSH_OPTS=""
-          if [ "${HELM_OCI_PLAIN_HTTP:-}" = "true" ]; then PUSH_OPTS="--plain-http"; fi
+          if [ "${HELM_OCI_PLAIN_HTTP:-true}" = "true" ]; then PUSH_OPTS="--plain-http"; fi
           charts=(paas-artifacts/helm/*.tgz)
           if [ ${#charts[@]} -eq 0 ]; then
             echo "[helm-oci] Aucun chart .tgz à publier."
             exit 0
           fi
-          echo "${HARBOR_PASSWORD}" | helm registry login ${LOGIN_OPTS} "${REG_HOST}" -u "${HARBOR_USERNAME}" --password-stdin || exit 1
+          echo "${HARBOR_PASSWORD}" | "${HELM_BIN}" registry login ${LOGIN_OPTS} "${REG_HOST}" -u "${HARBOR_USERNAME}" --password-stdin || exit 1
           for f in "${charts[@]}"; do
             echo "[helm-oci] helm push $f ${HELM_OCI_REF}"
-            helm push ${PUSH_OPTS} "$f" "${HELM_OCI_REF}" || exit 1
+            "${HELM_BIN}" push ${PUSH_OPTS} "$f" "${HELM_OCI_REF}" || exit 1
           done
         '''
       }
@@ -1151,4 +1247,15 @@ EOF
     println "PAAS_BUILD_COMPLETE result=${buildResult} image=${promoteImage ?: artifactImage} project=${projectId} build=${env.BUILD_NUMBER}"
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
+}
 
+if (!agentLabel || agentLabel == 'built-in') {
+  println "[paas] node: default Built-In Node (agentLabel=${agentLabel ?: 'empty'})"
+  node {
+    runPaasDeploy()
+  }
+} else {
+  println "[paas] node: agentLabel=${agentLabel}"
+  node(agentLabel) {
+    runPaasDeploy()
+  }
