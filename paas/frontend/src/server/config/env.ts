@@ -196,6 +196,7 @@ const envSchema = z.object({
     APPS_PUBLIC_BASE_DOMAIN: z.string().default("apps.local"),
     APPS_PUBLIC_URL_TEMPLATE: z.string().default(""),
     APPS_PUBLIC_LAB_NODE_IP: z.string().default(""),
+    NODE_IP: z.string().default(""),
 
     APPS_LAB_NODE_SELECTOR: z.preprocess(stripInlineEnvComment, z.string().default("")),
     APPS_PUBLIC_INGRESS_HTTP_PORT: z.string().default(""),
@@ -459,6 +460,7 @@ const parsed = envSchema.safeParse({
     APPS_PUBLIC_BASE_DOMAIN: process.env.APPS_PUBLIC_BASE_DOMAIN,
     APPS_PUBLIC_URL_TEMPLATE: process.env.APPS_PUBLIC_URL_TEMPLATE,
     APPS_PUBLIC_LAB_NODE_IP: process.env.APPS_PUBLIC_LAB_NODE_IP,
+    NODE_IP: process.env.NODE_IP,
     APPS_LAB_NODE_SELECTOR: process.env.APPS_LAB_NODE_SELECTOR,
     APPS_PUBLIC_INGRESS_HTTP_PORT: process.env.APPS_PUBLIC_INGRESS_HTTP_PORT,
     APPS_INGRESS_CLASS: process.env.APPS_INGRESS_CLASS,

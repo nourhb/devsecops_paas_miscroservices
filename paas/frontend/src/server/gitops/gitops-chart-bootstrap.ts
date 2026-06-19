@@ -1,5 +1,5 @@
 import { env } from "@/server/config/env";
-import { buildAppIngressHost } from "@/server/deploy/app-public-url";
+import { buildAppIngressHost, resolveLabNodeIp } from "@/server/deploy/app-public-url";
 import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { resolveDeploymentStrategy } from "@/server/gitops/gitops-blue-green";
 import { resolveDeployProfileSpec, type DeployProfileSpec } from "@/server/deploy/deploy-profile";
@@ -234,7 +234,7 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
     else {
         delete doc.nodeSelector;
     }
-    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    const labIp = resolveLabNodeIp();
     if (!labIp) {
         return;
     }

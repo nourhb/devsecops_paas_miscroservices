@@ -1,5 +1,14 @@
 import { env } from "@/server/config/env";
 import { allowSimulation } from "@/server/integrations/integration-mode";
+
+/** Lab VM IP for nip.io URLs (`http://{app}.{ip}.nip.io:30659/`). */
+export function resolveLabNodeIp(): string {
+    return env.APPS_PUBLIC_LAB_NODE_IP.trim() || env.NODE_IP.trim();
+}
+
+export function resolveLabIngressHttpPort(): string {
+    return env.APPS_PUBLIC_INGRESS_HTTP_PORT.trim().replace(/^:/, "") || "30659";
+}
 export function appSubdomainFromProjectName(projectName: string): string {
     return (projectName
         .toLowerCase()
@@ -14,11 +23,11 @@ export function buildAppPublicUrl(projectName: string): string {
         return template
             .replace(/\{\{projectName\}\}/gi, projectName)
             .replace(/\{\{subdomain\}\}/gi, subdomain)
-            .replace(/\{\{labNodeIp\}\}/gi, env.APPS_PUBLIC_LAB_NODE_IP.trim());
+            .replace(/\{\{labNodeIp\}\}/gi, resolveLabNodeIp());
     }
-    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    const labIp = resolveLabNodeIp();
     if (labIp) {
-        const port = env.APPS_PUBLIC_INGRESS_HTTP_PORT.trim().replace(/^:/, "");
+        const port = resolveLabIngressHttpPort();
         const portSuffix = port ? `:${port}` : "";
         return `http://${subdomain}.${labIp}.nip.io${portSuffix}`;
     }
@@ -28,7 +37,7 @@ export function buildAppPublicUrl(projectName: string): string {
     return `${scheme}://${subdomain}.${domain}`;
 }
 export function buildAppIngressHost(projectName: string): string {
-    const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();
+    const labIp = resolveLabNodeIp();
     const subdomain = appSubdomainFromProjectName(projectName);
     if (labIp) {
         return `${subdomain}.${labIp}.nip.io`;
@@ -41,7 +50,7 @@ export function resolveAppUrlForClient(projectName: string, storedUrl: string | 
     if (allowSimulation()) {
         return canonical;
     }
-    if (env.APPS_PUBLIC_LAB_NODE_IP.trim()) {
+    if (resolveLabNodeIp()) {
         return canonical;
     }
     const stored = (storedUrl ?? "").trim();
