@@ -6,7 +6,8 @@ import { parseBuildMetadata } from "@/server/build/build-metadata";
 import { getBuildBackend } from "@/server/build/build-backend";
 import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { promoteDeploymentAfterJenkinsSuccess, tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
-import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageFailure, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
 import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
 import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
@@ -177,7 +178,11 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
     if (!deployment) {
         return;
     }
-    if (deployment.status !== DeploymentJobStatus.PENDING && deployment.status !== DeploymentJobStatus.DEPLOYING) {
+    const falsePostgresFailure = deployment.status === DeploymentJobStatus.FAILED &&
+        isBuildMonitorPostgresOutageFailure(deployment);
+    if (!falsePostgresFailure &&
+        deployment.status !== DeploymentJobStatus.PENDING &&
+        deployment.status !== DeploymentJobStatus.DEPLOYING) {
         return;
     }
     const { projectName, id: projectId } = deployment.project;
@@ -186,10 +191,7 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
         return;
     }
     if (buildNum !== deployment.jenkinsBuildNumber) {
-        await prisma.deployment.update({
-            where: { id: deploymentId },
-            data: { jenkinsBuildNumber: buildNum }
-        });
+        await prismaDeploymentUpdate(deploymentId, { jenkinsBuildNumber: buildNum });
     }
     const meta = await jenkinsClient.getBuildApiJson(projectName, projectId, buildNum, "deploy");
     if (!meta) {
@@ -198,14 +200,11 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
     const console = (await jenkinsClient.getBuildConsoleText(projectName, projectId, buildNum, "deploy")) ?? deployment.logs ?? "";
     const logTail = console.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
     if (!terminalBuild(meta)) {
-        await prisma.deployment.update({
-            where: { id: deploymentId },
-            data: {
-                status: DeploymentJobStatus.DEPLOYING,
-                jenkinsBuildNumber: buildNum,
-                logs: logTail,
-                ...clearDeploymentFailureFields()
-            }
+        await prismaDeploymentUpdate(deploymentId, {
+            status: DeploymentJobStatus.DEPLOYING,
+            jenkinsBuildNumber: buildNum,
+            logs: logTail,
+            ...clearDeploymentFailureFields()
         });
         await updateProject(projectId, {
             lastDeploymentStatus: "DEPLOYING",
@@ -216,14 +215,11 @@ export async function reconcileJenkinsDeploymentRecord(deploymentId: string): Pr
         return;
     }
     if (meta.result === "SUCCESS") {
-        await prisma.deployment.update({
-            where: { id: deploymentId },
-            data: {
-                status: DeploymentJobStatus.DEPLOYING,
-                jenkinsBuildNumber: buildNum,
-                logs: logTail,
-                ...clearDeploymentFailureFields()
-            }
+        await prismaDeploymentUpdate(deploymentId, {
+            status: DeploymentJobStatus.DEPLOYING,
+            jenkinsBuildNumber: buildNum,
+            logs: logTail,
+            ...clearDeploymentFailureFields()
         });
         await updateProject(projectId, {
             lastDeploymentStatus: "PROMOTING",

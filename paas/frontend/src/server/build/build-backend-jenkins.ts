@@ -3,6 +3,7 @@ import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTr
 import { prependBuildMetadata } from "@/server/build/build-metadata";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
+import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
 import type { ResolvedBuildPlan } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
@@ -178,12 +179,9 @@ export class JenkinsBuildBackend implements BuildBackend {
                         runNumber: simBuild,
                         artifactImage: `${buildDeployImageRepository(projectName)}:${simBuild}`
                     });
-                await prisma.deployment.update({
-                    where: { id: args.deploymentId },
-                    data: {
-                        jenkinsBuildNumber: simBuild,
-                        logs: simLog.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS)
-                    }
+                await prismaDeploymentUpdate(args.deploymentId, {
+                    jenkinsBuildNumber: simBuild,
+                    logs: simLog.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS)
                 });
                 try {
                     await promoteDeploymentAfterBuildSuccess(args.deploymentId, projectId, projectName, {
@@ -236,14 +234,11 @@ export class JenkinsBuildBackend implements BuildBackend {
                     waitTicks++;
                     if (waitTicks === 1 || waitTicks % 6 === 0) {
                         logTail = mergeLogTail(logTail, "[build] Waiting for Jenkins run for this project on shared paas-deploy…");
-                        await prisma.deployment.update({
-                            where: { id: args.deploymentId },
-                            data: {
-                                status: DeploymentJobStatus.PENDING,
-                                jenkinsBuildNumber: null,
-                                logs: logTail,
-                                ...clearDeploymentFailureFields()
-                            }
+                        await prismaDeploymentUpdate(args.deploymentId, {
+                            status: DeploymentJobStatus.PENDING,
+                            jenkinsBuildNumber: null,
+                            logs: logTail,
+                            ...clearDeploymentFailureFields()
                         });
                     }
                     if (Date.now() > resolveDeadline) {
@@ -260,14 +255,11 @@ export class JenkinsBuildBackend implements BuildBackend {
             let activeBuildNum: number = buildNum;
             let monitorTicks = 0;
             logTail = mergeLogTail(logTail, `[build] Monitoring ${this.provider} run #${activeBuildNum}`);
-            await prisma.deployment.update({
-                where: { id: args.deploymentId },
-                data: {
-                    jenkinsBuildNumber: activeBuildNum,
-                    status: DeploymentJobStatus.DEPLOYING,
-                    logs: logTail,
-                    ...clearDeploymentFailureFields()
-                }
+            await prismaDeploymentUpdate(args.deploymentId, {
+                jenkinsBuildNumber: activeBuildNum,
+                status: DeploymentJobStatus.DEPLOYING,
+                logs: logTail,
+                ...clearDeploymentFailureFields()
             });
             while (Date.now() < deadline) {
                 monitorTicks++;
@@ -282,9 +274,10 @@ export class JenkinsBuildBackend implements BuildBackend {
                             activeBuildNum = reassigned;
                             progressiveLogOffsets.set(args.deploymentId, 0);
                             logTail = mergeLogTail(logTail, `[build] Switched monitor to Jenkins run #${activeBuildNum} for this project.`);
-                            await prisma.deployment.update({
-                                where: { id: args.deploymentId },
-                                data: { jenkinsBuildNumber: activeBuildNum, logs: logTail, ...clearDeploymentFailureFields() }
+                            await prismaDeploymentUpdate(args.deploymentId, {
+                                jenkinsBuildNumber: activeBuildNum,
+                                logs: logTail,
+                                ...clearDeploymentFailureFields()
                             });
                         }
                     }
@@ -298,13 +291,10 @@ export class JenkinsBuildBackend implements BuildBackend {
                 const meta = await jenkinsClient.getBuildApiJson(projectName, projectId, activeBuildNum, "deploy");
                 if (!meta) {
                     logTail = mergeLogTail(logTail, "[build-monitor] Waiting for Jenkins metadata. Log streaming may continue while the upstream API is slow.");
-                    await prisma.deployment.update({
-                        where: { id: args.deploymentId },
-                        data: {
-                            status: DeploymentJobStatus.DEPLOYING,
-                            logs: logTail,
-                            ...clearDeploymentFailureFields()
-                        }
+                    await prismaDeploymentUpdate(args.deploymentId, {
+                        status: DeploymentJobStatus.DEPLOYING,
+                        logs: logTail,
+                        ...clearDeploymentFailureFields()
                     });
                     await sleep(interval);
                     continue;
@@ -328,9 +318,10 @@ export class JenkinsBuildBackend implements BuildBackend {
                             activeBuildNum = reassigned;
                             progressiveLogOffsets.set(args.deploymentId, 0);
                             logTail = mergeLogTail(logTail, `[build] Reassigned monitor to Jenkins run #${activeBuildNum} (prior run belonged to another project).`);
-                            await prisma.deployment.update({
-                                where: { id: args.deploymentId },
-                                data: { jenkinsBuildNumber: activeBuildNum, logs: logTail, ...clearDeploymentFailureFields() }
+                            await prismaDeploymentUpdate(args.deploymentId, {
+                                jenkinsBuildNumber: activeBuildNum,
+                                logs: logTail,
+                                ...clearDeploymentFailureFields()
                             });
                             continue;
                         }
@@ -371,15 +362,12 @@ export class JenkinsBuildBackend implements BuildBackend {
                     });
                     return;
                 }
-                await prisma.deployment.update({
-                    where: { id: args.deploymentId },
-                    data: {
-                        status: statusFromJenkins(meta.result, meta.building) === DeploymentJobStatus.PENDING
-                            ? DeploymentJobStatus.DEPLOYING
-                            : statusFromJenkins(meta.result, meta.building),
-                        logs: logTail,
-                        ...clearDeploymentFailureFields()
-                    }
+                await prismaDeploymentUpdate(args.deploymentId, {
+                    status: statusFromJenkins(meta.result, meta.building) === DeploymentJobStatus.PENDING
+                        ? DeploymentJobStatus.DEPLOYING
+                        : statusFromJenkins(meta.result, meta.building),
+                    logs: logTail,
+                    ...clearDeploymentFailureFields()
                 });
                 await updateProject(projectId, {
                     lastDeploymentStatus: "DEPLOYING",

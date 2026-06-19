@@ -40,7 +40,7 @@ if [[ -f "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh" ]]; then
 fi
 
 echo "==> Postgres + frontend"
-bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" 2>/dev/null || {
+PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" 2>/dev/null || {
   kubectl rollout restart deployment/postgres -n "${PAAS_NS}" 2>/dev/null || true
   kubectl wait --for=condition=available deployment/postgres -n "${PAAS_NS}" --timeout=300s 2>/dev/null || true
 }

@@ -149,6 +149,38 @@ function main() {
         }
         console.warn(`WARN: JENKINS_BASE_URL in-cluster/dead clusterIP -> ${nodeJenkins} (frontend pod uses node NodePort)`);
     }
+    const dtBase = envTrim(byKey, "DEPENDENCY_TRACK_BASE_URL");
+    const jenkinsDt = envTrim(byKey, "JENKINS_DEPENDENCY_TRACK_BASE_URL");
+    if (dtBase && /:\d+/.test(dtBase) && (!jenkinsDt || /\.svc\.cluster\.local/i.test(jenkinsDt))) {
+        byKey.set("JENKINS_DEPENDENCY_TRACK_BASE_URL", dtBase);
+        console.warn(`WARN: JENKINS_DEPENDENCY_TRACK_BASE_URL -> ${dtBase} (Jenkins built-in uses NodePort, not cluster DNS)`);
+    }
+    const sonarBase = envTrim(byKey, "SONAR_BASE_URL") || envTrim(byKey, "SONAR_HOST_URL");
+    if (labNodeIp && sonarBase && /\.svc\.cluster\.local/i.test(sonarBase)) {
+        const sonarNode = `http://${labNodeIp}:30900`;
+        byKey.set("SONAR_BASE_URL", sonarNode);
+        byKey.set("SONAR_HOST_URL", sonarNode);
+        console.warn(`WARN: SONAR_* in-cluster URL -> ${sonarNode} for Jenkins job params`);
+    } else if (labNodeIp && !sonarBase) {
+        const sonarNode = `http://${labNodeIp}:30900`;
+        byKey.set("SONAR_BASE_URL", sonarNode);
+        byKey.set("SONAR_HOST_URL", sonarNode);
+        console.warn(`WARN: SONAR_BASE_URL defaulted to ${sonarNode}`);
+    }
+    if (!envTrim(byKey, "HELM_OCI_PLAIN_HTTP")) {
+        byKey.set("HELM_OCI_PLAIN_HTTP", "true");
+    }
+    if (!envTrim(byKey, "HELM_OCI_INSECURE")) {
+        byKey.set("HELM_OCI_INSECURE", "true");
+    }
+    if (!envTrim(byKey, "JENKINS_NPM_SNAPSHOT_MAX_MB")) {
+        byKey.set("JENKINS_NPM_SNAPSHOT_MAX_MB", "800");
+    }
+    const appBase = envTrim(byKey, "APP_BASE_URL");
+    if (appBase && !envTrim(byKey, "ZAP_TARGET_URL")) {
+        byKey.set("ZAP_TARGET_URL", appBase);
+        console.warn(`WARN: ZAP_TARGET_URL defaulted to APP_BASE_URL (${appBase}) for Step 10 DAST`);
+    }
     const entriesOut = [...byKey.entries()];
     const header = "";
     const body = entriesOut.map(([k, v]) => `${k}=${escapeForComposeLine(v)}`).join("\n");

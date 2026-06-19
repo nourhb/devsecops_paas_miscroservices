@@ -236,6 +236,17 @@ if jenkins_job_has_broken_mutate "${CFG}"; then
 fi
 if jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}"; then
   echo "OK: Jenkins job has Step 6 mutate fix (start-paas.sh)"
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath'; then
+  JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
+  JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
+  if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- sh -c \
+    'grep -qF "entrypoint=/app/start-paas.sh" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
+      || grep -qF "crane mutate OK" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null'; then
+    echo "OK: Jenkins stages file has Step 6 mutate fix (load() layout)"
+  elif jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
+    echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run bash paas/scripts/lab.sh jenkins"
+    exit 1
+  fi
 elif jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
   echo "FAIL: Jenkins has crane-next16 but NOT mutate fix — run bash paas/scripts/lab.sh jenkins"
   exit 1
@@ -330,7 +341,8 @@ if echo "${CFG}" | grep -qF 'def runPaasDeploy'; then
   exit 0
 fi
 if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' \
-  && jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}" \
+  && { jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}" \
+    || { [[ -n "${JPOD:-}" ]] && kubectl exec -n "${JNS:-cicd}" "${JPOD}" -- grep -qF 'entrypoint=/app/start-paas.sh' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; }; } \
   && jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
   echo "OK: Jenkins job ${JOB} is up to date (load() layout + stages bundle)"
   echo ""

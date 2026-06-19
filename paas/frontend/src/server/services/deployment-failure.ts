@@ -1,14 +1,32 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
+import { withPrismaRetry } from "@/server/db/prisma-retry";
 import { updateProject } from "@/server/projects/project-service";
 import { notifyPipelineFailureEmail } from "@/server/notifications/pipeline-failure-notify";
 const MESSAGE_MAX = 2000;
+export function isBuildMonitorPostgresOutageFailure(deployment: {
+    failureMessage?: string | null;
+    logs?: string | null;
+}): boolean {
+    const text = `${deployment.failureMessage ?? ""}\n${deployment.logs ?? ""}`;
+    return /\[build-monitor\]/i.test(text) &&
+        /can't reach database server|postgres:5432|Invalid prisma\.deployment\.update/i.test(text);
+}
+
+export function isBuildMonitorPostgresOutageMessage(message: string): boolean {
+    return /can't reach database server|postgres:5432|Invalid prisma\.deployment\.update/i.test(message);
+}
+
 export async function recordDeploymentFailure(deploymentId: string, projectId: string, options: {
     reason: DeploymentFailureReason;
     message: string;
     logs: string;
 }): Promise<void> {
+    if (isBuildMonitorPostgresOutageMessage(options.message)) {
+        console.warn(`[deployment-failure] skipping FAILED for transient Postgres outage (${deploymentId})`);
+        return;
+    }
     const prior = await prisma.deployment.findUnique({
         where: { id: deploymentId },
         select: {
@@ -35,7 +53,7 @@ export async function recordDeploymentFailure(deploymentId: string, projectId: s
         ? options.logs
         : options.logs.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);
     const failureMessage = options.message.length <= MESSAGE_MAX ? options.message : `${options.message.slice(0, MESSAGE_MAX)}…`;
-    await prisma.deployment.update({
+    await withPrismaRetry(() => prisma.deployment.update({
         where: { id: deploymentId },
         data: {
             status: DeploymentJobStatus.FAILED,
@@ -43,7 +61,7 @@ export async function recordDeploymentFailure(deploymentId: string, projectId: s
             failureReason: options.reason,
             failureMessage
         }
-    });
+    }));
     const failedDuringJenkinsRun = options.reason === DeploymentFailureReason.JENKINS ||
         options.reason === DeploymentFailureReason.TIMEOUT ||
         options.reason === DeploymentFailureReason.TRIGGER ||
