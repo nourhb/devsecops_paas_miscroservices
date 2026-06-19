@@ -31,6 +31,7 @@ usage() {
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
   echo "  frontend-force    RS cleanup + pin recovery image when rollout hangs"
   echo "  frontend-stop     Scale frontend to 0 + pause (stop eviction storm)"
+  echo "  frontend-safety   Recreate + master pin (prevent pod storms)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
@@ -106,6 +107,8 @@ case "$cmd" in
     bash "$LIB/lab-frontend-recover.sh" ;;
   frontend-stop|stop-storm)
     bash "$LIB/lab-frontend-stop-storm.sh" ;;
+  frontend-safety|safety)
+    bash "$LIB/lab-frontend-lab-safety.sh" apply ;;
   frontend-force|force-frontend)
     bash "$LIB/lab-frontend-force-recover.sh" ;;
   emergency|unblock)

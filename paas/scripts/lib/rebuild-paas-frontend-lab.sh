@@ -79,44 +79,60 @@ harbor_push_image() {
 
 harbor_push_image "${TARGET_IMAGE}"
 
-echo "==> Load image into k3s containerd on all nodes (lab)"
+# Lab UI always uses recovery tag on master — frontend-force and Never pull depend on it.
+if [[ "${TARGET_IMAGE}" == docker.io/library/paas-frontend:* || "${TARGET_IMAGE}" == paas-frontend:* ]]; then
+  docker tag "${TARGET_IMAGE}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
+fi
+
+echo "==> Load image into k3s containerd on master (lab UI runs on master — worker import optional)"
 if command -v docker >/dev/null 2>&1; then
-  bash "${SCRIPT_DIR}/lab-k3s-import-image-nodes.sh" "${TARGET_IMAGE}" || \
-    docker save "${TARGET_IMAGE}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
+  docker save "${TARGET_IMAGE}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null \
+    || docker save "${TARGET_IMAGE}" | sudo ctr -n k8s.io images import - 2>/dev/null || true
+  if [[ "${LAB_IMPORT_IMAGE_ALL_NODES:-false}" == "true" ]]; then
+    bash "${SCRIPT_DIR}/lab-k3s-import-image-nodes.sh" "${TARGET_IMAGE}" || true
+  else
+    echo "==> Skip worker image import (set LAB_IMPORT_IMAGE_ALL_NODES=true to push to all nodes)"
+  fi
+fi
+
+# Storm guard: hundreds of pods on worker1 happens when RollingUpdate + unpinned + missing image.
+if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+  # shellcheck source=lab-frontend-lab-safety.sh
+  source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+  stop_frontend_storm_if_needed 3
+fi
+
+DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 88 ]]; then
+  echo "ERROR: disk at ${DISK_PCT}% — free space before frontend rollout (run: bash paas/scripts/lab.sh disk-emergency)" >&2
+  exit 1
 fi
 
 echo "==> Kyverno fail-open so deployment patch is not blocked"
 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
-echo "==> Updating deployment/frontend"
-kubectl patch deployment frontend -n "${PAAS_NS}" --type=strategic -p "$(cat <<PATCH
-spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  template:
-    spec:
-      nodeSelector: null
-      containers:
-      - name: frontend
-        image: ${TARGET_IMAGE}
-        imagePullPolicy: IfNotPresent
-PATCH
-)" || {
-  echo "WARN: strategic patch blocked — retry after Kyverno webhook guard" >&2
-  bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || true
+echo "==> Updating deployment/frontend (Recreate + master pin + imagePullPolicy Never for local image)"
+DEPLOY_IMAGE="${TARGET_IMAGE}"
+if [[ "${TARGET_IMAGE}" == docker.io/library/paas-frontend:* ]]; then
+  DEPLOY_IMAGE="docker.io/library/paas-frontend:recovery"
+  docker save "${DEPLOY_IMAGE}" 2>/dev/null | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
+fi
+if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+  apply_lab_frontend_safety "${DEPLOY_IMAGE}" 1
+else
   kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge -p "$(cat <<PATCH
 {
   "spec": {
     "replicas": 1,
+    "revisionHistoryLimit": 0,
     "strategy": {"type": "Recreate"},
     "template": {
       "spec": {
-        "nodeSelector": null,
+        "nodeSelector": {"kubernetes.io/hostname": "master"},
         "containers": [{
           "name": "frontend",
-          "image": "${TARGET_IMAGE}",
-          "imagePullPolicy": "IfNotPresent"
+          "image": "${DEPLOY_IMAGE}",
+          "imagePullPolicy": "Never"
         }]
       }
     }
@@ -124,7 +140,12 @@ PATCH
 }
 PATCH
 )"
-}
-kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
+fi
+if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s; then
+  echo "WARN: rollout failed — applying recovery image on master" >&2
+  docker save "${TARGET_IMAGE}" 2>/dev/null | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
+  docker tag "${TARGET_IMAGE}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
+  bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || exit 1
+fi
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
 echo "OK: frontend rolled out with ${TARGET_IMAGE}"
