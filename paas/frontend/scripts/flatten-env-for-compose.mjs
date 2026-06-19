@@ -176,6 +176,9 @@ function main() {
     if (!envTrim(byKey, "JENKINS_NPM_SNAPSHOT_MAX_MB")) {
         byKey.set("JENKINS_NPM_SNAPSHOT_MAX_MB", "800");
     }
+    if (labNodeIp && !envTrim(byKey, "NODE_IP")) {
+        byKey.set("NODE_IP", labNodeIp);
+    }
     if (labNodeIp && !envTrim(byKey, "APPS_PUBLIC_LAB_NODE_IP")) {
         byKey.set("APPS_PUBLIC_LAB_NODE_IP", labNodeIp);
         console.warn(`WARN: APPS_PUBLIC_LAB_NODE_IP defaulted to ${labNodeIp} (nip.io app URLs)`);
