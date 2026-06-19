@@ -29,6 +29,7 @@ spec:
                 - kube-system
                 - kyverno
                 - ingress-nginx
+                - dependency-track
       verifyImages:
         - imageReferences:
             - "*"

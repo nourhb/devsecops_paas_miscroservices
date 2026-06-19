@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 
-function isTransientDbError(error: unknown): boolean {
+export function isTransientDbError(error: unknown): boolean {
     const msg = error instanceof Error ? error.message : String(error);
     return /can't reach database server|connection refused|ECONNREFUSED|ETIMEDOUT|P1001|P1017|Connection terminated/i.test(msg);
 }
