@@ -148,8 +148,9 @@ main() {
     ok "Sonar token valid at ${url}"
   else
     fail "Sonar token invalid at ${url} (got valid:false)"
-    echo "  Generate NEW token in Sonar UI and run:"
-    echo "  SONAR_TOKEN=sqa_YOUR_NEW_TOKEN bash paas/scripts/lab.sh pipeline-heal"
+    echo "  Bypass UI password loop and create token via API:"
+    echo "  bash paas/scripts/lab.sh sonar-bootstrap"
+    echo "  Or: SONAR_TOKEN=sqa_... bash paas/scripts/lab.sh pipeline-heal"
     FAIL=1
   fi
 
