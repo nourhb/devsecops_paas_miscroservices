@@ -37,6 +37,53 @@ resolve_lab_image_pull_policy() {
   fi
 }
 
+image_in_containerd() {
+  local img="$1" short
+  short="${img##*/}"
+  sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF "${short}" \
+    || sudo k3s crictl images 2>/dev/null | grep -qF "${short}"
+}
+
+import_docker_image_to_k3s() {
+  local img="$1"
+  docker image inspect "${img}" >/dev/null 2>&1 || return 1
+  docker save "${img}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null
+}
+
+# Ephemeral local-* tags are pruned from containerd; recovery is the stable lab tag.
+resolve_lab_frontend_image() {
+  local img="${1:-}"
+  local recovery="docker.io/library/paas-frontend:recovery"
+  if [[ -z "${img}" ]]; then
+    img="$(kubectl get deployment frontend -n "${PAAS_NS}" \
+      -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+  fi
+  [[ -n "${img}" ]] || { echo "${recovery}"; return; }
+
+  if image_in_containerd "${img}"; then
+    echo "${img}"
+    return
+  fi
+
+  if import_docker_image_to_k3s "${img}" && image_in_containerd "${img}"; then
+    if [[ "${img}" == *paas-frontend:local-* ]]; then
+      docker tag "${img}" "${recovery}" 2>/dev/null || true
+      import_docker_image_to_k3s "${recovery}" || true
+      echo "${recovery}"
+      return
+    fi
+    echo "${img}"
+    return
+  fi
+
+  if import_docker_image_to_k3s "${recovery}" || image_in_containerd "${recovery}"; then
+    echo "${recovery}"
+    return
+  fi
+
+  echo "${img}"
+}
+
 # Stop runaway rollouts before patching (hundreds of pods on worker1).
 stop_frontend_storm_if_needed() {
   local threshold="${1:-3}"
@@ -63,6 +110,8 @@ apply_lab_frontend_safety() {
       -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
   fi
   [[ -n "${img}" ]] || { echo "ERROR: no frontend image" >&2; return 1; }
+
+  img="$(resolve_lab_frontend_image "${img}")"
 
   local pull_policy
   pull_policy="$(resolve_lab_image_pull_policy "${img}")"
@@ -109,11 +158,13 @@ ensure_lab_frontend_safety() {
   ns="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.nodeSelector.kubernetes\.io/hostname}' 2>/dev/null || true)"
   [[ "${strategy}" == "Recreate" ]] && strategy_ok=1
   if [[ "${strategy_ok}" -eq 1 && "${ns}" == "${LAB_FRONTEND_NODE}" ]]; then
-    local img policy want
+    local img policy want resolved
     img="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
     policy="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}' 2>/dev/null || true)"
     want="$(resolve_lab_image_pull_policy "${img}")"
-    if [[ "${policy}" == "${want}" ]] && ! frontend_storm_active 3; then
+    resolved="$(resolve_lab_frontend_image "${img}")"
+    if [[ "${policy}" == "${want}" && "${resolved}" == "${img}" ]] \
+        && image_in_containerd "${img}" && ! frontend_storm_active 3; then
       return 0
     fi
   fi

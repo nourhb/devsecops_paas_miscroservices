@@ -162,10 +162,11 @@ else
     kubectl get events -n "${PAAS_NS}" --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' 2>/dev/null | tail -8 || true
     echo ""
     echo "If the new pod is ImagePullBackOff / ErrImageNeverPull (image was pruned from k3s):"
-    echo "  bash paas/scripts/lab.sh frontend"
-    echo "Or force-delete a stuck Terminating pod, then re-run:"
-    echo "  kubectl delete pod -n ${PAAS_NS} -l app=frontend --force --grace-period=0"
-    echo "  bash paas/scripts/lab.sh env"
+    echo "  bash paas/scripts/lab.sh frontend-force"
+    if [[ -f "${SCRIPT_DIR}/lab-frontend-force-recover.sh" ]]; then
+      echo "==> Auto-recover frontend (ErrImageNeverPull / rollout timeout)"
+      bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || true
+    fi
   fi
 fi
 echo "==> Core auth env in pod"
