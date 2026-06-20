@@ -2,7 +2,31 @@
 # Self-contained fix for paas-deploy MethodTooLarge. No git pull required — only needs
 # paas/jenkins/Jenkinsfile.paas-deploy on disk + kubectl + python3 on master.
 set -euo pipefail
-REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+discover_repo_root() {
+  if [[ -n "${REPO_ROOT:-}" && -f "${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy" ]]; then
+    echo "${REPO_ROOT}"
+    return 0
+  fi
+  local script_root
+  script_root="$(cd "$(dirname "$0")/../../.." && pwd)"
+  if [[ -f "${script_root}/paas/jenkins/Jenkinsfile.paas-deploy" ]]; then
+    echo "${script_root}"
+    return 0
+  fi
+  for candidate in \
+    "${HOME}/devsecops_paas_miscroservices" \
+    "/home/master/devsecops_paas_miscroservices"; do
+    if [[ -f "${candidate}/paas/jenkins/Jenkinsfile.paas-deploy" ]]; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+REPO_ROOT="$(discover_repo_root)" || {
+  echo "ERROR: cannot find repo — set REPO_ROOT=~/devsecops_paas_miscroservices" >&2
+  exit 1
+}
 cd "${REPO_ROOT}"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 PAAS_DIR="/var/jenkins_home/paas"
