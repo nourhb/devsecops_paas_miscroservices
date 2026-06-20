@@ -1490,100 +1490,8 @@ ${paasOpensslLegacyShellSnippet()}
   """
 }
 
-def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
-  def appRoot = detectAppRoot()
-  println "[image] PAAS app root for build layer: ${appRoot}"
-  materializeProjectBuildEnv(appRoot)
-  patchNextBuildEnvIntoConfig(appRoot)
-  def artifactImageRef = normalizeOciImageReference(imageRef)
-  imageRef = resolveHarborPushImageRef(artifactImageRef)
-  if (imageRef != artifactImageRef) {
-    println "[image] Harbor registry host coerced for push: ${artifactImageRef} → ${imageRef}"
-  }
-  artifactImageRef = imageRef
-  def registry = normalizeRegistryHost(registryHostFor(imageRef))
-  def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
-  def harborHost = normalizeRegistryHost(harborRegistry)
-  if (!harborHost && registry.contains('.nip.io')) {
-    harborHost = registry
-  }
-  def pushHost = registry
-  def craneInsecure = "--insecure"
-  def dockerhubUser = params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: ""
-  def dockerhubToken = params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: ""
-  def harborUser = params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: ""
-  def harborPassword = params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: ""
-
-  if (registry == "index.docker.io") {
-    if (!dockerhubUser || !dockerhubToken) {
-      error("Docker Hub credentials are required for dockerless image push.")
-    }
-    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${dockerhubUser}", "REGISTRY_PASS=${dockerhubToken}", "IMAGE_REF=${imageRef}"]) {
-      sh '''
-        set -eu
-        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
-      '''
-    }
-  } else if (harborHost && (registry == harborHost || pushHost == harborHost || registry.contains('.nip.io'))) {
-    if (!harborUser || !harborPassword) {
-      error("Harbor credentials are required for dockerless image push.")
-    }
-    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
-      sh '''
-        set -eu
-        echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
-        if command -v getent >/dev/null 2>&1; then
-          getent hosts "${REGISTRY%%:*}" 2>/dev/null || echo "[image] WARN: DNS lookup failed for ${REGISTRY%%:*}"
-        fi
-        _harbor_ok=0
-        for _try in 1 2 3 4 5 6; do
-          _hc="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" 2>/dev/null || echo 000)"
-          if [ "${_hc}" = "200" ] || [ "${_hc}" = "401" ]; then
-            echo "[image] Harbor /v2/ OK (HTTP ${_hc})"
-            _harbor_ok=1
-            break
-          fi
-          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (attempt ${_try}/6) — 502 = run: bash paas/scripts/lab.sh harbor"
-          sleep 20
-        done
-        if [ "${_harbor_ok}" != "1" ]; then
-          echo "[image] ERROR: Harbor registry not reachable at http://${REGISTRY}/v2/ — fix Harbor before crane push"
-          exit 1
-        fi
-        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" --insecure &
-        _auth_pid=$!
-        _n=0
-        while kill -0 "$_auth_pid" 2>/dev/null; do
-          sleep 15
-          _n=$((_n + 1))
-          echo "[image] crane auth login still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        done
-        if ! wait "$_auth_pid"; then
-          echo "[image] WARN: crane auth login failed — push may fail"
-        else
-          echo "[image] crane auth login OK"
-        fi
-      '''
-    }
-  }
-
-  def dfPath = (dockerfilePath ?: 'Dockerfile').trim()
-  def imageStack = detectProjectFramework(appRoot)
-  def runtimeStack = resolveCraneRuntimeStack(appRoot, dfPath)
-  println "[image] detected framework=${imageStack} crane runtime=${runtimeStack} (app root: ${appRoot}, dockerfile: ${dfPath})"
-
-  if (runtimeStack == 'python') {
-    dockerlessPythonCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot)
-    return
-  }
-  if (fileExists("${appRoot}/package.json")) {
-    ensureNodeTool(resolveNodeVersion(appRoot))
-  }
-  if (runtimeStack == 'nginx') {
-    dockerlessNginxCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot, imageStack)
-    return
-  }
-
+// cps-split-dockerless-6abc-20260620
+def dockerlessImagePushCraneNode6a(String appRoot) {
   println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
     set -eu
@@ -1648,6 +1556,9 @@ ${paasShellKeepaliveHelper()}
     fi
   """
 
+}
+
+def dockerlessImagePushCraneNode6b(String appRoot, String imageStack) {
   println "[image] Step 6b — Next.js production build (separate sh)"
   sh """
     set -eu
@@ -1691,8 +1602,9 @@ ${paasSourceBuildEnvShellSnippet()}
     fi
   """
 
-  verifyNextPublicEnvInBuild(appRoot)
+}
 
+def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
   println "[image] Step 6c — layer tar + crane append"
   sh """
     set -eu
@@ -1856,6 +1768,108 @@ PAAS_START
       echo "PAAS_IMAGE_DIGEST=\${DIGEST_REF}" >> paas-artifacts/cosign-meta.txt
     fi
   """
+
+}
+
+def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {
+  def appRoot = detectAppRoot()
+  println "[image] PAAS app root for build layer: ${appRoot}"
+  materializeProjectBuildEnv(appRoot)
+  patchNextBuildEnvIntoConfig(appRoot)
+  def artifactImageRef = normalizeOciImageReference(imageRef)
+  imageRef = resolveHarborPushImageRef(artifactImageRef)
+  if (imageRef != artifactImageRef) {
+    println "[image] Harbor registry host coerced for push: ${artifactImageRef} → ${imageRef}"
+  }
+  artifactImageRef = imageRef
+  def registry = normalizeRegistryHost(registryHostFor(imageRef))
+  def harborRegistry = params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: ""
+  def harborHost = normalizeRegistryHost(harborRegistry)
+  if (!harborHost && registry.contains('.nip.io')) {
+    harborHost = registry
+  }
+  def pushHost = registry
+  def craneInsecure = "--insecure"
+  def dockerhubUser = params.DOCKERHUB_USERNAME?.trim() ?: env.DOCKERHUB_USERNAME ?: ""
+  def dockerhubToken = params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: ""
+  def harborUser = params.HARBOR_USERNAME?.trim() ?: env.HARBOR_USERNAME ?: ""
+  def harborPassword = params.HARBOR_PASSWORD?.trim() ?: env.HARBOR_PASSWORD ?: ""
+
+  if (registry == "index.docker.io") {
+    if (!dockerhubUser || !dockerhubToken) {
+      error("Docker Hub credentials are required for dockerless image push.")
+    }
+    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${dockerhubUser}", "REGISTRY_PASS=${dockerhubToken}", "IMAGE_REF=${imageRef}"]) {
+      sh '''
+        set -eu
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
+      '''
+    }
+  } else if (harborHost && (registry == harborHost || pushHost == harborHost || registry.contains('.nip.io'))) {
+    if (!harborUser || !harborPassword) {
+      error("Harbor credentials are required for dockerless image push.")
+    }
+    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
+      sh '''
+        set -eu
+        echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
+        if command -v getent >/dev/null 2>&1; then
+          getent hosts "${REGISTRY%%:*}" 2>/dev/null || echo "[image] WARN: DNS lookup failed for ${REGISTRY%%:*}"
+        fi
+        _harbor_ok=0
+        for _try in 1 2 3 4 5 6; do
+          _hc="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 25 "http://${REGISTRY}/v2/" 2>/dev/null || echo 000)"
+          if [ "${_hc}" = "200" ] || [ "${_hc}" = "401" ]; then
+            echo "[image] Harbor /v2/ OK (HTTP ${_hc})"
+            _harbor_ok=1
+            break
+          fi
+          echo "[image] WARN: Harbor /v2/ HTTP ${_hc} (attempt ${_try}/6) — 502 = run: bash paas/scripts/lab.sh harbor"
+          sleep 20
+        done
+        if [ "${_harbor_ok}" != "1" ]; then
+          echo "[image] ERROR: Harbor registry not reachable at http://${REGISTRY}/v2/ — fix Harbor before crane push"
+          exit 1
+        fi
+        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" --insecure &
+        _auth_pid=$!
+        _n=0
+        while kill -0 "$_auth_pid" 2>/dev/null; do
+          sleep 15
+          _n=$((_n + 1))
+          echo "[image] crane auth login still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        done
+        if ! wait "$_auth_pid"; then
+          echo "[image] WARN: crane auth login failed — push may fail"
+        else
+          echo "[image] crane auth login OK"
+        fi
+      '''
+    }
+  }
+
+  def dfPath = (dockerfilePath ?: 'Dockerfile').trim()
+  def imageStack = detectProjectFramework(appRoot)
+  def runtimeStack = resolveCraneRuntimeStack(appRoot, dfPath)
+  println "[image] detected framework=${imageStack} crane runtime=${runtimeStack} (app root: ${appRoot}, dockerfile: ${dfPath})"
+
+  if (runtimeStack == 'python') {
+    dockerlessPythonCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot)
+    return
+  }
+  if (fileExists("${appRoot}/package.json")) {
+    ensureNodeTool(resolveNodeVersion(appRoot))
+  }
+  if (runtimeStack == 'nginx') {
+    dockerlessNginxCranePush(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot, imageStack)
+    return
+  }
+
+  dockerlessImagePushCraneNode6a(appRoot)
+  dockerlessImagePushCraneNode6b(appRoot, imageStack)
+  verifyNextPublicEnvInBuild(appRoot)
+  dockerlessImagePushCraneNode6c(craneBin, imageRef, artifactImageRef, craneInsecure, appRoot)
+
 }
 
 def cosignSignImageShellSnippet() {

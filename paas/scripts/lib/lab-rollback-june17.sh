@@ -16,7 +16,9 @@ echo "=============================================="
 if [[ "${LAB_ROLLBACK_CONFIRM:-}" != "1" ]]; then
   echo ""
   echo "This restores the Jenkins load() layout that worked on 17 June."
-  echo "Run with:"
+  echo "Prefer CPS split fix (keeps latest pipeline):"
+  echo "  bash paas/scripts/lib/emergency-install-cps-split.sh"
+  echo "Or rollback older Jenkinsfile (June 17, fewer features):"
   echo "  LAB_ROLLBACK_CONFIRM=1 bash paas/scripts/lab.sh rollback-june17"
   echo ""
   exit 1
@@ -31,8 +33,11 @@ fi
 
 echo "==> Restore Jenkins pipeline files from ${JUNE17_COMMIT}"
 git checkout "${JUNE17_COMMIT}" -- \
+  paas/jenkins/Jenkinsfile.paas-deploy \
+  paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy \
   paas/jenkins/render-loadable-stages.py \
-  paas/scripts/lib/create_jenkins_paas_deploy_job.py
+  paas/scripts/lib/create_jenkins_paas_deploy_job.py \
+  paas/scripts/lib/install-jenkins-stages-file.sh
 
 echo "==> Install June 17 stages + sync Jenkins job"
 SKIP_FRONTEND_REBUILD=true LAB_DT_SKIP_HEAL=true \
