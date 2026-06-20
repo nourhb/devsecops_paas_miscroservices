@@ -10,12 +10,18 @@ BUNDLE_MARKER = "helm-portable-20260620-cps-split"
 LEGACY_MARKER = "helm-portable-20260619"
 
 # Output filenames under /var/jenkins_home/paas/
-LOAD_FILES = (
+HELPER_FILES = (
     "paas-deploy-load-h1.groovy",
     "paas-deploy-load-h2.groovy",
     "paas-deploy-load-h3.groovy",
-    "paas-deploy-stages.groovy",
 )
+STAGE_FILES = (
+    "paas-deploy-stages-vars.groovy",
+    "paas-deploy-stages-p1.groovy",
+    "paas-deploy-stages-p2.groovy",
+    "paas-deploy-stages-p3.groovy",
+)
+LOAD_FILES = HELPER_FILES + STAGE_FILES + ("paas-deploy-stages.groovy",)
 
 
 def find_closure_end(lines: list[str], open_line: int) -> int:
@@ -45,11 +51,9 @@ def find_stage_line_indices(body_lines: list[str]) -> list[int]:
 
 def split_helpers(lines: list[str], vars_start: int) -> tuple[str, str, str]:
     helper_lines = lines[:vars_start]
-    # Split at def boundaries (keep uploadBom + early tooling in h1; crane push cluster in h2/h3).
     names = [i for i, ln in enumerate(helper_lines) if ln.startswith("def ")]
     if len(names) < 6:
         raise ValueError("too few helper defs to split")
-    # h1: through ensureHelmTool; h2: through dockerlessNginx; h3: dockerlessImagePush + cosign snippet
     h1_end = next(i for i, ln in enumerate(helper_lines) if ln.startswith("def normalizeCosignPrivateKeyPem"))
     h2_end = next(i for i, ln in enumerate(helper_lines) if ln.startswith("def dockerlessImagePush("))
     return (
@@ -59,12 +63,8 @@ def split_helpers(lines: list[str], vars_start: int) -> tuple[str, str, str]:
     )
 
 
-def split_stages_body(body_lines: list[str]) -> str:
+def split_stages_parts(body_lines: list[str], vars_block: str) -> dict[str, str]:
     stage_idx = find_stage_line_indices(body_lines)
-    chunks: list[tuple[str, int, int]] = []
-    # env init before first stage
-    if stage_idx[0] > 0:
-        chunks.append(("runPaasDeployEnvInit", 0, stage_idx[0]))
     bounds = stage_idx + [len(body_lines)]
     groups = [
         ("runPaasDeploySteps1_2", 0, 2),
@@ -74,17 +74,15 @@ def split_stages_body(body_lines: list[str]) -> str:
         ("runPaasDeploySteps7_8", 6, 8),
         ("runPaasDeploySteps9_12", 8, 12),
     ]
-    out_parts: list[str] = []
+    closures: dict[str, str] = {}
+    if stage_idx[0] > 0:
+        init = "".join(body_lines[0 : stage_idx[0]]).rstrip() + "\n"
+        closures["runPaasDeployEnvInit"] = f"def runPaasDeployEnvInit = {{\n{init}}}\n"
     for name, g0, g1 in groups:
-        if name == "runPaasDeployEnvInit":
-            continue
         start = bounds[g0]
         end = bounds[g1]
         chunk = "".join(body_lines[start:end]).rstrip() + "\n"
-        out_parts.append(f"def {name} = {{\n{chunk}}}\n")
-    if stage_idx[0] > 0:
-        init = "".join(body_lines[0 : stage_idx[0]]).rstrip() + "\n"
-        out_parts.insert(0, f"def runPaasDeployEnvInit = {{\n{init}}}\n")
+        closures[name] = f"def {name} = {{\n{chunk}}}\n"
     calls = [
         "runPaasDeployEnvInit()",
         "runPaasDeploySteps1_2()",
@@ -95,7 +93,18 @@ def split_stages_body(body_lines: list[str]) -> str:
         "runPaasDeploySteps9_12()",
     ]
     orchestrator = "def runPaasDeploy = {\n" + "\n".join(f"  {c}" for c in calls) + "\n}\n"
-    return "".join(out_parts) + orchestrator
+    vars_part = vars_block + closures.get("runPaasDeployEnvInit", "")
+    p1 = closures["runPaasDeploySteps1_2"] + closures["runPaasDeployStep3"]
+    p2 = closures["runPaasDeploySteps4_5"] + closures["runPaasDeployStep6"]
+    p3 = closures["runPaasDeploySteps7_8"] + closures["runPaasDeploySteps9_12"] + orchestrator
+    combined = vars_part + p1 + p2 + p3
+    return {
+        "paas-deploy-stages-vars.groovy": vars_part,
+        "paas-deploy-stages-p1.groovy": p1,
+        "paas-deploy-stages-p2.groovy": p2,
+        "paas-deploy-stages-p3.groovy": p3,
+        "paas-deploy-stages.groovy": combined,
+    }
 
 
 def header(part: str) -> str:
@@ -115,13 +124,16 @@ def render_bundle(main_path: Path) -> dict[str, str]:
     h1, h2, h3 = split_helpers(lines, vars_start)
     vars_block = "".join(lines[vars_start:body_start])
     body_lines = lines[body_start + 1 : end]
-    stages_body = split_stages_body(body_lines)
-    return {
-        LOAD_FILES[0]: header("helpers h1") + h1,
-        LOAD_FILES[1]: header("helpers h2") + h2,
-        LOAD_FILES[2]: header("helpers h3") + h3,
-        LOAD_FILES[3]: header("vars + stage closures") + vars_block + stages_body,
+    stage_parts = split_stages_parts(body_lines, vars_block)
+    bundle: dict[str, str] = {
+        HELPER_FILES[0]: header("helpers h1") + h1,
+        HELPER_FILES[1]: header("helpers h2") + h2,
+        HELPER_FILES[2]: header("helpers h3") + h3,
     }
+    for name, content in stage_parts.items():
+        part_label = name.replace("paas-deploy-stages", "stages").replace(".groovy", "")
+        bundle[name] = header(part_label) + content
+    return bundle
 
 
 def main() -> int:
@@ -154,17 +166,16 @@ def main() -> int:
         return 1
     if args.out_dir:
         args.out_dir.mkdir(parents=True, exist_ok=True)
-        for name, content in bundle.items():
+        for name in LOAD_FILES:
+            content = bundle[name]
             out = args.out_dir / name
             out.write_text(content, encoding="utf-8")
             print(f"OK wrote {out} ({len(content)} bytes)", file=sys.stderr)
         return 0
     if args.stdout_stages_only:
-        sys.stdout.buffer.write(bundle[LOAD_FILES[3]].encode("utf-8"))
+        sys.stdout.buffer.write(bundle["paas-deploy-stages.groovy"].encode("utf-8"))
         return 0
-    # Default: write all parts to stderr paths hint + stages on stdout for install script compat
-    # Install script uses --out-dir; single-file stdout is the stages orchestrator file.
-    sys.stdout.buffer.write(bundle[LOAD_FILES[3]].encode("utf-8"))
+    sys.stdout.buffer.write(bundle["paas-deploy-stages.groovy"].encode("utf-8"))
     return 0
 
 

@@ -81,7 +81,7 @@ def live_cfg() -> tuple[int, str]:
 
 def marker_ok(body: str) -> bool:
     m = re.search(r"paas-deploy-stages-load-[0-9a-z-]+", body)
-    return bool(m and m.group(0) == want and "load paasLoadH1" in body and "runPaasDeploy()" in body)
+    return bool(m and m.group(0) == want and "load paasStagesP3" in body and "runPaasDeploy()" in body)
 
 if not wait_api():
     print("FAIL: Jenkins API not ready", file=sys.stderr)

@@ -27,24 +27,34 @@ bundle = os.environ["MARKER"]
 paas_dir = os.environ["PAAS_DIR"]
 p = Path("/tmp/paas-deploy-config.xml")
 t = p.read_text(encoding="utf-8")
-if marker in t and "load paasLoadH1" in t and "runPaasDeploy()" in t:
-    print(f"OK: job config on disk already has {marker} + multi-load + runPaasDeploy()")
+if marker in t and "load paasStagesP3" in t and "runPaasDeploy()" in t:
+    print(f"OK: job config on disk already has {marker} + 7-file multi-load + runPaasDeploy()")
 else:
     new_script = f"""def paasLoadH1 = '{paas_dir}/paas-deploy-load-h1.groovy'
 def paasLoadH2 = '{paas_dir}/paas-deploy-load-h2.groovy'
 def paasLoadH3 = '{paas_dir}/paas-deploy-load-h3.groovy'
-def paasDeployStagesPath = '{paas_dir}/paas-deploy-stages.groovy'
-println '[paas-jenkinsfile] marker={marker} (Steps 1-12 via multi load — CPS split)'
+def paasStagesVars = '{paas_dir}/paas-deploy-stages-vars.groovy'
+def paasStagesP1 = '{paas_dir}/paas-deploy-stages-p1.groovy'
+def paasStagesP2 = '{paas_dir}/paas-deploy-stages-p2.groovy'
+def paasStagesP3 = '{paas_dir}/paas-deploy-stages-p3.groovy'
+println '[paas-jenkinsfile] marker={marker} (Steps 1-12 via multi load — CPS split 7 files)'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def paasRequireFreshStages = {{
-  for (p in [paasLoadH1, paasLoadH2, paasLoadH3, paasDeployStagesPath]) {{
+  def bundlePaths = [paasLoadH1, paasLoadH2, paasLoadH3, paasStagesVars, paasStagesP1, paasStagesP2, paasStagesP3]
+  bundlePaths.each {{ p ->
     if (!fileExists(p)) {{ error("Missing ${{p}}") }}
     if (!readFile(p).contains('{bundle}')) {{ error("Stale ${{p}} — re-run: bash paas/scripts/lab.sh fix-paas-deploy") }}
+  }}
+  if (!readFile(paasStagesP3).contains('def runPaasDeploy = {{')) {{
+    error("Stale stages bundle (missing runPaasDeploy in p3)")
   }}
   load paasLoadH1
   load paasLoadH2
   load paasLoadH3
-  load paasDeployStagesPath
+  load paasStagesVars
+  load paasStagesP1
+  load paasStagesP2
+  load paasStagesP3
   runPaasDeploy()
 }}
 if (!agentLabel || agentLabel == 'built-in') {{
@@ -75,6 +85,6 @@ bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh"
 
 kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- sh -c "
   grep -qF '${LOAD_MARKER}' ${JOB_CFG} && echo OK:job-marker
-  grep -qF 'load paasLoadH1' ${JOB_CFG} && echo OK:multi-load
+  grep -qF 'load paasStagesP3' ${JOB_CFG} && echo OK:multi-load
   grep -qF 'runPaasDeploy()' ${JOB_CFG} && echo OK:run-call
 "

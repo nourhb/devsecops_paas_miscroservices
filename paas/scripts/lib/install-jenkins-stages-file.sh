@@ -14,8 +14,13 @@ BUNDLE_FILES=(
   paas-deploy-load-h1.groovy
   paas-deploy-load-h2.groovy
   paas-deploy-load-h3.groovy
+  paas-deploy-stages-vars.groovy
+  paas-deploy-stages-p1.groovy
+  paas-deploy-stages-p2.groovy
+  paas-deploy-stages-p3.groovy
   paas-deploy-stages.groovy
 )
+STAGES_P3="${REMOTE_DIR}/paas-deploy-stages-p3.groovy"
 
 kubectl_api_ok() {
   kubectl get --raw=/healthz --request-timeout=15s >/dev/null 2>&1
@@ -51,9 +56,9 @@ verify_remote_bundle() {
       grep -qF "${DT_MARKER}" "${remote}" 2>/dev/null || return 1
   done
   kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
-    grep -qF 'def runPaasDeploy = {' "${REMOTE_STAGES}" 2>/dev/null \
+    grep -qF 'def runPaasDeploy = {' "${STAGES_P3}" 2>/dev/null \
     && kubectl exec -n "${ns}" deploy/jenkins -c "${JENKINS_CONTAINER}" --request-timeout="${KTO}" -- \
-      grep -qF 'runPaasDeploySteps9_12' "${REMOTE_STAGES}" 2>/dev/null
+      grep -qF 'runPaasDeploySteps9_12' "${STAGES_P3}" 2>/dev/null
 }
 
 print_manual_install() {
@@ -80,16 +85,16 @@ for f in "${BUNDLE_FILES[@]}"; do
   fi
 done
 
-stages="${RENDER_DIR}/paas-deploy-stages.groovy"
+stages="${RENDER_DIR}/paas-deploy-stages-p3.groovy"
 if ! grep -qF 'def runPaasDeploy = {' "${stages}"; then
-  echo "ERROR: stages file missing runPaasDeploy orchestrator" >&2
+  echo "ERROR: stages-p3 missing runPaasDeploy orchestrator" >&2
   exit 1
 fi
-if ! grep -qF 'stage("Step 12 —' "${stages}"; then
+if ! grep -qF 'stage("Step 12 —' "${RENDER_DIR}/paas-deploy-stages.groovy"; then
   echo "ERROR: stages file missing Step 12" >&2
   exit 1
 fi
-cp "${stages}" "${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
+cp "${RENDER_DIR}/paas-deploy-stages.groovy" "${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"
 echo "==> Rendered CPS-split bundle under ${RENDER_DIR}"
 ls -la "${RENDER_DIR}"/paas-deploy-*.groovy
 
