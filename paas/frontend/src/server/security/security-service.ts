@@ -695,7 +695,6 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                 : dependencyTrack.high > 0
                     ? `${dependencyTrack.high} high vulnerabilities detected in Dependency-Track.`
                     : integrationNotes;
-    const qualityGateStatus = qualityGateFromJenkinsLogs(sonar.status, sonarFromLogs ?? null);
     const integrationProbes = buildIntegrationProbes({
         sonarStatus: qualityGateStatus === "PASSED" || qualityGateStatus === "FAILED"
             ? qualityGateStatus
