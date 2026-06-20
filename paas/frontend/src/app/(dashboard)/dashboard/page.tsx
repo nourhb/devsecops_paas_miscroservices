@@ -3,6 +3,8 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, LayoutGrid, Loader2, Package, Percent, Plus, Rocket, Shield, ServerCog } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartCaption, ChartStatRow } from "@/components/charts/chart-stat-row";
+import { CHART_COLORS, chartYDomain, pieRowsForDisplay, sumRowValues } from "@/components/charts/chart-display-utils";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
 import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
@@ -13,13 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dashboardOverviewApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-const chartColors = {
-    success: "#22c55e",
-    warning: "#f59e0b",
-    danger: "#ef4444",
-    info: "#06b6d4",
-    muted: "#64748b"
-};
+const chartColors = CHART_COLORS;
 function deploymentStatusBadgeVariant(status: string): "success" | "danger" | "warning" | "outline" {
     const s = status.toUpperCase();
     if (s === "SUCCESS" || s === "DEPLOYED")
@@ -70,15 +66,6 @@ function StatsSkeleton() {
         </Card>))}
     </div>);
 }
-function ChartEmptyState({ title, children }: {
-    title: string;
-    children: React.ReactNode;
-}) {
-    return (<div className="flex h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 px-6 text-center">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {children ? <div className="max-w-md text-sm text-muted">{children}</div> : null}
-    </div>);
-}
 export default function DashboardPage() {
     const overviewQuery = useQuery({
         queryKey: ["dashboard-overview"],
@@ -110,7 +97,8 @@ export default function DashboardPage() {
         { name: "Successful", value: successfulDeployments, fill: chartColors.success, dotClassName: "bg-success" },
         { name: "Active", value: stats?.activeDeployments ?? 0, fill: chartColors.warning, dotClassName: "bg-warning" },
         { name: "Failed", value: stats?.failedDeployments ?? 0, fill: chartColors.danger, dotClassName: "bg-danger" }
-    ].filter((item) => item.value > 0);
+    ];
+    const deliveryPieData = pieRowsForDisplay(deliveryChartData, "No deployments");
     const securityChartData = [
         { name: "Critical", value: security?.critical ?? 0, fill: chartColors.danger },
         { name: "High", value: security?.high ?? 0, fill: chartColors.warning },
@@ -133,16 +121,16 @@ export default function DashboardPage() {
         { name: "Failed", value: sonarFailed, fill: chartColors.danger },
         { name: "Unknown", value: sonarUnknown, fill: chartColors.muted }
     ];
-    const sonarGateHasSignal = sonarPassed + sonarFailed + sonarUnknown > 0;
-    const scanCompareHasSignal = scanCompareData.some((row) => row.dt > 0 || row.trivy > 0);
+    const sonarGatePieData = pieRowsForDisplay(sonarGateData, "No Sonar data");
+    const scanCompareMax = Math.max(...scanCompareData.flatMap((row) => [row.dt, row.trivy]), 0);
     const policySignalData = [
         { name: "Cosign unsigned", value: security?.unsignedImages ?? 0, fill: chartColors.info },
         { name: "Deploy blocked", value: security?.policyBlocked ?? 0, fill: chartColors.danger },
-        { name: "Kyverno gap", value: security?.kyverno.projectsWithPolicyGap ?? 0, fill: "#a855f7" },
-        { name: "OPA policy gap", value: security?.opa.projectsWithPolicyGap ?? 0, fill: "#6366f1" },
+        { name: "Kyverno gap", value: security?.kyverno.projectsWithPolicyGap ?? 0, fill: chartColors.purple },
+        { name: "OPA policy gap", value: security?.opa.projectsWithPolicyGap ?? 0, fill: chartColors.indigo },
         { name: "OPA violations", value: security?.opa.violationCount ?? 0, fill: chartColors.warning }
     ];
-    const policySignalHasSignal = policySignalData.some((item) => item.value > 0);
+    const policySignalMax = Math.max(...policySignalData.map((item) => item.value), 0);
     const securitySampled = security?.sampledProjects ?? 0;
     const toolHealthChartData = [
         { name: "Live", value: stats?.liveTools ?? 0, fill: chartColors.success, dotClassName: "bg-success" },
@@ -153,7 +141,9 @@ export default function DashboardPage() {
             fill: chartColors.muted,
             dotClassName: "bg-slate-500"
         }
-    ].filter((item) => item.value > 0);
+    ];
+    const toolHealthPieData = pieRowsForDisplay(toolHealthChartData, "No tools");
+    const workloadMax = Math.max(...workloadChartData.map((item) => item.value), 0);
     return (<div className="mx-auto max-w-7xl space-y-8">
       <header className="flex flex-col gap-6 border-b border-border/60 pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
@@ -220,25 +210,25 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {workloadChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="Nothing to plot yet">
-                {clusterDataSource === "kubernetes"
-                ? "Kubernetes returned zero pods, services, and deployments for your filters, or the cluster is empty."
-                : clusterDataSource === "project_rollups"
-                    ? "Project rollups are all zero \u2014 add projects and run deploys so workload counts update, or connect Kubernetes for live cluster metrics."
-                    : "Add projects or connect Kubernetes; there is no data to chart for workload right now."}
-              </ChartEmptyState>) : (<div className="h-[240px]">
+            <ChartStatRow items={workloadChartData.map((item) => ({ label: item.name, value: item.value }))}/>
+            <div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={workloadChartData} margin={{ left: -20, right: 12, top: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
+                  <YAxis allowDecimals={false} domain={chartYDomain(workloadChartData.map((item) => item.value))} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
                   <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.25)" }} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                   <Bar dataKey="value" radius={[8, 8, 0, 0]}>
                     {workloadChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </div>)}
+            </div>
+            {workloadMax === 0 ? (<ChartCaption>
+                {clusterDataSource === "kubernetes"
+                    ? "All workload counts are 0 — cluster may be empty or filters exclude resources."
+                    : "Add projects or connect Kubernetes to populate workload metrics."}
+              </ChartCaption>) : null}
           </CardContent>
         </Card>
 
@@ -250,26 +240,24 @@ export default function DashboardPage() {
             <CardDescription>Success, active, and failed deployment history.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
-            {deliveryChartData.length === 0 ? (<ChartEmptyState title="No segments for this pie">
-                {(stats?.totalDeployments ?? 0) === 0
-                ? "There are no deployment rows yet. Trigger a build/deploy from a project; finished jobs will appear here as successful, active, or failed."
-                : "All current jobs are still in categories with zero count (for example only pending). Open the project board below or Deployments for live status."}
-              </ChartEmptyState>) : (<div className="h-[220px]">
+            <div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={deliveryChartData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={90} paddingAngle={3}>
-                    {deliveryChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                  <Pie data={deliveryPieData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={90} paddingAngle={3}>
+                    {deliveryPieData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
                   </Pie>
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                  <Legend wrapperStyle={{ fontSize: 12 }}/>
                 </PieChart>
               </ResponsiveContainer>
-            </div>)}
+            </div>
             <div className="grid content-center gap-2">
               {deliveryChartData.map((item) => (<div key={item.name} className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-sm">
                 <span className="flex items-center gap-2"><span className={cn("h-2.5 w-2.5 rounded-full", item.dotClassName)}/>{item.name}</span>
                 <span className="font-semibold">{item.value}</span>
               </div>))}
-      </div>
+            </div>
+            {sumRowValues(deliveryChartData) === 0 ? (<ChartCaption className="sm:col-span-2">No finished deployments yet — counts stay at 0 until jobs complete.</ChartCaption>) : null}
           </CardContent>
         </Card>
 
@@ -285,13 +273,12 @@ export default function DashboardPage() {
           <CardContent className="grid gap-6 lg:grid-cols-2">
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">All findings (SCA + image scan)</p>
-              {securityChartData.every((item) => item.value === 0) ? (<ChartEmptyState title="No counted findings yet">
-                  Zeros usually mean scanners are not configured, returned no vulnerabilities for the sampled image refs, or projects lack image tags. Configure tool URLs under Integrations / env and open a project Security tab to verify per-project responses.
-                </ChartEmptyState>) : (<div className="h-[260px]">
+              <ChartStatRow items={[{ label: "Total", value: sumRowValues(securityChartData) }, { label: "Sampled", value: securitySampled }]}/>
+              <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={securityChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
-                    <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
+                    <XAxis type="number" allowDecimals={false} domain={chartYDomain(securityChartData.map((item) => item.value))} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
                     <YAxis type="category" dataKey="name" width={88} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
                     <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.25)" }} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                     <Bar dataKey="value" radius={[0, 8, 8, 0]}>
@@ -299,55 +286,60 @@ export default function DashboardPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>)}
+              </div>
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Dependency-Track vs Trivy by severity</p>
-              {securitySampled === 0 ? (<ChartEmptyState title="No security sample yet">
-                  Dashboard polls up to 3 recent projects. Add a project, run a full deploy (not fast pipeline), then refresh. If deploys exist, open Integrations to confirm Dependency-Track and Harbor Trivy are reachable.
-                </ChartEmptyState>) : !scanCompareHasSignal ? (<ChartEmptyState title="Zero scanner findings">
-                  {securitySampled} project(s) sampled with no Critical/High/Medium/Low counted — clean scans, or SBOM/Trivy not uploaded yet. Open a project Security tab for per-tool detail.
-                </ChartEmptyState>) : (<div className="h-[260px]">
+              <ChartStatRow items={[
+                { label: "DT total", value: scanCompareData.reduce((sum, row) => sum + row.dt, 0) },
+                { label: "Trivy total", value: scanCompareData.reduce((sum, row) => sum + row.trivy, 0) }
+              ]}/>
+              <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={scanCompareData} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
                     <XAxis dataKey="severity" tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
-                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
+                    <YAxis allowDecimals={false} domain={chartYDomain([scanCompareMax])} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
                     <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                     <Legend wrapperStyle={{ fontSize: 12 }}/>
                     <Bar dataKey="dt" name="Dependency-Track" fill="#0ea5e9" radius={[6, 6, 0, 0]}/>
                     <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>)}
+              </div>
+              {scanCompareMax === 0 ? (<ChartCaption>
+                  {securitySampled === 0
+                      ? "No projects sampled yet — run a full deploy to populate scanner data."
+                      : `${securitySampled} project(s) sampled with 0 findings (clean scan or tools not configured).`}
+                </ChartCaption>) : null}
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">SonarQube quality gate (projects sampled)</p>
-              {(!sonarGateHasSignal || (security?.sampledProjects ?? 0) === 0) ? (<ChartEmptyState title="No Sonar gate results">
-                  With tools configured, each sampled project reports PASSED, FAILED, or UNKNOWN. UNKNOWN usually means Sonar is not configured or the project key did not match.
-                </ChartEmptyState>) : (<div className="h-[220px]">
+              <ChartStatRow items={[
+                { label: "Passed", value: sonarPassed },
+                { label: "Failed", value: sonarFailed },
+                { label: "Unknown", value: sonarUnknown }
+              ]}/>
+              <div className="h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={sonarGateData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={80} paddingAngle={2}>
-                      {sonarGateData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                    <Pie data={sonarGatePieData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={80} paddingAngle={2}>
+                      {sonarGatePieData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
                     </Pie>
                     <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                     <Legend wrapperStyle={{ fontSize: 12 }}/>
                   </PieChart>
                 </ResponsiveContainer>
-              </div>)}
+              </div>
             </div>
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Signing & policy (Cosign / OPA / Kyverno)</p>
-              {securitySampled === 0 ? (<ChartEmptyState title="No policy sample yet">
-                  Same as scanner charts: needs at least one deployed project with a Harbor image ref. Run a deploy, then refresh.
-                </ChartEmptyState>) : !policySignalHasSignal ? (<ChartEmptyState title="No policy issues">
-                  {securitySampled} project(s) sampled — all images signed, no OPA violations, Kyverno policies satisfied. Bars appear when unsigned images or policy gaps are detected.
-                </ChartEmptyState>) : (<div className="h-[220px]">
+              <ChartStatRow items={[{ label: "Issues", value: sumRowValues(policySignalData) }, { label: "Sampled", value: securitySampled }]}/>
+              <div className="h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={policySignalData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
-                    <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
+                    <XAxis type="number" allowDecimals={false} domain={chartYDomain([policySignalMax])} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}/>
                     <YAxis type="category" dataKey="name" width={120} tickLine={false} axisLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}/>
                     <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
                     <Bar dataKey="value" radius={[0, 8, 8, 0]}>
@@ -355,7 +347,8 @@ export default function DashboardPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>)}
+              </div>
+              {policySignalMax === 0 ? (<ChartCaption>All policy signals clear across sampled projects.</ChartCaption>) : null}
             </div>
           </CardContent>
         </Card>
@@ -368,18 +361,17 @@ export default function DashboardPage() {
             <CardDescription>Live and degraded platform tools from configured integrations.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[1fr_160px]">
-            {toolHealthChartData.length === 0 ? (<ChartEmptyState title="No tool health segments">
-                Platform tooling has not returned live vs degraded counts yet. Open the Platform hub to run reachability checks, or wait for the background poll to finish.
-              </ChartEmptyState>) : (<div className="h-[220px]">
+            <div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={toolHealthChartData} dataKey="value" nameKey="name" innerRadius={54} outerRadius={88} paddingAngle={3}>
-                    {toolHealthChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                  <Pie data={toolHealthPieData} dataKey="value" nameKey="name" innerRadius={54} outerRadius={88} paddingAngle={3}>
+                    {toolHealthPieData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
                   </Pie>
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                  <Legend wrapperStyle={{ fontSize: 12 }}/>
                 </PieChart>
               </ResponsiveContainer>
-            </div>)}
+            </div>
             <div className="grid content-center gap-2">
               {toolHealthChartData.map((item) => (<div key={item.name} className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-sm">
                 <span className="flex items-center gap-2"><span className={cn("h-2.5 w-2.5 rounded-full", item.dotClassName)}/>{item.name}</span>

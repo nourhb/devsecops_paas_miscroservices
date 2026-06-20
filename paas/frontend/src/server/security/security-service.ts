@@ -455,6 +455,30 @@ async function resolveSonarQualityGate(project: Project, logKeys: string[] = [])
     return { status: "UNKNOWN", matchedKey: null };
 }
 
+function qualityGateFromJenkinsLogs(
+    apiStatus: "PASSED" | "FAILED" | "UNKNOWN",
+    sonarFromLogs?: {
+        level: string;
+    } | null
+): string {
+    if (apiStatus === "PASSED" || apiStatus === "FAILED") {
+        return apiStatus;
+    }
+    if (sonarFromLogs?.level === "OK") {
+        return "PASSED";
+    }
+    if (sonarFromLogs?.level === "FAIL") {
+        return "FAILED";
+    }
+    if (sonarFromLogs?.level === "SKIP") {
+        return "SKIPPED";
+    }
+    if (sonarFromLogs?.level === "WARN") {
+        return "FAILED";
+    }
+    return apiStatus;
+}
+
 async function resolveDependencyTrackMetrics(project: Project) {
     for (const key of dependencyTrackLookupKeys(project)) {
         const row = await dependencyTrackClient.projectMetrics(key);
@@ -612,10 +636,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                 deployOk
             })
             : opaAllowed;
+    const qualityGateStatus = qualityGateFromJenkinsLogs(sonar.status, sonarFromLogs ?? null);
     const deploymentAllowed = computeDeploymentAllowed({
         cosignSigned,
         policyValidated,
-        sonarStatus: sonar.status,
+        sonarStatus: qualityGateStatus,
         dtProjectUuid: dependencyTrackProject.projectUuid,
         scaFromLogs: scaFromLogs ?? null,
         sonarFromLogs: sonarFromLogs ?? null
@@ -626,7 +651,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                 ? "Deployment blocked: image is not signed with Cosign."
                 : !policyValidated
                     ? `${policyEngine} policy rejected this workload.`
-                    : sonar.status !== "PASSED"
+                    : qualityGateStatus !== "PASSED"
                         ? "Deployment blocked: SonarQube quality gate must be PASSED (Step 5 required)."
                         : !dependencyTrackProject.projectUuid
                             ? "Deployment blocked: Dependency-Track project not linked (Step 4 SBOM upload required)."
@@ -644,13 +669,13 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         trivy.high * 10 +
         trivy.medium * 4 +
         trivy.low * 1;
-    const gatePenalty = (sonar.status === "FAILED" ? 20 : sonar.status === "UNKNOWN" ? 15 : 0) +
+    const gatePenalty = (qualityGateStatus === "FAILED" ? 20 : qualityGateStatus === "UNKNOWN" || qualityGateStatus === "SKIPPED" ? 15 : 0) +
         (!dependencyTrackProject.projectUuid ? 10 : 0) +
         (!cosignSigned ? 20 : 0) +
         (!opaAllowed ? 20 : 0) +
         (!deploymentAllowed ? 15 : 0);
     const securityScore = score(100, severityPenalty + gatePenalty);
-    const integrationNotes = await buildIntegrationNotes(project, sonar.status, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
+    const integrationNotes = await buildIntegrationNotes(project, qualityGateStatus, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
     const logNotes: string[] = [];
     if (scaFromLogs?.level === "FAIL" || scaFromLogs?.level === "WARN") {
         logNotes.push(`Jenkins Step 4: ${scaFromLogs.level} — ${scaFromLogs.message}`);
@@ -670,8 +695,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                 : dependencyTrack.high > 0
                     ? `${dependencyTrack.high} high vulnerabilities detected in Dependency-Track.`
                     : integrationNotes;
+    const qualityGateStatus = qualityGateFromJenkinsLogs(sonar.status, sonarFromLogs ?? null);
     const integrationProbes = buildIntegrationProbes({
-        sonarStatus: sonar.status,
+        sonarStatus: qualityGateStatus === "PASSED" || qualityGateStatus === "FAILED"
+            ? qualityGateStatus
+            : sonar.status,
         sonarMatchedKey: sonar.matchedKey,
         sonarFromLogs: sonarFromLogs ?? null,
         dtProjectUuid: dependencyTrackProject.projectUuid,
@@ -685,7 +713,7 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         partialErrors
     });
     return {
-        qualityGateStatus: sonar.status,
+        qualityGateStatus,
         dependencyTrack,
         dependencyTrackProjectUuid: dependencyTrackProject.projectUuid,
         dependencyTrackProjectName: dependencyTrackProject.projectName,
