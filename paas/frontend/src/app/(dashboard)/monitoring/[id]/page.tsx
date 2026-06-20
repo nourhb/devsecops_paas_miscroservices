@@ -16,6 +16,8 @@ import { argocdApi, kubernetesApi, monitoringApi, pipelineApi } from "@/lib/api"
 import type { MonitoringKubernetesPod } from "@/types";
 import { ChartCaption } from "@/components/charts/chart-stat-row";
 import { chartYDomain, placeholderTimeSeries } from "@/components/charts/chart-display-utils";
+import { GitOpsStatusChart } from "@/components/charts/gitops-status-chart";
+import { SupplyChainChart } from "@/components/charts/supply-chain-chart";
 import { cn } from "@/lib/utils";
 const chartCpu = "#0ea5e9";
 const chartMem = "#f97316";
@@ -275,16 +277,18 @@ export default function MonitoringPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[260px]">
-                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : (<ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={cpuChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
-                      <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" width={36}/>
-                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number) => [`${value}%`, "CPU"]}/>
-                      <Line type="monotone" dataKey="pct" name="CPU %" stroke={chartCpu} strokeWidth={2} dot={false}/>
-                    </LineChart>
-                  </ResponsiveContainer>)}
-                {!snap.prometheus.rangeError && (snap?.prometheus.cpuSeries ?? []).length === 0 ? (<ChartCaption>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={cpuChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
+                    <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" width={36}/>
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number) => [`${value}%`, "CPU"]}/>
+                    <Line type="monotone" dataKey="pct" name="CPU %" stroke={chartCpu} strokeWidth={2} dot={false}/>
+                  </LineChart>
+                </ResponsiveContainer>
+                {snap.prometheus.rangeError ? (<ChartCaption className="text-warning">
+                    {snap.prometheus.rangeError} — zero baseline shown until Prometheus responds.
+                  </ChartCaption>) : (snap?.prometheus.cpuSeries ?? []).length === 0 ? (<ChartCaption>
                     {snap.prometheus.configured ? "No CPU points yet — showing zero baseline." : "Set PROMETHEUS_BASE_URL for live CPU trends."}
                   </ChartCaption>) : null}
               </CardContent>
@@ -299,16 +303,18 @@ export default function MonitoringPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[260px]">
-                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : (<ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={memChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
-                      <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" width={36}/>
-                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number) => [`${value}%`, "Memory"]}/>
-                      <Line type="monotone" dataKey="pct" name="Memory %" stroke={chartMem} strokeWidth={2} dot={false}/>
-                    </LineChart>
-                  </ResponsiveContainer>)}
-                {!snap.prometheus.rangeError && (snap?.prometheus.memorySeries ?? []).length === 0 ? (<ChartCaption>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={memChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
+                    <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" width={36}/>
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number) => [`${value}%`, "Memory"]}/>
+                    <Line type="monotone" dataKey="pct" name="Memory %" stroke={chartMem} strokeWidth={2} dot={false}/>
+                  </LineChart>
+                </ResponsiveContainer>
+                {snap.prometheus.rangeError ? (<ChartCaption className="text-warning">
+                    {snap.prometheus.rangeError} — zero baseline shown until Prometheus responds.
+                  </ChartCaption>) : (snap?.prometheus.memorySeries ?? []).length === 0 ? (<ChartCaption>
                     {snap.prometheus.configured ? "No memory points yet — showing zero baseline." : "Connect Prometheus for memory trends."}
                   </ChartCaption>) : null}
               </CardContent>
@@ -415,14 +421,7 @@ export default function MonitoringPage() {
                 <CardDescription>Application sync and health for this project.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {argoQuery.isLoading ? <Skeleton className="h-20 w-full"/> : (<>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">App: {argoQuery.data?.appName ?? "\u2014"}</Badge>
-                      <Badge variant={argoQuery.data?.health === "Healthy" ? "success" : "outline"}>Health: {argoQuery.data?.health ?? "\u2014"}</Badge>
-                      <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
-                    </div>
-                    {argoQuery.data?.unreachableReason ? <p className="text-xs text-warning">{argoQuery.data.unreachableReason}</p> : null}
-                  </>)}
+                {argoQuery.isLoading ? <Skeleton className="h-[220px] w-full"/> : (<GitOpsStatusChart health={argoQuery.data?.health} syncStatus={argoQuery.data?.syncStatus} appName={argoQuery.data?.appName} unreachableReason={argoQuery.data?.unreachableReason}/>)}
               </CardContent>
         </Card>
         <Card>
@@ -432,23 +431,8 @@ export default function MonitoringPage() {
                 </CardTitle>
                 <CardDescription>Derived from all non-deleted projects (Cosign/Trivy-style rollups in metrics service), not only this app.</CardDescription>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg border border-border bg-muted/10 p-3">
-                  <p className="text-xs text-muted">Signed images</p>
-                  <p className="text-xl font-semibold">{snap.runtime.signedImages}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/10 p-3">
-                  <p className="text-xs text-muted">Unsigned</p>
-                  <p className="text-xl font-semibold">{snap.runtime.unsignedImages}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/10 p-3">
-                  <p className="text-xs text-muted">Failed builds (all)</p>
-                  <p className="text-xl font-semibold">{snap.runtime.failedBuilds}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/10 p-3">
-                  <p className="text-xs text-muted">Running apps (deploy OK)</p>
-                  <p className="text-xl font-semibold">{snap.runtime.runningApplications}</p>
-                </div>
+              <CardContent>
+                <SupplyChainChart signedImages={snap.runtime.signedImages} unsignedImages={snap.runtime.unsignedImages} failedBuilds={snap.runtime.failedBuilds} runningApplications={snap.runtime.runningApplications}/>
               </CardContent>
         </Card>
       </section>

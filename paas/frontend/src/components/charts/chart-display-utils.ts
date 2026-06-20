@@ -50,3 +50,59 @@ export function sumSeverityCounts(row: {
 }): number {
     return row.critical + row.high + row.medium + row.low;
 }
+
+function argoStatusWeight(status?: string): number {
+    const normalized = (status || "unknown").trim().toLowerCase();
+    if (!normalized || normalized === "unknown" || normalized === "—" || normalized === "-") {
+        return 0;
+    }
+    return 1;
+}
+
+export function argoHealthColor(health?: string): string {
+    const normalized = (health || "").trim().toLowerCase();
+    if (normalized === "healthy") {
+        return CHART_COLORS.success;
+    }
+    if (normalized === "degraded" || normalized === "progressing") {
+        return CHART_COLORS.warning;
+    }
+    if (normalized === "missing" || normalized === "suspended" || normalized.includes("fail")) {
+        return CHART_COLORS.danger;
+    }
+    return CHART_COLORS.muted;
+}
+
+export function argoSyncColor(syncStatus?: string): string {
+    const normalized = (syncStatus || "").trim().toLowerCase();
+    if (normalized === "synced") {
+        return CHART_COLORS.success;
+    }
+    if (normalized === "outofsync" || normalized === "out of sync") {
+        return CHART_COLORS.warning;
+    }
+    return CHART_COLORS.muted;
+}
+
+export function argoGitOpsPieData(health?: string, syncStatus?: string): ChartPieRow[] {
+    const healthLabel = health?.trim() || "Unknown";
+    const syncLabel = syncStatus?.trim() || "Unknown";
+    return pieRowsForDisplay([
+        { name: `Health: ${healthLabel}`, value: argoStatusWeight(health), fill: argoHealthColor(health) },
+        { name: `Sync: ${syncLabel}`, value: argoStatusWeight(syncStatus), fill: argoSyncColor(syncStatus) }
+    ], "Argo CD pending");
+}
+
+export function supplyChainBarData(input: {
+    signedImages: number;
+    unsignedImages: number;
+    failedBuilds: number;
+    runningApplications: number;
+}): ChartPieRow[] {
+    return [
+        { name: "Signed", value: input.signedImages, fill: CHART_COLORS.success },
+        { name: "Unsigned", value: input.unsignedImages, fill: CHART_COLORS.warning },
+        { name: "Failed builds", value: input.failedBuilds, fill: CHART_COLORS.danger },
+        { name: "Running apps", value: input.runningApplications, fill: CHART_COLORS.info }
+    ];
+}

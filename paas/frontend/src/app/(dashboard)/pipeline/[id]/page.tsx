@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
 import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
+import { GitOpsStatusChart } from "@/components/charts/gitops-status-chart";
 import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help-provider";
 import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-parse";
 import { mergeJenkinsChecksByStep, parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
@@ -516,21 +517,7 @@ export default function PipelinePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {argoQuery.isLoading ? (<Skeleton className="h-20 w-full"/>) : (<>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-muted">Application</span>
-                  <code className="inline-code px-2 py-1">
-                    {argoQuery.data?.appName ?? "\u2014"}
-                  </code>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <ArgoHealthBadge health={argoQuery.data?.health}/>
-                  <Badge variant="outline">Sync: {argoQuery.data?.syncStatus ?? "\u2014"}</Badge>
-                </div>
-                {argoQuery.data?.unreachableReason ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-                    {argoQuery.data.unreachableReason}
-                  </p>) : null}
-              </>)}
+            {argoQuery.isLoading ? (<Skeleton className="h-[220px] w-full"/>) : (<GitOpsStatusChart health={argoQuery.data?.health} syncStatus={argoQuery.data?.syncStatus} appName={argoQuery.data?.appName} unreachableReason={argoQuery.data?.unreachableReason}/>)}
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted">
               <p>
                 Image in use:{" "}
