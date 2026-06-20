@@ -55,6 +55,50 @@ function clearKubeApiClients(): void {
     customObjectsApi = undefined;
     appsApi = undefined;
 }
+const inClusterTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+const inClusterCaPath = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
+function loadInClusterKubeConfig(kc: k8s.KubeConfig): boolean {
+    const host = process.env.KUBERNETES_SERVICE_HOST;
+    if (!host || !fs.existsSync(inClusterTokenPath)) {
+        return false;
+    }
+    try {
+        kc.loadFromCluster();
+        return true;
+    }
+    catch {
+        // Standalone bundles sometimes break loadFromCluster — build config from mounted SA files.
+    }
+    try {
+        const port = process.env.KUBERNETES_SERVICE_PORT || "443";
+        const token = fs.readFileSync(inClusterTokenPath, "utf8").trim();
+        const caData = fs.existsSync(inClusterCaPath)
+            ? fs.readFileSync(inClusterCaPath).toString("base64")
+            : undefined;
+        kc.loadFromOptions({
+            clusters: [{
+                name: "in-cluster",
+                server: `https://${host}:${port}`,
+                caData,
+                skipTLSVerify: env.KUBE_TLS_SKIP_VERIFY === "true" || !caData
+            }],
+            users: [{
+                name: "in-cluster",
+                token
+            }],
+            contexts: [{
+                name: "in-cluster",
+                user: "in-cluster",
+                cluster: "in-cluster"
+            }],
+            currentContext: "in-cluster"
+        });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 function getKubeConfig(): k8s.KubeConfig | null {
     const cacheKey = getKubeConfigCacheKey();
     if (kubeConfig !== undefined && kubeConfigCacheKey === cacheKey) {
@@ -68,20 +112,31 @@ function getKubeConfig(): k8s.KubeConfig | null {
     }
     try {
         const kc = new k8s.KubeConfig();
-        if (env.KUBE_CONFIG_PATH?.trim()) {
-            kc.loadFromFile(env.KUBE_CONFIG_PATH.trim());
+        const kubePath = env.KUBE_CONFIG_PATH?.trim();
+        let loaded = false;
+        // Inside the pod, prefer service-account credentials over a host kubeconfig path.
+        if (process.env.KUBERNETES_SERVICE_HOST) {
+            loaded = loadInClusterKubeConfig(kc);
         }
-        else if (process.env.KUBERNETES_SERVICE_HOST) {
-            kc.loadFromCluster();
+        if (!loaded && kubePath && fs.existsSync(kubePath)) {
+            kc.loadFromFile(kubePath);
+            loaded = true;
         }
-        else {
+        if (!loaded && !process.env.KUBERNETES_SERVICE_HOST) {
             kc.loadFromDefault();
+            loaded = true;
+        }
+        if (!loaded) {
+            console.error("[kubernetes-client] kubeconfig unavailable (in-cluster SA missing or KUBE_CONFIG_PATH invalid)");
+            kubeConfig = null;
+            return null;
         }
         applyKubeTlsOverrides(kc);
         kubeConfig = kc;
         return kubeConfig;
     }
-    catch {
+    catch (error) {
+        console.error("[kubernetes-client] kubeconfig load failed:", error instanceof Error ? error.message : error);
         kubeConfig = null;
         return null;
     }
@@ -187,6 +242,62 @@ export async function kubernetesAuthenticatedFetch(url: string, init: RequestIni
     finally {
         clearTimeout(timer);
     }
+}
+function canUseInClusterKubernetes(): boolean {
+    return env.KUBERNETES_ENABLED === "true"
+        && Boolean(process.env.KUBERNETES_SERVICE_HOST)
+        && fs.existsSync(inClusterTokenPath);
+}
+function isKubernetesApiAvailable(): boolean {
+    return getCoreV1Api() !== null || canUseInClusterKubernetes();
+}
+function kubernetesApiBaseUrl(): string {
+    const host = process.env.KUBERNETES_SERVICE_HOST || "";
+    const port = process.env.KUBERNETES_SERVICE_PORT || "443";
+    return `https://${host}:${port}`;
+}
+async function kubernetesApiGetJson<T>(path: string, timeoutMs = 20_000): Promise<T> {
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    const response = await kubernetesAuthenticatedFetch(`${kubernetesApiBaseUrl()}${normalized}`, {}, timeoutMs);
+    if (!response.ok) {
+        const error = new Error(`Kubernetes API returned HTTP ${response.status}`) as Error & {
+            statusCode?: number;
+        };
+        error.statusCode = response.status;
+        throw error;
+    }
+    return await response.json() as T;
+}
+function resourceCreatedAt(value: unknown): string {
+    if (!value) {
+        return "";
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+    if (typeof value === "object" && value !== null && "toISOString" in value && typeof (value as Date).toISOString === "function") {
+        return (value as Date).toISOString();
+    }
+    return String(value);
+}
+function mapPodToRecord(pod: V1Pod, defaultNamespace?: string): ClusterPodRecord {
+    const health = getPodHealth(pod);
+    return {
+        name: pod.metadata?.name ?? "",
+        namespace: pod.metadata?.namespace ?? defaultNamespace ?? "default",
+        containers: getPodContainers(pod),
+        status: pod.status?.phase ?? "Unknown",
+        health: health.health,
+        healthReason: health.healthReason,
+        ready: formatPodReady(pod),
+        restarts: sumPodRestarts(pod),
+        nodeName: pod.spec?.nodeName ?? "-",
+        podIP: pod.status?.podIP ?? "-",
+        createdAt: resourceCreatedAt(pod.metadata?.creationTimestamp)
+    };
 }
 function podBucket(pod: V1Pod): "running" | "failed" | "pending" | "succeeded" | "other" {
     const phase = pod.status?.phase;
@@ -413,8 +524,7 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
     if (cached) {
         return cached;
     }
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             running: 0,
             failed: 0,
@@ -425,8 +535,42 @@ export async function getNamespacePodSummary(namespace: string): Promise<Namespa
             error: "Kubernetes API not configured."
         };
     }
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const { body } = await api.listNamespacedPod(ns);
+            const items = body.items ?? [];
+            const counts = { running: 0, failed: 0, pending: 0, succeeded: 0, other: 0 };
+            for (const pod of items) {
+                const b = podBucket(pod);
+                counts[b] += 1;
+            }
+            const summary = {
+                ...counts,
+                total: items.length
+            };
+            namespacePodSummaryCache.set(ns, summary);
+            return summary;
+        }
+        catch (e) {
+            const message = kubernetesErrorMessage(e);
+            const summary = {
+                running: 0,
+                failed: 0,
+                pending: 0,
+                succeeded: 0,
+                other: 0,
+                total: 0,
+                error: message
+            };
+            namespacePodSummaryCache.set(ns, summary, 3000);
+            return summary;
+        }
+    }
     try {
-        const { body } = await api.listNamespacedPod(ns);
+        const body = await kubernetesApiGetJson<{
+            items?: V1Pod[];
+        }>(`/api/v1/namespaces/${encodeURIComponent(ns)}/pods`);
         const items = body.items ?? [];
         const counts = { running: 0, failed: 0, pending: 0, succeeded: 0, other: 0 };
         for (const pod of items) {
@@ -460,8 +604,7 @@ export async function listNamespacePods(namespace: string): Promise<{
     items: ClusterPodRecord[];
     error?: string;
 }> {
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             configured: false,
             items: [],
@@ -476,35 +619,37 @@ export async function listNamespacePods(namespace: string): Promise<{
             error: "Project namespace is empty."
         };
     }
-    try {
-        const { body } = await api.listNamespacedPod(ns);
-        const items = (body.items ?? []).map((pod) => {
-            const health = getPodHealth(pod);
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const { body } = await api.listNamespacedPod(ns);
             return {
-                name: pod.metadata?.name ?? "",
-                namespace: pod.metadata?.namespace ?? ns,
-                containers: getPodContainers(pod),
-                status: pod.status?.phase ?? "Unknown",
-                health: health.health,
-                healthReason: health.healthReason,
-                ready: formatPodReady(pod),
-                restarts: sumPodRestarts(pod),
-                nodeName: pod.spec?.nodeName ?? "-",
-                podIP: pod.status?.podIP ?? "-",
-                createdAt: pod.metadata?.creationTimestamp?.toISOString?.() ?? ""
+                configured: true,
+                items: (body.items ?? []).map((pod) => mapPodToRecord(pod, ns))
             };
-        });
+        }
+        catch (e) {
+            return {
+                configured: true,
+                items: [],
+                error: kubernetesErrorMessage(e)
+            };
+        }
+    }
+    try {
+        const body = await kubernetesApiGetJson<{
+            items?: V1Pod[];
+        }>(`/api/v1/namespaces/${encodeURIComponent(ns)}/pods`);
         return {
             configured: true,
-            items
+            items: (body.items ?? []).map((pod) => mapPodToRecord(pod, ns))
         };
     }
     catch (e) {
-        const message = kubernetesErrorMessage(e);
         return {
             configured: true,
             items: [],
-            error: message
+            error: kubernetesErrorMessage(e)
         };
     }
 }
@@ -513,46 +658,47 @@ export async function listClusterPods(): Promise<{
     items: ClusterPodRecord[];
     error?: string;
 }> {
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             configured: false,
             items: [],
             error: "Kubernetes API not configured."
         };
     }
-    try {
-        const response = await (api as any).listPodForAllNamespaces();
-        const body = readBody<{
-            items?: V1Pod[];
-        }>(response);
-        const items = (body.items ?? []).map((pod) => {
-            const health = getPodHealth(pod);
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const response = await (api as any).listPodForAllNamespaces();
+            const body = readBody<{
+                items?: V1Pod[];
+            }>(response);
             return {
-                name: pod.metadata?.name ?? "",
-                namespace: pod.metadata?.namespace ?? "default",
-                containers: getPodContainers(pod),
-                status: pod.status?.phase ?? "Unknown",
-                health: health.health,
-                healthReason: health.healthReason,
-                ready: formatPodReady(pod),
-                restarts: sumPodRestarts(pod),
-                nodeName: pod.spec?.nodeName ?? "-",
-                podIP: pod.status?.podIP ?? "-",
-                createdAt: pod.metadata?.creationTimestamp?.toISOString?.() ?? ""
+                configured: true,
+                items: (body.items ?? []).map((pod) => mapPodToRecord(pod))
             };
-        });
+        }
+        catch (e) {
+            return {
+                configured: true,
+                items: [],
+                error: kubernetesErrorMessage(e)
+            };
+        }
+    }
+    try {
+        const body = await kubernetesApiGetJson<{
+            items?: V1Pod[];
+        }>("/api/v1/pods");
         return {
             configured: true,
-            items
+            items: (body.items ?? []).map((pod) => mapPodToRecord(pod))
         };
     }
     catch (e) {
-        const message = kubernetesErrorMessage(e);
         return {
             configured: true,
             items: [],
-            error: message
+            error: kubernetesErrorMessage(e)
         };
     }
 }
@@ -561,65 +707,83 @@ export async function listClusterServices(): Promise<{
     items: ClusterServiceRecord[];
     error?: string;
 }> {
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             configured: false,
             items: [],
             error: "Kubernetes API not configured."
         };
     }
-    try {
-        const response = await (api as any).listServiceForAllNamespaces();
-        const body = readBody<{
-            items?: Array<{
-                metadata?: {
-                    name?: string;
-                    namespace?: string;
-                    creationTimestamp?: Date;
-                };
-                spec?: {
-                    type?: string;
-                    clusterIP?: string;
-                    ports?: Array<{
-                        port?: number;
-                        protocol?: string;
-                        targetPort?: string | number;
-                    }>;
-                    selector?: Record<string, string>;
-                    externalIPs?: string[];
-                };
-                status?: {
-                    loadBalancer?: {
-                        ingress?: Array<{
-                            ip?: string;
-                            hostname?: string;
-                        }>;
-                    };
-                };
+    type ServiceItem = {
+        metadata?: {
+            name?: string;
+            namespace?: string;
+            creationTimestamp?: unknown;
+        };
+        spec?: {
+            type?: string;
+            clusterIP?: string;
+            ports?: Array<{
+                port?: number;
+                protocol?: string;
+                targetPort?: string | number;
             }>;
-        }>(response);
-        const items = (body.items ?? []).map((service) => ({
-            name: service.metadata?.name ?? "",
-            namespace: service.metadata?.namespace ?? "default",
-            type: service.spec?.type ?? "ClusterIP",
-            clusterIP: service.spec?.clusterIP ?? "-",
-            externalIP: normalizeExternalIps(service),
-            ports: normalizeServicePorts(service.spec?.ports),
-            selector: normalizeSelector(service.spec?.selector),
-            createdAt: service.metadata?.creationTimestamp?.toISOString?.() ?? ""
-        }));
+            selector?: Record<string, string>;
+            externalIPs?: string[];
+        };
+        status?: {
+            loadBalancer?: {
+                ingress?: Array<{
+                    ip?: string;
+                    hostname?: string;
+                }>;
+            };
+        };
+    };
+    const mapServices = (items: ServiceItem[]) => items.map((service) => ({
+        name: service.metadata?.name ?? "",
+        namespace: service.metadata?.namespace ?? "default",
+        type: service.spec?.type ?? "ClusterIP",
+        clusterIP: service.spec?.clusterIP ?? "-",
+        externalIP: normalizeExternalIps(service),
+        ports: normalizeServicePorts(service.spec?.ports),
+        selector: normalizeSelector(service.spec?.selector),
+        createdAt: resourceCreatedAt(service.metadata?.creationTimestamp)
+    }));
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const response = await (api as any).listServiceForAllNamespaces();
+            const body = readBody<{
+                items?: ServiceItem[];
+            }>(response);
+            return {
+                configured: true,
+                items: mapServices(body.items ?? [])
+            };
+        }
+        catch (e) {
+            return {
+                configured: true,
+                items: [],
+                error: kubernetesErrorMessage(e)
+            };
+        }
+    }
+    try {
+        const body = await kubernetesApiGetJson<{
+            items?: ServiceItem[];
+        }>("/api/v1/services");
         return {
             configured: true,
-            items
+            items: mapServices(body.items ?? [])
         };
     }
     catch (e) {
-        const message = kubernetesErrorMessage(e);
         return {
             configured: true,
             items: [],
-            error: message
+            error: kubernetesErrorMessage(e)
         };
     }
 }
@@ -628,58 +792,76 @@ export async function listClusterDeployments(): Promise<{
     items: ClusterDeploymentRecord[];
     error?: string;
 }> {
-    const api = getAppsV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             configured: false,
             items: [],
             error: "Kubernetes API not configured."
         };
     }
+    type DeploymentItem = {
+        metadata?: {
+            name?: string;
+            namespace?: string;
+            creationTimestamp?: unknown;
+        };
+        spec?: {
+            replicas?: number;
+            strategy?: {
+                type?: string;
+            };
+        };
+        status?: {
+            readyReplicas?: number;
+            replicas?: number;
+            availableReplicas?: number;
+            updatedReplicas?: number;
+        };
+    };
+    const mapDeployments = (items: DeploymentItem[]) => items.map((deployment) => ({
+        name: deployment.metadata?.name ?? "",
+        namespace: deployment.metadata?.namespace ?? "default",
+        ready: `${deployment.status?.readyReplicas ?? 0}/${deployment.spec?.replicas ?? deployment.status?.replicas ?? 0}`,
+        replicas: deployment.spec?.replicas ?? deployment.status?.replicas ?? 0,
+        available: deployment.status?.availableReplicas ?? 0,
+        updated: deployment.status?.updatedReplicas ?? 0,
+        strategy: deployment.spec?.strategy?.type ?? "RollingUpdate",
+        createdAt: resourceCreatedAt(deployment.metadata?.creationTimestamp)
+    }));
+    const api = getAppsV1Api();
+    if (api) {
+        try {
+            const response = await (api as any).listDeploymentForAllNamespaces();
+            const body = readBody<{
+                items?: DeploymentItem[];
+            }>(response);
+            return {
+                configured: true,
+                items: mapDeployments(body.items ?? [])
+            };
+        }
+        catch (e) {
+            return {
+                configured: true,
+                items: [],
+                error: kubernetesErrorMessage(e)
+            };
+        }
+    }
     try {
-        const response = await (api as any).listDeploymentForAllNamespaces();
-        const body = readBody<{
-            items?: Array<{
-                metadata?: {
-                    name?: string;
-                    namespace?: string;
-                    creationTimestamp?: Date;
-                };
-                spec?: {
-                    replicas?: number;
-                    strategy?: {
-                        type?: string;
-                    };
-                };
-                status?: {
-                    readyReplicas?: number;
-                    replicas?: number;
-                    availableReplicas?: number;
-                    updatedReplicas?: number;
-                };
-            }>;
-        }>(response);
-        const items = (body.items ?? []).map((deployment) => ({
-            name: deployment.metadata?.name ?? "",
-            namespace: deployment.metadata?.namespace ?? "default",
-            ready: `${deployment.status?.readyReplicas ?? 0}/${deployment.spec?.replicas ?? deployment.status?.replicas ?? 0}`,
-            replicas: deployment.spec?.replicas ?? deployment.status?.replicas ?? 0,
-            available: deployment.status?.availableReplicas ?? 0,
-            updated: deployment.status?.updatedReplicas ?? 0,
-            strategy: deployment.spec?.strategy?.type ?? "RollingUpdate",
-            createdAt: deployment.metadata?.creationTimestamp?.toISOString?.() ?? ""
-        }));
+        const body = await kubernetesApiGetJson<{
+            items?: DeploymentItem[];
+        }>("/apis/apps/v1/deployments");
         return {
             configured: true,
-            items
+            items: mapDeployments(body.items ?? [])
         };
     }
     catch (e) {
-        const message = kubernetesErrorMessage(e);
         return {
             configured: true,
             items: [],
-            error: message
+            error: kubernetesErrorMessage(e)
         };
     }
 }
@@ -956,46 +1138,64 @@ export async function listClusterNamespaces(): Promise<{
     items: ClusterNamespaceRecord[];
     error?: string;
 }> {
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return {
             configured: false,
             items: [],
             error: "Kubernetes API not configured."
         };
     }
-    try {
-        const response = await (api as any).listNamespace();
-        const body = readBody<{
-            items?: Array<{
-                metadata?: {
-                    name?: string;
-                    creationTimestamp?: Date;
-                };
-                status?: {
-                    phase?: string;
-                };
-            }>;
-        }>(response);
-        const items = (body.items ?? [])
-            .map((ns) => ({
+    type NamespaceItem = {
+        metadata?: {
+            name?: string;
+            creationTimestamp?: unknown;
+        };
+        status?: {
+            phase?: string;
+        };
+    };
+    const mapNamespaces = (items: NamespaceItem[]) => items
+        .map((ns) => ({
             name: ns.metadata?.name ?? "",
             phase: ns.status?.phase ?? "Unknown",
-            createdAt: ns.metadata?.creationTimestamp?.toISOString?.() ?? ""
+            createdAt: resourceCreatedAt(ns.metadata?.creationTimestamp)
         }))
-            .filter((row) => Boolean(row.name))
-            .sort((a, b) => a.name.localeCompare(b.name));
+        .filter((row) => Boolean(row.name))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const response = await (api as any).listNamespace();
+            const body = readBody<{
+                items?: NamespaceItem[];
+            }>(response);
+            return {
+                configured: true,
+                items: mapNamespaces(body.items ?? [])
+            };
+        }
+        catch (e) {
+            return {
+                configured: true,
+                items: [],
+                error: kubernetesErrorMessage(e)
+            };
+        }
+    }
+    try {
+        const body = await kubernetesApiGetJson<{
+            items?: NamespaceItem[];
+        }>("/api/v1/namespaces");
         return {
             configured: true,
-            items
+            items: mapNamespaces(body.items ?? [])
         };
     }
     catch (e) {
-        const message = kubernetesErrorMessage(e);
         return {
             configured: true,
             items: [],
-            error: message
+            error: kubernetesErrorMessage(e)
         };
     }
 }
@@ -1019,7 +1219,24 @@ export async function aggregatePodCountsAcrossNamespaces(namespaces: string[]): 
     return { runningPods, failedPods, errors };
 }
 export function isKubernetesConfigured(): boolean {
-    return getCoreV1Api() !== null;
+    return isKubernetesApiAvailable();
+}
+export function getKubernetesLabDiagnostics(): {
+    enabled: boolean;
+    clientReady: boolean;
+    inClusterHost: boolean;
+    saTokenMounted: boolean;
+    kubeConfigPath: string;
+    inClusterFallback: boolean;
+} {
+    return {
+        enabled: env.KUBERNETES_ENABLED === "true",
+        clientReady: isKubernetesApiAvailable(),
+        inClusterHost: Boolean(process.env.KUBERNETES_SERVICE_HOST),
+        saTokenMounted: fs.existsSync(inClusterTokenPath),
+        kubeConfigPath: env.KUBE_CONFIG_PATH?.trim() || "",
+        inClusterFallback: canUseInClusterKubernetes() && getCoreV1Api() === null
+    };
 }
 export async function listPodsByLabel(namespace: string, labelSelector: string): Promise<V1Pod[]> {
     const api = getCoreV1Api();
@@ -1035,13 +1252,32 @@ export async function listPodsByLabel(namespace: string, labelSelector: string):
     }
 }
 export async function readPodLog(namespace: string, podName: string, container?: string): Promise<string | null> {
-    const api = getCoreV1Api();
-    if (!api) {
+    if (!isKubernetesApiAvailable()) {
         return null;
     }
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const response = await (api as any).readNamespacedPodLog(podName, namespace, container || undefined, false, undefined, undefined, undefined, false, undefined, 500, true);
+            return response.body ?? null;
+        }
+        catch (error) {
+            return `Could not load logs: ${kubernetesErrorMessage(error)}`;
+        }
+    }
     try {
-        const response = await (api as any).readNamespacedPodLog(podName, namespace, container || undefined, false, undefined, undefined, undefined, false, undefined, 500, true);
-        return response.body ?? null;
+        const params = new URLSearchParams({
+            tailLines: "500"
+        });
+        if (container?.trim()) {
+            params.set("container", container.trim());
+        }
+        const path = `/api/v1/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(podName)}/log?${params.toString()}`;
+        const response = await kubernetesAuthenticatedFetch(`${kubernetesApiBaseUrl()}${path}`);
+        if (!response.ok) {
+            return `Could not load logs: Kubernetes API returned HTTP ${response.status}.`;
+        }
+        return await response.text();
     }
     catch (error) {
         return `Could not load logs: ${kubernetesErrorMessage(error)}`;

@@ -54,6 +54,15 @@ awk '
     for (k in env) print k "=" env[k]
   }
 ' "${ENV_FILE}" > "${FILTERED}"
+if grep -qE '^KUBERNETES_ENABLED=true' "${FILTERED}"; then
+  if grep -qE '^KUBE_CONFIG_PATH=' "${FILTERED}"; then
+    grep -vE '^KUBE_CONFIG_PATH=' "${FILTERED}" > "${FILTERED}.strip" && mv "${FILTERED}.strip" "${FILTERED}"
+    echo "==> Stripped KUBE_CONFIG_PATH (in-cluster pod uses serviceAccount token)"
+  fi
+  if ! grep -qE '^KUBERNETES_ENABLED=' "${FILTERED}"; then
+    echo "KUBERNETES_ENABLED=true" >> "${FILTERED}"
+  fi
+fi
 if grep -qE '^DATABASE_URL=.*@(localhost|127\.0\.0\.1):5432' "${FILTERED}"; then
   sed -i 's|@localhost:5432|@postgres:5432|g; s|@127.0.0.1:5432|@postgres:5432|g' "${FILTERED}"
   echo "==> Rewrote DATABASE_URL localhost -> postgres (in-cluster service)"
@@ -194,12 +203,16 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
 ' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
 echo "==> Prometheus / Kubernetes in pod"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
-  for v in KUBERNETES_ENABLED PROMETHEUS_BASE_URL PROMETHEUS_PROBE_URL; do
+  for v in KUBERNETES_ENABLED KUBE_CONFIG_PATH PROMETHEUS_BASE_URL PROMETHEUS_PROBE_URL; do
     eval "val=\$$v"
     if [ -n "$val" ]; then echo "$v=$val"; else echo "$v=MISSING"; fi
   done
   if [ -n "$KUBERNETES_SERVICE_HOST" ]; then echo "KUBERNETES_SERVICE_HOST=set"; else echo "KUBERNETES_SERVICE_HOST=MISSING"; fi
+  if [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo "saToken=mounted"; else echo "saToken=MISSING"; fi
 ' 2>/dev/null || echo "WARN: could not exec into pod yet"
+if grep -qE '^KUBE_CONFIG_PATH=' "${FILTERED}" 2>/dev/null; then
+  echo "WARN: KUBE_CONFIG_PATH is set in ${ENV_FILE} — remove it for in-cluster PaaS (breaks cluster UI)."
+fi
 if ! grep -qE '^SONAR_TOKEN=' "${ENV_FILE}"; then
   echo "WARN: ${ENV_FILE} is missing SONAR_TOKEN — Jenkins Step 5 (Sonar) may skip."
   SECURITY_OK=0
