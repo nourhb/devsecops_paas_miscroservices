@@ -127,7 +127,7 @@ export default function SecurityPage() {
     const dtTotal = sumSeverityCounts(data.dependencyTrack);
     const trivyTotal = sumSeverityCounts(data.trivy);
     const sonarPieData = pieRowsForDisplay([
-        { name: `Gate: ${data.qualityGateStatus}`, value: data.qualityGateStatus === "UNKNOWN" ? 0 : 1, fill: sonarGateColor(data.qualityGateStatus) }
+        { name: `Gate: ${data.qualityGateStatus}`, value: 1, fill: sonarGateColor(data.qualityGateStatus) }
     ], `Gate: ${data.qualityGateStatus}`);
     const pipeline = data.pipelineVerification;
     const buildCtx = data.buildContext;
