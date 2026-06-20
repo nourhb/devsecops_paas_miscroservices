@@ -208,8 +208,8 @@ if [[ -z "${CFG}" ]]; then
 fi
 REMOTE_CHECK_TEXT="${CFG}"
 if echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260620-cps-split' \
-  && echo "${CFG}" | grep -qF 'load paasLoadH1'; then
-  echo "OK: Jenkins job uses CPS multi-load layout (20260620-cps-split)"
+  && echo "${CFG}" | grep -qF 'load paasStagesP3'; then
+  echo "OK: Jenkins job uses CPS multi-load layout (20260620-cps-split, 7 files)"
 elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
   echo "FAIL: Jenkins job uses obsolete single-load layout (20260617) — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   exit 1
@@ -223,7 +223,7 @@ elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paa
   echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   exit 1
 elif echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617' \
-  || (echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && ! echo "${CFG}" | grep -qF 'load paasLoadH1'); then
+  || (echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && ! echo "${CFG}" | grep -qF 'load paasStagesP3'); then
   echo "FAIL: Jenkins job uses obsolete single-load layout — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   exit 1
 fi
@@ -240,7 +240,7 @@ if jenkins_job_has_broken_mutate "${CFG}"; then
 fi
 if jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}"; then
   echo "OK: Jenkins job has Step 6 mutate fix (start-paas.sh)"
-elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'load paasLoadH1'; then
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'load paasStagesP3' || echo "${CFG}" | grep -qF 'load paasLoadH1'; then
   JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
   JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
   if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- sh -c \
