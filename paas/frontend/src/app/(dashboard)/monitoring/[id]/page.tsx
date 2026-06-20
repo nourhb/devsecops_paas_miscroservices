@@ -14,6 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { argocdApi, kubernetesApi, monitoringApi, pipelineApi } from "@/lib/api";
 import type { MonitoringKubernetesPod } from "@/types";
+import { ChartCaption } from "@/components/charts/chart-stat-row";
+import { chartYDomain, placeholderTimeSeries } from "@/components/charts/chart-display-utils";
 import { cn } from "@/lib/utils";
 const chartCpu = "#0ea5e9";
 const chartMem = "#f97316";
@@ -93,7 +95,13 @@ export default function MonitoringPage() {
     const snap = snapshotQuery.data;
     const phaseChartData = useMemo(() => {
         if (!snap) {
-            return [];
+            return [
+                { name: "Running", value: 0, fill: phaseColors.Running },
+                { name: "Pending", value: 0, fill: phaseColors.Pending },
+                { name: "Failed", value: 0, fill: phaseColors.Failed },
+                { name: "Succeeded", value: 0, fill: phaseColors.Succeeded },
+                { name: "Other", value: 0, fill: phaseColors.Other }
+            ];
         }
         const { summary } = snap.kubernetes;
         return [
@@ -102,18 +110,25 @@ export default function MonitoringPage() {
             { name: "Failed", value: summary.failed, fill: phaseColors.Failed },
             { name: "Succeeded", value: summary.succeeded, fill: phaseColors.Succeeded },
             { name: "Other", value: summary.other, fill: phaseColors.Other }
-        ].filter((row) => row.value > 0);
+        ];
     }, [snap]);
-    const cpuChartData = useMemo(() => (snap?.prometheus.cpuSeries ?? []).map((p) => ({
-        t: formatChartTime(p.ts),
-        ts: p.ts,
-        pct: Math.round(p.value * 10) / 10
-    })), [snap?.prometheus.cpuSeries]);
-    const memChartData = useMemo(() => (snap?.prometheus.memorySeries ?? []).map((p) => ({
-        t: formatChartTime(p.ts),
-        ts: p.ts,
-        pct: Math.round(p.value * 10) / 10
-    })), [snap?.prometheus.memorySeries]);
+    const phaseChartMax = Math.max(...phaseChartData.map((row) => row.value), 0);
+    const cpuChartData = useMemo(() => {
+        const rows = (snap?.prometheus.cpuSeries ?? []).map((p) => ({
+            t: formatChartTime(p.ts),
+            ts: p.ts,
+            pct: Math.round(p.value * 10) / 10
+        }));
+        return rows.length > 0 ? rows : placeholderTimeSeries();
+    }, [snap?.prometheus.cpuSeries]);
+    const memChartData = useMemo(() => {
+        const rows = (snap?.prometheus.memorySeries ?? []).map((p) => ({
+            t: formatChartTime(p.ts),
+            ts: p.ts,
+            pct: Math.round(p.value * 10) / 10
+        }));
+        return rows.length > 0 ? rows : placeholderTimeSeries();
+    }, [snap?.prometheus.memorySeries]);
     function openPodLogs(pod: MonitoringKubernetesPod) {
         const first = pod.containers[0] ?? "";
         setSelectedPod({
@@ -260,9 +275,7 @@ export default function MonitoringPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[260px]">
-                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : cpuChartData.length === 0 ? (<p className="text-sm text-muted">
-                    {snap.prometheus.configured ? "No time-series points returned (empty result or short history)." : "Set PROMETHEUS_BASE_URL to chart live usage."}
-                  </p>) : (<ResponsiveContainer width="100%" height="100%">
+                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : (<ResponsiveContainer width="100%" height="100%">
                     <LineChart data={cpuChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
                       <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
@@ -271,6 +284,9 @@ export default function MonitoringPage() {
                       <Line type="monotone" dataKey="pct" name="CPU %" stroke={chartCpu} strokeWidth={2} dot={false}/>
                     </LineChart>
                   </ResponsiveContainer>)}
+                {!snap.prometheus.rangeError && (snap?.prometheus.cpuSeries ?? []).length === 0 ? (<ChartCaption>
+                    {snap.prometheus.configured ? "No CPU points yet — showing zero baseline." : "Set PROMETHEUS_BASE_URL for live CPU trends."}
+                  </ChartCaption>) : null}
               </CardContent>
         </Card>
         <Card>
@@ -283,9 +299,7 @@ export default function MonitoringPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[260px]">
-                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : memChartData.length === 0 ? (<p className="text-sm text-muted">
-                    {snap.prometheus.configured ? "No memory series returned." : "Connect Prometheus for trend data."}
-                  </p>) : (<ResponsiveContainer width="100%" height="100%">
+                {snap.prometheus.rangeError ? (<p className="text-sm text-warning">{snap.prometheus.rangeError}</p>) : (<ResponsiveContainer width="100%" height="100%">
                     <LineChart data={memChartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
                       <XAxis dataKey="t" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"/>
@@ -294,6 +308,9 @@ export default function MonitoringPage() {
                       <Line type="monotone" dataKey="pct" name="Memory %" stroke={chartMem} strokeWidth={2} dot={false}/>
                     </LineChart>
                   </ResponsiveContainer>)}
+                {!snap.prometheus.rangeError && (snap?.prometheus.memorySeries ?? []).length === 0 ? (<ChartCaption>
+                    {snap.prometheus.configured ? "No memory points yet — showing zero baseline." : "Connect Prometheus for memory trends."}
+                  </ChartCaption>) : null}
               </CardContent>
             </Card>
           </section>
@@ -311,17 +328,33 @@ export default function MonitoringPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[280px]">
-                {snap.kubernetes.error ? (<p className="text-sm text-warning">{snap.kubernetes.error}</p>) : !snap.kubernetes.configured ? (<p className="text-sm text-muted">Kubernetes API is disabled or unavailable. Pod phases and logs from the cluster cannot load.</p>) : phaseChartData.length === 0 ? (<p className="text-sm text-muted">No pods in this namespace.</p>) : (<ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={phaseChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
-                      <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }}/>
-                      <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11 }}/>
-                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}/>
-                      <Bar dataKey="value" radius={[0, 6, 6, 0]}>
-                        {phaseChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>)}
+                {snap.kubernetes.error ? (<p className="text-sm text-warning">{snap.kubernetes.error}</p>) : !snap.kubernetes.configured ? (<>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={phaseChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
+                        <XAxis type="number" allowDecimals={false} domain={chartYDomain([phaseChartMax])} tick={{ fontSize: 11 }}/>
+                        <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11 }}/>
+                        <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}/>
+                        <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                          {phaseChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    <ChartCaption>Kubernetes API unavailable — pod phase counts shown as 0.</ChartCaption>
+                  </>) : (<>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={phaseChartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false}/>
+                        <XAxis type="number" allowDecimals={false} domain={chartYDomain([phaseChartMax])} tick={{ fontSize: 11 }}/>
+                        <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11 }}/>
+                        <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}/>
+                        <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                          {phaseChartData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    {phaseChartMax === 0 ? (<ChartCaption>No pods in this namespace — all phases are 0.</ChartCaption>) : null}
+                  </>)}
               </CardContent>
             </Card>
             <Card className="xl:col-span-2">

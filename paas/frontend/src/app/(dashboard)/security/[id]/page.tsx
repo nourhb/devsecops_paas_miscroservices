@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartCaption, ChartStatRow } from "@/components/charts/chart-stat-row";
+import { CHART_COLORS, chartYDomain, pieRowsForDisplay, sumSeverityCounts } from "@/components/charts/chart-display-utils";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { projectApi, securityApi } from "@/lib/api";
 import { queryHttpMessage } from "@/lib/query-http-message";
@@ -29,6 +31,36 @@ function probeBadgeVariant(status: SecurityIntegrationProbeStatus): "success" | 
         return "warning";
     }
     return "outline";
+}
+function sonarGateColor(status: string): string {
+    if (status === "PASSED") {
+        return CHART_COLORS.success;
+    }
+    if (status === "FAILED") {
+        return CHART_COLORS.danger;
+    }
+    if (status === "SKIPPED") {
+        return CHART_COLORS.warning;
+    }
+    return CHART_COLORS.muted;
+}
+function severityChartData(dt: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+}, trivy: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+}) {
+    return [
+        { severity: "Critical", dt: dt.critical, trivy: trivy.critical },
+        { severity: "High", dt: dt.high, trivy: trivy.high },
+        { severity: "Medium", dt: dt.medium, trivy: trivy.medium },
+        { severity: "Low", dt: dt.low, trivy: trivy.low }
+    ];
 }
 export default function SecurityPage() {
     const params = useParams<{
@@ -92,6 +124,11 @@ export default function SecurityPage() {
       </Card>
     </div>);
     }
+    const dtTotal = sumSeverityCounts(data.dependencyTrack);
+    const trivyTotal = sumSeverityCounts(data.trivy);
+    const sonarPieData = pieRowsForDisplay([
+        { name: `Gate: ${data.qualityGateStatus}`, value: data.qualityGateStatus === "UNKNOWN" ? 0 : 1, fill: sonarGateColor(data.qualityGateStatus) }
+    ], `Gate: ${data.qualityGateStatus}`);
     const pipeline = data.pipelineVerification;
     const buildCtx = data.buildContext;
     const deployFailed = (buildCtx?.deploymentStatus || "").toUpperCase() === "FAILED";
@@ -101,7 +138,11 @@ export default function SecurityPage() {
           Security Overview: {displayName}
         </h2>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={data.qualityGateStatus === "PASSED" ? "success" : data.qualityGateStatus === "UNKNOWN" ? "outline" : "danger"}>
+          <Badge variant={data.qualityGateStatus === "PASSED"
+            ? "success"
+            : data.qualityGateStatus === "UNKNOWN" || data.qualityGateStatus === "SKIPPED"
+                ? "outline"
+                : "danger"}>
             Sonar Quality Gate: {data.qualityGateStatus}
           </Badge>
         </div>
@@ -212,29 +253,28 @@ export default function SecurityPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {data.qualityGateStatus === "UNKNOWN" ? (<div className="flex h-[180px] flex-col items-center justify-center gap-2 text-center text-sm text-muted">
-                <p className="font-medium text-foreground">No quality gate result</p>
-                <p className="max-w-sm text-xs">Sonar Step 5 was skipped or did not finish. Set SONAR_HOST_URL + SONAR_TOKEN on Jenkins, then run a new deploy.</p>
-              </div>) : (<>
+            <ChartStatRow items={[
+              { label: "Gate status", value: data.qualityGateStatus },
+              { label: "Score impact", value: data.qualityGateStatus === "PASSED" ? "OK" : data.qualityGateStatus === "UNKNOWN" ? "Pending" : "Risk" }
+            ]}/>
             <div className="h-[180px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={[
-            {
-                name: `Gate: ${data.qualityGateStatus}`,
-                value: 1
-            }
-        ]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={72}>
-                    <Cell fill={data.qualityGateStatus === "PASSED"
-            ? "#22c55e"
-            : data.qualityGateStatus === "UNKNOWN" ? "#64748b" : "#ef4444"}/>
+                  <Pie data={sonarPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={72}>
+                    {sonarPieData.map((entry) => <Cell key={entry.name} fill={entry.fill}/>)}
                   </Pie>
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                  <Legend wrapperStyle={{ fontSize: 12 }}/>
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <p className="text-center text-xs text-muted">Value comes from SonarQube quality-gate API for this project key.</p>
-            </>)}
+            <ChartCaption>
+              {data.qualityGateStatus === "UNKNOWN"
+                ? "Gate pending — run full deploy with SONAR_HOST_URL + SONAR_TOKEN."
+                : data.qualityGateStatus === "SKIPPED"
+                    ? "Step 5 skipped (fast pipeline or missing Sonar config)."
+                    : "Live quality gate for this project key."}
+            </ChartCaption>
           </CardContent>
         </Card>
         <Card>
@@ -243,46 +283,31 @@ export default function SecurityPage() {
               Dependency-Track vs Trivy (severity counts)
             </CardTitle>
           </CardHeader>
-          <CardContent className="h-[220px]">
-            {severityTotals === 0 ? (<div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-muted">
-                <p className="font-medium text-foreground">No vulnerabilities counted</p>
-                <p className="text-xs">
-                  {data.dependencyTrackProjectUuid
-                    ? "Dependency-Track is linked and Trivy/Harbor scan returned 0 findings — a clean bill of health."
-                    : "Run a full Jenkins build (Step 4 SCA + Harbor image scan). If Step 4 shows OK in verification below, zeros mean a clean scan."}
-                </p>
-              </div>) : (<ResponsiveContainer width="100%" height="100%">
-              <BarChart data={[
-            {
-                severity: "Critical",
-                dt: data.dependencyTrack.critical,
-                trivy: data.trivy.critical
-            },
-            {
-                severity: "High",
-                dt: data.dependencyTrack.high,
-                trivy: data.trivy.high
-            },
-            {
-                severity: "Medium",
-                dt: data.dependencyTrack.medium,
-                trivy: data.trivy.medium
-            },
-            {
-                severity: "Low",
-                dt: data.dependencyTrack.low,
-                trivy: data.trivy.low
-            }
-        ]} margin={{ top: 8, right: 8, left: 8, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
-                <XAxis dataKey="severity" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false}/>
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false}/>
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
-                <Legend wrapperStyle={{ fontSize: 12 }}/>
-                <Bar dataKey="dt" name="Dependency-Track" fill="#0ea5e9" radius={[6, 6, 0, 0]}/>
-                <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
-              </BarChart>
-            </ResponsiveContainer>)}
+          <CardContent>
+            <ChartStatRow items={[
+              { label: "DT total", value: dtTotal },
+              { label: "Trivy total", value: trivyTotal }
+            ]}/>
+            <div className="h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={severityChartData(data.dependencyTrack, data.trivy)} margin={{ top: 8, right: 8, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false}/>
+                  <XAxis dataKey="severity" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false}/>
+                  <YAxis allowDecimals={false} domain={chartYDomain([severityTotals])} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false}/>
+                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}/>
+                  <Legend wrapperStyle={{ fontSize: 12 }}/>
+                  <Bar dataKey="dt" name="Dependency-Track" fill="#0ea5e9" radius={[6, 6, 0, 0]}/>
+                  <Bar dataKey="trivy" name="Trivy" fill="#f97316" radius={[6, 6, 0, 0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <ChartCaption>
+              {severityTotals === 0
+                ? data.dependencyTrackProjectUuid
+                    ? "0 findings — linked Dependency-Track project and Trivy scan are clean."
+                    : "0 counted — run Step 4 SCA + image scan for live SBOM/Trivy data."
+                : `${severityTotals} total findings across both scanners.`}
+            </ChartCaption>
           </CardContent>
         </Card>
         <Card className="xl:col-span-2">
