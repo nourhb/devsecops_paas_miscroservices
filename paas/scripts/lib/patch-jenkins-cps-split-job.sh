@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Patch paas-deploy job config.xml to multi-load CPS wrapper (kubectl only — no Jenkins API).
+# Patch paas-deploy job config.xml to multi-load CPS wrapper, then POST to Jenkins API (reload memory).
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 PAAS_DIR="${JENKINS_PAAS_REMOTE_DIR:-/var/jenkins_home/paas}"
 MARKER="${DT_STAGES_MARKER:-helm-portable-20260620-cps-split}"
@@ -67,6 +69,9 @@ PY
 
 kubectl exec -i -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
   tee "${JOB_CFG}" < /tmp/paas-deploy-config.xml >/dev/null
+
+echo "==> Reload Jenkins in-memory job (disk-only patch is NOT enough for builds)"
+bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh"
 
 kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- sh -c "
   grep -qF '${LOAD_MARKER}' ${JOB_CFG} && echo OK:job-marker

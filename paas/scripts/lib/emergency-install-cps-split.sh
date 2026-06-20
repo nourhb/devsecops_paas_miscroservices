@@ -232,6 +232,9 @@ PY
 kubectl exec -i -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
   tee /var/jenkins_home/jobs/paas-deploy/config.xml < /tmp/paas-deploy-config.xml >/dev/null
 
+echo "==> Reload Jenkins LIVE job (POST config — disk-only is not enough)"
+bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh"
+
 echo ""
 echo "==> Verification (must all print OK)"
 kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- sh -c "

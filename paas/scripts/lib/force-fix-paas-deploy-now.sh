@@ -15,7 +15,7 @@ echo "=============================================="
 echo " FORCE FIX paas-deploy (CPS split + anti-revert)"
 echo "=============================================="
 
-echo "==> 1/4 Install CPS bundles + patch job config (kubectl — no Jenkins API)"
+echo "==> 1/4 Install CPS bundles + patch + reload Jenkins LIVE job"
 bash "${SCRIPT_DIR}/fix-paas-deploy-stages-load.sh"
 
 echo "==> 2/4 Disable inline Jenkinsfile sync (stops UI from overwriting job)"
@@ -37,15 +37,8 @@ else
   echo "==> 3/4 SKIP env sync (no paas-frontend-env secret)"
 fi
 
-echo "==> 4/4 Verify Jenkins job (must NOT show ${OLD_MARKER})"
-CFG_MARKER="$(kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
-  grep -o 'paas-deploy-stages-load-[0-9a-z-]*' /var/jenkins_home/jobs/paas-deploy/config.xml 2>/dev/null | head -1 || true)"
-
-if [[ "${CFG_MARKER}" != "${CPS_MARKER}" ]]; then
-  echo "FAIL: job marker='${CFG_MARKER:-<empty>}' expected '${CPS_MARKER}'" >&2
-  echo "Re-run: bash paas/scripts/lib/patch-jenkins-cps-split-job.sh" >&2
-  exit 1
-fi
+echo "==> 4/4 Verify Jenkins LIVE job via API (builds use memory, not disk)"
+bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh"
 
 kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- sh -c "
   grep -qF 'load paasLoadH1' /var/jenkins_home/jobs/paas-deploy/config.xml && echo OK:multi-load
