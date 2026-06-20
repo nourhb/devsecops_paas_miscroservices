@@ -27,10 +27,16 @@ bundle = os.environ["MARKER"]
 paas_dir = os.environ["PAAS_DIR"]
 p = Path("/tmp/paas-deploy-config.xml")
 t = p.read_text(encoding="utf-8")
-if marker in t and "load paasStagesP3" in t and "runPaasDeploy()" in t:
-    print(f"OK: job config on disk already has {marker} + 7-file multi-load + runPaasDeploy()")
+needs_patch = (
+    "load paasStagesP3" not in t
+    or "load paasDeployStagesPath" in t
+    or marker not in t
+)
+if needs_patch:
+    print("==> rewriting job wrapper to 7-file CPS load bundle")
 else:
-    new_script = f"""def paasLoadH1 = '{paas_dir}/paas-deploy-load-h1.groovy'
+    print(f"OK: job config already has {marker} + 7-file load (refreshing anyway)")
+new_script = f"""def paasLoadH1 = '{paas_dir}/paas-deploy-load-h1.groovy'
 def paasLoadH2 = '{paas_dir}/paas-deploy-load-h2.groovy'
 def paasLoadH3 = '{paas_dir}/paas-deploy-load-h3.groovy'
 def paasStagesVars = '{paas_dir}/paas-deploy-stages-vars.groovy'
@@ -65,16 +71,16 @@ if (!agentLabel || agentLabel == 'built-in') {{
   node(agentLabel) {{ paasRequireFreshStages() }}
 }}
 """
-    m = re.search(
-        r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>\s*<!\[CDATA\[)([\s\S]*?)(\]\]>\s*</script>)',
-        t,
-        re.I,
-    )
-    if not m:
-        print("ERROR: Pipeline CDATA not found in config.xml", file=sys.stderr)
-        sys.exit(1)
-    p.write_text(t[: m.start(2)] + new_script + t[m.end(2) :], encoding="utf-8")
-    print("OK patched config.xml")
+m = re.search(
+    r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>\s*<!\[CDATA\[)([\s\S]*?)(\]\]>\s*</script>)',
+    t,
+    re.I,
+)
+if not m:
+    print("ERROR: Pipeline CDATA not found in config.xml", file=sys.stderr)
+    sys.exit(1)
+p.write_text(t[: m.start(2)] + new_script + t[m.end(2) :], encoding="utf-8")
+print("OK patched config.xml (7-file wrapper)")
 PY
 
 kubectl exec -i -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
