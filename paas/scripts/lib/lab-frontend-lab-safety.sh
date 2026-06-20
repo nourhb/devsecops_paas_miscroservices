@@ -123,11 +123,11 @@ apply_lab_frontend_safety() {
   stop_frontend_storm_if_needed 3
 
   local patch_json
-  patch_json="$(python3 - "${img}" "${pull_policy}" "${replicas}" "${LAB_FRONTEND_NODE}" <<'PY'
+  patch_json="$(python3 - "${replicas}" "${LAB_FRONTEND_NODE}" <<'PY'
 import json
 import sys
 
-img, pull_policy, replicas, node = sys.argv[1:5]
+replicas, node = sys.argv[1:3]
 print(json.dumps({
     "spec": {
         "paused": False,
@@ -143,11 +143,6 @@ print(json.dumps({
                     "operator": "Exists",
                     "effect": "NoSchedule",
                 }],
-                "containers": [{
-                    "name": "frontend",
-                    "image": img,
-                    "imagePullPolicy": pull_policy,
-                }],
             }
         },
     }
@@ -156,6 +151,21 @@ PY
 )"
 
   kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "${patch_json}" || return 1
+  kubectl set image deployment/frontend -n "${PAAS_NS}" "frontend=${img}" --request-timeout=60s || return 1
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=json --request-timeout=60s -p "$(cat <<PATCH
+[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "${pull_policy}"}
+]
+PATCH
+)" 2>/dev/null || true
+
+  local has_envfrom
+  has_envfrom="$(kubectl get deployment frontend -n "${PAAS_NS}" \
+    -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].secretRef.name}' 2>/dev/null || true)"
+  if [[ "${has_envfrom}" != "paas-frontend-env" ]]; then
+    echo "WARN: frontend missing envFrom paas-frontend-env — re-attaching (prevents UI 500)"
+    PAAS_SKIP_ROLLOUT=1 bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || return 1
+  fi
 
   echo "OK: frontend safety — Recreate, replicas=${replicas}, node=${LAB_FRONTEND_NODE}, pull=${pull_policy}, image=${img}"
 }
