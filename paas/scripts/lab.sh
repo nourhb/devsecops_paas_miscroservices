@@ -13,6 +13,8 @@ usage() {
   echo "  health    Quick health check"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
+  echo "  probe-k8s     Diagnose Kubernetes API from frontend pod (UI cluster pages)"
+  echo "  fix-k8s-ui    Strip bad KUBE_CONFIG_PATH + sync env (+ REBUILD=1 for image fix)"
   echo "  monitoring-disk  Safe disk cleanup (no docker prune -af) + stale pods"
   echo "                   Use: monitoring-disk quick — skip slow cluster-wide image pulls"
   echo "  guard         Full lab hardening check (disk, images, Prometheus, health)"
@@ -68,6 +70,10 @@ case "$cmd" in
     bash "$LIB/lab-prometheus-recover.sh" ;;
   probe-prometheus)
     bash "$LIB/probe-prometheus-lab.sh" ;;
+  probe-k8s|k8s-probe)
+    bash "$LIB/probe-k8s-lab.sh" ;;
+  fix-k8s-ui|k8s-ui)
+    bash "$LIB/fix-k8s-ui-lab.sh" ;;
   monitoring-disk|disk-heal)
     bash "$LIB/lab-monitoring-disk-heal.sh" "${2:-}" ;;
   disk-emergency|free-disk)

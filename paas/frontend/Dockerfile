@@ -27,6 +27,7 @@ RUN addgroup --system --gid 1001 nodejs \
     && chown root:root /usr/local/bin/cosign
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@kubernetes ./node_modules/@kubernetes
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-jenkinsfile-embedded/paas/jenkins/Jenkinsfile.paas-deploy
 COPY --chown=nextjs:nodejs jenkins/Jenkinsfile.paas-deploy /app/paas-bundled/paas/jenkins/Jenkinsfile.paas-deploy

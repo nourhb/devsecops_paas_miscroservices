@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
+import { getKubernetesLabDiagnostics } from "@/server/integrations/kubernetes-client";
 import { getDeployPipelineReadiness } from "@/server/services/deploy-pipeline-readiness";
 export const runtime = "nodejs";
 export async function GET() {
@@ -36,6 +37,7 @@ export async function GET() {
         requiredConfig: {
             appBaseUrl: Boolean(env.APP_BASE_URL.trim()),
             jwtConfigured: env.JWT_SECRET !== "change-this-dev-secret-to-32-char-min"
-        }
+        },
+        kubernetes: getKubernetesLabDiagnostics()
     }, { status: ok ? 200 : 503 });
 }

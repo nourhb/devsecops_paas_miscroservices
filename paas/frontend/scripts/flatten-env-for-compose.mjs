@@ -131,6 +131,10 @@ function main() {
         byKey.set("KUBERNETES_ENABLED", "true");
         console.warn("WARN: KUBERNETES_ENABLED defaulted to true for lab");
     }
+    if (labNodeIp && envTrim(byKey, "KUBERNETES_ENABLED") === "true" && envTrim(byKey, "KUBE_CONFIG_PATH")) {
+        byKey.delete("KUBE_CONFIG_PATH");
+        console.warn("WARN: KUBE_CONFIG_PATH removed for in-cluster lab (uses serviceAccount token)");
+    }
     const JENKINS_NODEPORT = 30090;
     const isInClusterJenkinsUrl = (url) => {
         const u = String(url || "").trim();
