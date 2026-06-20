@@ -23,8 +23,9 @@ usage() {
   echo "  env-quick Sync env only (skip Dependency-Track — use when k8s API is slow)"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  jenkins-stages  Render + install CPS-split load bundles (no frontend rebuild)"
-  echo "  fix-paas-deploy Fix MethodTooLarge: CPS bundles + multi-load job wrapper"
+  echo "  fix-paas-deploy Fix MethodTooLarge: CPS bundles + API job wrapper (break loop)"
   echo "  force-fix-paas-deploy  fix-paas-deploy + disable UI job revert + restart frontend"
+  echo "  break-paas-deploy-loop  Same as fix-paas-deploy (explicit name)"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
@@ -92,7 +93,7 @@ case "$cmd" in
     LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   jenkins-stages|stages)
     bash "$LIB/install-jenkins-stages-file.sh" ;;
-  fix-paas-deploy|cps-split|fix-method-too-large)
+  fix-paas-deploy|cps-split|fix-method-too-large|break-paas-deploy-loop)
     bash "$LIB/fix-paas-deploy-stages-load.sh" ;;
   force-fix-paas-deploy|force-fix)
     bash "$LIB/force-fix-paas-deploy-now.sh" ;;
