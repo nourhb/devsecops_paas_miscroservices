@@ -70,6 +70,20 @@ safe_docker_prune() {
 safe_crictl_prune() {
   echo "==> Ensure workload images exist before containerd prune"
   ensure_protected_images_local || true
+  # Never prune lab frontend builds (recovery + latest local-*).
+  if command -v docker >/dev/null 2>&1; then
+    for tag in recovery; do
+      img="docker.io/library/paas-frontend:${tag}"
+      if docker image inspect "${img}" >/dev/null 2>&1; then
+        docker save "${img}" | sudo k3s ctr -n k8s.io images import - >/dev/null 2>&1 || true
+      fi
+    done
+    local latest_local
+    latest_local="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'paas-frontend:local-' | sort | tail -1 || true)"
+    if [[ -n "${latest_local}" ]] && docker image inspect "${latest_local}" >/dev/null 2>&1; then
+      docker save "${latest_local}" | sudo k3s ctr -n k8s.io images import - >/dev/null 2>&1 || true
+    fi
+  fi
   if command -v k3s >/dev/null 2>&1; then
     echo "==> k3s crictl rmi --prune (unused images only)"
     sudo k3s crictl rmi --prune 2>/dev/null || true

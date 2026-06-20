@@ -40,6 +40,7 @@ usage() {
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
+  echo "  frontend-rollout  Roll out existing local/recovery image (no rebuild)"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
   echo "  heal      Patch GitOps values + Argo sync + rollout"
@@ -135,6 +136,8 @@ case "$cmd" in
     bash "$LIB/lab-worker2-heal.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
+  frontend-rollout|rollout-frontend)
+    bash "$LIB/rollout-paas-frontend-recovery.sh" ;;
   repair)
     bash "$LIB/repair-gitops-app-lab.sh" "${2:?usage: lab.sh repair <project-slug> [tag]}" "${3:-655}" ;;
   fix-gitops)

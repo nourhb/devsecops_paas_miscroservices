@@ -118,33 +118,40 @@ apply_lab_frontend_safety() {
 
   stop_frontend_storm_if_needed 3
 
-  kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "$(cat <<PATCH
-{
-  "spec": {
-    "paused": false,
-    "revisionHistoryLimit": 0,
-    "replicas": ${replicas},
-    "strategy": {"type": "Recreate"},
-    "progressDeadlineSeconds": 600,
-    "template": {
-      "spec": {
-        "nodeSelector": {"kubernetes.io/hostname": "${LAB_FRONTEND_NODE}"},
-        "tolerations": [{
-          "key": "node.kubernetes.io/disk-pressure",
-          "operator": "Exists",
-          "effect": "NoSchedule"
-        }],
-        "containers": [{
-          "name": "frontend",
-          "image": "${img}",
-          "imagePullPolicy": "${pull_policy}"
-        }]
-      }
+  local patch_json
+  patch_json="$(python3 - "${img}" "${pull_policy}" "${replicas}" "${LAB_FRONTEND_NODE}" <<'PY'
+import json
+import sys
+
+img, pull_policy, replicas, node = sys.argv[1:5]
+print(json.dumps({
+    "spec": {
+        "paused": False,
+        "revisionHistoryLimit": 0,
+        "replicas": int(replicas),
+        "strategy": {"type": "Recreate"},
+        "progressDeadlineSeconds": 600,
+        "template": {
+            "spec": {
+                "nodeSelector": {"kubernetes.io/hostname": node},
+                "tolerations": [{
+                    "key": "node.kubernetes.io/disk-pressure",
+                    "operator": "Exists",
+                    "effect": "NoSchedule",
+                }],
+                "containers": [{
+                    "name": "frontend",
+                    "image": img,
+                    "imagePullPolicy": pull_policy,
+                }],
+            }
+        },
     }
-  }
-}
-PATCH
-)" || return 1
+}))
+PY
+)"
+
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "${patch_json}" || return 1
 
   echo "OK: frontend safety — Recreate, replicas=${replicas}, node=${LAB_FRONTEND_NODE}, pull=${pull_policy}, image=${img}"
 }
