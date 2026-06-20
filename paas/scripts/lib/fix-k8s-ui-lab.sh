@@ -9,13 +9,24 @@ NODE_IP="${NODE_IP:-192.168.56.129}"
 PAAS_PORT="${PAAS_PORT:-30100}"
 REBUILD="${REBUILD:-0}"
 
+strip_kube_config_path() {
+  local f="$1"
+  [[ -f "${f}" ]] || return 0
+  if grep -qE '^KUBE_CONFIG_PATH=' "${f}"; then
+    sed -i '/^KUBE_CONFIG_PATH=/d' "${f}"
+    echo "==> Removed KUBE_CONFIG_PATH from ${f}"
+  fi
+}
+
 echo "==> fix-k8s-ui-lab"
 
+# compose regenerates docker-compose.env from .env — strip both sources
+strip_kube_config_path "${REPO_ROOT}/paas/frontend/.env"
+strip_kube_config_path "${ENV_FILE}"
+bash "${SCRIPT_DIR}/compose-paas-frontend-env.sh" 2>/dev/null || true
+strip_kube_config_path "${ENV_FILE}"
+
 if [[ -f "${ENV_FILE}" ]]; then
-  if grep -qE '^KUBE_CONFIG_PATH=' "${ENV_FILE}"; then
-    echo "==> Removing KUBE_CONFIG_PATH from ${ENV_FILE} (breaks in-cluster API client)"
-    sed -i '/^KUBE_CONFIG_PATH=/d' "${ENV_FILE}"
-  fi
   if ! grep -qE '^KUBERNETES_ENABLED=true' "${ENV_FILE}"; then
     echo "KUBERNETES_ENABLED=true" >> "${ENV_FILE}"
     echo "==> Set KUBERNETES_ENABLED=true"
