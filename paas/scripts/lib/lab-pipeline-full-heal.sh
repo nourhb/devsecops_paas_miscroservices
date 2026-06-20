@@ -70,10 +70,10 @@ verify_twelve_stages_on_jenkins() {
   if kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
     grep -qF 'stage("Step 12 —' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
     && kubectl exec -n "${JENKINS_NS}" deploy/jenkins --request-timeout=45s -- \
-    grep -qF 'helm-portable-20260619' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
-    ok "Jenkins stages file has Step 12 + helm-portable-20260619 marker (June 17 layout)"
+    grep -qF 'helm-portable-20260620-cps-split' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
+    ok "Jenkins stages file has Step 12 + CPS split marker"
   else
-    fail "Jenkins stages file stale — run: bash paas/scripts/lab.sh rollback-june17"
+    fail "Jenkins stages file stale — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   fi
 }
 

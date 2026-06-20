@@ -96,7 +96,7 @@ const envSchema = z.object({
 
     JENKINS_NUM_EXECUTORS: z.coerce.number().int().min(1).max(64).default(8),
     JENKINS_HTTP_TIMEOUT_MS: z.coerce.number().int().min(5000).default(120000),
-    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("true"),
+    JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER: z.enum(["true", "false"]).default("false"),
     JENKINSFILE_SYNC_RAW_URL: z.string().default(""),
     JENKINS_PAAS_FAST_PIPELINE: z.enum(["true", "false"]).default("false"),
 

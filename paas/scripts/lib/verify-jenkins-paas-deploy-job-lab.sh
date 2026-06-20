@@ -207,9 +207,12 @@ if [[ -z "${CFG}" ]]; then
   exit 1
 fi
 REMOTE_CHECK_TEXT="${CFG}"
-if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
-  echo "OK: Jenkins job uses June 17 inline load() layout (build #756 / #778 era)"
-  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+if echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260620-cps-split' \
+  && echo "${CFG}" | grep -qF 'load paasLoadH1'; then
+  echo "OK: Jenkins job uses CPS multi-load layout (20260620-cps-split)"
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
+  echo "FAIL: Jenkins job uses obsolete single-load layout (20260617) — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
+  exit 1
 elif echo "${CFG}" | grep -qF 'paas.paasDeployInit()' || echo "${CFG}" | grep -qF 'paas.runPaasStep12()'; then
   echo "FAIL: Jenkins job uses broken split/closure layout — run: bash paas/scripts/lab.sh rollback-june17"
   exit 1
@@ -217,11 +220,12 @@ elif echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF
   echo "OK: Jenkins job uses monolithic runPaasDeploy() layout"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paasDeployInit()'; then
-  echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh jenkins"
+  echo "FAIL: Jenkins job still uses broken Blue Ocean split layout — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   exit 1
-elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617'; then
-  echo "OK: Jenkins job uses June 17 inline load() layout (build #756 / #778 era)"
-  REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
+elif echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617' \
+  || (echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && ! echo "${CFG}" | grep -qF 'load paasLoadH1'); then
+  echo "FAIL: Jenkins job uses obsolete single-load layout — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
+  exit 1
 fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
   echo "FAIL: Jenkins still has OLD Step 6 (npx next build --no-lint in crane path)"
@@ -236,7 +240,7 @@ if jenkins_job_has_broken_mutate "${CFG}"; then
 fi
 if jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}"; then
   echo "OK: Jenkins job has Step 6 mutate fix (start-paas.sh)"
-elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath'; then
+elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'load paasLoadH1'; then
   JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
   JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
   if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- sh -c \

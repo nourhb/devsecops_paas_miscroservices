@@ -24,6 +24,7 @@ usage() {
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  jenkins-stages  Render + install CPS-split load bundles (no frontend rebuild)"
   echo "  fix-paas-deploy Fix MethodTooLarge: CPS bundles + multi-load job wrapper"
+  echo "  force-fix-paas-deploy  fix-paas-deploy + disable UI job revert + restart frontend"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
@@ -93,6 +94,8 @@ case "$cmd" in
     bash "$LIB/install-jenkins-stages-file.sh" ;;
   fix-paas-deploy|cps-split|fix-method-too-large)
     bash "$LIB/fix-paas-deploy-stages-load.sh" ;;
+  force-fix-paas-deploy|force-fix)
+    bash "$LIB/force-fix-paas-deploy-now.sh" ;;
   jenkins-tools|agent-tools)
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
   sonarqube|sonar-heal|sonar-recover)
