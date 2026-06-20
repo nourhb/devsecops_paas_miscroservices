@@ -26,6 +26,13 @@ echo "==> Source image: ${SRC}"
 docker tag "${SRC}" "${RECOVERY}"
 import_docker_image_to_k3s "${RECOVERY}" || true
 
+# Fix deployment if a prior rollout wrote ctr import noise into the image field.
+CURRENT="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+if [[ "${CURRENT}" != "${RECOVERY}" ]]; then
+  echo "==> Reset frontend image (was: ${CURRENT})"
+  kubectl set image deployment/frontend -n "${PAAS_NS}" "frontend=${RECOVERY}" --request-timeout=60s
+fi
+
 apply_lab_frontend_safety "${RECOVERY}" 1
 kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
