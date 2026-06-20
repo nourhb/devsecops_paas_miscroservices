@@ -22,7 +22,8 @@ usage() {
   echo "  env       Sync docker-compose.env to the frontend pod"
   echo "  env-quick Sync env only (skip Dependency-Track — use when k8s API is slow)"
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
-  echo "  jenkins-stages  Render + install paas-deploy-stages.groovy (no frontend rebuild)"
+  echo "  jenkins-stages  Render + install CPS-split load bundles (no frontend rebuild)"
+  echo "  fix-paas-deploy Fix MethodTooLarge: CPS bundles + multi-load job wrapper"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
@@ -90,6 +91,8 @@ case "$cmd" in
     LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   jenkins-stages|stages)
     bash "$LIB/install-jenkins-stages-file.sh" ;;
+  fix-paas-deploy|cps-split|fix-method-too-large)
+    bash "$LIB/fix-paas-deploy-stages-load.sh" ;;
   jenkins-tools|agent-tools)
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
   sonarqube|sonar-heal|sonar-recover)
