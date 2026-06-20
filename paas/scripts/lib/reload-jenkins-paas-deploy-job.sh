@@ -81,6 +81,8 @@ def live_cfg() -> tuple[int, str]:
 
 def marker_ok(body: str) -> bool:
     m = re.search(r"paas-deploy-stages-load-[0-9a-z-]+", body)
+    if "load paasDeployStagesPath" in body:
+        return False
     return bool(m and m.group(0) == want and "load paasStagesP3" in body and "runPaasDeploy()" in body)
 
 if not wait_api():
