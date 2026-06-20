@@ -55,21 +55,6 @@ function buildHeaderBadgeVariant(buildLabel: string): "success" | "warning" | "d
     }
     return "outline";
 }
-function ArgoHealthBadge({ health }: {
-    health: string | undefined;
-}) {
-    const h = (health || "").toLowerCase();
-    if (h === "healthy" || h === "progressing") {
-        return <Badge variant="success">Health: {health ?? "\u2014"}</Badge>;
-    }
-    if (h === "degraded" || h === "missing" || h === "unknown" || h === "suspended") {
-        return <Badge variant="warning">Health: {health ?? "\u2014"}</Badge>;
-    }
-    if (h.includes("fail") || h === "unhealthy") {
-        return <Badge variant="danger">Health: {health ?? "\u2014"}</Badge>;
-    }
-    return <Badge variant="outline">Health: {health ?? "\u2014"}</Badge>;
-}
 export default function PipelinePage() {
     const params = useParams<{
         id: string;
