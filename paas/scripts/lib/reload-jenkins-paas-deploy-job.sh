@@ -140,6 +140,12 @@ if jenkins_live_ok; then
   exit 0
 fi
 
+if [[ "${VERIFY_ONLY:-0}" == "1" ]]; then
+  echo "FAIL: LIVE job config wrong (VERIFY_ONLY — not posting disk config.xml)" >&2
+  echo "  Expected marker=${CPS_MARKER}, load paasStagesP3, NO load paasDeployStagesPath" >&2
+  exit 1
+fi
+
 echo "WARN: live job still wrong — restarting Jenkins (reload config from PVC disk)"
 kubectl rollout restart deploy/jenkins -n "${JENKINS_NS}"
 kubectl rollout status deploy/jenkins -n "${JENKINS_NS}" --timeout=300s

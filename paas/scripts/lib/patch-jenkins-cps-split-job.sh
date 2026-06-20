@@ -71,15 +71,29 @@ if (!agentLabel || agentLabel == 'built-in') {{
   node(agentLabel) {{ paasRequireFreshStages() }}
 }}
 """
-m = re.search(
+cdata_pat = re.compile(
     r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>\s*<!\[CDATA\[)([\s\S]*?)(\]\]>\s*</script>)',
-    t,
     re.I,
 )
+plain_pat = re.compile(
+    r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>)([\s\S]*?)(</script>)',
+    re.I,
+)
+m = cdata_pat.search(t)
+use_cdata = bool(m)
 if not m:
-    print("ERROR: Pipeline CDATA not found in config.xml", file=sys.stderr)
+    m = plain_pat.search(t)
+if not m:
+    print("ERROR: Pipeline script block not found in config.xml — use API path:", file=sys.stderr)
+    print("  set -a; source paas/frontend/docker-compose.env; set +a", file=sys.stderr)
+    print("  python3 paas/scripts/lib/create_jenkins_paas_deploy_job.py --force --force-full", file=sys.stderr)
     sys.exit(1)
-p.write_text(t[: m.start(2)] + new_script + t[m.end(2) :], encoding="utf-8")
+if use_cdata:
+    inner = new_script.replace("]]>", "]]]]><![CDATA[>")
+else:
+    from xml.sax.saxutils import escape
+    inner = escape(new_script)
+p.write_text(t[: m.start(2)] + inner + t[m.end(2) :], encoding="utf-8")
 print("OK patched config.xml (7-file wrapper)")
 PY
 

@@ -121,5 +121,7 @@ done
 verify_remote_bundle "${ns}"
 echo "OK: CPS-split bundle on ${ns}/deploy/jenkins (${DT_MARKER})"
 
-echo "==> Patch paas-deploy job wrapper (multi-load + runPaasDeploy)"
-bash "${SCRIPT_DIR}/patch-jenkins-cps-split-job.sh"
+if [[ "${SKIP_JOB_PATCH:-0}" != "1" ]]; then
+  echo "==> Patch paas-deploy job wrapper (multi-load + runPaasDeploy)"
+  bash "${SCRIPT_DIR}/patch-jenkins-cps-split-job.sh"
+fi
