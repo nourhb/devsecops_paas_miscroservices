@@ -93,6 +93,14 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     const mountRoot = env.PAAS_MONOREPO_ROOT.trim();
     const mounted = Boolean(mountRoot && jenkinsfileRelativePathExists(path.resolve(mountRoot)));
     const root = findMonorepoRoot();
+    const trimmedJob = jobName.trim();
+    const sharedDeployJob = env.JENKINS_DEPLOY_JOB_NAME.trim();
+    if (sharedDeployJob && trimmedJob === sharedDeployJob) {
+        return `[jenkins-sync] Skipped: shared deploy job "${trimmedJob}" uses CPS multi-load wrapper (run: bash paas/scripts/lab.sh force-fix-paas-deploy).`;
+    }
+    if (trimmedJob === "paas-deploy") {
+        return "[jenkins-sync] Skipped: paas-deploy uses CPS multi-load wrapper (run: bash paas/scripts/lab.sh force-fix-paas-deploy).";
+    }
     if (flag === "false") {
         return `[jenkins-sync] Skipped (JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false; mounted Jenkinsfile=${mounted}).`;
     }
@@ -109,7 +117,6 @@ export async function syncInlinePaasDeployJenkinsJobBeforeTrigger(jobName: strin
     if (env.JENKINS_JOB_FOLDER.trim()) {
         return "[jenkins-sync] Skipped: JENKINS_JOB_FOLDER is set (REST sync targets /job/<name> only). Configure folder jobs manually in Jenkins if needed.";
     }
-    const trimmedJob = jobName.trim();
     if (!trimmedJob || trimmedJob.includes("/")) {
         return "[jenkins-sync] Skipped: folder-qualified job name (use manual sync for nested jobs).";
     }
