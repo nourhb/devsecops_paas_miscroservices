@@ -38,7 +38,7 @@ postgres_wait() {
   local timeout_sec="${TIMEOUT_SEC:-600}"
   local deadline=$((SECONDS + timeout_sec))
   echo "==> Waiting for Postgres (max ${timeout_sec}s)…"
-  while (( SECONDS < DEADLINE )); do
+  while (( SECONDS < deadline )); do
     if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
       if kubectl exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas >/dev/null 2>&1; then
         echo "OK: Postgres ready"
