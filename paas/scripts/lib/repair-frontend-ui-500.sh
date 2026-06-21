@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Fix PaaS UI 500 after image-only rollout (restore env secret + probes + postgres).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

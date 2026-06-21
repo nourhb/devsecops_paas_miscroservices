@@ -21,7 +21,6 @@ bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || warn "kyverno webhook
 echo "==> Frontend schedule (master pin + Recreate — prevents worker1 pod storms)"
 if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
-    # shellcheck source=lab-frontend-lab-safety.sh
     source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
     if frontend_storm_active 3; then
       warn "frontend pod storm — stop + safety patch"

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Roll back Jenkins pipeline to last known-good lab state:
-#   17 June 2026 ~14:38 — Jenkins build #756 DEPLOYED (git commit bb1fef3)
-# Everything after 390fb61 (18 June Blue Ocean split) broke the pipeline.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -17,7 +14,7 @@ if [[ "${LAB_ROLLBACK_CONFIRM:-}" != "1" ]]; then
   echo ""
   echo "This restores the Jenkins load() layout that worked on 17 June."
   echo "Prefer CPS split fix (keeps latest pipeline):"
-  echo "  bash paas/scripts/lib/emergency-install-cps-split.sh"
+  echo "  bash paas/scripts/lab.sh fix-paas-deploy"
   echo "Or rollback older Jenkinsfile (June 17, fewer features):"
   echo "  LAB_ROLLBACK_CONFIRM=1 bash paas/scripts/lab.sh rollback-june17"
   echo ""

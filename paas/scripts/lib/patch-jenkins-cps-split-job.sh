@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Patch paas-deploy job config.xml to multi-load CPS wrapper, then POST to Jenkins API (reload memory).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

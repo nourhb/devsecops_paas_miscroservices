@@ -79,7 +79,6 @@ harbor_push_image() {
 
 harbor_push_image "${TARGET_IMAGE}"
 
-# Lab UI always uses recovery tag on master — frontend-force and Never pull depend on it.
 if [[ "${TARGET_IMAGE}" == docker.io/library/paas-frontend:* || "${TARGET_IMAGE}" == paas-frontend:* ]]; then
   docker tag "${TARGET_IMAGE}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
 fi
@@ -95,9 +94,7 @@ if command -v docker >/dev/null 2>&1; then
   fi
 fi
 
-# Storm guard: hundreds of pods on worker1 happens when RollingUpdate + unpinned + missing image.
 if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
-  # shellcheck source=lab-frontend-lab-safety.sh
   source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
   stop_frontend_storm_if_needed 3
 fi

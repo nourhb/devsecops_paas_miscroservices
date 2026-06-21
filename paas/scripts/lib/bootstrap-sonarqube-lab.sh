@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Bypass SonarQube "Update your password" UI loop — change admin password + create analysis token via API.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

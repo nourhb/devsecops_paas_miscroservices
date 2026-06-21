@@ -1,7 +1,6 @@
 import { env } from "@/server/config/env";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 
-/** Lab VM IP for nip.io URLs (`http://{app}.{ip}.nip.io:30659/`). */
 function parseIpv4HostFromUrl(raw: string): string {
     const value = raw.trim();
     if (!value) {

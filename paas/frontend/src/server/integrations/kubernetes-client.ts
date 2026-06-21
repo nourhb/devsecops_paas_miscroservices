@@ -67,7 +67,6 @@ function loadInClusterKubeConfig(kc: k8s.KubeConfig): boolean {
         return true;
     }
     catch {
-        // Standalone bundles sometimes break loadFromCluster — build config from mounted SA files.
     }
     try {
         const port = process.env.KUBERNETES_SERVICE_PORT || "443";
@@ -114,7 +113,6 @@ function getKubeConfig(): k8s.KubeConfig | null {
         const kc = new k8s.KubeConfig();
         const kubePath = env.KUBE_CONFIG_PATH?.trim();
         let loaded = false;
-        // Inside the pod, prefer service-account credentials over a host kubeconfig path.
         if (process.env.KUBERNETES_SERVICE_HOST) {
             loaded = loadInClusterKubeConfig(kc);
         }

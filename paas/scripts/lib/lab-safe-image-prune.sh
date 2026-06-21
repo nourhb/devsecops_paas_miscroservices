@@ -70,7 +70,6 @@ safe_docker_prune() {
 safe_crictl_prune() {
   echo "==> Ensure workload images exist before containerd prune"
   ensure_protected_images_local || true
-  # Never prune lab frontend builds (recovery + latest local-*).
   if command -v docker >/dev/null 2>&1; then
     for tag in recovery; do
       img="docker.io/library/paas-frontend:${tag}"

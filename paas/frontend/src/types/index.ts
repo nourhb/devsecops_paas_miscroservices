@@ -464,7 +464,7 @@ export interface ArgoCdStatus {
     appName: string;
     unreachableReason?: string;
 }
-export type PlatformIntegrationCategoryId = "control-infra" | "security-policy" | "monitoring" | "cicd" | "registry" | "security-scan" | "infra" | "runtimes";
+export type PlatformIntegrationCategoryId = "control-infra" | "security-policy" | "monitoring" | "cicd" | "registry" | "security-scan" | "infra";
 export type PlatformIntegrationKind = "external" | "internal" | "cli";
 export type PlatformIntegrationReachabilityState = "reachable" | "unreachable" | "skipped";
 export interface PlatformIntegrationReachability {

@@ -22,6 +22,8 @@ frontend/playwright-report/
 frontend/blob-report/
 
 jenkins/paas-deploy-job.generated.xml
+jenkins/.render-out/
+/_gen.groovy
 
 *.log
 __pycache__/

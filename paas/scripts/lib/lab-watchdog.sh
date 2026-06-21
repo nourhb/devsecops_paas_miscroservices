@@ -38,17 +38,8 @@ setTimeout(()=>process.exit(1),5000);
 " >/dev/null 2>&1
 }
 
-unpin_frontend_node_selector() {
-  : # removed — lab UI must stay on master (see lab-frontend-lab-safety.sh)
-}
-
-fix_frontend_image_pull_policy() {
-  : # removed — local images use imagePullPolicy Never on master
-}
-
 ensure_frontend_lab_safety() {
   if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
-    # shellcheck source=lab-frontend-lab-safety.sh
     source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
     if frontend_storm_active 3; then
       stop_frontend_storm_if_needed 3

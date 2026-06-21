@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Split oversized CPS hotspots in Jenkinsfile.paas-deploy (dockerlessImagePush 6a/6b/6c)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,7 +13,6 @@ def main() -> int:
         print(f"SKIP: {path.name} already has {MARKER}")
         return 0
     start = text.index("def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {")
-    # Find Step 6a block inside dockerlessImagePush
     s6a = text.index('  println "[image] Step 6a — npm deps', start)
     s6b = text.index('  println "[image] Step 6b — Next.js production build', start)
     verify = text.index("  verifyNextPublicEnvInBuild(appRoot)", start)

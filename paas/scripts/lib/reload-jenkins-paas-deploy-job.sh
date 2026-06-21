@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# POST paas-deploy config.xml to Jenkins REST API (cookie+crumb) so builds use the live job definition.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

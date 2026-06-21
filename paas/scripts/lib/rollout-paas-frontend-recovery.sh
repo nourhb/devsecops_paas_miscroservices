@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Roll out an already-built local paas-frontend image (no docker build).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
@@ -26,7 +25,6 @@ echo "==> Source image: ${SRC}"
 docker tag "${SRC}" "${RECOVERY}"
 import_docker_image_to_k3s "${RECOVERY}" || true
 
-# Fix deployment if a prior rollout wrote ctr import noise into the image field.
 CURRENT="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
 if [[ "${CURRENT}" != "${RECOVERY}" ]]; then
   echo "==> Reset frontend image (was: ${CURRENT})"

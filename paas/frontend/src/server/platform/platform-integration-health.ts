@@ -172,16 +172,10 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             }
             return httpProbe(joinUrl(base, "/artifacts"), {}, { itemId: item.id });
         }
-        if (item.id === "project-security" || item.id === "nodejs-express" || item.id === "python" || item.id === "java-static") {
+        if (item.id === "project-security") {
             return {
                 state: "reachable",
                 message: "In-app"
-            };
-        }
-        if (item.id === "nextjs-ui") {
-            return {
-                state: "reachable",
-                message: "This application"
             };
         }
         return {
