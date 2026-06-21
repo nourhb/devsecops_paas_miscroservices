@@ -1,6 +1,7 @@
 import { env } from "@/server/config/env";
 import { isPlaceholderValue, realValueOrEmpty } from "@/server/config/real-values";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
+import { resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
 import { probeHostIsRemapSource } from "@/server/http/integration-probe-host";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
@@ -327,10 +328,11 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                     message: "Not configured"
                 };
             }
-            if (!realValueOrEmpty(env.ARGOCD_AUTH_TOKEN)) {
+            const authHeaders = await resolveArgoCdAuthHeader();
+            if (!authHeaders) {
                 return {
                     state: "skipped",
-                    message: "Set ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN) to probe the Argo CD API"
+                    message: "Set ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN) or ARGOCD_PASSWORD to probe the Argo CD API"
                 };
             }
             const base = env.ARGOCD_BASE_URL.replace(/\/+$/, "");
@@ -338,9 +340,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             try {
                 const res = await argocdIntegrationFetch(`${base}/api/version`, {
                     method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${env.ARGOCD_AUTH_TOKEN.trim()}`
-                    }
+                    headers: authHeaders
                 });
                 const ms = Date.now() - t0;
                 if (res.ok) {
