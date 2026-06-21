@@ -2059,7 +2059,8 @@ export class ArgoCdClient {
             status: "SYNCED",
             logs: `[argocd] Synced application ${appName}`
         };
-        const configured = Boolean(getArgoCdApiBase() && env.ARGOCD_AUTH_TOKEN.trim());
+        const configured = Boolean(getArgoCdApiBase() &&
+            (env.ARGOCD_AUTH_TOKEN.trim() || env.ARGOCD_PASSWORD.trim()));
         if (!configured) {
             return fetchOrFallback("Argo CD sync", false, "", {}, fallback, async () => fallback);
         }

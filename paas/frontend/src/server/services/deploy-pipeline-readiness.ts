@@ -31,7 +31,8 @@ export function getDeployPipelineReadiness(): DeployPipelineReadiness {
     const jenkinsConfigured = isRealConfigured(env.JENKINS_BASE_URL, env.JENKINS_USERNAME, env.JENKINS_API_TOKEN);
     const tektonConfigured = Boolean(isKubernetesConfigured() && getCustomObjectsApi() && env.TEKTON_NAMESPACE.trim());
     const gitopsConfigured = isRealConfigured(env.GITOPS_REPO_URL, env.GITOPS_REPO_TOKEN);
-    const argocdConfigured = isRealConfigured(env.ARGOCD_BASE_URL, env.ARGOCD_AUTH_TOKEN);
+    const argocdAuthConfigured = Boolean(realValueOrEmpty(env.ARGOCD_AUTH_TOKEN) || realValueOrEmpty(env.ARGOCD_PASSWORD));
+    const argocdConfigured = isRealConfigured(env.ARGOCD_BASE_URL) && argocdAuthConfigured;
     const appsConfigured = Boolean(realValueOrEmpty(env.APPS_PUBLIC_URL_TEMPLATE) ||
         (realValueOrEmpty(env.APPS_PUBLIC_BASE_DOMAIN) && realValueOrEmpty(env.APPS_PUBLIC_URL_SCHEME)));
     const simulationEnabled = allowSimulation();
@@ -46,7 +47,7 @@ export function getDeployPipelineReadiness(): DeployPipelineReadiness {
         missingForFullPipeline.push("GITOPS_REPO_URL, GITOPS_REPO_TOKEN");
     }
     if (!argocdConfigured) {
-        missingForFullPipeline.push("ARGOCD_BASE_URL (or ARGOCD_URL), ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN)");
+        missingForFullPipeline.push("ARGOCD_BASE_URL (or ARGOCD_URL), ARGOCD_AUTH_TOKEN (or ARGOCD_TOKEN) or ARGOCD_PASSWORD");
     }
     if (!appsConfigured) {
         missingForFullPipeline.push("APPS_PUBLIC_BASE_DOMAIN (+ APPS_PUBLIC_URL_SCHEME) or APPS_PUBLIC_URL_TEMPLATE");

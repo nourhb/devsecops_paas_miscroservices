@@ -333,7 +333,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Continuous delivery and GitOps sync status per project.",
                     kind: "external",
                     href: trimUrl(realValueOrEmpty(env.ARGOCD_BASE_URL)) || null,
-                    configured: isRealConfigured(env.ARGOCD_BASE_URL)
+                    configured: isRealConfigured(env.ARGOCD_BASE_URL) &&
+                        Boolean(realValueOrEmpty(env.ARGOCD_AUTH_TOKEN) || realValueOrEmpty(env.ARGOCD_PASSWORD))
                 },
                 {
                     id: "github",

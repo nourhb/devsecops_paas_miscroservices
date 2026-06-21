@@ -228,7 +228,7 @@ function DeployReadinessSummary({ dr }: {
         {
             label: "Argo CD",
             ok: dr.argocd.configured,
-            hint: "ARGOCD_BASE_URL and auth token"
+            hint: "ARGOCD_BASE_URL and auth token or password"
         },
         {
             label: "Public app URLs",
