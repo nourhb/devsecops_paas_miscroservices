@@ -5,7 +5,7 @@ LIB="${DIR}/lib"
 cmd="${1:-}"
 usage() {
   echo "usage: lab.sh <command>"
-  echo "  start     Recover PaaS after reboot"
+  echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"

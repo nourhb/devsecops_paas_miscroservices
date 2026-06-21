@@ -111,7 +111,7 @@ Or `bash paas/scripts/dev.sh` on a dev machine.
 
 | Command | Purpose |
 |---------|---------|
-| `lab.sh start` | Recover after VM reboot (postgres, env, frontend, harbor, kyverno) |
+| `lab.sh start` | Recover after VM reboot (postgres, env, **frontend-force**, health) |
 | `lab.sh env` | Sync `docker-compose.env` → `paas-frontend-env` secret |
 | `lab.sh jenkins` | Push Jenkinsfile to Jenkins + rebuild frontend |
 | `lab.sh frontend` | Rebuild and roll out frontend image only |

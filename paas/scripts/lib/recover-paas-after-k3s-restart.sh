@@ -15,16 +15,6 @@ diagnose_frontend() {
   kubectl get events -n "${PAAS_NS}" --sort-by='.lastTimestamp' 2>/dev/null | tail -25 || true
 }
 
-wait_for_frontend() {
-  local timeout="${1:-600}"
-  if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout="${timeout}s"; then
-    echo "ERROR: frontend rollout failed" >&2
-    diagnose_frontend
-    return 1
-  fi
-  kubectl wait --for=condition=available deployment/frontend -n "${PAAS_NS}" --timeout=120s
-}
-
 echo "==> Wait for k3s API (after VM boot this can take 1–3 min)"
 for i in $(seq 1 36); do
   if timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
@@ -74,14 +64,13 @@ fi
 echo "==> Kyverno require-non-root workload patches (frontend/postgres)"
 bash "${SCRIPT_DIR}/lab-kyverno.sh" workloads || true
 
-echo "==> Start frontend"
-if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
-  kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=1
-  wait_for_frontend 600
-else
+echo "==> Recover frontend on master (recovery image, Recreate, NodePort :30100)"
+if ! kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
   echo "ERROR: deployment/frontend missing in namespace ${PAAS_NS}" >&2
   exit 1
 fi
+kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false 2>/dev/null || true
+bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh"
 
 for i in $(seq 1 12); do
   if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then

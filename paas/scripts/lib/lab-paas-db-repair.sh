@@ -142,18 +142,19 @@ fi
 
 FR="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
 if [[ "${FR}" == "0" ]]; then
-  echo "WARN: frontend scaled to 0 — not restarting (run frontend-heal when postgres stable)"
+  echo "WARN: frontend scaled to 0 — running frontend-force"
+  bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh"
+  if frontend_tcp_probe | grep -q '^OK$'; then
+    echo "OK: frontend pod TCP -> postgres:5432 after frontend-force"
+    exit 0
+  fi
   exit 1
 fi
 
-echo "WARN: TCP probe failed — one frontend restart only"
-kubectl rollout restart deployment/frontend -n "${PAAS_NS}"
-if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=300s; then
-  echo "WARN: frontend rollout slow — check: kubectl get pods -n ${PAAS_NS} -l app=frontend" >&2
-  exit 1
-fi
+echo "WARN: TCP probe failed — frontend-force recover (avoids hung RollingUpdate rollout)"
+bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh"
 if frontend_tcp_probe | grep -q '^OK$'; then
-  echo "OK: frontend pod TCP -> postgres:5432 after restart"
+  echo "OK: frontend pod TCP -> postgres:5432 after frontend-force"
   exit 0
 fi
 echo "ERROR: frontend still cannot reach postgres:5432" >&2
