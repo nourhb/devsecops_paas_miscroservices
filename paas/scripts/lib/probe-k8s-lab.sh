@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Diagnose why PaaS UI shows "Kubernetes API not configured".
 set -euo pipefail
 PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -67,7 +66,7 @@ echo "GET /api/k8s/pods without auth: HTTP ${HTTP} (401/403 expected)"
 
 echo ""
 echo "If saToken=mounted and direct API OK but UI still says not configured:"
-echo "  1. grep KUBE_CONFIG_PATH paas/frontend/docker-compose.env  # must be empty or absent"
+echo "  1. grep KUBE_CONFIG_PATH paas/frontend/docker-compose.env  (must be empty or absent)"
 echo "  2. bash paas/scripts/lab.sh env"
 echo "  3. Rebuild frontend (kubernetes-client fix): bash paas/scripts/lab.sh frontend"
 echo "     Or rollout only if image already rebuilt: bash paas/scripts/lab.sh frontend-rollout"

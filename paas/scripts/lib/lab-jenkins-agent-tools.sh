@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Pre-install portable helm (and verify crane) under JENKINS_HOME on the Jenkins pod.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JENKINS_NS="${JENKINS_NS:-cicd}"

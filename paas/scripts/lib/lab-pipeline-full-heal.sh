@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Restore full 12-step paas-deploy pipeline: env, Jenkins job, Sonar token, integrations.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Heal SonarQube for Jenkins Step 5 — status UP + rules API 200 (admin auth).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -39,7 +38,6 @@ sonar_status_up() {
   curl -fsS -m 15 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'
 }
 
-# Health probe uses admin user — analysis tokens may 401 on /api/rules/search.
 sonar_rules_http_admin() {
   local http pass
   for pass in "${SONAR_ADMIN_PASSWORD}" SonarQube123! admin; do

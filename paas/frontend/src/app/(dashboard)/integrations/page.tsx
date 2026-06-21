@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertCircle, Box, CheckCircle2, Cpu, ExternalLink, GitBranch, Layers, Loader2, Package, RefreshCw, Server, Shield, Wrench } from "lucide-react";
+import { Activity, AlertCircle, Box, CheckCircle2, ExternalLink, GitBranch, Layers, Loader2, Package, RefreshCw, Server, Shield, Wrench } from "lucide-react";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,8 +50,6 @@ function categoryIcon(id: PlatformIntegrationCategory["id"]) {
             return <Shield className={className}/>;
         case "infra":
             return <Layers className={className}/>;
-        case "runtimes":
-            return <Cpu className={className}/>;
         default:
             return <Box className={className}/>;
     }

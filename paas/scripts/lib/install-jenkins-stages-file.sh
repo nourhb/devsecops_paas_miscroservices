@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Render CPS-split paas-deploy load bundles and install into Jenkins (/var/jenkins_home/paas/).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

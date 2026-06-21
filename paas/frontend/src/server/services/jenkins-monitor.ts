@@ -7,7 +7,7 @@ import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageMessage, reco
 
 const activeMonitors = new Set<string>();
 const TRANSIENT_RETRY_MS = 5000;
-const TRANSIENT_RETRY_MAX = 360; // ~30 min — do not mark FAILED while Jenkins may still succeed
+const TRANSIENT_RETRY_MAX = 360;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

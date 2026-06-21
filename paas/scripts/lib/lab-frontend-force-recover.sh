@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Force one frontend pod on master when rollout/describe hang (evicted-pod API storm).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
@@ -28,7 +27,7 @@ import_recovery_image() {
   if [[ -z "${src}" ]]; then
     echo "ERROR: paas-frontend:recovery not in docker — rebuild on master:" >&2
     echo "  docker images | grep paas-frontend" >&2
-    echo "  # or: bash paas/scripts/lab.sh frontend  (long build)" >&2
+    echo "  or: bash paas/scripts/lab.sh frontend  (long build)" >&2
     return 1
   fi
   echo "==> Import ${src} into k3s containerd (fixes ErrImageNeverPull)"
@@ -69,7 +68,7 @@ wait_postgres_ready() {
     sleep 5
   done
   echo "ERROR: postgres not ready — try:" >&2
-  echo "  bash paas/scripts/lab.sh worker2   # PVC is on worker2" >&2
+  echo "  bash paas/scripts/lab.sh worker2   (PVC is on worker2)" >&2
   echo "  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair" >&2
   return 1
 }

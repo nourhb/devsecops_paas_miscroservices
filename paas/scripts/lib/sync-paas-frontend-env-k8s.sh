@@ -144,7 +144,6 @@ else
   if [[ "${CUR_IMAGE}" == *paas-frontend:recovery* || "${CUR_IMAGE}" == docker.io/library/paas-frontend:* ]]; then
     echo "==> Keep master-local image schedule (local image — pin master on env sync)"
     if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
-      # shellcheck source=lab-frontend-lab-safety.sh
       source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
       ensure_lab_frontend_safety 2>/dev/null || true
     fi

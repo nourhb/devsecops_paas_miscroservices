@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Fix "Kubernetes API not configured" in PaaS UI (env + optional rebuild).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -20,7 +19,6 @@ strip_kube_config_path() {
 
 echo "==> fix-k8s-ui-lab"
 
-# compose regenerates docker-compose.env from .env — strip both sources
 strip_kube_config_path "${REPO_ROOT}/paas/frontend/.env"
 strip_kube_config_path "${ENV_FILE}"
 bash "${SCRIPT_DIR}/compose-paas-frontend-env.sh" 2>/dev/null || true

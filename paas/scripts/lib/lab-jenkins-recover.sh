@@ -167,7 +167,7 @@ jenkins_recover() {
   echo "=============================================="
   echo "OK: Jenkins is up. Next:"
   echo "  bash paas/scripts/lab.sh env"
-  echo "  bash paas/scripts/lab.sh jenkins   # sync pipeline job"
+  echo "  bash paas/scripts/lab.sh jenkins   (sync pipeline job)"
   echo "=============================================="
 }
 

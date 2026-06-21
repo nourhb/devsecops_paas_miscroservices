@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: Jenkins up + frontend env + pipeline sync (skip DT rebuild).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

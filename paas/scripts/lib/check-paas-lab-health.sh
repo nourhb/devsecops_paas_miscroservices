@@ -53,5 +53,5 @@ if [[ "${FAIL}" -eq 0 ]]; then
   exit 0
 fi
 echo "run: bash paas/scripts/lab.sh db-repair"
-echo "auto-heal: bash paas/scripts/lab.sh harden   # installs 10-min watchdog cron"
+echo "auto-heal: bash paas/scripts/lab.sh harden   (installs 10-min watchdog cron)"
 exit 1

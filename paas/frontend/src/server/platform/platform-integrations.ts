@@ -530,62 +530,6 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     optional: true
                 }
             ]
-        },
-        {
-            id: "runtimes",
-            title: "Application runtimes & data",
-            description: "Stacks this platform templates and deploys.",
-            items: [
-                {
-                    id: "nextjs-ui",
-                    name: "Next.js (this control plane)",
-                    description: "Current web UI and API routes.",
-                    kind: "internal",
-                    href: null,
-                    internalPath: "/dashboard",
-                    configured: true,
-                    notes: `APP_BASE_URL=${trimUrl(env.APP_BASE_URL) || "(unset)"}`
-                },
-                {
-                    id: "nodejs-express",
-                    name: "Node.js / Express",
-                    description: "Build profile: Node services and APIs.",
-                    kind: "internal",
-                    href: null,
-                    internalPath: "/projects/create",
-                    configured: true,
-                    notes: "Choose language Node when creating a project; pipeline uses the Node build profile."
-                },
-                {
-                    id: "python",
-                    name: "Python",
-                    description: "Build profile: Python applications and workers.",
-                    kind: "internal",
-                    href: null,
-                    internalPath: "/projects/create",
-                    configured: true,
-                    notes: "Choose Python when creating a project."
-                },
-                {
-                    id: "java-static",
-                    name: "Java & static sites",
-                    description: "Additional build profiles supported by templates.",
-                    kind: "internal",
-                    href: null,
-                    internalPath: "/projects/create",
-                    configured: true
-                },
-                {
-                    id: "plsql",
-                    name: "PL/SQL & Oracle data tier",
-                    description: "Use alongside app services; connect via JDBC from your app image.",
-                    kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_ORACLE_APEX_URL") || publicEnv("NEXT_PUBLIC_DB_ADMIN_URL") || null,
-                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_ORACLE_APEX_URL"), publicEnv("NEXT_PUBLIC_DB_ADMIN_URL"))),
-                    optional: true,
-                    notes: "This app uses PostgreSQL for its own data; point PL/SQL consoles or APEX here if you use Oracle in the cluster."
-                }
-            ]
         }
     ];
     return {

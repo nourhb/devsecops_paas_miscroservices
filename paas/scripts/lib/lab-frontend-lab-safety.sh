@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Lab-safe frontend deployment: prevent pod storms (Recreate, master pin, local image Never).
 set -euo pipefail
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -47,7 +46,6 @@ image_in_containerd() {
 import_docker_image_to_k3s() {
   local img="$1"
   docker image inspect "${img}" >/dev/null 2>&1 || return 1
-  # ctr import writes progress to stdout — must not leak into $(resolve_lab_frontend_image).
   docker save "${img}" | sudo k3s ctr -n k8s.io images import - >/dev/null 2>&1
 }
 
@@ -85,7 +83,6 @@ resolve_lab_frontend_image() {
   echo "${img}"
 }
 
-# Stop runaway rollouts before patching (hundreds of pods on worker1).
 stop_frontend_storm_if_needed() {
   local threshold="${1:-3}"
   if ! frontend_storm_active "${threshold}"; then
@@ -102,7 +99,6 @@ stop_frontend_storm_if_needed() {
     --request-timeout=30s 2>/dev/null || true
 }
 
-# Pin PaaS UI on master, Recreate strategy (never RollingUpdate), revisionHistoryLimit 0.
 apply_lab_frontend_safety() {
   local img="${1:-}"
   local replicas="${2:-1}"
