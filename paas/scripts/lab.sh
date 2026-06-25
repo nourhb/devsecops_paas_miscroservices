@@ -6,6 +6,8 @@ cmd="${1:-}"
 usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
+  echo "  boot-install  Install systemd auto-start on VM boot (run once with sudo)"
+  echo "  boot-status   Show paas-lab-start.service + boot log tail"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"
@@ -57,6 +59,12 @@ usage() {
 case "$cmd" in
   start|recover)
     bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
+  boot-install|install-boot)
+    sudo bash "$LIB/install-paas-boot-service.sh" install ;;
+  boot-status|boot-log)
+    sudo bash "$LIB/install-paas-boot-service.sh" status ;;
+  boot-uninstall)
+    sudo bash "$LIB/install-paas-boot-service.sh" uninstall ;;
   bootstrap)
     bash "$LIB/lab-kyverno.sh" bootstrap ;;
   harbor)
