@@ -43,6 +43,17 @@ do_install() {
   chmod +x "${REPO_DIR}/paas/scripts/lab.sh" 2>/dev/null || true
   chmod +x "${REPO_DIR}/paas/scripts/lib/"*.sh 2>/dev/null || true
 
+  if [[ ! -f "${LAB_HOME}/.kube/config" && -f /etc/rancher/k3s/k3s.yaml ]]; then
+    install -d -o "${LAB_USER}" -g "${LAB_USER}" -m 700 "${LAB_HOME}/.kube"
+    install -o "${LAB_USER}" -g "${LAB_USER}" -m 600 "${LAB_HOME}/.kube/config" /etc/rancher/k3s/k3s.yaml
+    echo "OK: kubeconfig for ${LAB_USER} at ${LAB_HOME}/.kube/config"
+  fi
+
+  KUBECONFIG_PATH="${LAB_HOME}/.kube/config"
+  if [[ ! -f "${KUBECONFIG_PATH}" && -r /etc/rancher/k3s/k3s.yaml ]]; then
+    KUBECONFIG_PATH="/etc/rancher/k3s/k3s.yaml"
+  fi
+
   touch "${LOG_FILE}"
   chown "${LAB_USER}:${LAB_USER}" "${LOG_FILE}" 2>/dev/null || true
 
@@ -68,6 +79,8 @@ WorkingDirectory=${REPO_DIR}
 Environment=NODE_IP=${NODE_IP}
 Environment=PAAS_FORCE_KYVERNO_UNBLOCK=1
 Environment=HOME=${LAB_HOME}
+Environment=KUBECONFIG=${KUBECONFIG_PATH}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/bin/bash ${REPO_DIR}/paas/scripts/lab.sh start
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}

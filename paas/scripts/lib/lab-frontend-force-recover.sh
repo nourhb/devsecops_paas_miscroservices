@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_NS="${PAAS_NS:-paas}"
 IMG="${IMG:-docker.io/library/paas-frontend:recovery}"
 DB_URL='postgresql://postgres:root@postgres:5432/paas?options=-c%20lc_messages%3DC'
@@ -45,7 +47,8 @@ else
   sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
 fi
 
-PAAS_SKIP_KYVERNO_RESTART=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
+PAAS_FORCE_KYVERNO_UNBLOCK="${PAAS_FORCE_KYVERNO_UNBLOCK:-1}" PAAS_SKIP_KYVERNO_RESTART=1 \
+  bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
 postgres_ready_quick() {
   kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .
