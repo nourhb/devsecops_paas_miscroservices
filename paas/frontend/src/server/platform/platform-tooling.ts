@@ -195,9 +195,11 @@ async function loadPlatformTooling(): Promise<{
     ]);
     const policyActive = kyvernoPolicies > 0 || gatekeeperCrds > 0 || kubewarden.running > 0;
     const sonarConfigured = configuredUrl(env.SONAR_BASE_URL) || sonarqube.total > 0;
-    const scaSbomConfigured = configuredUrl(env.DEPENDENCY_TRACK_BASE_URL) ||
+    const scaSbomConfigured = (configuredUrl(env.DEPENDENCY_TRACK_BASE_URL) && configuredUrl(env.DEPENDENCY_TRACK_API_KEY)) ||
         dependencyTrack.total > 0 ||
-        configuredUrl(env.TRIVY_BASE_URL);
+        configuredUrl(env.TRIVY_BASE_URL) ||
+        configuredUrl(env.TRIVY_PROBE_URL) ||
+        process.env.HARBOR_TRIVY_INSTALLED === "true";
     const cosignConfigured = Boolean(env.COSIGN_PUBLIC_KEY?.trim() || env.COSIGN_PRIVATE_KEY?.trim());
     const harborConfigured = configuredUrl(env.HARBOR_BASE_URL);
     const artifactoryConfigured = configuredUrl(process.env.NEXT_PUBLIC_ARTIFACTORY_URL) || configuredUrl(env.ARTIFACTORY_URL);
@@ -260,7 +262,9 @@ async function loadPlatformTooling(): Promise<{
                             ? "outline"
                             : toneFromPods(kubewarden.running, kubewarden.total)),
                     tool("Cosign", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "Verification keys configured for image signature checks." : "No signing key configured", env.COSIGN_PUBLIC_KEY || env.COSIGN_PRIVATE_KEY ? "success" : "outline"),
-                    tool("Trivy", env.TRIVY_BASE_URL ? "Scanner endpoint configured for image/security checks." : "No Trivy endpoint configured", env.TRIVY_BASE_URL ? "success" : "outline")
+                    tool("Trivy", configuredUrl(env.TRIVY_BASE_URL) || configuredUrl(env.TRIVY_PROBE_URL) || process.env.HARBOR_TRIVY_INSTALLED === "true"
+                        ? "Scanner endpoint configured for image/security checks."
+                        : "No Trivy endpoint configured", configuredUrl(env.TRIVY_BASE_URL) || configuredUrl(env.TRIVY_PROBE_URL) || process.env.HARBOR_TRIVY_INSTALLED === "true" ? "success" : "outline")
                 ]
             },
             {
@@ -275,8 +279,12 @@ async function loadPlatformTooling(): Promise<{
                         : configuredUrl(env.PROMETHEUS_BASE_URL || process.env.NEXT_PUBLIC_PROMETHEUS_URL)
                             ? "success"
                             : "outline"),
-                    tool("Grafana", process.env.NEXT_PUBLIC_GRAFANA_URL ? "Dashboard link available from the app." : "No Grafana URL configured", process.env.NEXT_PUBLIC_GRAFANA_URL ? "success" : "outline"),
-                    tool("Alertmanager", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "Alertmanager link configured." : "No Alertmanager URL configured", process.env.NEXT_PUBLIC_ALERTMANAGER_URL ? "success" : "outline"),
+                    tool("Grafana", configuredUrl(process.env.NEXT_PUBLIC_GRAFANA_URL) || configuredUrl(env.GRAFANA_PROBE_URL)
+                        ? "Dashboard link available from the app."
+                        : "No Grafana URL configured", configuredUrl(process.env.NEXT_PUBLIC_GRAFANA_URL) || configuredUrl(env.GRAFANA_PROBE_URL) ? "success" : "outline"),
+                    tool("Alertmanager", configuredUrl(process.env.NEXT_PUBLIC_ALERTMANAGER_URL) || configuredUrl(env.ALERTMANAGER_PROBE_URL)
+                        ? "Alertmanager link configured."
+                        : "No Alertmanager URL configured", configuredUrl(process.env.NEXT_PUBLIC_ALERTMANAGER_URL) || configuredUrl(env.ALERTMANAGER_PROBE_URL) ? "success" : "outline"),
                     tool("Kube-state-metrics", kubeStateMetrics.total > 0
                         ? `${kubeStateMetrics.running}/${kubeStateMetrics.total} pods matching kube-state-metrics in monitoring`
                         : configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL)

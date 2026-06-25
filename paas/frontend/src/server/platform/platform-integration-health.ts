@@ -396,8 +396,10 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
         }
         case "elasticsearch": {
             const node = labNodeBase();
+            const esProbe = realValueOrEmpty(process.env.ELASTICSEARCH_PROBE_URL).replace(/\/+$/, "");
             const http = await probeMany([
                 "http://elasticsearch-master.monitoring.svc.cluster.local:9200",
+                esProbe,
                 href,
                 node ? `${node}:32231` : ""
             ], "/_cluster/health", { itemId: item.id, bypassHostRemap: true });
@@ -454,17 +456,44 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             });
         }
         case "dependency-track": {
-            const dtBase = href.replace(/\/+$/, "");
-            const bypassDt = probeHostIsRemapSource(dtBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            const headers: Record<string, string> = {};
+            const apiKey = realValueOrEmpty(env.DEPENDENCY_TRACK_API_KEY);
+            if (apiKey) {
+                headers["X-Api-Key"] = apiKey;
+            }
+            const dtBase = href.replace(/\/+$/, "") ||
+                realValueOrEmpty(env.DEPENDENCY_TRACK_BASE_URL).replace(/\/+$/, "");
+            if (!apiKey) {
+                return {
+                    state: "skipped",
+                    message: "Set DEPENDENCY_TRACK_API_KEY (run: bash paas/scripts/lab.sh dt-bootstrap)"
+                };
+            }
+            const bypassDt = dtBase ? probeHostIsRemapSource(dtBase, env.INTEGRATIONS_PROBE_HOST_REMAP) : false;
             const node = labNodeBase();
-            return probeMany([
+            const bases = [
                 "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080",
                 dtBase,
-                node ? `${node}:31428` : ""
-            ], "/api/version", {
-                itemId: item.id,
-                bypassHostRemap: bypassDt
-            });
+                node && dtBase.includes("://") ? dtBase : ""
+            ].filter(Boolean);
+            const seen = new Set<string>();
+            for (const base of bases) {
+                if (seen.has(base)) {
+                    continue;
+                }
+                seen.add(base);
+                const r = await httpProbe(joinUrl(base, "/api/version"), { headers }, {
+                    itemId: item.id,
+                    bypassHostRemap: bypassDt
+                });
+                if (r.state === "reachable") {
+                    return r;
+                }
+            }
+            return {
+                state: "unreachable",
+                message: "Dependency-Track API not reachable"
+            };
         }
         case "trivy-policy": {
             const probeCtx = {
