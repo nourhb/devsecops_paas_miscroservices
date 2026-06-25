@@ -36,7 +36,7 @@ lab_k8s_api_ready() {
 # Prefer standalone kubectl when kubeconfig exists; else k3s kubectl (common on lab VMs).
 if command -v k3s >/dev/null 2>&1; then
   kubectl() {
-    if lab_ensure_kubeconfig && command kubectl "$@" 2>/dev/null; then
+    if lab_ensure_kubeconfig && command kubectl "$@"; then
       return $?
     fi
     k3s kubectl "$@"
