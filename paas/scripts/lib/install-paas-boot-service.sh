@@ -81,7 +81,7 @@ Environment=PAAS_FORCE_KYVERNO_UNBLOCK=1
 Environment=HOME=${LAB_HOME}
 Environment=KUBECONFIG=${KUBECONFIG_PATH}
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash ${REPO_DIR}/paas/scripts/lab.sh start
+ExecStart=/bin/bash ${REPO_DIR}/paas/scripts/lib/paas-boot-start.sh
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
 TimeoutStartSec=900

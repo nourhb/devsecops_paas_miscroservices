@@ -18,13 +18,21 @@ diagnose_frontend() {
 }
 
 echo "==> Wait for k3s API (after VM boot this can take 1–3 min)"
-for i in $(seq 1 36); do
-  if timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
+for i in $(seq 1 60); do
+  if lab_k8s_api_ready; then
     echo "OK: Kubernetes API ready (attempt ${i})"
     break
   fi
   sleep 5
-  [[ "${i}" -eq 36 ]] && { echo "ERROR: k8s API not ready — run: sudo systemctl status k3s" >&2; exit 1; }
+  if [[ "${i}" -eq 60 ]]; then
+    echo "ERROR: k8s API not ready after 5 min" >&2
+    echo "  kubectl: $(command -v kubectl 2>/dev/null || echo missing)" >&2
+    echo "  k3s: $(command -v k3s 2>/dev/null || echo missing)" >&2
+    echo "  KUBECONFIG=${KUBECONFIG:-unset}" >&2
+    echo "  HOME=${HOME:-unset}" >&2
+    echo "  Fix: bash paas/scripts/lab.sh boot-install && sudo systemctl restart k3s" >&2
+    exit 1
+  fi
 done
 
 if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
