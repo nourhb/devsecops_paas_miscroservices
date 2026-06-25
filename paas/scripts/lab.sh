@@ -2,7 +2,20 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB="${DIR}/lib"
+REPO_ROOT="$(cd "${DIR}/../.." && pwd)"
 cmd="${1:-}"
+
+_run_boot_script() {
+  local action="$1"
+  local lab_user="${SUDO_USER:-${USER:-master}}"
+  if [[ "$(id -u)" -eq 0 ]]; then
+    PAAS_REPO_DIR="${REPO_ROOT}" PAAS_LAB_USER="${lab_user}" bash "$LIB/install-paas-boot-service.sh" "${action}"
+  elif [[ "${action}" == "status" ]]; then
+    PAAS_REPO_DIR="${REPO_ROOT}" bash "$LIB/install-paas-boot-service.sh" status
+  else
+    sudo env PAAS_REPO_DIR="${REPO_ROOT}" PAAS_LAB_USER="${lab_user}" bash "$LIB/install-paas-boot-service.sh" "${action}"
+  fi
+}
 usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
@@ -60,11 +73,11 @@ case "$cmd" in
   start|recover)
     bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
   boot-install|install-boot)
-    sudo bash "$LIB/install-paas-boot-service.sh" install ;;
+    _run_boot_script install ;;
   boot-status|boot-log)
-    sudo bash "$LIB/install-paas-boot-service.sh" status ;;
+    _run_boot_script status ;;
   boot-uninstall)
-    sudo bash "$LIB/install-paas-boot-service.sh" uninstall ;;
+    _run_boot_script uninstall ;;
   bootstrap)
     bash "$LIB/lab-kyverno.sh" bootstrap ;;
   harbor)
