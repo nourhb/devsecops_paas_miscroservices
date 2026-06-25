@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -24,6 +26,16 @@ for i in $(seq 1 36); do
   sleep 5
   [[ "${i}" -eq 36 ]] && { echo "ERROR: k8s API not ready — run: sudo systemctl status k3s" >&2; exit 1; }
 done
+
+if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
+  echo "OK: PaaS already healthy — skip disruptive recover (boot service success)"
+  bash "${SCRIPT_DIR}/lab-guard-cron.sh" install 2>/dev/null || true
+  echo ""
+  echo "OK — PaaS login: http://${NODE_IP}:30100/login"
+  exit 0
+fi
+
+PAAS_FORCE_KYVERNO_UNBLOCK="${PAAS_FORCE_KYVERNO_UNBLOCK:-1}" bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || true
 
 POSTGRES_UP=0
 if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
