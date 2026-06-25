@@ -23,4 +23,24 @@ lab_ensure_kubeconfig() {
   return 1
 }
 
+lab_k8s_api_ready() {
+  if timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v k3s >/dev/null 2>&1 && timeout 15 k3s kubectl get --raw=/healthz >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Prefer standalone kubectl when kubeconfig exists; else k3s kubectl (common on lab VMs).
+if command -v k3s >/dev/null 2>&1; then
+  kubectl() {
+    if lab_ensure_kubeconfig && command kubectl "$@" 2>/dev/null; then
+      return $?
+    fi
+    k3s kubectl "$@"
+  }
+fi
+
 lab_ensure_kubeconfig || true
