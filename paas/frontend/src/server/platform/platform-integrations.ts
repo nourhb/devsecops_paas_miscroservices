@@ -59,6 +59,12 @@ function dockerHubProfileUrl(username: string): string {
 function publicEnv(name: string): string {
     return trimUrl(realValueOrEmpty(process.env[name]));
 }
+function integrationUrl(publicKey: string, ...serverUrls: (string | undefined)[]): string {
+    return firstNonEmpty(publicEnv(publicKey), ...serverUrls.map((u) => trimUrl(realValueOrEmpty(u))));
+}
+function integrationConfigured(publicKey: string, ...serverUrls: (string | undefined)[]): boolean {
+    return Boolean(integrationUrl(publicKey, ...serverUrls));
+}
 function labInstalled(flag: string): boolean {
     return process.env[flag] === "true";
 }
@@ -222,8 +228,9 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Trivy (CI & registry)",
                     description: "Vulnerability and misconfiguration scanning.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.TRIVY_BASE_URL)) || null,
-                    configured: isRealConfigured(env.TRIVY_BASE_URL)
+                    href: firstNonEmpty(trimUrl(realValueOrEmpty(env.TRIVY_BASE_URL)), trimUrl(realValueOrEmpty(env.TRIVY_PROBE_URL))) || null,
+                    configured: isRealConfigured(env.TRIVY_BASE_URL) || isRealConfigured(env.TRIVY_PROBE_URL) ||
+                        (harborConfigured && labInstalled("HARBOR_TRIVY_INSTALLED"))
                 }
             ]
         },
@@ -245,16 +252,16 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Grafana",
                     description: "Dashboards on Prometheus and other data sources.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_GRAFANA_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_GRAFANA_URL"))
+                    href: integrationUrl("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL) || null,
+                    configured: integrationConfigured("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL)
                 },
                 {
                     id: "alertmanager",
                     name: "Alertmanager",
                     description: "Alert routing, silences, and receivers.",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_ALERTMANAGER_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_ALERTMANAGER_URL"))
+                    href: integrationUrl("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL) || null,
+                    configured: integrationConfigured("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL)
                 },
                 {
                     id: "pushgateway",
@@ -290,7 +297,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Elastic Stack dashboards and Discover.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_KIBANA_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_KIBANA_URL")),
+                    configured: integrationConfigured("NEXT_PUBLIC_KIBANA_URL"),
                     optional: true
                 },
                 {
@@ -298,8 +305,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Elasticsearch",
                     description: "Search and analytics engine (logs, APM, security).",
                     kind: "external",
-                    href: publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_ELASTICSEARCH_URL")),
+                    href: integrationUrl("NEXT_PUBLIC_ELASTICSEARCH_URL", process.env.ELASTICSEARCH_PROBE_URL) || null,
+                    configured: integrationConfigured("NEXT_PUBLIC_ELASTICSEARCH_URL", process.env.ELASTICSEARCH_PROBE_URL),
                     optional: true
                 }
             ]
@@ -427,8 +434,13 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Dynamic application security testing.",
                     kind: "external",
                     href: publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL") || null,
-                    configured: Boolean(publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL")),
-                    optional: true
+                    configured: integrationConfigured("NEXT_PUBLIC_OWASP_ZAP_URL", env.ZAP_TARGET_URL),
+                    optional: true,
+                    notes: publicEnv("NEXT_PUBLIC_OWASP_ZAP_URL")
+                        ? undefined
+                        : realValueOrEmpty(env.ZAP_TARGET_URL)
+                            ? `DAST target configured (${trimUrl(env.ZAP_TARGET_URL)}); ZAP runs from Jenkins when no ZAP server URL is set.`
+                            : undefined
                 },
                 {
                     id: "owasp-dependency-check",
@@ -455,7 +467,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Component analysis and vulnerability tracking.",
                     kind: "external",
                     href: trimUrl(realValueOrEmpty(env.DEPENDENCY_TRACK_BASE_URL)) || null,
-                    configured: isRealConfigured(env.DEPENDENCY_TRACK_BASE_URL),
+                    configured: isRealConfigured(env.DEPENDENCY_TRACK_BASE_URL, env.DEPENDENCY_TRACK_API_KEY),
                     optional: true
                 },
                 {

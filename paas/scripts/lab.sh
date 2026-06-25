@@ -50,6 +50,7 @@ usage() {
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
   echo "  argocd-bootstrap  Set ARGOCD_BASE_URL + admin password in env (no UI)"
+  echo "  integrations-bootstrap  Wire Grafana/Trivy/DT URLs + scale monitoring stack"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
   echo "  frontend-force    RS cleanup + pin recovery image when rollout hangs"
   echo "  frontend-stop     Scale frontend to 0 + pause (stop eviction storm)"
@@ -141,6 +142,8 @@ case "$cmd" in
     bash "$LIB/bootstrap-dependency-track-lab.sh" ;;
   argocd-bootstrap|bootstrap-argocd)
     bash "$LIB/bootstrap-argocd-lab.sh" ;;
+  integrations-bootstrap|bootstrap-integrations)
+    bash "$LIB/bootstrap-integrations-lab.sh" ;;
   frontend-heal)
     bash "$LIB/lab-frontend-schedule-heal.sh" ;;
   frontend-unstick|unstick-frontend)
