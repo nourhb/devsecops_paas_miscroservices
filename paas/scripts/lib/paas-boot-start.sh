@@ -35,6 +35,8 @@ lab_install_kubeconfig() {
 lab_install_kubeconfig || true
 lab_ensure_kubeconfig || true
 
+bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || exit 1
+
 # Cold VM boot: k3s unit may be up before API accepts requests.
 for i in $(seq 1 24); do
   if lab_k8s_api_ready; then

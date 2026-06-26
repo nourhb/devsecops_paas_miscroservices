@@ -19,6 +19,11 @@ git pull -q 2>/dev/null || echo "WARN: git pull skipped"
 
 chmod +x paas/scripts/lab.sh paas/scripts/lib/*.sh 2>/dev/null || true
 
+bash paas/scripts/lib/lab-k3s-ensure.sh || {
+  echo "ERROR: k3s failed to start — try: sudo systemctl restart k3s" >&2
+  exit 1
+}
+
 if [[ ! -r "${HOME}/.kube/config" && -f /etc/rancher/k3s/k3s.yaml ]]; then
   mkdir -p "${HOME}/.kube"
   if cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config" 2>/dev/null; then
