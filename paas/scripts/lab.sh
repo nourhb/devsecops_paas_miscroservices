@@ -4,6 +4,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB="${DIR}/lib"
 REPO_ROOT="$(cd "${DIR}/../.." && pwd)"
 cmd="${1:-}"
+cmd="${cmd//$'\r'/}"
 
 _run_boot_script() {
   local action="$1"
@@ -79,6 +80,8 @@ case "$cmd" in
     bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
   boot-install|install-boot)
     _run_boot_script install ;;
+  boot-fix|fix-boot)
+    bash "$LIB/lab-boot-fix.sh" ;;
   boot-status|boot-log)
     _run_boot_script status ;;
   boot-uninstall)

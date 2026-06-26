@@ -24,10 +24,10 @@ lab_ensure_kubeconfig() {
 }
 
 lab_k8s_api_ready() {
-  if timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
+  if command -v k3s >/dev/null 2>&1 && timeout 10 k3s kubectl get --raw=/healthz >/dev/null 2>&1; then
     return 0
   fi
-  if command -v k3s >/dev/null 2>&1 && timeout 15 k3s kubectl get --raw=/healthz >/dev/null 2>&1; then
+  if timeout 10 kubectl get --raw=/healthz >/dev/null 2>&1; then
     return 0
   fi
   return 1

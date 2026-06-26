@@ -17,7 +17,13 @@ diagnose_frontend() {
   kubectl get events -n "${PAAS_NS}" --sort-by='.lastTimestamp' 2>/dev/null | tail -25 || true
 }
 
-echo "==> Wait for k3s API (after VM boot this can take 1–3 min)"
+echo "==> Ensure k3s API (restart if needed after VM boot)"
+bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || {
+  echo "ERROR: k3s not running — fix k3s before PaaS recover" >&2
+  exit 1
+}
+
+echo "==> Wait for k3s API (extra probe)"
 for i in $(seq 1 60); do
   if lab_k8s_api_ready; then
     echo "OK: Kubernetes API ready (attempt ${i})"
