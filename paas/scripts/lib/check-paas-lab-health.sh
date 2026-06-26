@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 PAAS_PORT="${PAAS_PORT:-30100}"
 FAIL=0
 fail() { echo "FAIL: $*"; FAIL=1; }
 ok() { echo "OK: $*"; }
-timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1 || { fail "k8s API"; exit 1; }
+lab_ensure_kubeconfig || true
+if ! lab_k8s_api_ready; then
+  fail "k8s API"
+  exit 1
+fi
 ok "k8s API"
 if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
   PG_READY="$(kubectl get pods -n "${PAAS_NS}" -l app=postgres -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo False)"
