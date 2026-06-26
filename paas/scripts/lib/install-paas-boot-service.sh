@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ACTION="${1:-install}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 UNIT_PATH="/etc/systemd/system/paas-lab-start.service"
+TIMER_PATH="/etc/systemd/system/paas-lab-start-retry.timer"
 LOG_FILE="/var/log/paas-lab-start.log"
 SUDOERS_DROP="/etc/sudoers.d/paas-lab-k3s"
 
@@ -68,8 +69,7 @@ do_install() {
 [Unit]
 Description=PaaS lab auto-recover after k3s boot
 After=k3s.service network-online.target
-Wants=network-online.target
-Requires=k3s.service
+Wants=network-online.target k3s.service
 
 [Service]
 Type=oneshot
@@ -85,6 +85,10 @@ ExecStart=/bin/bash ${REPO_DIR}/paas/scripts/lib/paas-boot-start.sh
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
 TimeoutStartSec=900
+Restart=on-failure
+RestartSec=90
+StartLimitBurst=5
+StartLimitIntervalSec=900
 
 [Install]
 WantedBy=multi-user.target
@@ -92,6 +96,23 @@ EOF
 
   chmod 644 "${UNIT_PATH}"
   echo "OK: wrote ${UNIT_PATH}"
+
+  cat > "${TIMER_PATH}" <<EOF
+[Unit]
+Description=Retry PaaS lab recover after k3s warm-up (VM boot)
+After=k3s.service network-online.target
+
+[Timer]
+OnBootSec=4min
+Unit=paas-lab-start.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  chmod 644 "${TIMER_PATH}"
+  echo "OK: wrote ${TIMER_PATH} (retry 4 min after boot)"
 
   if [[ ! -f "${SUDOERS_DROP}" ]]; then
     cat > "${SUDOERS_DROP}" <<EOF
