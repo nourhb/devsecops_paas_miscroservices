@@ -82,6 +82,40 @@ ensure_dt_api_key() {
   bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh"
 }
 
+ensure_grafana_nodeport() {
+  local svc="kube-prometheus-stack-grafana"
+  local np
+  np="$(svc_nodeport "${MON_NS}" "${svc}" "http" || svc_nodeport "${MON_NS}" "${svc}" || true)"
+  if [[ -z "${np}" || "${np}" == "null" ]]; then
+    echo "==> Patch ${svc} to NodePort (browser UI)"
+    kubectl patch svc "${svc}" -n "${MON_NS}" -p '{"spec":{"type":"NodePort"}}' >/dev/null 2>&1 || true
+    np="$(svc_nodeport "${MON_NS}" "${svc}" "http" || svc_nodeport "${MON_NS}" "${svc}" || true)"
+  fi
+  if [[ -n "${np}" && "${np}" != "null" ]]; then
+    patch_both "NEXT_PUBLIC_GRAFANA_URL" "http://${NODE_IP}:${np}"
+  else
+    warn "Grafana has no NodePort — browser UI: kubectl port-forward -n monitoring svc/${svc} 3000:80"
+  fi
+  patch_both "GRAFANA_PROBE_URL" "http://${svc}.${MON_NS}.svc.cluster.local:80"
+}
+
+scale_pushgateway() {
+  if ! kubectl get deploy pushgateway-prometheus-pushgateway -n "${MON_NS}" >/dev/null 2>&1; then
+    return 0
+  fi
+  local cur np
+  cur="$(kubectl get deploy pushgateway-prometheus-pushgateway -n "${MON_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+  if [[ "${cur}" == "0" ]]; then
+    kubectl scale deploy pushgateway-prometheus-pushgateway -n "${MON_NS}" --replicas=1
+    ok "pushgateway scaled to 1"
+  fi
+  patch_both "PUSHGATEWAY_PROBE_URL" "http://pushgateway-prometheus-pushgateway.${MON_NS}.svc:9091"
+  np="$(svc_nodeport "${MON_NS}" pushgateway-prometheus-pushgateway || true)"
+  if [[ -n "${np}" && "${np}" != "null" ]]; then
+    patch_both "NEXT_PUBLIC_PUSHGATEWAY_URL" "http://${NODE_IP}:${np}"
+  fi
+}
+
 main() {
   need_cmd kubectl
   need_cmd curl
@@ -100,11 +134,7 @@ main() {
   svc="$(first_running_svc "${MON_NS}" \
     kube-prometheus-stack-grafana kube-prometheus-grafana grafana 2>/dev/null || true)"
   if [[ -n "${svc}" ]]; then
-    np="$(svc_nodeport "${MON_NS}" "${svc}" "http" || svc_nodeport "${MON_NS}" "${svc}")"
-    if [[ -n "${np}" && "${np}" != "null" ]]; then
-      patch_both "NEXT_PUBLIC_GRAFANA_URL" "http://${NODE_IP}:${np}"
-    fi
-    patch_both "GRAFANA_PROBE_URL" "http://${svc}.${MON_NS}.svc.cluster.local:80"
+    ensure_grafana_nodeport
   else
     warn "Grafana service not found in ${MON_NS}"
   fi
@@ -113,11 +143,13 @@ main() {
     kube-prometheus-stack-alertmanager alertmanager-kube-prometheus-stack-alertmanager 2>/dev/null || true)"
   if [[ -n "${svc}" ]]; then
     np="$(svc_nodeport "${MON_NS}" "${svc}" "http-web" || svc_nodeport "${MON_NS}" "${svc}")"
+    patch_both "ALERTMANAGER_PROBE_URL" "http://kube-prometheus-stack-alertmanager.${MON_NS}.svc:9093"
     if [[ -n "${np}" && "${np}" != "null" ]]; then
       patch_both "NEXT_PUBLIC_ALERTMANAGER_URL" "http://${NODE_IP}:${np}"
-      patch_both "ALERTMANAGER_PROBE_URL" "http://${NODE_IP}:${np}"
     fi
   fi
+
+  scale_pushgateway
 
   svc="$(first_running_svc "${MON_NS}" \
     kube-prometheus-stack-prometheus prometheus-kube-prometheus-stack-prometheus 2>/dev/null || true)"

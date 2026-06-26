@@ -252,7 +252,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Grafana",
                     description: "Dashboards on Prometheus and other data sources.",
                     kind: "external",
-                    href: integrationUrl("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL) || null,
+                    href: firstNonEmpty(trimUrl(realValueOrEmpty(env.GRAFANA_PROBE_URL)), integrationUrl("NEXT_PUBLIC_GRAFANA_URL")) || null,
                     configured: integrationConfigured("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL)
                 },
                 {
