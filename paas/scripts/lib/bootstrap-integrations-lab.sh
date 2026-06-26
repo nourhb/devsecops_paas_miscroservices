@@ -84,17 +84,20 @@ ensure_dt_api_key() {
 
 ensure_grafana_nodeport() {
   local svc="kube-prometheus-stack-grafana"
-  local np
-  np="$(svc_nodeport "${MON_NS}" "${svc}" "http" || svc_nodeport "${MON_NS}" "${svc}" || true)"
+  local np target_port=3000
+  np="$(svc_nodeport "${MON_NS}" "${svc}" "http-web" || svc_nodeport "${MON_NS}" "${svc}" || true)"
+  target_port="$(kubectl get svc "${svc}" -n "${MON_NS}" -o jsonpath='{.spec.ports[0].targetPort}' 2>/dev/null || echo 3000)"
   if [[ -z "${np}" || "${np}" == "null" ]]; then
-    echo "==> Patch ${svc} to NodePort (browser UI)"
-    kubectl patch svc "${svc}" -n "${MON_NS}" -p '{"spec":{"type":"NodePort"}}' >/dev/null 2>&1 || true
-    np="$(svc_nodeport "${MON_NS}" "${svc}" "http" || svc_nodeport "${MON_NS}" "${svc}" || true)"
+    echo "==> Patch ${svc} to NodePort 32383 (browser UI)"
+    kubectl patch svc "${svc}" -n "${MON_NS}" --type merge \
+      -p "{\"spec\":{\"type\":\"NodePort\",\"ports\":[{\"port\":80,\"targetPort\":${target_port},\"nodePort\":32383}]}}" \
+      >/dev/null 2>&1 || true
+    np="$(svc_nodeport "${MON_NS}" "${svc}" || true)"
   fi
   if [[ -n "${np}" && "${np}" != "null" ]]; then
     patch_both "NEXT_PUBLIC_GRAFANA_URL" "http://${NODE_IP}:${np}"
   else
-    warn "Grafana has no NodePort — browser UI: kubectl port-forward -n monitoring svc/${svc} 3000:80"
+    warn "Grafana has no NodePort — browser UI: kubectl port-forward -n monitoring svc/${svc} 30300:80"
   fi
   patch_both "GRAFANA_PROBE_URL" "http://${svc}.${MON_NS}.svc.cluster.local:80"
 }
