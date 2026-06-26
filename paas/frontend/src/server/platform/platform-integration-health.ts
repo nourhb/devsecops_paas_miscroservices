@@ -371,28 +371,46 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             return httpProbe(joinUrl(promBase, "/-/ready"), {}, { itemId: item.id, bypassHostRemap: bypass });
         }
         case "alertmanager": {
-            const amBase = realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
-            const bypass = Boolean(realValueOrEmpty(env.ALERTMANAGER_PROBE_URL)) ||
-                probeHostIsRemapSource(amBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            return httpProbe(joinUrl(amBase, "/-/healthy"), {}, { itemId: item.id, bypassHostRemap: bypass });
+            const node = labNodeBase();
+            const amPublic = realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") ||
+                realValueOrEmpty(process.env.NEXT_PUBLIC_ALERTMANAGER_URL).replace(/\/+$/, "");
+            return probeMany([
+                "http://kube-prometheus-stack-alertmanager.monitoring.svc:9093",
+                "http://alertmanager-operated.monitoring.svc:9093",
+                amPublic,
+                node ? `${node}:30772` : ""
+            ], "/-/healthy", { itemId: item.id, bypassHostRemap: true });
         }
         case "pushgateway": {
             const node = labNodeBase();
             return probeMany([
-                realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL),
-                href,
+                realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL).replace(/\/+$/, ""),
+                "http://pushgateway-prometheus-pushgateway.monitoring.svc:9091",
+                href.replace(/\/+$/, ""),
                 node ? `${node}:31481` : ""
             ], "/-/healthy", { itemId: item.id, bypassHostRemap: true });
         }
         case "grafana": {
             const node = labNodeBase();
-            return probeMany([
-                realValueOrEmpty(env.GRAFANA_PROBE_URL),
-                href,
+            const http = await probeMany([
+                realValueOrEmpty(env.GRAFANA_PROBE_URL).replace(/\/+$/, ""),
+                "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80",
+                "http://kube-prometheus-stack-grafana.monitoring.svc:80",
+                href.replace(/\/+$/, ""),
                 node ? `${node}:32383` : "",
-                node ? `${node}:30082` : "",
-                "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80"
+                node ? `${node}:30082` : ""
             ], "/api/health", { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (await hasRunningPodMatching("monitoring", /grafana/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Grafana pod running (HTTP probe failed — use port-forward or NodePort for browser UI)"
+                };
+            }
+            return http;
         }
         case "elasticsearch": {
             const node = labNodeBase();
