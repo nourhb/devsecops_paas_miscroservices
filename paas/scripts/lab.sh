@@ -20,6 +20,7 @@ usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
   echo "  boot-install  Install systemd auto-start on VM boot (run once with sudo)"
+  echo "  boot-fix      Install boot service + kubeconfig + recover now (after VM reboot)"
   echo "  boot-status   Show paas-lab-start.service + boot log tail"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
@@ -46,6 +47,9 @@ usage() {
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
+  echo "  artifactory-bootstrap  Deploy JFrog Artifactory OSS + wire ARTIFACTORY_* (Step 8)"
+  echo "  full-pipeline-enable   Steps 7-8+10-11 no-skip: helm, Artifactory, ZAP, Helm OCI"
+  echo "  jenkins-zap-tools   kubectl in Jenkins pod + RBAC for Step 10 ZAP"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
@@ -124,16 +128,30 @@ case "$cmd" in
     LAB_DT_SKIP_HEAL="${LAB_DT_SKIP_HEAL:-true}" bash "$LIB/sync-jenkins-pipeline-from-repo.sh" ;;
   jenkins-stages|stages)
     bash "$LIB/install-jenkins-stages-file.sh" ;;
+  fix-cps-load|fix-load-syntax|cps-load-method)
+    bash "$LIB/fix-cps-load-method-syntax.sh" ;;
+  fix-p3-self-invoke|fix-p3-invoke)
+    bash "$LIB/fix-p3-no-self-invoke.sh" ;;
   fix-paas-deploy|cps-split|fix-method-too-large|break-paas-deploy-loop)
     bash "$LIB/fix-paas-deploy-stages-load.sh" ;;
   force-fix-paas-deploy|force-fix)
-    bash "$LIB/force-fix-paas-deploy-now.sh" ;;
+    bash "$LIB/restore-paas-deploy-working.sh" ;;
+  force-api-paas-deploy|api-wrapper-now)
+    bash "$LIB/force-api-jenkins-paas-deploy-now.sh" ;;
+  apply-inline-wrapper|inline-wrapper)
+    bash -c 'set -a; source paas/frontend/docker-compose.env 2>/dev/null; set +a; exec python3 paas/scripts/lib/apply-jenkins-inline-steps-wrapper.py' ;;
   jenkins-tools|agent-tools)
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
   sonarqube|sonar-heal|sonar-recover)
     bash "$LIB/lab-sonarqube-recover.sh" ;;
   sonar-bootstrap|bootstrap-sonar)
     bash "$LIB/bootstrap-sonarqube-lab.sh" ;;
+  artifactory-bootstrap|bootstrap-artifactory|artifactory)
+    bash "$LIB/bootstrap-artifactory-lab.sh" ;;
+  full-pipeline-enable|enable-full-pipeline|no-skip)
+    bash "$LIB/lab-enable-full-pipeline.sh" ;;
+  jenkins-zap-tools|zap-tools)
+    bash "$LIB/lab-jenkins-zap-tools.sh" ;;
   jenkins-recover|recover-jenkins)
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
   dependency-track|dtrack)
