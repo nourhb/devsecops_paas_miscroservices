@@ -41,13 +41,14 @@ if ! bash paas/scripts/lab.sh boot-install; then
   exit 1
 fi
 
-sudo systemctl reset-failed paas-lab-start.service 2>/dev/null || true
-sudo systemctl start paas-lab-start.service || true
+echo ""
+echo "==> Recover PaaS now (direct — not via systemd, avoids k3s restart race)"
+bash paas/scripts/lab.sh start
 
 echo ""
 echo "==> Waiting for PaaS health (up to 5 min)…"
 for i in $(seq 1 30); do
-  if bash paas/scripts/lab.sh health 2>/dev/null; then
+  if bash paas/scripts/lab.sh health; then
     echo ""
     echo "=============================================="
     echo " OK — PaaS ready: http://${NODE_IP}:30100/login"

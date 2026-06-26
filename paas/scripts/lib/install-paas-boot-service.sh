@@ -85,10 +85,6 @@ ExecStart=/bin/bash ${REPO_DIR}/paas/scripts/lib/paas-boot-start.sh
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
 TimeoutStartSec=900
-Restart=on-failure
-RestartSec=90
-StartLimitBurst=5
-StartLimitIntervalSec=900
 
 [Install]
 WantedBy=multi-user.target
@@ -128,6 +124,8 @@ EOF
 
   systemctl daemon-reload
   systemctl enable paas-lab-start.service
+  systemctl enable paas-lab-start-retry.timer
+  systemctl start paas-lab-start-retry.timer 2>/dev/null || true
   echo ""
   echo "=============================================="
   echo " Boot service installed"
@@ -158,7 +156,8 @@ do_status() {
 do_uninstall() {
   [[ "$(id -u)" -eq 0 ]] || die "run with sudo"
   systemctl disable paas-lab-start.service 2>/dev/null || true
-  rm -f "${UNIT_PATH}"
+  systemctl disable paas-lab-start-retry.timer 2>/dev/null || true
+  rm -f "${UNIT_PATH}" "${TIMER_PATH}"
   systemctl daemon-reload
   echo "OK: removed paas-lab-start.service"
 }
