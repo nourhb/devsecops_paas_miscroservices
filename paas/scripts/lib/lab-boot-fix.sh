@@ -11,11 +11,11 @@ echo "=============================================="
 
 cd "${REPO_ROOT}"
 
-if [[ -n "$(git status --porcelain paas/scripts/ 2>/dev/null)" ]]; then
-  echo "WARN: local edits under paas/scripts/ — stashing before pull"
-  git stash push -m "lab-boot-fix-$(date +%Y%m%d)" -- paas/scripts/ 2>/dev/null || true
-fi
-git pull -q 2>/dev/null || echo "WARN: git pull skipped"
+echo "==> Sync scripts from origin/main (discard local paas/scripts edits)"
+git fetch -q origin main 2>/dev/null || git fetch origin main
+git checkout origin/main -- paas/scripts/ 2>/dev/null || true
+git merge --ff-only origin/main 2>/dev/null || git reset --hard origin/main
+echo "OK: repo at $(git rev-parse --short HEAD)"
 
 chmod +x paas/scripts/lab.sh paas/scripts/lib/*.sh 2>/dev/null || true
 
