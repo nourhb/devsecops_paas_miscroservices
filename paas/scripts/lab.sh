@@ -61,6 +61,7 @@ usage() {
   echo "  frontend-stop     Scale frontend to 0 + pause (stop eviction storm)"
   echo "  frontend-safety   Recreate + master pin (prevent pod storms)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
+  echo "  emergency-up    Unstick everything: kill lab jobs, restart k3s, recover UI"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
@@ -179,6 +180,8 @@ case "$cmd" in
     bash "$LIB/lab-frontend-force-recover.sh" ;;
   emergency|unblock)
     bash "$LIB/lab-emergency-unblock.sh" ;;
+  emergency-up|unstick|stuck)
+    bash "$LIB/lab-emergency-up.sh" ;;
   restore|fix-app|back)
     bash "$LIB/lab-restore-app.sh" ;;
   rollback-june17|june17|rollback-756)
