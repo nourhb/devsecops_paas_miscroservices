@@ -42,10 +42,10 @@ printf '%s' "${HARBOR_PASS}" | "\$CRANE" auth login "${NODE_IP}:${HARBOR_NODEPOR
 printf '%s' "${HARBOR_PASS}" | "\$CRANE" auth login "harbor.${NODE_IP}.nip.io:${HARBOR_NODEPORT}" -u "${HARBOR_USER}" --password-stdin --insecure || true
 "\$CRANE" pull --insecure mirror.gcr.io/library/alpine:3.20 /tmp/paas-probe.tar
 TAG="probe-\$(date +%s)"
-"\$CRANE" push --insecure /tmp/paas-probe.tar "${NODE_IP}:${HARBOR_NODEPORT}/paas/paas-harbor-push-probe:\${TAG}"
-"\$CRANE" digest --insecure "${NODE_IP}:${HARBOR_NODEPORT}/paas/paas-harbor-push-probe:\${TAG}"
+"\$CRANE" push --insecure /tmp/paas-probe.tar "${NODE_IP}:${HARBOR_NODEPORT}/${HARBOR_PROJECT:-paas}/paas-harbor-push-probe:\${TAG}"
+"\$CRANE" digest --insecure "${NODE_IP}:${HARBOR_NODEPORT}/${HARBOR_PROJECT:-paas}/paas-harbor-push-probe:\${TAG}"
 rm -f /tmp/paas-probe.tar
-echo "OK: crane push probe ${NODE_IP}:${HARBOR_NODEPORT}/paas/paas-harbor-push-probe:\${TAG}"
+echo "OK: crane push probe ${NODE_IP}:${HARBOR_NODEPORT}/${HARBOR_PROJECT:-paas}/paas-harbor-push-probe:\${TAG}"
 EOS
 fi
 
