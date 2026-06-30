@@ -168,9 +168,11 @@ kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=6
   -- grep -qF 'return this' "${REMOTE}/paas-deploy-stages.groovy"
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
   -- sh -c "grep -c 'def runPaasDeploy()' '${REMOTE}/paas-deploy-stages.groovy' | grep -qx 1"
-_def_pid="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
-  -- sh -c "grep -c '^def projectId' '${REMOTE}/paas-deploy-stages.groovy' 2>/dev/null || echo 0" | tr -d '\r\n')"
-[[ "${_def_pid}" == "0" ]] || { echo "FAIL: monolith has def projectId (broken CPS binding) — re-run assemble" >&2; exit 1; }
+if kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
+  -- grep -q '^def projectId' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null; then
+  echo "FAIL: monolith has def projectId (broken CPS binding) — re-run assemble" >&2
+  exit 1
+fi
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
   -- grep -qE '^projectId\s*=' "${REMOTE}/paas-deploy-stages.groovy" \
   || { echo "FAIL: monolith missing binding var projectId=" >&2; exit 1; }
