@@ -183,7 +183,7 @@ def materializeProjectBuildEnv(String appRoot) {
   try {
     writeFile file: "${prefix}.paas-build-env.b64", text: b64
     ensureNodeTool()
-    sh """
+            sh """
       set -eu
       cd '${appRoot}'
       if ! command -v node >/dev/null 2>&1; then
@@ -830,6 +830,10 @@ while [ ! -x "${CRANE_BIN}" ]; do
   sleep 5
 done
 
+if [ -f "${CRANE_BIN}" ] && [ ! -x "${CRANE_BIN}" ]; then
+  chmod +x "${CRANE_BIN}" 2>/dev/null || true
+fi
+
 if [ -x "${CRANE_BIN}" ]; then
   rmdir "${LOCK_DIR}" 2>/dev/null || true
   exit 0
@@ -860,8 +864,8 @@ curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 600 \
 kill "${HB_PID}" 2>/dev/null || true
 HB_PID=""
 mkdir -p "$(dirname "${CRANE_BIN}")"
-tar -xzf "${TDIR}/crane.tar.gz" -C "$(dirname "${CRANE_BIN}")" crane
-mv "$(dirname "${CRANE_BIN}")/crane" "${CRANE_BIN}"
+tar -xzf "${TDIR}/crane.tar.gz" -C "${TDIR}" crane
+mv "${TDIR}/crane" "${CRANE_BIN}"
 chmod +x "${CRANE_BIN}"
 rmdir "${LOCK_DIR}" 2>/dev/null || true
 LOCK_DIR=""
@@ -2727,6 +2731,7 @@ exit 0
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
+      println "[paas-jenkinsfile] marker=sonar-checkpoint-poll-20260630 (nohup scanner + Groovy poll — survives Jenkins pod restart)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -2748,10 +2753,9 @@ exit 0
           "SONAR_PROJECT_ID_TAG=${projectId}",
           "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"
         ]) {
-          def sonarRc = sh(script: '''#!/bin/bash
+          def sonarPrepRc = sh(script: '''#!/bin/bash
             set +e
             pick_sonar_url() {
-              # Built-in Jenkins agent: NodePort first (cluster DNS often unavailable).
               _np="http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
               for u in \
                 "${_np}" \
@@ -2786,8 +2790,7 @@ exit 0
                 break
               fi
               if printf '%s' "${VALID}" | grep -q '"valid":false'; then
-                echo "[sonar] SONAR_TOKEN rejected (valid:false) — generate new token: http://${NODE_IP}:${SONAR_NODEPORT:-30900} → Security → Generate Token"
-                echo "[sonar] then on master: SONAR_TOKEN=sqa_... bash paas/scripts/lab.sh pipeline-heal"
+                echo "[sonar] SONAR_TOKEN rejected (valid:false) — generate new token: http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
                 break
               fi
               if [ "${_sv}" -lt 5 ]; then
@@ -2799,7 +2802,7 @@ exit 0
             done
             if [ "${_sonar_ready}" != "1" ]; then
               if [ -z "${_last_valid}" ]; then
-                echo "[sonar] cannot reach Sonar — run: bash paas/scripts/lab.sh pipeline-heal (or lab-sonarqube-recover.sh)"
+                echo "[sonar] cannot reach Sonar — run: bash paas/scripts/lab.sh sonarqube"
               else
                 echo "[sonar] token not valid from Jenkins agent — rotate SONAR_TOKEN via pipeline-heal"
               fi
@@ -2843,9 +2846,10 @@ exit 0
               if [ -n "${SONAR_TSCONFIG:-}" ]; then
                 printf 'sonar.typescript.tsconfigPath=%s\n' "${SONAR_TSCONFIG}"
               fi
-              printf 'sonar.qualitygate.wait=%s\n' 'true'
+              printf 'sonar.qualitygate.wait=%s\n' "${JENKINS_SONAR_QUALITY_GATE_WAIT:-false}"
               printf 'sonar.scanner.analysisCacheEnabled=%s\n' 'false'
-              printf 'sonar.ws.timeout=%s\n' '300'
+              printf 'sonar.javascript.node.maxspace=%s\n' "${JENKINS_SONAR_NODE_MAXSPACE:-384}"
+              printf 'sonar.scanner.responseTimeout=%s\n' '300'
             } > "${SP}"
             chmod 600 "${SP}"
             echo "[sonar] wrote ${SP} (credentials in file; not echoed)"
@@ -2862,60 +2866,115 @@ exit 0
               done
             fi
             if ! command -v java >/dev/null 2>&1; then
-              echo "[sonar] ERROR: java not in PATH (sonarqube-scanner needs JRE). Jenkins image usually has JAVA_HOME — set JAVA_HOME on the Jenkins deployment or install openjdk-17-jre in the cicd/jenkins pod."
+              echo "[sonar] ERROR: java not in PATH"
               exit 1
             fi
             echo "[sonar] java: $(java -version 2>&1 | head -1)"
             mkdir -p paas-artifacts
-            LOG=paas-artifacts/sonar-scanner.log
-            # SonarScanner CLI 6.x: token via env + -D (properties alone is not enough).
-            export SONAR_TOKEN="${SONAR_TOKEN}"
-            export SONAR_HOST_URL="${SONAR_HOST_URL}"
-            RC=1
-            for _sonar_try in 1 2 3; do
-              echo "[sonar] scanner attempt ${_sonar_try}/3"
-              npx --yes sonarqube-scanner@4.2.8 \
-                -Dsonar.host.url="${SONAR_HOST_URL}" \
-                -Dsonar.token="${SONAR_TOKEN}" \
-                -Dsonar.ws.timeout=300 \
-                > "${LOG}" 2>&1
-              RC=$?
-              if [ "${RC}" = "0" ]; then
+            printf '%s\n' "${SONAR_HOST_URL}" > paas-artifacts/sonar-host-url.txt
+            exit 0
+          ''', returnStatus: true)
+          if (sonarPrepRc != 0) {
+            paasStepFail(5, 'sonar', 'Sonar prep failed — check SONAR_HOST_URL / SONAR_TOKEN')
+          }
+          def sonarPollSec = (env.JENKINS_SONAR_POLL_SEC?.trim() ?: '12') as int
+          def sonarPollMaxMin = (env.JENKINS_SONAR_POLL_MAX_MIN?.trim() ?: '25') as int
+          def sonarRc = 1
+          for (int sonarAttempt = 1; sonarAttempt <= 3; sonarAttempt++) {
+            if (sonarAttempt > 1) {
+              echo "[sonar] retry attempt ${sonarAttempt}/3 (prior scan interrupted or failed)"
+            }
+            def sonarStartRc = sh(script: """#!/bin/bash
+              set +e
+              LOG=paas-artifacts/sonar-scanner.log
+              PIDF=paas-artifacts/sonar-scanner.pid
+              if grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "\${LOG}" 2>/dev/null; then
+                echo "[sonar] log already shows success — skip start"
+                exit 0
+              fi
+              if [ -f "\${PIDF}" ]; then
+                OLD=\$(cat "\${PIDF}" 2>/dev/null || true)
+                if [ -n "\${OLD}" ] && kill -0 "\${OLD}" 2>/dev/null; then
+                  echo "[sonar] scanner pid \${OLD} still running"
+                  exit 0
+                fi
+              fi
+              export SONAR_TOKEN="\${SONAR_TOKEN}"
+              export SONAR_HOST_URL="\$(cat paas-artifacts/sonar-host-url.txt 2>/dev/null || echo "\${SONAR_HOST_URL_PARAM}")"
+              export SONAR_SCANNER_OPTS="\${SONAR_SCANNER_OPTS:--Xmx768m}"
+              echo "[sonar] === background start attempt ${sonarAttempt} \$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> "\${LOG}"
+              nohup npx --yes sonarqube-scanner@4.2.8 \
+                -Dsonar.host.url="\${SONAR_HOST_URL}" \
+                -Dsonar.token="\${SONAR_TOKEN}" \
+                -Dsonar.scanner.responseTimeout=300 \
+                >> "\${LOG}" 2>&1 &
+              echo \$! > "\${PIDF}"
+              sleep 2
+              if kill -0 "\$(cat "\${PIDF}")" 2>/dev/null; then
+                echo "[sonar] background pid \$(cat "\${PIDF}")"
+                exit 0
+              fi
+              echo "[sonar] ERROR: scanner failed to stay up"
+              tail -20 "\${LOG}" 2>/dev/null || true
+              exit 1
+            """, returnStatus: true)
+            if (sonarStartRc != 0) {
+              continue
+            }
+            def deadlineMs = System.currentTimeMillis() + (sonarPollMaxMin * 60 * 1000L)
+            def sonarDone = false
+            while (!sonarDone && System.currentTimeMillis() < deadlineMs) {
+              def pollRc = sh(script: '''#!/bin/bash
+                set +e
+                LOG=paas-artifacts/sonar-scanner.log
+                PIDF=paas-artifacts/sonar-scanner.pid
+                if [ -f "${LOG}" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
+                  exit 0
+                fi
+                if [ ! -f "${PIDF}" ]; then
+                  exit 3
+                fi
+                PID=$(cat "${PIDF}" 2>/dev/null || true)
+                if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+                  exit 1
+                fi
+                exit 2
+              ''', returnStatus: true)
+              if (pollRc == 0) {
+                sonarRc = 0
+                sonarDone = true
                 break
-              fi
-              if grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
-                RC=0
+              }
+              if (pollRc == 2 || pollRc == 3) {
                 break
-              fi
-              if grep -qE 'SocketTimeoutException|Read timed out|values\\.protobuf|ConnectException|Connection refused|Failed to connect' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
-                echo "[sonar] WARN: Sonar API timeout or connection dropped — re-probe URL and retry in 45s (Sonar may restart under load; avoid parallel paas-deploy builds)"
-                sleep 45
-                SONAR_HOST_URL="$(pick_sonar_url)"
-                echo "[sonar] retry using ${SONAR_HOST_URL}"
-                sed -i "s|^sonar.host.url=.*|sonar.host.url=${SONAR_HOST_URL}|" "${SP}" 2>/dev/null || true
-                export SONAR_HOST_URL="${SONAR_HOST_URL}"
-                continue
-              fi
-              if grep -qE 'Error 500 on.*rules/search|An error has occurred\\. Please contact your administrator' "${LOG}" && [ "${_sonar_try}" -lt 3 ]; then
-                echo "[sonar] WARN: Sonar rules API HTTP 500 (server overloaded — two builds scanning at once breaks the lab VM)"
-                echo "[sonar] Wait 90s and retry (on master: bash paas/scripts/lab.sh sonarqube)"
-                sleep 90
-                SONAR_HOST_URL="$(pick_sonar_url)"
-                continue
-              fi
+              }
+              echo "[sonar] poll checkpoint ${new Date().format('yyyy-MM-dd HH:mm:ss')} (pid alive)"
+              sleep(time: sonarPollSec, unit: 'SECONDS')
+            }
+            if (sonarRc == 0) {
               break
-            done
-            cat "${LOG}"
-            if [ "${RC}" != "0" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
-              echo "[sonar] scanner reported success despite exit ${RC} — treating as OK"
-              RC=0
+            }
+            def sonarLogMid = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
+            if (sonarLogMid.contains('EXECUTION SUCCESS') || sonarLogMid.contains('ANALYSIS SUCCESSFUL')) {
+              sonarRc = 0
+              break
+            }
+          }
+          sh(script: '''#!/bin/bash
+            set +e
+            PIDF=paas-artifacts/sonar-scanner.pid
+            if [ -f "${PIDF}" ]; then
+              PID=$(cat "${PIDF}" 2>/dev/null || true)
+              if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+                kill "${PID}" 2>/dev/null || true
+              fi
             fi
-            if [ "${RC}" != "0" ]; then
-              echo "[sonar] scanner tail:"
-              tail -40 "${LOG}" 2>/dev/null || true
+            rm -f sonar-project.properties .sonar-tsconfig.json paas-artifacts/sonar-scanner.pid
+            LOG=paas-artifacts/sonar-scanner.log
+            if [ -f "${LOG}" ]; then
+              tail -60 "${LOG}" || true
             fi
-            rm -f "${SP}" .sonar-tsconfig.json
-            exit "${RC}"
+            exit 0
           ''', returnStatus: true)
           def sonarLog = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
           def sonarPassed = (sonarRc as Integer) == 0 \
@@ -2924,7 +2983,7 @@ exit 0
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; verify SONAR_BASE_URL and SONAR_TOKEN in PaaS env")
+            paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; sync pipeline: bash paas/scripts/lib/fix-paas-deploy-cps-split-now.sh")
           }
         }
         return
@@ -3147,19 +3206,7 @@ EOF
       def basicUser = env.ARTIFACTORY_USERNAME?.trim() ?: ""
       def basicPass = env.ARTIFACTORY_PASSWORD?.trim() ?: ""
       if (!artiBase) {
-        def harborReg = (env.HARBOR_REGISTRY ?: params.HARBOR_REGISTRY ?: "").trim()
-        if (harborReg && fileExists('sca/bom.json')) {
-          println "[artifactory] ARTIFACTORY_URL absent — archiving sca+bundle locally only (Harbor image push is Step 6)."
-          sh '''
-            set +e
-            mkdir -p paas-artifacts/artifactory-local
-            tar -czf paas-artifacts/artifactory-local/paas-build-bundle.tgz sca paas-artifacts 2>/dev/null || true
-          '''
-          paasStepOk(8, 'artifactory', 'local bundle paas-artifacts/artifactory-local/ (set ARTIFACTORY_URL for JFrog upload)')
-          return
-        }
-        println "[artifactory] ARTIFACTORY_URL absent — étape ignorée (optionnel)."
-        return
+        paasStepFail(8, 'artifactory', 'ARTIFACTORY_URL required — bash paas/scripts/lab.sh artifactory-bootstrap')
       }
       def destUrl = "${artiBase.replaceAll(/\/$/, '')}/${artiRepo}/paas-builds/${projectId}/${env.BUILD_NUMBER}/paas-build-${env.BUILD_NUMBER}.tgz"
       def uploadShell = '''
@@ -3197,9 +3244,9 @@ EOF
           sh uploadShell
         }
       } else {
-        println "[artifactory] Définir ARTIFACTORY_CREDENTIALS_ID (Jenkins) ou ACCESS_TOKEN ou USER+PASSWORD — étape ignorée."
+        paasStepFail(8, 'artifactory', 'ARTIFACTORY_USERNAME+PASSWORD or ARTIFACTORY_ACCESS_TOKEN required — bash paas/scripts/lab.sh artifactory-bootstrap')
       }
-      paasStepOk(8, 'artifactory', 'stage finished (upload optional if ARTIFACTORY_URL set)')
+      paasStepOk(8, 'artifactory', "published to ${artiBase}")
     }
     }
   }
@@ -3282,8 +3329,7 @@ EOF
       nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
       def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
       if (!zapTarget) {
-        println "[zap] ZAP_TARGET_URL absent — étape ignorée."
-        return
+        paasStepFail(10, 'zap', 'ZAP_TARGET_URL required — set APP_BASE_URL in PaaS or bash paas/scripts/lab.sh integrations-bootstrap')
       }
       println "[zap] Cible DAST: ${zapTarget}"
       withEnv(["ZAP_TARGET=${zapTarget}", "ZAP_BUILD=${env.BUILD_NUMBER}"]) {
@@ -3300,25 +3346,28 @@ EOF
           }
           run_zap_kubectl() {
             local ns="${ZAP_K8S_NAMESPACE:-cicd}" pod="paas-zap-${ZAP_BUILD:-0}"
-            kubectl delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
-            kubectl run "$pod" -n "$ns" --restart=Never --image=ghcr.io/zaproxy/zaproxy:stable \
+            local kctl="${JENKINS_KUBECTL_BIN:-${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl}"
+            command -v kubectl >/dev/null 2>&1 && kctl=kubectl
+            [ -x "$kctl" ] || { echo "[zap] kubectl missing at $kctl"; return 127; }
+            "$kctl" delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
+            "$kctl" run "$pod" -n "$ns" --restart=Never --image=ghcr.io/zaproxy/zaproxy:stable \
               --command -- zap-baseline.py -t "$ZAP_TARGET" -J /tmp/zap.json -r /tmp/zap.html 2>/dev/null
-            kubectl wait -n "$ns" --for=condition=Ready "pod/$pod" --timeout=120s 2>/dev/null || true
+            "$kctl" wait -n "$ns" --for=condition=Ready "pod/$pod" --timeout=180s 2>/dev/null || true
             sleep 5
-            kubectl logs -n "$ns" "$pod" > paas-artifacts/zap-baseline-pod.log 2>&1 || true
-            kubectl exec -n "$ns" "$pod" -- cat /tmp/zap.json > paas-artifacts/zap-baseline-report.json 2>/dev/null || true
-            kubectl exec -n "$ns" "$pod" -- cat /tmp/zap.html > paas-artifacts/zap-baseline-report.html 2>/dev/null || true
-            kubectl delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
+            "$kctl" logs -n "$ns" "$pod" > paas-artifacts/zap-baseline-pod.log 2>&1 || true
+            "$kctl" exec -n "$ns" "$pod" -- cat /tmp/zap.json > paas-artifacts/zap-baseline-report.json 2>/dev/null || true
+            "$kctl" exec -n "$ns" "$pod" -- cat /tmp/zap.html > paas-artifacts/zap-baseline-report.html 2>/dev/null || true
+            "$kctl" delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
           }
           if command -v docker >/dev/null 2>&1; then
             echo "[zap] using docker"
             run_zap_docker
-          elif command -v kubectl >/dev/null 2>&1; then
+          elif command -v kubectl >/dev/null 2>&1 || [ -x "${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl" ]; then
             echo "[zap] docker CLI absent — using kubectl run (lab fallback)"
             run_zap_kubectl
           else
-            echo "[zap] docker and kubectl absent — ZAP baseline ignoré"
-            exit 0
+            echo "[zap] docker and kubectl absent — install: bash paas/scripts/lab.sh jenkins-zap-tools"
+            exit 127
           fi
           echo "[zap] zap-baseline exit code: $? (0=pass, 1=fail, 2=warnings) — stage non-bloquante"
         ''', returnStatus: true)
@@ -3329,7 +3378,7 @@ EOF
       if (fileExists('paas-artifacts/zap-baseline-report.html')) {
         paasStepOk(10, 'zap', 'ZAP report in paas-artifacts/')
       } else {
-        paasStepWarn(10, 'zap', 'ZAP skipped or no report (set ZAP_TARGET_URL)')
+        paasStepFail(10, 'zap', 'ZAP baseline produced no report — check paas-artifacts/zap-baseline-pod.log')
       }
     }
     }
@@ -3342,13 +3391,11 @@ EOF
       def hp = (env.HARBOR_PASSWORD ?: "").trim()
       def ociProj = (params.HELM_OCI_PROJECT?.trim() ?: env.HELM_OCI_PROJECT?.trim() ?: "paas")
       if (!reg || !hu || !hp) {
-        println "[helm-oci] HARBOR_REGISTRY / HARBOR_USERNAME / HARBOR_PASSWORD requis — publication Helm ignorée."
-        return
+        paasStepFail(11, 'helm_oci', 'HARBOR_REGISTRY / HARBOR_USERNAME / HARBOR_PASSWORD required')
       }
       def helmBin = ensureHelmTool()
       if (!fileExists("paas-artifacts/helm")) {
-        println "[helm-oci] Pas de paas-artifacts/helm (exécutez d'abord le packaging Step 7) — ignoré."
-        return
+        paasStepFail(11, 'helm_oci', 'paas-artifacts/helm missing — Step 7 must package a chart first')
       }
       def regHost = reg.replaceFirst("^https?://", "").replaceAll(/\/$/, "")
       def ociRef = "oci://${regHost}/${ociProj}"
@@ -3363,7 +3410,7 @@ EOF
           charts=(paas-artifacts/helm/*.tgz)
           if [ ${#charts[@]} -eq 0 ]; then
             echo "[helm-oci] Aucun chart .tgz à publier."
-            exit 0
+            exit 1
           fi
           echo "${HARBOR_PASSWORD}" | "${HELM_BIN}" registry login ${LOGIN_OPTS} "${REG_HOST}" -u "${HARBOR_USERNAME}" --password-stdin || exit 1
           for f in "${charts[@]}"; do
@@ -3372,7 +3419,7 @@ EOF
           done
         '''
       }
-      paasStepOk(11, 'helm_oci', 'Helm OCI push stage finished (charts optional)')
+      paasStepOk(11, 'helm_oci', "Helm OCI push OK → ${ociRef}")
     }
   }
 

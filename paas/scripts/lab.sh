@@ -21,6 +21,7 @@ usage() {
   echo "usage: lab.sh <command>"
   echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
   echo "  boot-install  Install systemd auto-start on VM boot (run once with sudo)"
+  echo "  boot-enable   One command: install boot service + test recover (no reboot yet)"
   echo "  boot-fix      Install boot service + kubeconfig + recover now (after VM reboot)"
   echo "  boot-status   Show paas-lab-start.service + boot log tail"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
@@ -51,7 +52,18 @@ usage() {
   echo "  artifactory-bootstrap  Deploy JFrog Artifactory OSS + wire ARTIFACTORY_* (Step 8)"
   echo "  full-pipeline-enable   Steps 7-8+10-11 no-skip: helm, Artifactory, ZAP, Helm OCI"
   echo "  jenkins-zap-tools   kubectl in Jenkins pod + RBAC for Step 10 ZAP"
+  echo "  jenkins-bootstrap  Create JENKINS_API_TOKEN after fresh Jenkins install (no UI)"
+  echo "  jenkins-auth       Fix JENKINS_USERNAME+token in .env (env-quick reads .env, not docker-compose.env)"
+  echo "  jenkins-create-job  Create paas-deploy job + CPS bundle (fresh Jenkins)"
+  echo "  jenkins-plugins  Install workflow-aggregator (required after jenkins-install)"
+  echo "  jenkins-install  Helm install/repair Jenkins (:30090, no plugin download)"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
+  echo "  jenkins-build-safe  Raise Jenkins memory + relax probes (Sonar/Next build stability)"
+  echo "  jenkins-pvc-backup  Tar jobs/plugins/paas BEFORE PVC wipe (check Released PVs)"
+  echo "  fix-jenkins-dedupe  Remove duplicate runPaasDeploy() in stages monolith (host python3)"
+  echo "  restore-paas-deploy One-shot: render monolith + job wrapper + verify"
+  echo "  jenkins-fix-executors  Set built-in numExecutors (fix 'Waiting for next available executor')"
+  echo "  assemble-monolith  Rebuild paas-deploy-stages.groovy from 7 split files (closure->method, +helpers)"
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
   echo "  argocd-bootstrap  Set ARGOCD_BASE_URL + admin password in env (no UI)"
@@ -62,8 +74,15 @@ usage() {
   echo "  frontend-safety   Recreate + master pin (prevent pod storms)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  emergency-up    Unstick everything: kill lab jobs, restart k3s, recover UI"
+  echo "  quick-up        ONE command: master + postgres + frontend UI (use this first)"
+  echo "  reboot          Safe recovery after VM/PC reboot (fixes broken deployment images)"
+  echo "  reinstall-platform  Reinstall Jenkins+Harbor+Argo after k3s db wipe (~30-60 min)"
+  echo "  fresh-cluster   Full redeploy after k3s db wipe (namespace + postgres + UI :30100)"
+  echo "  k3s-vacuum      Fix k3s stuck activating (slow SQLite — run with sudo)"
+  echo "  k3s-ensure      Wait for / restart k3s API when 127.0.0.1:6443 times out"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
+  echo "  master-heal     Heal master NotReady (PaaS UI runs on master)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  frontend-rollout  Roll out existing local/recovery image (no rebuild)"
   echo "  repair-frontend-ui  Fix UI 500 after rollout (restore envFrom + probes)"
@@ -81,6 +100,8 @@ case "$cmd" in
     bash "$LIB/recover-paas-after-k3s-restart.sh" ;;
   boot-install|install-boot)
     _run_boot_script install ;;
+  boot-enable|enable-boot)
+    bash "$LIB/lab-boot-enable.sh" ;;
   boot-fix|fix-boot)
     bash "$LIB/lab-boot-fix.sh" ;;
   boot-status|boot-log)
@@ -156,8 +177,32 @@ case "$cmd" in
     bash "$LIB/lab-enable-full-pipeline.sh" ;;
   jenkins-zap-tools|zap-tools)
     bash "$LIB/lab-jenkins-zap-tools.sh" ;;
+  jenkins-bootstrap|bootstrap-jenkins)
+    bash "$LIB/lab-jenkins-bootstrap.sh" ;;
+  jenkins-auth|jenkins-sync-auth|fix-jenkins-auth)
+    bash "$LIB/lab-jenkins-sync-auth.sh" ;;
+  jenkins-create-job|create-paas-deploy)
+    bash "$LIB/jenkins-create-paas-deploy-now.sh" ;;
+  jenkins-plugins|pipeline-plugins)
+    bash "$LIB/install-jenkins-workflow-plugins.sh" 2>/dev/null || bash "$LIB/lab-jenkins-pipeline-plugins.sh" ;;
+  jenkins-install|install-jenkins)
+    bash "$LIB/lab-jenkins-helm-install.sh" install ;;
+  jenkins-fix-init|fix-jenkins-init)
+    bash "$LIB/lab-jenkins-helm-install.sh" repair ;;
   jenkins-recover|recover-jenkins)
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
+  jenkins-build-safe|jenkins-stability|build-safe)
+    bash "$LIB/lab-jenkins-build-safe.sh" ;;
+  jenkins-pvc-backup|backup-jenkins-pvc)
+    bash "$LIB/lab-jenkins-pvc-backup.sh" ;;
+  fix-jenkins-dedupe|jenkins-dedupe)
+    bash "$LIB/fix-jenkins-stages-dedupe.sh" ;;
+  restore-paas-deploy|restore-paas-deploy-working)
+    bash "$LIB/restore-paas-deploy-working.sh" ;;
+  jenkins-fix-executors|fix-jenkins-executors|executors)
+    bash "$LIB/lab-jenkins-fix-executors.sh" ;;
+  assemble-monolith|fix-monolith|jenkins-monolith)
+    bash "$LIB/assemble-paas-deploy-monolith.sh" ;;
   dependency-track|dtrack)
     bash "$LIB/lab-dependency-track.sh" ;;
   dt-bootstrap|dependency-track-bootstrap)
@@ -182,6 +227,22 @@ case "$cmd" in
     bash "$LIB/lab-emergency-unblock.sh" ;;
   emergency-up|unstick|stuck)
     bash "$LIB/lab-emergency-up.sh" ;;
+  quick-up|up|fix)
+    bash "$LIB/lab-quick-up.sh" ;;
+  fresh-cluster|bootstrap-lab|rebuild-lab)
+    bash "$LIB/lab-fresh-cluster.sh" ;;
+  reboot|reboot-recover|after-reboot)
+    bash "$LIB/lab-reboot-recover.sh" ;;
+  reinstall-platform|platform-reinstall|reinstall)
+    bash "$LIB/lab-reinstall-platform.sh" ;;
+  k3s-vacuum|vacuum-k3s|k3s-db)
+    if [[ "$(id -u)" -eq 0 ]]; then
+      bash "$LIB/lab-k3s-db-vacuum.sh"
+    else
+      sudo bash "$LIB/lab-k3s-db-vacuum.sh"
+    fi ;;
+  k3s-ensure|k3s)
+    bash "$LIB/lab-k3s-ensure.sh" ;;
   restore|fix-app|back)
     bash "$LIB/lab-restore-app.sh" ;;
   rollback-june17|june17|rollback-756)
@@ -192,6 +253,8 @@ case "$cmd" in
     bash "$LIB/lab-break-loop.sh" ;;
   worker2|worker2-heal)
     bash "$LIB/lab-worker2-heal.sh" ;;
+  master-heal|master)
+    bash "$LIB/lab-master-heal.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   frontend-rollout|rollout-frontend)
