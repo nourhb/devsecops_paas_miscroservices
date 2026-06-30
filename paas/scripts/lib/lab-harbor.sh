@@ -101,10 +101,35 @@ harbor_probe() {
   curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 20 "http://${REGISTRY}/v2/" 2>/dev/null || echo "000"
 }
 
+harbor_ensure_paas_project() {
+  local user="${HARBOR_USER:-admin}"
+  local pass="${HARBOR_PASS:-Harbor12345}"
+  local proj="${HARBOR_PROJECT:-paas}"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -u "${user}:${pass}" \
+    "http://${REGISTRY}/api/v2.0/projects/${proj}" 2>/dev/null || echo 000)"
+  if [[ "${code}" == "200" ]]; then
+    echo "OK: Harbor project ${proj} exists"
+    return 0
+  fi
+  echo "==> create Harbor project ${proj} (HTTP ${code})"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -u "${user}:${pass}" \
+    -X POST "http://${REGISTRY}/api/v2.0/projects" \
+    -H 'Content-Type: application/json' \
+    -d "{\"project_name\":\"${proj}\",\"public\":true}" 2>/dev/null || echo 000)"
+  if [[ "${code}" == "201" || "${code}" == "409" ]]; then
+    echo "OK: Harbor project ${proj} ready (HTTP ${code})"
+    return 0
+  fi
+  echo "WARN: could not create Harbor project ${proj} (HTTP ${code})" >&2
+  return 1
+}
+
 harbor_recover() {
   echo "==> Harbor registry recover (${REGISTRY})"
   harbor_normalize_env || true
   harbor_fix_cosign_realm || true
+  harbor_ensure_paas_project || true
   local hc
   hc="$(harbor_probe)"
   if [[ "${hc}" == "200" || "${hc}" == "401" ]]; then
@@ -151,7 +176,7 @@ case "${cmd}" in
   normalize) harbor_normalize_env ;;
   configure) harbor_configure_k3s ;;
   fix-realm) harbor_fix_cosign_realm ;;
-  recover) harbor_recover ;;
+  ensure-project) harbor_ensure_paas_project ;;
   bootstrap) harbor_bootstrap ;;
   *)
     echo "usage: lab-harbor.sh [normalize|configure|fix-realm|recover|bootstrap]" >&2

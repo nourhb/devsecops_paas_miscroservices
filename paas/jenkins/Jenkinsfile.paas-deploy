@@ -1609,10 +1609,49 @@ ${paasSourceBuildEnvShellSnippet()}
 }
 
 def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
+  def imageRefIp = imageRef
+  def slash = imageRef.indexOf('/')
+  if (slash > 0) {
+    def host = imageRef.substring(0, slash)
+    def path = imageRef.substring(slash)
+    imageRefIp = "${harborIpRegistryHostFromNipio(host)}${path}"
+  }
   println "[image] Step 6c — layer tar + crane append"
   sh """
     set -eu
     cd '${appRoot}'
+    harbor_nipio_to_ip_ref() {
+      local ref="\$1"
+      case "\$ref" in
+        harbor.*.nip.io:*/*|harbor.*.nip.io/*)
+          local host="\${ref%%/*}"
+          local rest="\${ref#*/}"
+          local nip_host port ip
+          nip_host="\${host%%:*}"
+          port="\${host#*:}"
+          if [ "\${port}" = "\${nip_host}" ]; then port=""; fi
+          ip="\$(printf '%s' "\${nip_host}" | sed -nE 's/^harbor\\.([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\.nip\\.io\$/\\1/p')"
+          [ -n "\${ip}" ] || return 1
+          if [ -n "\${port}" ]; then printf '%s/%s' "\${ip}:\${port}" "\${rest}"
+          else printf '%s/%s' "\${ip}" "\${rest}"; fi
+          return 0
+          ;;
+      esac
+      return 1
+    }
+    paas_crane_harbor_login() {
+      local _nip="\${HARBOR_REGISTRY:-${imageRef.tokenize('/')[0]}}"
+      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
+      [ -z "\${_ip}" ] && _ip="${imageRefIp.tokenize('/')[0]}"
+      local _u="\${HARBOR_USERNAME:-admin}"
+      local _p="\${HARBOR_PASSWORD:-}"
+      [ -n "\${_p}" ] || { echo "[image] ERROR: HARBOR_PASSWORD empty"; return 1; }
+      for _r in "\${_ip}" "\${_nip}"; do
+        [ -z "\${_r}" ] && continue
+        echo "[image] crane re-login \${_r} before push"
+        "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" -p "\${_p}" --insecure
+      done
+    }
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
@@ -1685,14 +1724,23 @@ PAAS_START
     _crane_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
     _crane_attempt=1
     _crane_rc=1
+    _push_ref="${imageRef}"
+    _push_ref_ip="${imageRefIp}"
     while [ "\${_crane_attempt}" -le "\${_crane_max}" ]; do
-      echo "[image] crane append attempt \${_crane_attempt}/\${_crane_max} → ${imageRef}"
+      paas_crane_harbor_login || true
+      if [ "\${_crane_attempt}" -ge 2 ]; then
+        _push_ref="\${_push_ref_ip}"
+        echo "[image] crane append using IP registry ref (401 fallback): \${_push_ref}"
+      else
+        _push_ref="${imageRef}"
+      fi
+      echo "[image] crane append attempt \${_crane_attempt}/\${_crane_max} → \${_push_ref}"
       if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
         _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
         "${craneBin}" ${craneInsecure} append \\
           -b mirror.gcr.io/library/node:20-bookworm-slim \\
           -f paas-artifacts/app-layer.tar \\
-          -t "${imageRef}" &
+          -t "\${_push_ref}" &
         CRANE_APPEND_PID=\$!
         while kill -0 "\${CRANE_APPEND_PID}" 2>/dev/null; do
           echo "[image] (crane heartbeat) still packing or pushing… \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -1703,12 +1751,16 @@ PAAS_START
         "${craneBin}" ${craneInsecure} append \\
           -b mirror.gcr.io/library/node:20-bookworm-slim \\
           -f paas-artifacts/app-layer.tar \\
-          -t "${imageRef}" && _crane_rc=0 || _crane_rc=\$?
+          -t "\${_push_ref}" && _crane_rc=0 || _crane_rc=\$?
       fi
       if [ "\${_crane_rc}" = "0" ]; then
+        if [ "\${_push_ref}" != "${imageRef}" ]; then
+          echo "[image] pushed via IP ref — tagging nip.io alias ${imageRef}"
+          "${craneBin}" ${craneInsecure} tag "\${_push_ref}" "${imageRef}" || true
+        fi
         break
       fi
-      echo "[image] WARN: crane append failed (rc=\${_crane_rc}); Harbor 502? bash paas/scripts/lab.sh harbor"
+      echo "[image] WARN: crane append failed (rc=\${_crane_rc}); try: bash paas/scripts/lab.sh harbor"
       if [ "\${_crane_attempt}" -ge "\${_crane_max}" ]; then
         exit "\${_crane_rc}"
       fi
@@ -1813,7 +1865,7 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
     if (!harborUser || !harborPassword) {
       error("Harbor credentials are required for dockerless image push.")
     }
-    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
+    withEnv(["CRANE_BIN=${craneBin}", "REGISTRY=${registry}", "REGISTRY_IP=${harborIpRegistryHostFromNipio(registry)}", "REGISTRY_USER=${harborUser}", "REGISTRY_PASS=${harborPassword}", "IMAGE_REF=${imageRef}"]) {
       sh '''
         set -eu
         echo "[image] probing Harbor http://${REGISTRY}/v2/ before login…"
@@ -1835,19 +1887,12 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
           echo "[image] ERROR: Harbor registry not reachable at http://${REGISTRY}/v2/ — fix Harbor before crane push"
           exit 1
         fi
-        "$CRANE_BIN" auth login "$REGISTRY" -u "$REGISTRY_USER" -p "$REGISTRY_PASS" --insecure &
-        _auth_pid=$!
-        _n=0
-        while kill -0 "$_auth_pid" 2>/dev/null; do
-          sleep 15
-          _n=$((_n + 1))
-          echo "[image] crane auth login still running (${_n}×15s) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        for _reg in "${REGISTRY_IP}" "${REGISTRY}"; do
+          [ -z "${_reg}" ] && continue
+          echo "[image] crane auth login ${_reg} …"
+          "$CRANE_BIN" auth login "${_reg}" -u "${REGISTRY_USER}" -p "${REGISTRY_PASS}" --insecure
         done
-        if ! wait "$_auth_pid"; then
-          echo "[image] WARN: crane auth login failed — push may fail"
-        else
-          echo "[image] crane auth login OK"
-        fi
+        echo "[image] crane dual auth OK (IP ${REGISTRY_IP} + nip.io ${REGISTRY})"
       '''
     }
   }
@@ -2182,7 +2227,7 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
   println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
   println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
-  println '[paas-jenkinsfile] marker=harbor-nipio-artifact-ref-20260615 (PAAS_ARTIFACT_IMAGE + cosign use nip.io push ref)'
+  println '[paas-jenkinsfile] marker=harbor-crane-dual-auth-20260630 (IP+nip.io login; IP fallback on 401 push)'
   println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
   println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
 
