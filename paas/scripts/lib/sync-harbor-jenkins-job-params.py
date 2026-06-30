@@ -92,9 +92,9 @@ def main() -> int:
         req = urllib.request.Request(f"{base}{path}", data=data, method=method, headers=headers)
         try:
             with opener.open(req, timeout=120) as resp:
-                return resp.status, resp.read().decode("utf-8", replace="backslashreplace")
+                return resp.status, resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", replace="backslashreplace")
+            return e.code, e.read().decode("utf-8", errors="replace")
 
     code, body = call(f"/job/{job}/config.xml")
     if code == 404:

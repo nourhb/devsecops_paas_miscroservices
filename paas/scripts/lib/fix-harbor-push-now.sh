@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# One-shot Harbor push fix for lab VM (project RBAC + robot + env + Jenkins params + crane probe).
+# One-shot Harbor push fix for lab VM (DB heal + RBAC + robot + env + crane probe).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
 
 echo "=============================================="
-echo " FIX Harbor push (RBAC + robot + sync)"
+echo " FIX Harbor push (DB heal + RBAC + robot + sync)"
 echo "=============================================="
+
+chmod +x "${SCRIPT_DIR}/lab-harbor-db-heal.sh" 2>/dev/null || true
+bash "${SCRIPT_DIR}/lab-harbor-db-heal.sh"
 
 python3 "${SCRIPT_DIR}/harbor-push-rbac-fix.py"
 

@@ -277,6 +277,9 @@ harbor_fix_push() {
 harbor_recover() {
   echo "==> Harbor registry recover (${REGISTRY})"
   harbor_normalize_env || true
+  if [[ -f "${SCRIPT_DIR}/lab-harbor-db-heal.sh" ]]; then
+    bash "${SCRIPT_DIR}/lab-harbor-db-heal.sh" || true
+  fi
   harbor_fix_cosign_realm || true
   harbor_ensure_paas_project || true
   local hc

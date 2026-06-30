@@ -120,6 +120,11 @@ def delete_project(base: str, user: str, password: str, project: str) -> bool:
 def restart_harbor_core() -> None:
     if not shutil_which("kubectl"):
         return
+    db_heal = SCRIPT_DIR / "lab-harbor-db-heal.sh"
+    if db_heal.is_file():
+        log("==> heal Harbor database before restarting core")
+        subprocess.run(["bash", str(db_heal)], check=False)
+        return
     log("==> restart Harbor core/registry/nginx (recover from API 500)")
     for deploy in ("harbor-core", "harbor-registry", "harbor-nginx"):
         subprocess.run(
@@ -348,11 +353,21 @@ def resolve_push_creds(
     return push_user, push_pass, actions
 
 
+def api_projects_ok(base: str, user: str, password: str) -> bool:
+    code, _ = api_call(base, user, password, "/api/v2.0/projects?page_size=1")
+    return code == 200
+
+
 def main() -> int:
     global PROJECT
     admin_user, admin_pass = read_admin_password()
     base = pick_base(admin_user, admin_pass)
     log(f"==> Harbor API base={base}")
+
+    if not api_projects_ok(base, admin_user, admin_pass):
+        log("ERROR: Harbor API /projects not healthy — run: bash paas/scripts/lib/lab-harbor-db-heal.sh")
+        log("  (harbor-core logs showing harbor-database connection refused = Postgres down)")
+        return 1
 
     project = PROJECT
     repo = probe_repo(project)

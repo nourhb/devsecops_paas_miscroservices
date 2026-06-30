@@ -116,6 +116,8 @@ case "$cmd" in
     bash "$LIB/lab-harbor.sh" recover ;;
   harbor-fix-push|fix-harbor-push|harbor-push|fix-harbor-push-now)
     bash "$LIB/fix-harbor-push-now.sh" ;;
+  harbor-db-heal|heal-harbor-db)
+    bash "$LIB/lab-harbor-db-heal.sh" ;;
   db-repair)
     bash "$LIB/lab-paas-db-repair.sh" ;;
   postgres)
