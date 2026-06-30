@@ -59,6 +59,8 @@ usage() {
   echo "  jenkins-install  Helm install/repair Jenkins (:30090, no plugin download)"
   echo "  jenkins-recover  Restart Jenkins in cicd + wait for endpoints"
   echo "  jenkins-build-safe  Raise Jenkins memory + relax probes (Sonar/Next build stability)"
+  echo "  sync-repo       git fetch + reset --hard origin/main (fix VM drift blocking git pull)"
+  echo "  fix-sonar-step5 sync-repo + jenkins-build-safe + push checkpoint-poll pipeline to Jenkins"
   echo "  jenkins-pvc-backup  Tar jobs/plugins/paas BEFORE PVC wipe (check Released PVs)"
   echo "  fix-jenkins-dedupe  Remove duplicate runPaasDeploy() in stages monolith (host python3)"
   echo "  restore-paas-deploy One-shot: render monolith + job wrapper + verify"
@@ -193,6 +195,17 @@ case "$cmd" in
     bash "$LIB/lab-jenkins-recover.sh" recover ;;
   jenkins-build-safe|jenkins-stability|build-safe)
     bash "$LIB/lab-jenkins-build-safe.sh" ;;
+  sync-repo|git-sync|lab-git-sync)
+    bash "$LIB/lab-git-sync-origin.sh" ;;
+  deploy-fix-sonar|fix-sonar-step5)
+    bash "$LIB/lab-git-sync-origin.sh"
+    bash "$LIB/lab-jenkins-build-safe.sh"
+    rm -rf paas/jenkins/.render-test /var/tmp/paas-deploy-bundle
+    bash "$LIB/fix-paas-deploy-cps-split-now.sh"
+    kubectl exec -n "${JENKINS_K8S_NAMESPACE:-cicd}" jenkins-0 -c jenkins --request-timeout=60s -- \
+      grep -c 'sonar-checkpoint-poll-20260630' /var/jenkins_home/paas/paas-deploy-stages.groovy \
+      | tr -d '\r\n' | grep -qx 1 && echo "OK: sonar-checkpoint-poll on pod" \
+      || { echo "FAIL: pod missing sonar-checkpoint-poll" >&2; exit 1; } ;;
   jenkins-pvc-backup|backup-jenkins-pvc)
     bash "$LIB/lab-jenkins-pvc-backup.sh" ;;
   fix-jenkins-dedupe|jenkins-dedupe)
