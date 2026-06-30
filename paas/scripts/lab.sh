@@ -199,7 +199,7 @@ case "$cmd" in
     bash "$LIB/lab-git-sync-origin.sh" ;;
   deploy-fix-sonar|fix-sonar-step5)
     bash "$LIB/lab-git-sync-origin.sh"
-    bash "$LIB/lab-jenkins-build-safe.sh"
+    bash "$LIB/lab-jenkins-build-safe.sh" || echo "WARN: jenkins-build-safe failed — continuing pipeline sync"
     rm -rf paas/jenkins/.render-test /var/tmp/paas-deploy-bundle
     bash "$LIB/fix-paas-deploy-cps-split-now.sh"
     kubectl exec -n "${JENKINS_K8S_NAMESPACE:-cicd}" jenkins-0 -c jenkins --request-timeout=60s -- \

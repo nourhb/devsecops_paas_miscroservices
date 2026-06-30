@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Harden Jenkins controller for long paas-deploy steps (Next build, Sonar, crane).
-# Build #17 failed Step 5 when jenkins-0 restarted ~58s into Sonar (1536Mi limit + tight probes).
+# Uses JSON patch (merge patch on containers[] wipes image + probe handlers).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,36 +19,23 @@ if ! kubectl get statefulset jenkins -n "${JENKINS_NS}" >/dev/null 2>&1; then
   exit 1
 fi
 
-log "patch jenkins StatefulSet: memory limit=${MEM_LIMIT} request=${MEM_REQUEST}; relaxed probes"
-kubectl patch statefulset jenkins -n "${JENKINS_NS}" --type='merge' -p "
-spec:
-  template:
-    spec:
-      containers:
-      - name: jenkins
-        resources:
-          limits:
-            memory: ${MEM_LIMIT}
-          requests:
-            memory: ${MEM_REQUEST}
-        livenessProbe:
-          timeoutSeconds: 30
-          periodSeconds: 60
-          failureThreshold: 10
-          initialDelaySeconds: 120
-        readinessProbe:
-          timeoutSeconds: 30
-          periodSeconds: 30
-          failureThreshold: 12
-          initialDelaySeconds: 30
-"
+log "patch jenkins StatefulSet: memory limit=${MEM_LIMIT} request=${MEM_REQUEST}; relaxed probes (json patch)"
+kubectl patch statefulset jenkins -n "${JENKINS_NS}" --type=json -p="[
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/resources/limits/memory\",\"value\":\"${MEM_LIMIT}\"},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/resources/requests/memory\",\"value\":\"${MEM_REQUEST}\"},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds\",\"value\":30},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/livenessProbe/periodSeconds\",\"value\":60},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/livenessProbe/failureThreshold\",\"value\":10},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds\",\"value\":120},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds\",\"value\":30},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe/periodSeconds\",\"value\":30},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe/failureThreshold\",\"value\":12},
+  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds\",\"value\":30}
+]"
 
 log "rollout jenkins-0 (expect ~1–2 min)"
 kubectl rollout status statefulset/jenkins -n "${JENKINS_NS}" --timeout=300s
 
 lim="$(kubectl get pod -n "${JENKINS_NS}" "${JPOD}" -o jsonpath='{.spec.containers[0].resources.limits.memory}' 2>/dev/null || true)"
 log "jenkins-0 memory limit=${lim:-unknown}"
-log "optional JENKINS-48300: add to controller JAVA_OPTS:"
-log "  -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=300"
-log "done — sync pipeline + deploy:"
-log "  bash paas/scripts/lib/fix-paas-deploy-cps-split-now.sh"
+log "done"
