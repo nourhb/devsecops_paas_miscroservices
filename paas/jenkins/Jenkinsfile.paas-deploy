@@ -1646,11 +1646,66 @@ def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String arti
       local _u="\${HARBOR_USERNAME:-admin}"
       local _p="\${HARBOR_PASSWORD:-}"
       [ -n "\${_p}" ] || { echo "[image] ERROR: HARBOR_PASSWORD empty"; return 1; }
+      export DOCKER_CONFIG="\${JENKINS_HOME:-/var/jenkins_home}/.docker-paas-crane"
+      mkdir -p "\${DOCKER_CONFIG}"
       for _r in "\${_ip}" "\${_nip}"; do
         [ -z "\${_r}" ] && continue
-        echo "[image] crane re-login \${_r} before push"
-        "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" -p "\${_p}" --insecure
+        echo "[image] crane re-login \${_r} before push (password-stdin)"
+        printf '%s' "\${_p}" | "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" --password-stdin --insecure
       done
+    }
+    paas_harbor_ensure_project_and_token() {
+      local _user="\${HARBOR_USERNAME:-admin}"
+      local _pass="\${HARBOR_PASSWORD:-}"
+      local _nip="\${HARBOR_REGISTRY:-${imageRef.tokenize('/')[0]}}"
+      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
+      [ -z "\${_ip}" ] && _ip="${imageRefIp.tokenize('/')[0]}"
+      local _repo="\${_push_ref#*/}"
+      _repo="\${_repo%%:*}"
+      local _proj="\${_repo%%/*}"
+      [ -n "\${_user}" ] && [ -n "\${_pass}" ] || { echo "[image] ERROR: Harbor creds empty"; return 1; }
+      for _api in "http://\${_ip}" "http://\${_nip}"; do
+        [ -z "\${_api#http://}" ] && continue
+        _hc="\$(curl -sS -o /dev/null -w '%{http_code}' -u "\${_user}:\${_pass}" \
+          "\${_api}/api/v2.0/projects/\${_proj}" 2>/dev/null || echo 000)"
+        if [ "\${_hc}" != "200" ]; then
+          echo "[image] Harbor ensure project \${_proj} (GET HTTP \${_hc}) via \${_api}"
+          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \
+            -H 'Content-Type: application/json' \
+            -d "{\\"project_name\\":\\"\${_proj}\\",\\"metadata\\":{\\"public\\":\\"true\\"}}" >/dev/null 2>&1 || true
+          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \
+            -H 'Content-Type: application/json' \
+            -d "{\\"project_name\\":\\"\${_proj}\\",\\"public\\":true}" >/dev/null 2>&1 || true
+        fi
+        _resp="\$(curl -sS -u "\${_user}:\${_pass}" \
+          "\${_api}/service/token?service=harbor-registry&scope=repository:\${_repo}:pull,push" 2>/dev/null || true)"
+        if [ -n "\${_resp}" ] && command -v python3 >/dev/null 2>&1; then
+          _actions="\$(HARBOR_PROBE_REPO="\${_repo}" printf '%s' "\${_resp}" | python3 -c '
+import sys, json, base64, os
+repo = os.environ.get("HARBOR_PROBE_REPO", "")
+try:
+  tok = json.load(sys.stdin).get("token", "")
+  p = tok.split(".")[1]
+  p += "=" * (-len(p) % 4)
+  claims = json.loads(base64.urlsafe_b64decode(p))
+  acts = []
+  for a in claims.get("access") or []:
+    if a.get("name") == repo:
+      acts = list(a.get("actions") or [])
+      break
+  print(",".join(acts))
+except Exception:
+  print("")
+' 2>/dev/null || true)"
+          if echo "\${_actions}" | grep -q push; then
+            echo "[image] Harbor push token OK (\${_api} repo=\${_repo} actions=\${_actions})"
+            return 0
+          fi
+          echo "[image] WARN: Harbor token missing push for \${_repo} via \${_api} (actions=\${_actions:-empty})"
+        fi
+      done
+      echo "[image] ERROR: Harbor push RBAC denied for \${_repo} — run: bash paas/scripts/lib/fix-harbor-push-now.sh"
+      return 1
     }
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
@@ -1726,6 +1781,7 @@ PAAS_START
     _crane_rc=1
     _push_ref="${imageRef}"
     _push_ref_ip="${imageRefIp}"
+    paas_harbor_ensure_project_and_token || exit 1
     while [ "\${_crane_attempt}" -le "\${_crane_max}" ]; do
       paas_crane_harbor_login || true
       if [ "\${_crane_attempt}" -ge 2 ]; then
@@ -1890,7 +1946,9 @@ def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath)
         for _reg in "${REGISTRY_IP}" "${REGISTRY}"; do
           [ -z "${_reg}" ] && continue
           echo "[image] crane auth login ${_reg} …"
-          "$CRANE_BIN" auth login "${_reg}" -u "${REGISTRY_USER}" -p "${REGISTRY_PASS}" --insecure
+          export DOCKER_CONFIG="${JENKINS_HOME:-/var/jenkins_home}/.docker-paas-crane"
+          mkdir -p "${DOCKER_CONFIG}"
+          printf '%s' "${REGISTRY_PASS}" | "$CRANE_BIN" auth login "${_reg}" -u "${REGISTRY_USER}" --password-stdin --insecure
         done
         echo "[image] crane dual auth OK (IP ${REGISTRY_IP} + nip.io ${REGISTRY})"
       '''
@@ -2228,6 +2286,8 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
   println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
   println '[paas-jenkinsfile] marker=harbor-crane-dual-auth-20260630 (IP+nip.io login; IP fallback on 401 push)'
+  println '[paas-jenkinsfile] marker=harbor-ensure-push-token-20260630 (API ensure paas project + JWT push scope before crane append)'
+  println '[paas-jenkinsfile] marker=harbor-rbac-jwt-push-20260701 (fail Step6 when token actions lack push — run fix-harbor-push-now.sh)'
   println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
   println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
 

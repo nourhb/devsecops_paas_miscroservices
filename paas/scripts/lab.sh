@@ -114,6 +114,8 @@ case "$cmd" in
     bash "$LIB/lab-kyverno.sh" bootstrap ;;
   harbor)
     bash "$LIB/lab-harbor.sh" recover ;;
+  harbor-fix-push|fix-harbor-push|harbor-push|fix-harbor-push-now)
+    bash "$LIB/fix-harbor-push-now.sh" ;;
   db-repair)
     bash "$LIB/lab-paas-db-repair.sh" ;;
   postgres)
@@ -207,6 +209,15 @@ case "$cmd" in
       grep -c 'sonar-checkpoint-poll-20260630' /var/jenkins_home/paas/paas-deploy-stages.groovy \
       | tr -d '\r\n' | grep -qx 1 && echo "OK: sonar-checkpoint-poll on pod" \
       || { echo "FAIL: pod missing sonar-checkpoint-poll" >&2; exit 1; } ;;
+  deploy-fix-harbor|fix-harbor-step6|harbor-step6)
+    bash "$LIB/lab-git-sync-origin.sh"
+    bash "$LIB/fix-harbor-push-now.sh"
+    SKIP_HARBOR_FIX_PUSH=1 bash "$LIB/fix-paas-deploy-cps-split-now.sh"
+    bash "$DIR/lab.sh" env-quick || true
+    kubectl exec -n "${JENKINS_K8S_NAMESPACE:-cicd}" jenkins-0 -c jenkins --request-timeout=60s -- \
+      grep -c 'harbor-rbac-jwt-push-20260701' /var/jenkins_home/paas/paas-deploy-stages.groovy \
+      | tr -d '\r\n' | grep -qx 1 && echo "OK: harbor-rbac-jwt-push on pod" \
+      || { echo "FAIL: pod missing harbor-rbac-jwt-push marker" >&2; exit 1; } ;;
   jenkins-pvc-backup|backup-jenkins-pvc)
     bash "$LIB/lab-jenkins-pvc-backup.sh" ;;
   fix-jenkins-dedupe|jenkins-dedupe)

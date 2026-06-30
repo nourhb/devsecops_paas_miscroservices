@@ -19,6 +19,14 @@ echo "=============================================="
 echo " FIX paas-deploy: 7-file CPS split (jenkins-0)"
 echo "=============================================="
 
+if [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/fix-harbor-push-now.sh" ]]; then
+  echo "==> 0/5 Harbor push RBAC (project + robot + crane probe)"
+  bash "${SCRIPT_DIR}/fix-harbor-push-now.sh" || echo "WARN: harbor push fix failed — Step 6 may still 401"
+elif [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-harbor.sh" ]]; then
+  echo "==> 0/5 Harbor push path (project + token + crane probe)"
+  bash "${SCRIPT_DIR}/lab-harbor.sh" fix-push || echo "WARN: harbor fix-push failed — Step 6 may still 401 until harbor is healthy"
+fi
+
 kubectl get pod -n "${JENKINS_NS}" "${JPOD}" >/dev/null 2>&1 || {
   echo "FAIL: pod ${JENKINS_NS}/${JPOD} not found (lab uses StatefulSet jenkins-0, not deploy/jenkins)" >&2
   exit 1
@@ -132,6 +140,15 @@ if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
     exit 1
   fi
   echo "OK: Sonar checkpoint-poll marker present in rendered p2 (Step 5)"
+fi
+
+if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; then
+  harbor_render="$(grep -rc 'harbor-ensure-push-token-20260630' "${RENDER}"/paas-deploy-*.groovy 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+  if [[ "${harbor_render}" -lt 1 ]]; then
+    echo "FAIL: Jenkinsfile has harbor-ensure-push-token but render bundle does not — git pull && re-run" >&2
+    exit 1
+  fi
+  echo "OK: Harbor ensure-push-token marker present in rendered bundle (Step 6)"
 fi
 
 echo "==> 2/5 Push 7 split files to ${JENKINS_NS}/${JPOD}:${REMOTE}"
@@ -311,6 +328,10 @@ print("OK: Jenkins LIVE uses assembled monolith load + paas.runPaasDeploy()")
 PY
 fi
 
+if [[ -f "${SCRIPT_DIR}/sync-harbor-jenkins-job-params.py" ]]; then
+  python3 "${SCRIPT_DIR}/sync-harbor-jenkins-job-params.py" || echo "WARN: Harbor job param sync skipped"
+fi
+
 echo "==> 5/5 Verify pod monolith + LIVE job"
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
   sh -c "grep -qF 'return this' '${REMOTE}/paas-deploy-stages.groovy'"
@@ -324,6 +345,16 @@ if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
     echo "OK: Sonar checkpoint-poll marker on pod monolith"
   else
     echo "FAIL: pod monolith missing sonar-checkpoint-poll (got ${poll_pod}) — abort before deploy" >&2
+    exit 1
+  fi
+fi
+if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; then
+  harbor_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'harbor-ensure-push-token-20260630' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${harbor_pod}" == "1" ]]; then
+    echo "OK: Harbor ensure-push-token marker on pod monolith"
+  else
+    echo "FAIL: pod monolith missing harbor-ensure-push-token (got ${harbor_pod}) — abort before deploy" >&2
     exit 1
   fi
 fi
