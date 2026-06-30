@@ -156,24 +156,25 @@ p3_on_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --requ
 echo "OK: 7 split files on pod (p3 runPaasDeploy count=1)"
 
 echo "==> 2b/5 Assemble monolith paas-deploy-stages.groovy on pod"
-if [[ -x "${SCRIPT_DIR}/assemble-paas-deploy-monolith.sh" ]]; then
-  bash "${SCRIPT_DIR}/assemble-paas-deploy-monolith.sh"
-else
-  echo "WARN: assemble-paas-deploy-monolith.sh missing — pushing monolith from render if present"
-  if [[ -f "${RENDER}/paas-deploy-stages.groovy" ]]; then
-    kubectl exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=120s \
-      -- tee "${REMOTE}/paas-deploy-stages.groovy" < "${RENDER}/paas-deploy-stages.groovy" >/dev/null
-  else
-    echo "FAIL: no monolith — run assemble-paas-deploy-monolith.sh" >&2
-    exit 1
-  fi
+ASSEMBLE="${SCRIPT_DIR}/assemble-paas-deploy-monolith.sh"
+if [[ ! -f "${ASSEMBLE}" ]]; then
+  echo "FAIL: ${ASSEMBLE} missing — git pull origin/main" >&2
+  exit 1
 fi
+chmod +x "${ASSEMBLE}" 2>/dev/null || true
+bash "${ASSEMBLE}"
 
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
   -- grep -qF 'return this' "${REMOTE}/paas-deploy-stages.groovy"
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
   -- sh -c "grep -c 'def runPaasDeploy()' '${REMOTE}/paas-deploy-stages.groovy' | grep -qx 1"
-echo "OK: monolith on pod (1 runPaasDeploy + return this)"
+_def_pid="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
+  -- sh -c "grep -c '^def projectId' '${REMOTE}/paas-deploy-stages.groovy' 2>/dev/null || echo 0" | tr -d '\r\n')"
+[[ "${_def_pid}" == "0" ]] || { echo "FAIL: monolith has def projectId (broken CPS binding) — re-run assemble" >&2; exit 1; }
+kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
+  -- grep -qE '^projectId\s*=' "${REMOTE}/paas-deploy-stages.groovy" \
+  || { echo "FAIL: monolith missing binding var projectId=" >&2; exit 1; }
+echo "OK: monolith on pod (1 runPaasDeploy + return this + projectId binding)"
 
 echo "==> 3/5 Disable PaaS UI job revert"
 for f in "${ENV_FILE}" "${REPO_ROOT}/paas/frontend/.env"; do

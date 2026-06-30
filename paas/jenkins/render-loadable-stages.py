@@ -114,6 +114,21 @@ def header(part: str) -> str:
     return f"// STAGES_BUNDLE_VERSION={BUNDLE_MARKER}\n// CPS_LOAD_METHOD_SYNTAX=20260626\n"
 
 
+def normalize_top_level_binding_vars(text: str) -> str:
+    """CPS load() methods need shared params as binding vars (projectId=), not def projectId=."""
+    import re
+
+    out: list[str] = []
+    for ln in text.splitlines(keepends=True):
+        line = ln.rstrip("\n\r")
+        m = re.match(r"^def (\w+)(\s*=\s*)(?!\{)(.*)$", line)
+        if m:
+            out.append(f"{m.group(1)}{m.group(2)}{m.group(3)}\n")
+        else:
+            out.append(ln if ln.endswith("\n") else ln + "\n")
+    return "".join(out)
+
+
 def render_bundle(main_path: Path) -> dict[str, str]:
     text = main_path.read_text(encoding="utf-8").replace("\r\n", "\n")
     lines = text.splitlines(keepends=True)
@@ -121,7 +136,7 @@ def render_bundle(main_path: Path) -> dict[str, str]:
     body_start = next(i for i, line in enumerate(lines) if line.startswith("def runPaasDeploy = {"))
     end = find_closure_end(lines, body_start)
     h1, h2, h3 = split_helpers(lines, vars_start)
-    vars_block = "".join(lines[vars_start:body_start])
+    vars_block = normalize_top_level_binding_vars("".join(lines[vars_start:body_start]))
     body_lines = lines[body_start + 1 : end]
     stage_parts = split_stages_parts(body_lines, vars_block)
     bundle: dict[str, str] = {
