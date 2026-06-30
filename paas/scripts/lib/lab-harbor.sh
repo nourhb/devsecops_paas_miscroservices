@@ -177,8 +177,9 @@ case "${cmd}" in
   configure) harbor_configure_k3s ;;
   fix-realm) harbor_fix_cosign_realm ;;
   ensure-project) harbor_ensure_paas_project ;;
+  recover) harbor_recover ;;
   bootstrap) harbor_bootstrap ;;
   *)
-    echo "usage: lab-harbor.sh [normalize|configure|fix-realm|recover|bootstrap]" >&2
+    echo "usage: lab-harbor.sh [normalize|configure|fix-realm|ensure-project|recover|bootstrap]" >&2
     exit 1 ;;
 esac
