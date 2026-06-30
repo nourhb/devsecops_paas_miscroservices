@@ -67,6 +67,9 @@ from pathlib import Path
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
 
+# Stale render-loadable-stages.py used closure syntax; monolith assembler expects methods.
+t = t.replace("def runPaasDeploy = {", "def runPaasDeploy() {")
+
 def end_of_block(s: str, start: int) -> int:
     depth = 0
     for i in range(start, len(s)):
@@ -93,6 +96,11 @@ while lines and lines[-1].strip() in ("", "runPaasDeploy()"):
 out = "\n".join(lines) + "\n"
 p.write_text(out, encoding="utf-8")
 if out.count(m) != 1:
+    if out.count("def runPaasDeploy = {") == 1:
+        out = out.replace("def runPaasDeploy = {", m)
+        p.write_text(out, encoding="utf-8")
+        print(f"OK: p3 normalized runPaasDeploy closure -> method ({len(out)} bytes)")
+        sys.exit(0)
     sys.exit(f"ERROR: p3 has {out.count(m)} def runPaasDeploy() after dedupe")
 print(f"OK: p3 deduped to 1 def runPaasDeploy() ({len(out)} bytes)")
 PY

@@ -75,12 +75,12 @@ def split_stages_parts(body_lines: list[str], vars_block: str) -> dict[str, str]
     closures: dict[str, str] = {}
     if stage_idx[0] > 0:
         init = "".join(body_lines[0 : stage_idx[0]]).rstrip() + "\n"
-        closures["runPaasDeployEnvInit"] = f"def runPaasDeployEnvInit = {{\n{init}}}\n"
+        closures["runPaasDeployEnvInit"] = f"def runPaasDeployEnvInit() {{\n{init}}}\n"
     for name, g0, g1 in groups:
         start = bounds[g0]
         end = bounds[g1]
         chunk = "".join(body_lines[start:end]).rstrip() + "\n"
-        closures[name] = f"def {name} = {{\n{chunk}}}\n"
+        closures[name] = f"def {name}() {{\n{chunk}}}\n"
     calls = [
         "runPaasDeployEnvInit()",
         "runPaasDeploySteps1_2()",
@@ -90,12 +90,17 @@ def split_stages_parts(body_lines: list[str], vars_block: str) -> dict[str, str]
         "runPaasDeploySteps7_8()",
         "runPaasDeploySteps9_12()",
     ]
-    orchestrator = "def runPaasDeploy = {\n" + "\n".join(f"  {c}" for c in calls) + "\n}\n"
+    orchestrator = (
+        "def runPaasDeploy() {\n"
+        + "\n".join(f"  {c}" for c in calls)
+        + "\n}\n"
+        "// CPS_ORCHESTRATOR=runPaasDeploy-after-all-loads (job wrapper calls runPaasDeploy() — not inside load p3)\n"
+    )
     vars_part = vars_block + closures.get("runPaasDeployEnvInit", "")
     p1 = closures["runPaasDeploySteps1_2"] + closures["runPaasDeployStep3"]
     p2 = closures["runPaasDeploySteps4_5"] + closures["runPaasDeployStep6"]
     p3 = closures["runPaasDeploySteps7_8"] + closures["runPaasDeploySteps9_12"] + orchestrator
-    combined = vars_part + p1 + p2 + p3
+    combined = vars_part + p1 + p2 + p3 + "return this\n"
     return {
         "paas-deploy-stages-vars.groovy": vars_part,
         "paas-deploy-stages-p1.groovy": p1,
@@ -106,7 +111,7 @@ def split_stages_parts(body_lines: list[str], vars_block: str) -> dict[str, str]
 
 
 def header(part: str) -> str:
-    return f"// STAGES_BUNDLE_VERSION={BUNDLE_MARKER}\n"
+    return f"// STAGES_BUNDLE_VERSION={BUNDLE_MARKER}\n// CPS_LOAD_METHOD_SYNTAX=20260626\n"
 
 
 def render_bundle(main_path: Path) -> dict[str, str]:
@@ -127,6 +132,13 @@ def render_bundle(main_path: Path) -> dict[str, str]:
     for name, content in stage_parts.items():
         part_label = name.replace("paas-deploy-stages", "stages").replace(".groovy", "")
         bundle[name] = header(part_label) + content
+    monolith = h1 + h2 + h3 + stage_parts["paas-deploy-stages.groovy"]
+    if "return this" not in monolith:
+        monolith += "return this\n"
+    bundle["paas-deploy-stages.groovy"] = (
+        header("stages monolith h1+h2+h3+steps")
+        + monolith
+    )
     return bundle
 
 
