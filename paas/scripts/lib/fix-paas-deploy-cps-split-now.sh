@@ -74,6 +74,15 @@ echo "=============================================="
 echo " FIX paas-deploy: CPS split → Jenkins pod"
 echo "=============================================="
 
+echo "==> 0pre/5 k3s API"
+bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || {
+  echo "FAIL: k3s API down (127.0.0.1:6443 timeout) — fix cluster first:" >&2
+  echo "  sudo systemctl restart k3s && sleep 120" >&2
+  echo "  bash paas/scripts/lab.sh quick-up" >&2
+  echo "  sudo bash paas/scripts/lab.sh k3s-vacuum   # if k3s stuck activating" >&2
+  exit 1
+}
+
 if [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/fix-harbor-push-now.sh" ]]; then
   echo "==> 0/5 Harbor push RBAC (project + robot + crane probe)"
   bash "${SCRIPT_DIR}/fix-harbor-push-now.sh" || echo "WARN: harbor push fix failed — Step 6 may still 401"

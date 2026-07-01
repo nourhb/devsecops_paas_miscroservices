@@ -3,6 +3,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 SONAR_PORT="${SONAR_NODEPORT:-30900}"
 SONAR_NS="${SONAR_NS:-sonarqube}"
@@ -115,6 +117,9 @@ main() {
   echo "=============================================="
   echo " Sonar fresh install (wipe + 9.9 LTS on master)"
   echo "=============================================="
+  lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
+  echo "==> k3s API"
+  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || die "k3s API down — run: sudo systemctl restart k3s && sleep 120  OR  sudo bash paas/scripts/lab.sh k3s-vacuum"
   apply_sysctl_all_nodes
   wipe_sonar
   install_sonar
