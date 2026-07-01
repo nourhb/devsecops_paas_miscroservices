@@ -273,8 +273,7 @@ case "$cmd" in
     bash "$LIB/lab-platform-heal.sh" ;;
   git-pull|pull-repo)
     cd "$REPO_ROOT"
-    git checkout -- paas/scripts/lib/fix-paas-deploy-cps-split-now.sh \
-      paas/scripts/lib/lab-sonarqube-fresh-install.sh paas/scripts/lab.sh 2>/dev/null || true
+    git checkout -- paas/scripts/ 2>/dev/null || true
     git pull ;;
   fresh-cluster|bootstrap-lab|rebuild-lab)
     bash "$LIB/lab-fresh-cluster.sh" ;;
