@@ -60,7 +60,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
     "DT_PROJECT_TAG=${projId}",
     "PAAS_DT_UPLOAD_OPTIONAL=${(params.PAAS_DT_UPLOAD_OPTIONAL?.trim() ?: env.PAAS_DT_UPLOAD_OPTIONAL ?: 'false').trim()}"
   ]) {
-    sh '''
+    sh '''#!/usr/bin/env bash
       set +e
       echo "[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (NodePort/env URLs before cluster DNS — built-in Jenkins agent)"
       echo "[paas-jenkinsfile] marker=dt-probe-only-upload-20260701 (no cluster DNS fallback on built-in agent)"
@@ -88,7 +88,9 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
         fi | awk '!seen[$0]++'
       }
       DT_LIST_FILE="sca/.dt-bases-$$.txt"
+      DT_CANDIDATES_FILE="sca/.dt-candidates-$$.txt"
       : > "${DT_LIST_FILE}"
+      dt_upload_candidates > "${DT_CANDIDATES_FILE}"
       DT_BASE_PICKED=""
       while IFS= read -r _dt_probe; do
         [ -z "${_dt_probe}" ] && continue
@@ -96,7 +98,8 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
           printf '%s\n' "${_dt_probe}" >> "${DT_LIST_FILE}"
           [ -z "${DT_BASE_PICKED}" ] && DT_BASE_PICKED="${_dt_probe}"
         fi
-      done < <(dt_upload_candidates)
+      done < "${DT_CANDIDATES_FILE}"
+      rm -f "${DT_CANDIDATES_FILE}"
       if [ -z "${DT_BASE_PICKED}" ]; then
         if [ -n "${DT_BASE}" ]; then
           DT_BASE_PICKED="${DT_BASE}"

@@ -395,6 +395,22 @@ if grep -qF "${SCA_MARKER}" "${JENKINSFILE}" 2>/dev/null; then
   echo "OK: Python node-first SCA marker present in rendered p2 (Step 4)"
 fi
 
+if grep -qF 'dt-listfile-posix-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  dt_render="$(grep_count 'dt-listfile-posix-20260701' "${RENDER}/paas-deploy-load-h1.groovy")"
+  dt_stale="$(grep_count 'dt-listfile-no-ansi-20260701' "${RENDER}/paas-deploy-load-h1.groovy")"
+  if [[ "${dt_render}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has dt-listfile-posix but render h1 does not — git pull && re-run" >&2
+    exit 1
+  fi
+  [[ "${dt_stale}" == "0" ]] || {
+    echo "FAIL: render h1 still has stale dt-listfile-no-ansi — git pull && re-run fix-paas-deploy-cps-split-now.sh" >&2
+    exit 1
+  }
+  grep -qF 'DT_CANDIDATES_FILE=' "${RENDER}/paas-deploy-load-h1.groovy" \
+    || { echo "FAIL: render h1 missing DT_CANDIDATES_FILE (dash-safe DT upload)" >&2; exit 1; }
+  echo "OK: dt-listfile-posix marker in rendered h1 (Step 4 DT upload — bash/dash safe)"
+fi
+
 echo "==> 2/5 Push 7 split files to ${JENKINS_NS}/${JPOD}:${REMOTE}"
 ensure_k8s_for_jenkins_push
 kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s -- mkdir -p "${REMOTE}"
@@ -661,6 +677,20 @@ if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/nul
       echo "FAIL: pod monolith still missing quoted 'bom-ref' (got ${bomref_pod}) — abort before deploy" >&2
       exit 1
     fi
+  fi
+fi
+if grep -qF 'dt-listfile-posix-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  dt_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'dt-listfile-posix-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || dt_pod=0
+  dt_pod="${dt_pod:-0}"
+  dt_stale_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'dt-listfile-no-ansi-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || dt_stale_pod=0
+  dt_stale_pod="${dt_stale_pod:-0}"
+  if [[ "${dt_pod}" == "1" ]] && [[ "${dt_stale_pod}" == "0" ]]; then
+    echo "OK: dt-listfile-posix on pod monolith (Step 4 DT upload)"
+  else
+    echo "FAIL: pod monolith dt-posix=${dt_pod} stale-no-ansi=${dt_stale_pod} — re-run fix-paas-deploy-cps-split-now.sh" >&2
+    exit 1
   fi
 fi
 
