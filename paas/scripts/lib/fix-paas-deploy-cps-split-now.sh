@@ -92,6 +92,11 @@ if [[ "${SKIP_SONAR_BOOTSTRAP:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/bootstrap-so
   fi
 fi
 
+if [[ "${SKIP_ZAP_TOOLS:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-jenkins-zap-tools.sh" ]]; then
+  echo "==> 0c/5 Jenkins ZAP tools (kubectl in pod + RBAC for Step 10)"
+  bash "${SCRIPT_DIR}/lab-jenkins-zap-tools.sh" || echo "WARN: jenkins-zap-tools failed — Step 10 may skip until re-run"
+fi
+
 resolve_jenkins_pod
 
 patch_python_bom_ref_quotes() {
@@ -295,14 +300,24 @@ grep -qF 'def coerceHarborHostForCosign' "${RENDER}/paas-deploy-load-h3.groovy" 
   || grep -qF 'def coerceHarborHostForCosign' "${RENDER}/paas-deploy-load-h2.groovy" \
   || { echo "FAIL: helpers missing in h2/h3" >&2; exit 1; }
 
-if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
-  poll_render="$(grep -c 'sonar-checkpoint-poll-20260630' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
-  if [[ "${poll_render}" != "1" ]]; then
-    echo "FAIL: Jenkinsfile has sonar-checkpoint-poll but render p2 does not (stale render-loadable-stages.py on VM?)" >&2
-    echo "  git pull && rm -rf paas/jenkins/.render-test /var/tmp/paas-deploy-bundle && re-run" >&2
+if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  shell_render="$(grep -c 'sonar-shell-wait-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  if [[ "${shell_render}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has sonar-shell-wait but render p2 does not — git pull && re-run" >&2
     exit 1
   fi
-  echo "OK: Sonar checkpoint-poll marker present in rendered p2 (Step 5)"
+  echo "OK: Sonar shell-wait marker present in rendered p2 (Step 5 — no Groovy sleep)"
+elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
+  echo "WARN: Jenkinsfile still has old sonar-checkpoint-poll (Groovy sleep) — git pull for sonar-shell-wait-20260701"
+fi
+
+if grep -qF 'nginx-crane-ip-first-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  nginx_render="$(grep -c 'nginx-crane-ip-first-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  if [[ "${nginx_render}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has nginx-crane-ip-first but render p2 does not — git pull && re-run" >&2
+    exit 1
+  fi
+  echo "OK: nginx-crane-ip-first marker present in rendered p2 (Vite/Angular Step 6)"
 fi
 
 if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
@@ -526,15 +541,17 @@ kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=6
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
   sh -c "test \"\$(grep -c 'def runPaasDeploy()' '${REMOTE}/paas-deploy-stages.groovy' | tr -d '\\r')\" = 1"
 echo "OK: pod monolith verified (return this + 1× runPaasDeploy)"
-if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
-  poll_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'sonar-checkpoint-poll-20260630' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
-  if [[ "${poll_pod}" == "1" ]]; then
-    echo "OK: Sonar checkpoint-poll marker on pod monolith"
+if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  shell_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'sonar-shell-wait-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${shell_pod}" == "1" ]]; then
+    echo "OK: Sonar shell-wait marker on pod monolith"
   else
-    echo "FAIL: pod monolith missing sonar-checkpoint-poll (got ${poll_pod}) — abort before deploy" >&2
+    echo "FAIL: pod monolith missing sonar-shell-wait (got ${shell_pod}) — abort before deploy" >&2
     exit 1
   fi
+elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
+  echo "WARN: pod still has old sonar-checkpoint-poll — git pull Jenkinsfile and re-run this script"
 fi
 if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
   rotate_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \

@@ -49,9 +49,24 @@ wait_artifactory() {
   ok "Artifactory UP ${ARTI_URL}"
 }
 
+detect_artifactory_nodeport() {
+  local svc="${ARTI_RELEASE}-artifactory-nginx"
+  [[ -n "$(kubectl get svc -n "${ARTI_NS}" "${svc}" --request-timeout=20s 2>/dev/null)" ]] || return 1
+  kubectl get svc -n "${ARTI_NS}" "${svc}" --request-timeout=20s \
+    -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null \
+    | tr -d '\r\n'
+}
+
 ensure_artifactory_release() {
+  local existing_np svc="${ARTI_RELEASE}-artifactory-nginx"
+  existing_np="$(detect_artifactory_nodeport 2>/dev/null || true)"
+  if [[ -n "${existing_np}" ]]; then
+    ARTI_PORT="${existing_np}"
+    ARTI_URL="http://${NODE_IP}:${ARTI_PORT}/artifactory"
+    ok "reuse existing Artifactory NodePort ${ARTI_PORT} from ${svc}"
+  fi
   if arti_ping; then
-    ok "Artifactory already reachable"
+    ok "Artifactory already reachable at ${ARTI_URL}"
     return 0
   fi
   command -v helm >/dev/null 2>&1 || fail "helm required to install Artifactory"
@@ -72,19 +87,35 @@ ensure_artifactory_release() {
     helm_extra+=(--set "postgresql.image.tag=${pg_tag}" --set databaseUpgradeReady=true)
   fi
 
-  echo "==> helm upgrade --install ${ARTI_RELEASE} (NodePort ${ARTI_PORT})"
-  if ! helm upgrade --install "${ARTI_RELEASE}" jfrog/artifactory \
-    -n "${ARTI_NS}" \
-    --set nginx.service.type=NodePort \
-    --set "nginx.service.nodePort=${ARTI_PORT}" \
-    --set artifactory.persistence.enabled=false \
-    --set postgresql.enabled=true \
-    "${helm_extra[@]}" \
-    --wait --timeout 15m; then
+  local helm_rc=0
+  if kubectl get svc -n "${ARTI_NS}" "${svc}" >/dev/null 2>&1; then
+    echo "==> helm upgrade --install ${ARTI_RELEASE} (--reuse-values; keep existing NodePort)"
+    helm upgrade --install "${ARTI_RELEASE}" jfrog/artifactory \
+      -n "${ARTI_NS}" \
+      --reuse-values \
+      "${helm_extra[@]}" \
+      --wait --timeout 15m || helm_rc=$?
+  else
+    echo "==> helm upgrade --install ${ARTI_RELEASE} (NodePort ${ARTI_PORT})"
+    helm upgrade --install "${ARTI_RELEASE}" jfrog/artifactory \
+      -n "${ARTI_NS}" \
+      --set nginx.service.type=NodePort \
+      --set "nginx.service.nodePort=${ARTI_PORT}" \
+      --set artifactory.persistence.enabled=false \
+      --set postgresql.enabled=true \
+      "${helm_extra[@]}" \
+      --wait --timeout 15m || helm_rc=$?
+  fi
+  if [[ "${helm_rc}" -ne 0 ]]; then
+    existing_np="$(detect_artifactory_nodeport 2>/dev/null || true)"
+    if [[ -n "${existing_np}" ]]; then
+      ARTI_PORT="${existing_np}"
+      ARTI_URL="http://${NODE_IP}:${ARTI_PORT}/artifactory"
+    fi
     if arti_ping; then
-      warn "helm upgrade failed but Artifactory ping OK — continuing"
+      warn "helm upgrade failed (rc=${helm_rc}) but Artifactory ping OK at ${ARTI_URL} — continuing"
     else
-      fail "helm upgrade failed and Artifactory not reachable"
+      fail "helm upgrade failed and Artifactory not reachable at ${ARTI_URL}"
     fi
   fi
   wait_artifactory

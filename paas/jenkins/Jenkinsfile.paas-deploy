@@ -1234,6 +1234,98 @@ def harborIpRegistryHostFromNipio(String host) {
   return h
 }
 
+def imageRefHarborIp(String imageRef) {
+  def ref = (imageRef ?: '').trim()
+  if (!ref) {
+    return ref
+  }
+  def slash = ref.indexOf('/')
+  if (slash <= 0) {
+    return ref
+  }
+  def host = ref.substring(0, slash)
+  def path = ref.substring(slash)
+  return "${harborIpRegistryHostFromNipio(host)}${path}"
+}
+
+def paasHarborCranePushShellHelpers(String craneBin, String imageRef, String imageRefIp, String craneInsecure) {
+  def regHost = imageRef.tokenize('/')[0]
+  def ipHost = imageRefIp.tokenize('/')[0]
+  return """
+    harbor_nipio_to_ip_ref() {
+      local ref="\$1"
+      case "\$ref" in
+        harbor.*.nip.io:*/*|harbor.*.nip.io/*)
+          local host="\${ref%%/*}"
+          local rest="\${ref#*/}"
+          local nip_host port ip
+          nip_host="\${host%%:*}"
+          port="\${host#*:}"
+          if [ "\${port}" = "\${nip_host}" ]; then port=""; fi
+          ip="\$(printf '%s' "\${nip_host}" | sed -nE 's/^harbor\\.([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\.nip\\.io\$/\\1/p')"
+          [ -n "\${ip}" ] || return 1
+          if [ -n "\${port}" ]; then printf '%s/%s' "\${ip}:\${port}" "\${rest}"
+          else printf '%s/%s' "\${ip}" "\${rest}"; fi
+          return 0
+          ;;
+      esac
+      return 1
+    }
+    paas_crane_harbor_login() {
+      local _nip="\${HARBOR_REGISTRY:-${regHost}}"
+      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
+      [ -z "\${_ip}" ] && _ip="${ipHost}"
+      local _u="\${HARBOR_USERNAME:-admin}"
+      local _p="\${HARBOR_PASSWORD:-}"
+      [ -n "\${_p}" ] || { echo "[image] ERROR: HARBOR_PASSWORD empty"; return 1; }
+      export DOCKER_CONFIG="\${JENKINS_HOME:-/var/jenkins_home}/.docker-paas-crane"
+      mkdir -p "\${DOCKER_CONFIG}"
+      for _r in "\${_ip}" "\${_nip}"; do
+        [ -z "\${_r}" ] && continue
+        echo "[image] crane re-login \${_r} before push (password-stdin)"
+        printf '%s' "\${_p}" | "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" --password-stdin --insecure
+      done
+    }
+    paas_harbor_ensure_project_and_token() {
+      local _user="\${HARBOR_USERNAME:-admin}"
+      local _pass="\${HARBOR_PASSWORD:-}"
+      local _nip="\${HARBOR_REGISTRY:-${regHost}}"
+      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
+      [ -z "\${_ip}" ] && _ip="${ipHost}"
+      local _repo="\${_push_ref_ip#*/}"
+      _repo="\${_repo%%:*}"
+      local _proj="\${_repo%%/*}"
+      [ -n "\${_user}" ] && [ -n "\${_pass}" ] || { echo "[image] ERROR: Harbor creds empty"; return 1; }
+      for _api in "http://\${_ip}" "http://\${_nip}"; do
+        [ -z "\${_api#http://}" ] && continue
+        _hc="\$(curl -sS -o /dev/null -w '%{http_code}' -u "\${_user}:\${_pass}" \\
+          "\${_api}/api/v2.0/projects/\${_proj}" 2>/dev/null || echo 000)"
+        if [ "\${_hc}" != "200" ]; then
+          echo "[image] Harbor ensure project \${_proj} (GET HTTP \${_hc}) via \${_api}"
+          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \\
+            -H 'Content-Type: application/json' \\
+            -d "{\\"project_name\\":\\"\${_proj}\\",\\"metadata\\":{\\"public\\":\\"true\\"}}" >/dev/null 2>&1 || true
+          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \\
+            -H 'Content-Type: application/json' \\
+            -d "{\\"project_name\\":\\"\${_proj}\\",\\"public\\":true}" >/dev/null 2>&1 || true
+        fi
+        _resp="\$(curl -sS -u "\${_user}:\${_pass}" \\
+          "\${_api}/service/token?service=harbor-registry&scope=repository:\${_repo}:pull,push" 2>/dev/null || true)"
+        if echo "\${_resp}" | grep -q '"token"[[:space:]]*:[[:space:]]*"'; then
+          if echo "\${_resp}" | grep -qE '"actions"[[:space:]]*:[[:space:]]*\\[\\s*\\]'; then
+            echo "[image] ERROR: Harbor JWT has no push scope — bash paas/scripts/lab.sh fix-harbor-push"
+            return 1
+          fi
+          echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo})"
+          return 0
+        fi
+      done
+      echo "[image] WARN: Harbor precheck could not read token for \${_repo}; continuing to real crane push"
+      return 0
+    }
+"""
+}
+
 def harborClusterPullImageRef(String imageRef) {
   def ref = (imageRef ?: '').trim()
   if (!ref) {
@@ -1567,21 +1659,62 @@ ${paasOpensslLegacyShellSnippet()}
     mkdir -p paas-artifacts/_nginx_conf/conf.d
   """
   writeNginxPaasDefaultConf(appRoot)
+  def imageRefIp = imageRefHarborIp(imageRef)
+  println '[paas-jenkinsfile] marker=nginx-crane-ip-first-20260701 (IP push + nip.io mutate — same Harbor path as Next.js)'
   sh """
     set -eu
     cd '${appRoot}'
     tar -C paas-artifacts/_nginx_conf --transform='s#^#etc/nginx/#' -rf paas-artifacts/app-layer.tar .
-    echo "[image] nginx crane append → ${imageRef}"
-    "${craneBin}" ${craneInsecure} append \\
-      -b mirror.gcr.io/library/nginx:stable-alpine \\
-      -f paas-artifacts/app-layer.tar \\
-      -t "${imageRef}"
-    "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
-      -t "${imageRef}" \\
-      --cmd=nginx \\
-      --cmd=-g \\
-      --cmd='daemon off;' \\
-      --exposed-ports=80/tcp
+${paasHarborCranePushShellHelpers(craneBin, imageRef, imageRefIp, craneInsecure)}
+    _crane_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
+    if [ "\${_crane_max}" -lt 2 ] 2>/dev/null; then _crane_max=2; fi
+    _crane_attempt=1
+    _crane_rc=1
+    _push_ref_ip="${imageRefIp}"
+    paas_harbor_ensure_project_and_token || exit 1
+    echo "[image] primary push ref (IP): ${imageRefIp} ; alias ref: ${imageRef}"
+    while [ "\${_crane_attempt}" -le "\${_crane_max}" ]; do
+      paas_crane_harbor_login || true
+      _push_ref="\${_push_ref_ip}"
+      echo "[image] nginx crane append attempt \${_crane_attempt}/\${_crane_max} → \${_push_ref}"
+      "${craneBin}" ${craneInsecure} append \\
+        -b mirror.gcr.io/library/nginx:stable-alpine \\
+        -f paas-artifacts/app-layer.tar \\
+        -t "\${_push_ref}" && _crane_rc=0 || _crane_rc=\$?
+      if [ "\${_crane_rc}" = "0" ]; then
+        if [ "\${_push_ref_ip}" != "${imageRef}" ]; then
+          echo "[image] pushed via IP ref — tagging nip.io alias ${imageRef}"
+          "${craneBin}" ${craneInsecure} tag "\${_push_ref_ip}" "${imageRef}" || true
+        fi
+        break
+      fi
+      echo "[image] WARN: nginx crane append failed (rc=\${_crane_rc}); try: bash paas/scripts/lab.sh harbor"
+      if [ "\${_crane_attempt}" -ge "\${_crane_max}" ]; then
+        exit "\${_crane_rc}"
+      fi
+      _crane_attempt=\$((_crane_attempt + 1))
+      sleep 45
+    done
+    _mutate_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
+    _mutate_attempt=1
+    _mutate_rc=1
+    while [ "\${_mutate_attempt}" -le "\${_mutate_max}" ]; do
+      echo "[image] nginx crane mutate attempt \${_mutate_attempt}/\${_mutate_max} → ${imageRef}"
+      "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+        -t "${imageRef}" \\
+        --cmd=nginx \\
+        --cmd=-g \\
+        --cmd='daemon off;' \\
+        --exposed-ports=80/tcp && _mutate_rc=0 || _mutate_rc=\$?
+      if [ "\${_mutate_rc}" = "0" ]; then
+        break
+      fi
+      if [ "\${_mutate_attempt}" -ge "\${_mutate_max}" ]; then
+        exit "\${_mutate_rc}"
+      fi
+      _mutate_attempt=\$((_mutate_attempt + 1))
+      sleep 30
+    done
     ARTIFACT_REF="${artifactImageRef}"
     if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
       "${craneBin}" ${craneInsecure} copy "${imageRef}" "\${ARTIFACT_REF}" || true
@@ -1718,88 +1851,12 @@ ${paasSourceBuildEnvShellSnippet()}
 }
 
 def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
-  def imageRefIp = imageRef
-  def slash = imageRef.indexOf('/')
-  if (slash > 0) {
-    def host = imageRef.substring(0, slash)
-    def path = imageRef.substring(slash)
-    imageRefIp = "${harborIpRegistryHostFromNipio(host)}${path}"
-  }
+  def imageRefIp = imageRefHarborIp(imageRef)
   println "[image] Step 6c — layer tar + crane append"
   sh """
     set -eu
     cd '${appRoot}'
-    harbor_nipio_to_ip_ref() {
-      local ref="\$1"
-      case "\$ref" in
-        harbor.*.nip.io:*/*|harbor.*.nip.io/*)
-          local host="\${ref%%/*}"
-          local rest="\${ref#*/}"
-          local nip_host port ip
-          nip_host="\${host%%:*}"
-          port="\${host#*:}"
-          if [ "\${port}" = "\${nip_host}" ]; then port=""; fi
-          ip="\$(printf '%s' "\${nip_host}" | sed -nE 's/^harbor\\.([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\.nip\\.io\$/\\1/p')"
-          [ -n "\${ip}" ] || return 1
-          if [ -n "\${port}" ]; then printf '%s/%s' "\${ip}:\${port}" "\${rest}"
-          else printf '%s/%s' "\${ip}" "\${rest}"; fi
-          return 0
-          ;;
-      esac
-      return 1
-    }
-    paas_crane_harbor_login() {
-      local _nip="\${HARBOR_REGISTRY:-${imageRef.tokenize('/')[0]}}"
-      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
-      [ -z "\${_ip}" ] && _ip="${imageRefIp.tokenize('/')[0]}"
-      local _u="\${HARBOR_USERNAME:-admin}"
-      local _p="\${HARBOR_PASSWORD:-}"
-      [ -n "\${_p}" ] || { echo "[image] ERROR: HARBOR_PASSWORD empty"; return 1; }
-      export DOCKER_CONFIG="\${JENKINS_HOME:-/var/jenkins_home}/.docker-paas-crane"
-      mkdir -p "\${DOCKER_CONFIG}"
-      for _r in "\${_ip}" "\${_nip}"; do
-        [ -z "\${_r}" ] && continue
-        echo "[image] crane re-login \${_r} before push (password-stdin)"
-        printf '%s' "\${_p}" | "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" --password-stdin --insecure
-      done
-    }
-    paas_harbor_ensure_project_and_token() {
-      local _user="\${HARBOR_USERNAME:-admin}"
-      local _pass="\${HARBOR_PASSWORD:-}"
-      local _nip="\${HARBOR_REGISTRY:-${imageRef.tokenize('/')[0]}}"
-      local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
-      [ -z "\${_ip}" ] && _ip="${imageRefIp.tokenize('/')[0]}"
-      local _repo="\${_push_ref_ip#*/}"
-      _repo="\${_repo%%:*}"
-      local _proj="\${_repo%%/*}"
-      [ -n "\${_user}" ] && [ -n "\${_pass}" ] || { echo "[image] ERROR: Harbor creds empty"; return 1; }
-      for _api in "http://\${_ip}" "http://\${_nip}"; do
-        [ -z "\${_api#http://}" ] && continue
-        _hc="\$(curl -sS -o /dev/null -w '%{http_code}' -u "\${_user}:\${_pass}" \
-          "\${_api}/api/v2.0/projects/\${_proj}" 2>/dev/null || echo 000)"
-        if [ "\${_hc}" != "200" ]; then
-          echo "[image] Harbor ensure project \${_proj} (GET HTTP \${_hc}) via \${_api}"
-          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \
-            -H 'Content-Type: application/json' \
-            -d "{\\"project_name\\":\\"\${_proj}\\",\\"metadata\\":{\\"public\\":\\"true\\"}}" >/dev/null 2>&1 || true
-          curl -sS -u "\${_user}:\${_pass}" -X POST "\${_api}/api/v2.0/projects" \
-            -H 'Content-Type: application/json' \
-            -d "{\\"project_name\\":\\"\${_proj}\\",\\"public\\":true}" >/dev/null 2>&1 || true
-        fi
-        _resp="\$(curl -sS -u "\${_user}:\${_pass}" \
-          "\${_api}/service/token?service=harbor-registry&scope=repository:\${_repo}:pull,push" 2>/dev/null || true)"
-        if echo "\${_resp}" | grep -q '"token"[[:space:]]*:[[:space:]]*"'; then
-          if echo "\${_resp}" | grep -qE '"actions"[[:space:]]*:[[:space:]]*\\[\\s*\\]'; then
-            echo "[image] ERROR: Harbor JWT has no push scope — bash paas/scripts/lab.sh fix-harbor-push"
-            return 1
-          fi
-          echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo})"
-          return 0
-        fi
-      done
-      echo "[image] WARN: Harbor precheck could not read token for \${_repo}; continuing to real crane push"
-      return 0
-    }
+${paasHarborCranePushShellHelpers(craneBin, imageRef, imageRefIp, craneInsecure)}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
       npm prune --omit=dev || echo "[image] WARN: npm prune failed, continuing"
@@ -2979,7 +3036,7 @@ exit 0
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
-      println "[paas-jenkinsfile] marker=sonar-checkpoint-poll-20260630 (nohup scanner + Groovy poll — survives Jenkins pod restart)"
+      println "[paas-jenkinsfile] marker=sonar-shell-wait-20260701 (nohup scanner + bash DEADLINE poll — no Groovy sleep)"
       println "[paas-jenkinsfile] marker=sonar-auto-rotate-token-20260701 (invalid SONAR_TOKEN → admin API rotate before fail)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
@@ -3624,6 +3681,10 @@ EOF
         paasStepWarn(10, 'zap', 'ZAP_TARGET_URL missing — skip (set APP_BASE_URL in PaaS)')
       } else {
       println "[zap] Cible DAST: ${zapTarget}"
+      def jh = (env.JENKINS_HOME ?: '/var/jenkins_home').trim()
+      if (jh) {
+        prependPath("${jh}/bin")
+      }
       withEnv(["ZAP_TARGET=${zapTarget}", "ZAP_BUILD=${env.BUILD_NUMBER}"]) {
         def zapRc = sh(script: '''#!/bin/bash
           set +e
@@ -3654,8 +3715,16 @@ EOF
           if command -v docker >/dev/null 2>&1; then
             echo "[zap] using docker"
             run_zap_docker
-          elif command -v kubectl >/dev/null 2>&1 || [ -x "${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl" ]; then
-            echo "[zap] docker CLI absent — using kubectl run (lab fallback)"
+          elif command -v kubectl >/dev/null 2>&1 || [ -x "\${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl" ]; then
+            KCTL="\${JENKINS_KUBECTL_BIN:-}"
+            if [ -z "\${KCTL}" ] || [ ! -x "\${KCTL}" ]; then
+              KCTL="\${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
+            fi
+            if [ ! -x "\${KCTL}" ] && command -v kubectl >/dev/null 2>&1; then
+              KCTL=kubectl
+            fi
+            export JENKINS_KUBECTL_BIN="\${KCTL}"
+            echo "[zap] docker CLI absent — using kubectl at \${KCTL} (lab fallback)"
             run_zap_kubectl
           else
             echo "[zap] docker and kubectl absent — install: bash paas/scripts/lab.sh jenkins-zap-tools"
