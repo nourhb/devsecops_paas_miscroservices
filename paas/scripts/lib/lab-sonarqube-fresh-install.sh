@@ -82,6 +82,8 @@ install_sonar() {
     --set monitoringPasscode=paas-lab-monitor \
     --set initSysctl.enabled=false \
     --set initFs.enabled=false \
+    --set 'plugins.install=[]' \
+    --set prometheusExporter.enabled=false \
     --set "nodeSelector.kubernetes\.io/hostname=${SONAR_LAB_NODE}" \
     --set-json 'tolerations=[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"},{"key":"node-role.kubernetes.io/master","operator":"Exists","effect":"NoSchedule"}]' \
     --set startupProbe.initialDelaySeconds=60 \
@@ -96,21 +98,37 @@ install_sonar() {
 }
 
 wait_up() {
-  local i
-  for i in $(seq 1 36); do
+  local i pod phase ready
+  for i in $(seq 1 48); do
     if curl -fsS -m 10 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
       ok "SonarQube UP ${SONAR_URL} (${i} checks)"
       return 0
     fi
     kubectl get pods -n "${SONAR_NS}" -o wide --request-timeout=15s 2>/dev/null | tail -n +2 || true
-    echo "  waiting… (${i}/36)"
+    pod="$(kubectl get pods -n "${SONAR_NS}" -o name 2>/dev/null | grep sonarqube-sonarqube | head -1 | sed 's|pod/||' || true)"
+    if [[ -n "${pod}" ]]; then
+      phase="$(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+      ready="$(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.containerStatuses[?(@.name=="sonarqube")].ready}' 2>/dev/null || true)"
+      if [[ "${phase}" == "Pending" ]] || kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.initContainerStatuses[0].state.waiting.reason}' 2>/dev/null | grep -q .; then
+        echo "  init: $(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.initContainerStatuses[*].name}:{.status.initContainerStatuses[*].state}' 2>/dev/null || echo ?)"
+      fi
+      if [[ "${ready}" != "true" ]] && [[ "${phase}" == "Running" ]] && (( i % 4 == 0 )); then
+        kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --tail=5 2>/dev/null || true
+      fi
+    fi
+    echo "  waiting… (${i}/48 — first start can take 10–15 min on 8GB lab; do not Ctrl+C)"
     sleep 15
   done
   echo "==> last logs"
-  local pod
   pod="$(kubectl get pods -n "${SONAR_NS}" -o name 2>/dev/null | grep sonarqube-sonarqube | head -1 | sed 's|pod/||' || true)"
+  [[ -n "${pod}" ]] && kubectl describe pod -n "${SONAR_NS}" "${pod}" 2>/dev/null | tail -25 || true
   [[ -n "${pod}" ]] && kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --tail=40 2>/dev/null || true
-  die "Sonar not UP at ${SONAR_URL}"
+  die "Sonar not UP at ${SONAR_URL} — check: kubectl get pods -n ${SONAR_NS} -o wide"
+}
+
+sonar_already_installed() {
+  kubectl get statefulset -n "${SONAR_NS}" -l app=sonarqube 2>/dev/null | grep -q sonarqube \
+    || kubectl get statefulset sonarqube-sonarqube -n "${SONAR_NS}" >/dev/null 2>&1
 }
 
 main() {
@@ -119,7 +137,27 @@ main() {
   echo "=============================================="
   lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
   echo "==> k3s API"
-  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || die "k3s API down — run: sudo systemctl restart k3s && sleep 120  OR  sudo bash paas/scripts/lab.sh k3s-vacuum"
+  export LAB_K3S_WAIT_LOOPS=24 LAB_K3S_WAIT_SEC=5
+  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || die "k3s API down — wait 2 min then: k3s kubectl get nodes  OR  sudo bash paas/scripts/lab.sh k3s-unstick"
+
+  if curl -fsS -m 8 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
+    ok "Sonar already UP at ${SONAR_URL}"
+    if [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
+      SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh"
+    fi
+    exit 0
+  fi
+
+  if sonar_already_installed; then
+    echo "==> Sonar helm release already on cluster — skip wipe (wait for UP only)"
+    wait_up
+    if [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
+      SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh"
+    fi
+    echo "Done. UI: ${SONAR_URL}"
+    exit 0
+  fi
+
   apply_sysctl_all_nodes
   wipe_sonar
   install_sonar
