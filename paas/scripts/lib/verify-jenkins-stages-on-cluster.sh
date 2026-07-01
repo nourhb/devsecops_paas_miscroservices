@@ -3,10 +3,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
-DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260619}"
+DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260620-cps-split}"
+# June 17 rollback and older bundles use different markers — accept any known good marker.
+KNOWN_MARKERS=(
+  "${DT_MARKER}"
+  "helm-portable-20260620-cps-split"
+  "helm-portable-20260619"
+  "dt-api-server-svc-20260617-full"
+)
 FAIL=0
 
-echo "==> Verify Jenkins stages bundle on cluster (${DT_MARKER})"
+echo "==> Verify Jenkins stages bundle on cluster (want one of: ${KNOWN_MARKERS[*]})"
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "ERROR: kubectl required" >&2
   exit 1
@@ -18,11 +25,20 @@ while read -r ns pod; do
   FOUND=1
   echo "-- ${ns}/${pod}"
   if kubectl exec -n "${ns}" "${pod}" -- test -f "${REMOTE}" 2>/dev/null; then
-    if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${DT_MARKER}" "${REMOTE}" 2>/dev/null \
+    marker_ok=0
+    for m in "${KNOWN_MARKERS[@]}"; do
+      [[ -n "${m}" ]] || continue
+      if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${m}" "${REMOTE}" 2>/dev/null; then
+        marker_ok=1
+        found_marker="${m}"
+        break
+      fi
+    done
+    if [[ "${marker_ok}" -eq 1 ]] \
       && kubectl exec -n "${ns}" "${pod}" -- grep -qF 'stage("Step 12 —' "${REMOTE}" 2>/dev/null; then
-      echo "OK: ${REMOTE} has ${DT_MARKER} + Step 12 (June 17 inline load layout)"
+      echo "OK: ${REMOTE} has ${found_marker} + Step 12"
     else
-      echo "FAIL: ${REMOTE} exists but missing ${DT_MARKER} (stale — run bash paas/scripts/lab.sh jenkins)"
+      echo "FAIL: ${REMOTE} exists but missing known bundle marker (stale — run bash paas/scripts/lab.sh jenkins)"
       FAIL=1
     fi
     if kubectl exec -n "${ns}" "${pod}" -- grep -qF 'pick_dt_base' "${REMOTE}" 2>/dev/null; then

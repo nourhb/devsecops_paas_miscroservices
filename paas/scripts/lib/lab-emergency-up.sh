@@ -20,10 +20,9 @@ sudo systemctl reset-failed paas-lab-start.service 2>/dev/null || true
 echo "==> 2/7 kubeconfig + scripts executable"
 mkdir -p "${HOME}/.kube"
 if [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
-  if ! cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config" 2>/dev/null; then
-    sudo cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
-    sudo chown "${USER}:${USER}" "${HOME}/.kube/config"
-  fi
+  cp -f /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config" 2>/dev/null \
+    || sudo cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
+  sudo chown "${USER}:${USER}" "${HOME}/.kube/config" 2>/dev/null || true
   chmod 600 "${HOME}/.kube/config" 2>/dev/null || true
 fi
 export KUBECONFIG="${HOME}/.kube/config"
@@ -49,16 +48,28 @@ k3s kubectl get nodes 2>/dev/null || true
 echo "==> 5/7 Postgres (fixes 'Database is still starting' on login)"
 FE_READY="$(k3s kubectl get pods -n "${PAAS_NS}" -l app=frontend \
   -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo false)"
-PG_READY="$(k3s kubectl get pods -n "${PAAS_NS}" -l app=postgres \
-  -o jsonpath='{.items[0].status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null || echo False)"
+PG_READY="False"
+if k3s kubectl exec -n "${PAAS_NS}" deploy/postgres --request-timeout=30s -- \
+    pg_isready -U postgres -d paas >/dev/null 2>&1; then
+  PG_READY="True"
+else
+  PG_READY="$(k3s kubectl get pods -n "${PAAS_NS}" -l app=postgres \
+    -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo False)"
+fi
 echo "  frontend ready=${FE_READY}  postgres=${PG_READY}"
 k3s kubectl get pods -n "${PAAS_NS}" -l app=postgres -o wide 2>/dev/null || true
 
 if [[ "${PG_READY}" != "True" ]]; then
   [[ -f "${LIB}/lab-worker2-heal.sh" ]] && bash "${LIB}/lab-worker2-heal.sh" 2>/dev/null || true
   PAAS_DB_REPAIR_COOLDOWN_SEC=0 PAAS_FORCE_KYVERNO_UNBLOCK=1 bash "${LIB}/lab-paas-db-repair.sh" || true
+  if ! k3s kubectl exec -n "${PAAS_NS}" deploy/postgres --request-timeout=30s -- \
+      pg_isready -U postgres -d paas >/dev/null 2>&1; then
   [[ -f "${LIB}/lab-postgres.sh" ]] && bash "${LIB}/lab-postgres.sh" deploy || true
-  [[ -f "${LIB}/lab-postgres.sh" ]] && bash "${LIB}/lab-postgres.sh" wait || true
+  TIMEOUT_SEC=180 bash "${LIB}/lab-postgres.sh" wait || true
+  fi
+else
+  echo "==> Postgres already ready — light db-repair only"
+  PAAS_DB_REPAIR_COOLDOWN_SEC=0 PAAS_FORCE_KYVERNO_UNBLOCK=1 bash "${LIB}/lab-paas-db-repair.sh" 2>/dev/null || true
 fi
 
 echo "==> 6/7 Frontend (if UI down)"

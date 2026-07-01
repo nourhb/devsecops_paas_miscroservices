@@ -13,7 +13,7 @@ echo " FORCE FIX paas-deploy (break loop + anti-revert)"
 echo "=============================================="
 
 echo "==> 1/3 Break loop (API wrapper + verify LIVE)"
-bash "${SCRIPT_DIR}/break-paas-deploy-loop.sh"
+bash "${SCRIPT_DIR}/force-api-jenkins-paas-deploy-now.sh"
 
 echo "==> 2/3 Disable inline Jenkinsfile sync (stops UI from overwriting job)"
 for f in "${ENV_FILE}" "${REPO_ROOT}/paas/frontend/.env"; do

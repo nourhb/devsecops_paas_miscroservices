@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Assemble paas-deploy-stages.groovy monolith from the 7 split files ALREADY on jenkins-0,
 # guaranteeing: helm marker, def runPaasDeploy() orchestrator, and trailing `return this`.
-# Independent of render-loadable-stages.py (VM copy may be stale). Pushes result to jenkins-0.
+# If pod split files are stale, re-render from repo and push splits first.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 JPOD="${JENKINS_POD:-jenkins-0}"
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
@@ -24,6 +25,29 @@ SPLIT_FILES=(
 
 kexec() { kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JENKINS_CONTAINER}" --request-timeout=120s -- "$@"; }
 kexec_i() { kubectl exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JENKINS_CONTAINER}" --request-timeout=120s -- "$@"; }
+
+ensure_fresh_splits_on_pod() {
+  local need_refresh=0 f bytes
+  for f in "${SPLIT_FILES[@]}"; do
+    if ! kexec test -f "${REMOTE_DIR}/${f}" 2>/dev/null; then
+      echo "WARN: ${f} missing on pod"
+      need_refresh=1
+      break
+    fi
+    if ! kexec grep -qF "${BUNDLE}" "${REMOTE_DIR}/${f}" 2>/dev/null; then
+      echo "WARN: ${f} on pod missing ${BUNDLE}"
+      need_refresh=1
+      break
+    fi
+  done
+  if [[ "${need_refresh}" == "1" ]]; then
+    echo "==> Pod split bundle stale — run full CPS fix (render + push + assemble)"
+    bash "${SCRIPT_DIR}/fix-paas-deploy-cps-split-now.sh"
+    exit $?
+  fi
+}
+
+ensure_fresh_splits_on_pod
 
 echo "==> Pull 7 split files from ${JENKINS_NS}/${JPOD}:${REMOTE_DIR}"
 for f in "${SPLIT_FILES[@]}"; do

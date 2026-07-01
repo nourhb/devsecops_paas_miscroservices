@@ -19,14 +19,15 @@ _run_boot_script() {
 }
 usage() {
   echo "usage: lab.sh <command>"
-  echo "  start     Recover PaaS after reboot (postgres + frontend-force + health)"
-  echo "  boot-install  Install systemd auto-start on VM boot (run once with sudo)"
-  echo "  boot-enable   One command: install boot service + test recover (no reboot yet)"
+  echo "  start     Recover PaaS after reboot (quick-up; full path if needed)"
+  echo "  boot-enable   ONE-TIME: harden + install auto-start on VM boot (run once)"
+  echo "  boot-install  Install systemd auto-start only (sudo)"
   echo "  boot-fix      Install boot service + kubeconfig + recover now (after VM reboot)"
   echo "  boot-status   Show paas-lab-start.service + boot log tail"
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"
+  echo "  pin-pg15  Force postgres:15-alpine (lab PVC is PG15 — fixes PG16 crash loop)"
   echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
@@ -83,14 +84,22 @@ usage() {
   echo "  k3s-vacuum      Fix k3s stuck activating (slow SQLite — run with sudo)"
   echo "  k3s-ensure      Wait for / restart k3s API when 127.0.0.1:6443 times out"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
+  echo "  worker1         Heal worker1 NotReady (Harbor DB PVC node)"
   echo "  worker2         Heal worker2 NotReady (Postgres PVC node)"
   echo "  master-heal     Heal master NotReady (PaaS UI runs on master)"
+  echo "  k3s-stabilize   Wait for API + clear taints (never restarts k3s by default)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
   echo "  frontend-rollout  Roll out existing local/recovery image (no rebuild)"
   echo "  repair-frontend-ui  Fix UI 500 after rollout (restore envFrom + probes)"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
+  echo "  fix-routing Restore Traefik on :30659 (fixes all apps showing same content)"
+  echo "  harbor-check  Verify paas/<project>:<tag> exists in Harbor before heal"
+  echo "  harbor-catalog List image repositories in Harbor paas project"
+  echo "  fix-python-sca  Patch Jenkins pipeline: Python SCA via Node (no python3 required)"
   echo "  heal      Patch GitOps values + Argo sync + rollout"
+  echo "  heal-all  Heal every project under ~/gitops/apps (uses values.yaml tag)"
+  echo "  fix-all-deploy  Argo CD + bootstrap all apps + heal-all (one command)"
   echo "  deploy    git pull + Kyverno Audit + cosign try + heal (one-shot)"
   echo "  ultimate  Full fix: Kyverno HTTP Harbor + GitOps + deploy (one command)"
   echo "  restore   Jenkins + frontend env + pipeline (get deploy working again)"
@@ -120,6 +129,8 @@ case "$cmd" in
     bash "$LIB/lab-harbor-db-heal.sh" ;;
   db-repair)
     bash "$LIB/lab-paas-db-repair.sh" ;;
+  pin-pg15|pin-postgres|fix-pg15)
+    bash "$LIB/pin-postgres-pg15-now.sh" ;;
   postgres)
     bash "$LIB/lab-postgres.sh" "${2:-all}" ;;
   health|check)
@@ -164,7 +175,7 @@ case "$cmd" in
   fix-p3-self-invoke|fix-p3-invoke)
     bash "$LIB/fix-p3-no-self-invoke.sh" ;;
   fix-paas-deploy|cps-split|fix-method-too-large|break-paas-deploy-loop)
-    bash "$LIB/fix-paas-deploy-stages-load.sh" ;;
+    bash "$LIB/fix-paas-deploy-cps-split-now.sh" ;;
   force-fix-paas-deploy|force-fix)
     bash "$LIB/restore-paas-deploy-working.sh" ;;
   force-api-paas-deploy|api-wrapper-now)
@@ -278,10 +289,14 @@ case "$cmd" in
     bash "$LIB/lab-pipeline-full-heal.sh" ;;
   break-loop|stop-loop|break)
     bash "$LIB/lab-break-loop.sh" ;;
+  worker1|worker1-heal)
+    LAB_WORKER_NODE=worker1 LAB_WORKER_IP=192.168.56.128 bash "$LIB/lab-worker2-heal.sh" ;;
   worker2|worker2-heal)
     bash "$LIB/lab-worker2-heal.sh" ;;
   master-heal|master)
     bash "$LIB/lab-master-heal.sh" ;;
+  k3s-stabilize|stabilize-k3s|api-wait)
+    bash "$LIB/lab-k3s-stabilize.sh" ;;
   frontend)
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   frontend-rollout|rollout-frontend)
@@ -293,8 +308,37 @@ case "$cmd" in
   fix-gitops)
     source "$LIB/gitops-lab-lib.sh"
     gitops_fix_repo_lab ;;
+  install-argocd|argocd-install)
+    bash "$LIB/lab-install-argocd-now.sh" ;;
+  fix-deploy-lenient|fix-gitops-deploy)
+    bash "$LIB/fix-gitops-deploy-lenient-now.sh" ;;
+  fix-routing|fix-app-routing)
+    bash "$LIB/lab-fix-traefik-app-routing.sh" ;;
+  harbor-check|check-harbor-image)
+    bash "$LIB/lab-harbor-check-image.sh" "${2:?usage: lab.sh harbor-check <project> <tag>}" "${3:?}" ;;
+  harbor-catalog|harbor-tags)
+  NODE_IP="${NODE_IP:-192.168.56.129}" HARBOR_PORT="${HARBOR_NODEPORT:-30002}" bash -c '
+    set -a; source paas/frontend/docker-compose.env 2>/dev/null; set +a
+    u="${HARBOR_USER:-admin}"; p="${HARBOR_PASS:-Harbor12345}"
+    echo "==> Harbor catalog (paas/* repos)"
+    curl -s -u "$u:$p" "http://${NODE_IP:-192.168.56.129}:${HARBOR_NODEPORT:-30002}/v2/_catalog" | python3 -m json.tool 2>/dev/null || true
+    for r in simple-app docker-demo-with-simple-python-app angular-docker; do
+      echo "--- paas/$r tags ---"
+      curl -s -u "$u:$p" "http://${NODE_IP:-192.168.56.129}:${HARBOR_NODEPORT:-30002}/v2/paas/$r/tags/list" 2>/dev/null || echo "(not found)"
+    done
+  ' ;;
+  fix-python-sca|python-sca|push-sca-fix|push-jenkins-sca)
+    bash "$LIB/push-jenkins-multi-framework-sca-now.sh" ;;
+  fix-jenkins-sca|fix-sca-dt|jenkins-sca-dt)
+    bash "$LIB/lab-fix-jenkins-sca-dt-now.sh" ;;
   heal)
     bash "$DIR/heal-project-deploy-lab.sh" "${2:?usage: lab.sh heal <project-slug> <build> [port]}" "${3:?}" "${4:-3000}" ;;
+  heal-all|heal-all-projects)
+    bash "$LIB/lab-heal-all-projects.sh" ;;
+  fix-all-deploy|fix-all-projects)
+    bash "$LIB/lab-fix-all-projects-deploy-now.sh" ;;
+  bootstrap-argocd-apps|argocd-apps)
+    bash "$LIB/lab-argocd-bootstrap-all-apps.sh" ;;
   deploy)
     REPO_ROOT="$(cd "$DIR/../.." && pwd)"
     git -C "${REPO_ROOT}" pull origin main 2>/dev/null || true

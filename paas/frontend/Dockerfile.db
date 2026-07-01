@@ -4,7 +4,7 @@ RUN apk add --no-cache openssl
 COPY frontend/package.json frontend/package-lock.json ./
 COPY frontend/prisma ./prisma
 COPY frontend/scripts/seed-admin-user.cjs ./scripts/seed-admin-user.cjs
-RUN npm ci && npx prisma generate
 RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -D appuser
+RUN npm ci && npx prisma generate && chown -R appuser:nodejs /app
 USER appuser
 CMD ["npx", "prisma", "db", "push"]

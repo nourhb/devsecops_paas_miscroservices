@@ -42,12 +42,32 @@ harbor_db_pg_ready() {
     pg_isready -U postgres >/dev/null 2>&1
 }
 
-harbor_api_projects_ok() {
-  local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' -u "${HARBOR_USER}:${HARBOR_PASS}" \
+harbor_api_bases() {
+  printf '%s\n' \
+    "http://${NODE_IP}:${HARBOR_NODEPORT}" \
+    "http://harbor.${NODE_IP}.nip.io:${HARBOR_NODEPORT}"
+}
+
+harbor_api_projects_code() {
+  local base="$1"
+  curl -sS -o /dev/null -w '%{http_code}' -u "${HARBOR_USER}:${HARBOR_PASS}" \
     --connect-timeout 8 --max-time 20 \
-    "http://${NODE_IP}:${HARBOR_NODEPORT}/api/v2.0/projects?page_size=1" 2>/dev/null || echo 000)"
-  [[ "${code}" == "200" ]]
+    "${base}/api/v2.0/projects?page_size=1" 2>/dev/null || echo 000
+}
+
+harbor_api_projects_ok() {
+  local base code
+  for base in $(harbor_api_bases); do
+    code="$(harbor_api_projects_code "${base}")"
+    [[ "${code}" == "200" ]] && return 0
+  done
+  return 1
+}
+
+harbor_v2_code() {
+  local base="$1"
+  curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 20 \
+    "${base}/v2/" 2>/dev/null || echo 000
 }
 
 harbor_db_pvc_name() {
@@ -78,15 +98,30 @@ diagnose_pending_db() {
   kubectl get nodes -o wide 2>/dev/null || true
 }
 
+uncordon_pv_node() {
+  local node="$1"
+  [[ -n "${node}" ]] || return 0
+  echo "==> uncordon ${node} + clear scheduling taints"
+  kubectl uncordon "${node}" 2>/dev/null || true
+  kubectl taint nodes "${node}" node.kubernetes.io/disk-pressure:NoSchedule- 2>/dev/null || true
+  kubectl taint nodes "${node}" node.kubernetes.io/unreachable:NoSchedule- 2>/dev/null || true
+  kubectl taint nodes "${node}" node.kubernetes.io/not-ready:NoSchedule- 2>/dev/null || true
+}
+
 heal_worker_for_pv() {
-  local bound="$1"
-  if [[ "${bound}" == worker2 ]] || [[ "${bound}" == *worker2* ]]; then
-    echo "==> Harbor DB PVC on worker2 — heal worker2 first"
-    if [[ -f "${SCRIPT_DIR}/lab-worker2-heal.sh" ]]; then
-      bash "${SCRIPT_DIR}/lab-worker2-heal.sh" || warn "worker2 heal failed — try manual: bash paas/scripts/lab.sh worker2"
-    else
-      warn "run: bash paas/scripts/lab.sh worker2"
-    fi
+  local bound="$1" ip
+  case "${bound}" in
+    worker1) ip="192.168.56.128" ;;
+    worker2) ip="192.168.56.130" ;;
+    *) return 0 ;;
+  esac
+  echo "==> Harbor DB PVC on ${bound} — heal node (k3s-agent + uncordon)"
+  uncordon_pv_node "${bound}"
+  if [[ -f "${SCRIPT_DIR}/lab-worker2-heal.sh" ]]; then
+    LAB_WORKER_NODE="${bound}" LAB_WORKER_IP="${ip}" bash "${SCRIPT_DIR}/lab-worker2-heal.sh" \
+      || warn "${bound} heal failed — ssh ${bound} && sudo systemctl restart k3s-agent"
+  else
+    warn "run: LAB_WORKER_NODE=${bound} bash paas/scripts/lib/lab-worker2-heal.sh"
   fi
 }
 
@@ -106,17 +141,18 @@ scale_harbor_db_replicas() {
 
 patch_db_node_selector() {
   local node="$1"
-  echo "==> pin harbor-database StatefulSet to node ${node}"
-  kubectl patch statefulset harbor-database -n "${HARBOR_NS}" --type=merge -p \
-    "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${node}\"}}}}}" \
-    2>/dev/null || warn "could not patch harbor-database nodeSelector"
+  echo "==> pin harbor-database StatefulSet to node ${node} (+ control-plane tolerations)"
+  # local-path PV is node-bound; master often has NoSchedule taint → Pending without tolerations.
+  kubectl patch statefulset harbor-database -n "${HARBOR_NS}" --type=strategic -p \
+    "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${node}\"},\"tolerations\":[{\"key\":\"node-role.kubernetes.io/control-plane\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"},{\"key\":\"node-role.kubernetes.io/master\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}}}}" \
+    2>/dev/null || warn "could not patch harbor-database scheduling"
 }
 
-recreate_db_pvc_on_master() {
-  local pvc pod
+recreate_db_pvc_on_node() {
+  local pvc pod target="${1:-${HARBOR_DB_NODE}}"
   pvc="$(harbor_db_pvc_name)"
   pod="$(harbor_db_pod)"
-  warn "LAB-ONLY: recreating Harbor database PVC on ${HARBOR_DB_NODE} (Harbor projects/users reset; registry blobs may remain)"
+  warn "LAB-ONLY: recreating Harbor database PVC on ${target} (Harbor projects/users reset; registry blobs may remain)"
   for deploy in harbor-core harbor-jobservice harbor-portal harbor-registry; do
     kubectl scale "deployment/${deploy}" -n "${HARBOR_NS}" --replicas=0 2>/dev/null || true
   done
@@ -131,16 +167,27 @@ recreate_db_pvc_on_master() {
       kubectl delete pv "${pv}" --wait=false 2>/dev/null || true
     fi
   fi
-  patch_db_node_selector "${HARBOR_DB_NODE}"
+  uncordon_pv_node "${target}"
+  patch_db_node_selector "${target}"
   scale_harbor_db_replicas 1
 }
 
+recreate_db_pvc_on_master() {
+  recreate_db_pvc_on_node "${HARBOR_DB_NODE}"
+}
+
 wait_harbor_db() {
-  local n=0 pod phase
+  local n=0 pod phase pending_fix=0
   echo "==> wait Harbor PostgreSQL ready (max $((72 * 5))s)"
   while [[ "${n}" -lt 72 ]]; do
     pod="$(harbor_db_pod)"
     phase="$(harbor_db_phase "${pod}")"
+    if [[ "${phase}" == "Pending" ]] && [[ "${pending_fix}" -eq 0 ]]; then
+      fix_pending_db_scheduling || true
+      pending_fix=1
+      n=0
+      continue
+    fi
     if [[ "${phase}" == "Pending" ]] && [[ $((n % 6)) -eq 0 ]] && [[ "${n}" -gt 0 ]]; then
       diagnose_pending_db "${pod}"
     fi
@@ -155,25 +202,46 @@ wait_harbor_db() {
   return 1
 }
 
+fix_pending_db_scheduling() {
+  local pod bound wstatus
+  pod="$(harbor_db_pod)"
+  [[ "$(harbor_db_phase "${pod}")" == "Pending" ]] || return 1
+  bound="$(harbor_db_pv_node)"
+  diagnose_pending_db "${pod}"
+  uncordon_pv_node "${bound}"
+  heal_worker_for_pv "${bound}"
+  if [[ -z "${bound}" ]]; then
+    warn "Harbor DB PVC has no PV node affinity — recreating on ${HARBOR_DB_NODE}"
+    recreate_db_pvc_on_master
+    return 0
+  fi
+  wstatus="$(kubectl get node "${bound}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo False)"
+  sched="$(kubectl get node "${bound}" -o jsonpath='{.spec.unschedulable}' 2>/dev/null || echo false)"
+  if [[ "${wstatus}" != "True" ]] || [[ "${sched}" == "true" ]]; then
+    warn "PV node ${bound} not schedulable (Ready=${wstatus} unschedulable=${sched}) — recreating DB PVC on ${HARBOR_DB_NODE}"
+    recreate_db_pvc_on_master
+    return 0
+  fi
+  echo "==> Pending: PV on schedulable node ${bound} — patch nodeSelector + tolerations"
+  patch_db_node_selector "${bound}"
+  recycle_db_pod "${pod}"
+  sleep 8
+  pod="$(harbor_db_pod)"
+  if [[ "$(harbor_db_phase "${pod}")" == "Pending" ]]; then
+    warn "still Pending on ${bound} after patch — recreating DB PVC on ${HARBOR_DB_NODE}"
+    recreate_db_pvc_on_master
+  fi
+  return 0
+}
+
 restart_db_workload() {
   if kubectl get statefulset harbor-database -n "${HARBOR_NS}" >/dev/null 2>&1; then
-    local phase bound pod
+    local phase pod
     pod="$(harbor_db_pod)"
     phase="$(harbor_db_phase "${pod}")"
-    bound="$(harbor_db_pv_node)"
     if [[ "${phase}" == "Pending" ]]; then
-      diagnose_pending_db "${pod}"
-      heal_worker_for_pv "${bound}"
-      recycle_db_pod "${pod}"
-      if [[ "${bound}" != "${HARBOR_DB_NODE}" ]] && [[ "${bound}" != "" ]]; then
-        local wstatus
-        wstatus="$(kubectl get node "${bound}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo False)"
-        if [[ "${wstatus}" != "True" ]]; then
-          warn "PV node ${bound} not Ready — recreating DB PVC on ${HARBOR_DB_NODE}"
-          recreate_db_pvc_on_master
-          return 0
-        fi
-      fi
+      fix_pending_db_scheduling
+      return 0
     fi
     echo "==> rollout restart statefulset/harbor-database -n ${HARBOR_NS} (timeout ${ROLLout_TIMEOUT}s)"
     kubectl rollout restart statefulset/harbor-database -n "${HARBOR_NS}" 2>/dev/null || true
@@ -184,7 +252,21 @@ restart_db_workload() {
   warn "no statefulset/harbor-database in ${HARBOR_NS}"
 }
 
+dedupe_harbor_core() {
+  local ready n
+  ready="$(kubectl get pods -n "${HARBOR_NS}" -l app=harbor,component=core \
+    --field-selector=status.phase=Running -o name 2>/dev/null | wc -l | tr -d ' ')"
+  n="$(kubectl get deployment harbor-core -n "${HARBOR_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)"
+  if [[ "${ready}" -gt 1 ]] || [[ "${n}" -gt 1 ]]; then
+    echo "==> dedupe harbor-core (scale 1, drop CrashLoop/Completed)"
+    kubectl scale deployment/harbor-core -n "${HARBOR_NS}" --replicas=1 2>/dev/null || true
+    kubectl delete pod -n "${HARBOR_NS}" -l app=harbor,component=core \
+      --field-selector=status.phase!=Running --force --grace-period=0 2>/dev/null || true
+  fi
+}
+
 restart_harbor_apps() {
+  dedupe_harbor_core
   for deploy in harbor-core harbor-jobservice harbor-registry harbor-nginx harbor-portal; do
     if kubectl get deployment "${deploy}" -n "${HARBOR_NS}" >/dev/null 2>&1; then
       kubectl scale "deployment/${deploy}" -n "${HARBOR_NS}" --replicas=1 2>/dev/null || true
@@ -196,6 +278,14 @@ restart_harbor_apps() {
     kubectl rollout status "deployment/harbor-core" -n "${HARBOR_NS}" --timeout=300s || true
   fi
   kubectl delete pod -n "${HARBOR_NS}" -l app=harbor,component=core --field-selector=status.phase=Failed --force --grace-period=0 2>/dev/null || true
+}
+
+try_harbor_api_recover() {
+  local helper="${SCRIPT_DIR}/lab-harbor.sh"
+  if [[ -f "${helper}" ]]; then
+    echo "==> Harbor API still unhealthy — run deeper recover helper"
+    bash "${helper}" recover || true
+  fi
 }
 
 main() {
@@ -229,10 +319,23 @@ main() {
   restart_harbor_apps
   sleep 10
 
-  local n=0
+  local n=0 base code v2
   until harbor_api_projects_ok; do
     n=$((n + 1))
-    [[ "${n}" -le 36 ]] || fail "Harbor API still failing — kubectl logs -n ${HARBOR_NS} deploy/harbor-core --tail=50"
+    if [[ "${n}" -eq 18 ]]; then
+      try_harbor_api_recover
+    fi
+    if [[ "${n}" -gt 36 ]]; then
+      for base in $(harbor_api_bases); do
+        code="$(harbor_api_projects_code "${base}")"
+        v2="$(harbor_v2_code "${base}")"
+        echo "Harbor probe ${base} -> /projects=${code} /v2=${v2}" >&2
+      done
+      kubectl get pods -n "${HARBOR_NS}" -o wide 2>/dev/null || true
+      kubectl logs -n "${HARBOR_NS}" deploy/harbor-core --tail=80 2>/dev/null || true
+      kubectl logs -n "${HARBOR_NS}" deploy/harbor-nginx --tail=80 2>/dev/null || true
+      fail "Harbor API still failing after DB heal"
+    fi
     echo "  waiting Harbor API (${n}/36)…"
     sleep 5
   done

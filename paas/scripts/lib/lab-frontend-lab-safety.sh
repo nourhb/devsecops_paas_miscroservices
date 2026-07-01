@@ -99,6 +99,14 @@ stop_frontend_storm_if_needed() {
     --request-timeout=30s 2>/dev/null || true
 }
 
+ensure_frontend_recreate_strategy() {
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=json --request-timeout=60s -p='[
+    {"op":"remove","path":"/spec/strategy/rollingUpdate"}
+  ]' 2>/dev/null || true
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p \
+    '{"spec":{"strategy":{"type":"Recreate"}}}' 2>/dev/null || true
+}
+
 apply_lab_frontend_safety() {
   local img="${1:-}"
   local replicas="${2:-1}"
@@ -146,6 +154,7 @@ print(json.dumps({
 PY
 )"
 
+  ensure_frontend_recreate_strategy
   kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "${patch_json}" || return 1
   kubectl set image deployment/frontend -n "${PAAS_NS}" "frontend=${img}" --request-timeout=60s || return 1
   kubectl patch deployment frontend -n "${PAAS_NS}" --type=json --request-timeout=60s -p "$(cat <<PATCH

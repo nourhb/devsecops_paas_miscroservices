@@ -14,11 +14,51 @@ echo "=============================================="
 df -h / | tail -1
 
 image_on_node() {
-  sudo k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery' \
-    || sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'
+  if k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+    return 0
+  fi
+  if sudo k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+    return 0
+  fi
+  if k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'; then
+    return 0
+  fi
+  if sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'; then
+    return 0
+  fi
+  return 1
+}
+
+try_harbor_frontend_pull() {
+  local registry="${NODE_IP}:${HARBOR_NODEPORT:-30002}"
+  local user="${HARBOR_USER:-admin}"
+  local pass="${HARBOR_PASS:-Harbor12345}"
+  local pulled="" tag ref
+  for ref in "paas/frontend:latest" "paas/frontend:recovery"; do
+    tag="${registry}/${ref}"
+    if docker image inspect "${tag}" >/dev/null 2>&1; then
+      pulled="${tag}"
+      break
+    fi
+    echo "==> Try Harbor pull ${tag}"
+    if echo "${pass}" | docker login "${registry}" -u "${user}" --password-stdin 2>/dev/null \
+      && docker pull "${tag}" 2>/dev/null; then
+      pulled="${tag}"
+      break
+    fi
+  done
+  [[ -n "${pulled}" ]] || return 1
+  docker tag "${pulled}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
+  docker tag "${pulled}" "${IMG}" 2>/dev/null || true
+  echo "OK: tagged ${pulled} -> paas-frontend:recovery"
 }
 
 import_recovery_image() {
+  if image_on_node; then
+    echo "OK: recovery image already in containerd (no docker import needed)"
+    k3s crictl images 2>/dev/null | grep paas-frontend || sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
+    return 0
+  fi
   local src="" candidate
   for candidate in "${IMG}" "paas-frontend:recovery" "docker.io/library/paas-frontend:recovery"; do
     if docker image inspect "${candidate}" >/dev/null 2>&1; then
@@ -27,16 +67,34 @@ import_recovery_image() {
     fi
   done
   if [[ -z "${src}" ]]; then
-    echo "ERROR: paas-frontend:recovery not in docker — rebuild on master:" >&2
-    echo "  docker images | grep paas-frontend" >&2
-    echo "  or: bash paas/scripts/lab.sh frontend  (long build)" >&2
+    for candidate in \
+      "${NODE_IP}:30002/paas/frontend:latest" \
+      "${NODE_IP}:30002/paas/frontend:recovery" \
+      "192.168.56.129:30002/paas/frontend:latest"; do
+      if docker image inspect "${candidate}" >/dev/null 2>&1; then
+        docker tag "${candidate}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
+        src="docker.io/library/paas-frontend:recovery"
+        break
+      fi
+    done
+  fi
+  if [[ -z "${src}" ]]; then
+    try_harbor_frontend_pull || true
+    if docker image inspect "docker.io/library/paas-frontend:recovery" >/dev/null 2>&1; then
+      src="docker.io/library/paas-frontend:recovery"
+    fi
+  fi
+  if [[ -z "${src}" ]]; then
+    echo "ERROR: paas-frontend:recovery not in docker, containerd, or Harbor — rebuild on master:" >&2
+    echo "  IMAGE=docker.io/library/paas-frontend bash paas/scripts/lab.sh frontend" >&2
     return 1
   fi
-  echo "==> Import ${src} into k3s containerd (fixes ErrImageNeverPull)"
-  docker save "${src}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null
+  echo "==> Import ${src} from docker into k3s containerd (fixes ErrImageNeverPull)"
+  docker save "${src}" | k3s ctr -n k8s.io images import - 2>/dev/null \
+    || docker save "${src}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null
   sudo k3s ctr -n k8s.io images tag "${src}" "${IMG}" 2>/dev/null || true
   sudo k3s ctr -n k8s.io images tag "${src}" "paas-frontend:recovery" 2>/dev/null || true
-  sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
+  k3s crictl images 2>/dev/null | grep paas-frontend || sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
 }
 
 echo "==> Image on master (before any slow kubectl work)"
@@ -44,8 +102,25 @@ if ! image_on_node; then
   import_recovery_image || exit 1
 else
   echo "OK: recovery image already in containerd"
-  sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
+  k3s crictl images 2>/dev/null | grep paas-frontend || sudo k3s crictl images 2>/dev/null | grep paas-frontend || true
 fi
+
+echo "==> Master must be Ready (frontend pinned to master)"
+if lab_k8s_api_probe; then
+  echo "OK: k8s API up — clear master taints only (skip k3s stabilize)"
+  kubectl taint nodes master node.kubernetes.io/unreachable:NoExecute- 2>/dev/null || true
+  kubectl taint nodes master node.kubernetes.io/unreachable:NoSchedule- 2>/dev/null || true
+elif [[ "${PAAS_SKIP_MASTER_HEAL:-}" == "1" ]]; then
+  bash "${SCRIPT_DIR}/lab-k3s-stabilize.sh" || exit 1
+elif ! LAB_MASTER_ALLOW_SLOW_API="${LAB_MASTER_ALLOW_SLOW_API:-1}" \
+  LAB_MASTER_K3S_RESTART="${LAB_MASTER_K3S_RESTART:-0}" \
+  bash "${SCRIPT_DIR}/lab-master-heal.sh"; then
+  echo "ERROR: master node not Ready — fix master before frontend-force" >&2
+  echo "  Try: bash paas/scripts/lab.sh k3s-stabilize" >&2
+  exit 1
+fi
+
+FE_REPLICAS="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)"
 
 PAAS_FORCE_KYVERNO_UNBLOCK="${PAAS_FORCE_KYVERNO_UNBLOCK:-1}" PAAS_SKIP_KYVERNO_RESTART=1 \
   bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
@@ -103,6 +178,9 @@ done
 set -e
 
 echo "==> Patch deployment (Recreate, master, Never pull)"
+kubectl patch deployment frontend -n "${PAAS_NS}" --type=json --request-timeout=60s -p='[
+  {"op":"remove","path":"/spec/strategy/rollingUpdate"}
+]' 2>/dev/null || true
 kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout=60s -p "$(cat <<PATCH
 {
   "spec": {
@@ -144,7 +222,11 @@ kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge --request-timeout
   }
 }
 PATCH
-)" || exit 1
+)" || {
+  echo "ERROR: deployment patch failed — restoring replicas=${FE_REPLICAS:-1}" >&2
+  kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas="${FE_REPLICAS:-1}" --request-timeout=60s 2>/dev/null || true
+  exit 1
+}
 
 echo "==> Wait for Running pod"
 for i in $(seq 1 48); do
@@ -203,6 +285,6 @@ else
   echo "If login shows DB unavailable: PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash paas/scripts/lab.sh db-repair"
   echo "If postgres PVC node down: bash paas/scripts/lab.sh worker2"
   echo "If HTTP 500 (env): bash paas/scripts/lab.sh env-quick"
-  echo "If ErrImageNeverPull: docker images | grep paas-frontend  then re-run this script"
+  echo "If ErrImageNeverPull: k3s crictl images | grep paas-frontend  then re-run this script"
   echo "If Evicted: free disk below 88% then re-run"
 fi

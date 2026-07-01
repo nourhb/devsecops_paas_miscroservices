@@ -316,9 +316,48 @@ free_namespace_capacity() {
   kubectl delete pods -n "${ns}" --all --force --grace-period=0 2>/dev/null || true
   sleep 2
 }
+harbor_image_tag_exists() {
+  local project="$1"
+  local tag="$2"
+  local user pass
+  user="${HARBOR_USER:-admin}"
+  pass="${HARBOR_PASS:-Harbor12345}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    user="$(grep -E '^HARBOR_USER=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+    pass="$(grep -E '^HARBOR_PASS=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
+    [[ -z "${user}" ]] && user="admin"
+    [[ -z "${pass}" ]] && pass="Harbor12345"
+  fi
+  local code tags_json
+  tags_json="$(curl -s -u "${user}:${pass}" \
+    "http://${NODE_IP}:${HARBOR_PORT}/v2/paas/${project}/tags/list" 2>/dev/null || echo '{}')"
+  if echo "${tags_json}" | python3 -c "import json,sys; t=json.load(sys.stdin).get('tags') or []; sys.exit(0 if '${tag}' in [str(x) for x in t] else 1)" 2>/dev/null; then
+    return 0
+  fi
+  for host in "${NODE_IP}:${HARBOR_PORT}" "harbor.${NODE_IP}.nip.io:${HARBOR_PORT}"; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' \
+      -u "${user}:${pass}" \
+      -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+      "http://${host}/v2/paas/${project}/manifests/${tag}" 2>/dev/null || echo '000')"
+    [[ "${code}" == "200" ]] && return 0
+  done
+  return 1
+}
 echo "==> Heal ${PROJECT_NAME} build :${TAG} targetPort=${TARGET_PORT}"
 echo "    Image: ${IMAGE}"
 echo "    URL:   ${URL}"
+if ! harbor_image_tag_exists "${PROJECT_NAME}" "${TAG}"; then
+  echo ""
+  echo "ERROR: Harbor image missing — ${IMAGE}" >&2
+  echo "  Jenkins build #${TAG} likely FAILED before Step 6 (image push)." >&2
+  echo "  Fix: trigger a NEW successful paas-deploy from PaaS UI, then:" >&2
+  echo "    bash paas/scripts/lab.sh heal ${PROJECT_NAME} <SUCCESS_BUILD_NUMBER> ${TARGET_PORT}" >&2
+  echo "  Check Harbor tags:" >&2
+  echo "    curl -s -u admin:Harbor12345 http://${NODE_IP}:${HARBOR_PORT}/v2/paas/${PROJECT_NAME}/tags/list" >&2
+  exit 1
+fi
+echo "OK: Harbor has paas/${PROJECT_NAME}:${TAG}"
+bash "${LIB}/lab-fix-traefik-app-routing.sh" 2>/dev/null || echo "WARN: Traefik routing fix skipped (non-fatal)"
 echo "==> Kyverno lab policy (Audit unless COSIGN_LAB_ENFORCE_SIGNED=true)"
 COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" bash "${LIB}/lab-kyverno.sh" apply
 enforce_lab_policy_audit_and_exclude_namespace "${NS}"
@@ -384,6 +423,7 @@ doc["resources"] = {
     "limits": {"cpu": "200m", "memory": "256Mi"},
     "requests": {"cpu": "25m", "memory": "64Mi"},
 }
+doc["nodeSelector"] = {"kubernetes.io/hostname": "master"}
 if port == 8000:
     doc["probes"] = {
         "readiness": {"initialDelaySeconds": 30, "periodSeconds": 10, "failureThreshold": 12},
@@ -395,8 +435,14 @@ elif port == 80:
         "readiness": {"initialDelaySeconds": 3, "periodSeconds": 5, "failureThreshold": 6},
         "liveness": {"initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 6},
     }
+ingress = doc.get("ingress") if isinstance(doc.get("ingress"), dict) else {}
+ingress["enabled"] = True
+ingress["className"] = "traefik"
+ingress["hosts"] = [{"host": f"{name}.{node_ip}.nip.io"}]
+ingress.setdefault("tls", [])
+doc["ingress"] = ingress
 Path(path).write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False), encoding="utf-8")
-print(f"OK values: Rolling image={repo}:{tag} service.targetPort={port}")
+print(f"OK values: Rolling image={repo}:{tag} service.targetPort={port} ingress={name}.{node_ip}.nip.io")
 PY
 free_namespace_capacity "${NS}"
 echo "==> Push GitOps to GitHub"
@@ -451,7 +497,16 @@ if [[ "${TARGET_PORT}" == "8000" ]]; then
   patch_python_deploy_lab "${NS}" "${TARGET_PORT}" || true
 fi
 echo "==> Wait rollout"
-kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || true
+kubectl delete pods -n "${NS}" --field-selector=status.phase=Failed --force --grace-period=0 2>/dev/null || true
+for pod in $(kubectl get pods -n "${NS}" -o jsonpath='{range .items[?(@.metadata.deletionTimestamp)]}{.metadata.name}{" "}{end}' 2>/dev/null); do
+  kubectl delete pod "${pod}" -n "${NS}" --force --grace-period=0 2>/dev/null || true
+done
+kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || {
+  echo "WARN: rollout slow — force pod recycle" >&2
+  kubectl delete pods -n "${NS}" --all --force --grace-period=0 2>/dev/null || true
+  sleep 3
+  kubectl rollout status deployment -n "${NS}" --timeout="${ROLLOUT_TIMEOUT}" 2>/dev/null || true
+}
 bash "${LIB}/lab-stale-pod-cleanup.sh" 2>/dev/null || true
 echo "==> Pods"
 kubectl get deploy,pods -n "${NS}" -o wide 2>/dev/null || true
@@ -462,10 +517,16 @@ if [[ -n "${BAD_POD}" ]]; then
   kubectl describe pod "${BAD_POD}" -n "${NS}" 2>/dev/null | tail -20 || true
 fi
 HTTP="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" 2>/dev/null || echo '?')"
+BODY_HEAD="$(curl -s "${URL}" 2>/dev/null | head -c 200 || true)"
 echo ""
 echo "HTTP ${URL} => ${HTTP}"
-if [[ "${HTTP}" =~ ^[23] ]]; then
+if [[ "${HTTP}" =~ ^[23] ]] && kubectl get pods -n "${NS}" -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null | grep -q true; then
   echo "OK — open ${URL}"
+elif [[ "${HTTP}" =~ ^[23] ]]; then
+  echo "WARN — HTTP ${HTTP} but pod not Ready (often Traefik default backend = simple-app)"
+  echo "  Run: bash paas/scripts/lib/lab-fix-traefik-app-routing.sh"
+  echo "  Pods: kubectl get pods -n ${NS}"
+  echo "  Preview: ${BODY_HEAD}"
 else
   echo "WARN — still not HTTP 2xx/3xx"
   echo "  bash paas/scripts/lab.sh fix-gitops"

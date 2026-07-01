@@ -2,7 +2,12 @@
 set -euo pipefail
 PAAS_NS="${PAAS_NS:-paas}"
 WORKER="${LAB_WORKER_NODE:-worker2}"
-WORKER_IP="${LAB_WORKER2_IP:-192.168.56.130}"
+case "${WORKER}" in
+  worker1) WORKER_IP="${LAB_WORKER_IP:-192.168.56.128}" ;;
+  worker2) WORKER_IP="${LAB_WORKER_IP:-192.168.56.130}" ;;
+  master)  WORKER_IP="${LAB_WORKER_IP:-192.168.56.129}" ;;
+  *)       WORKER_IP="${LAB_WORKER_IP:-192.168.56.130}" ;;
+esac
 
 echo "=============================================="
 echo " lab-worker2-heal — Postgres PVC lives on ${WORKER}"
@@ -27,7 +32,7 @@ echo "==> SSH restart k3s-agent on ${WORKER} (${WORKER_IP})"
 if ssh -o ConnectTimeout=8 -o BatchMode=yes "${WORKER}" 'echo OK' 2>/dev/null; then
   ssh "${WORKER}" 'sudo systemctl restart k3s-agent; sleep 5; sudo systemctl is-active k3s-agent; df -h / | tail -1; free -h | head -2'
 else
-  echo "WARN: passwordless ssh to ${WORKER} failed — run manually on worker2:"
+  echo "WARN: passwordless ssh to ${WORKER} failed — run manually on ${WORKER}:"
   echo "  ssh ${WORKER}"
   echo "  sudo systemctl restart k3s-agent"
   echo "  sudo journalctl -u k3s-agent -n 40 --no-pager"

@@ -9,8 +9,19 @@ echo "=============================================="
 echo " FIX Harbor push (DB heal + RBAC + robot + sync)"
 echo "=============================================="
 
+NODE_IP="${NODE_IP:-192.168.56.129}"
+HARBOR_NODEPORT="${HARBOR_NODEPORT:-30002}"
+harbor_api_healthy() {
+  curl -fsS -m 10 "http://${NODE_IP}:${HARBOR_NODEPORT}/api/v2.0/health" 2>/dev/null \
+    | grep -qE '"status"[[:space:]]*:[[:space:]]*"healthy"'
+}
+
 chmod +x "${SCRIPT_DIR}/lab-harbor-db-heal.sh" 2>/dev/null || true
-bash "${SCRIPT_DIR}/lab-harbor-db-heal.sh"
+if [[ "${SKIP_HARBOR_DB_HEAL:-}" == "1" ]] || harbor_api_healthy; then
+  echo "OK: Harbor API healthy — skip harbor-database heal (set SKIP_HARBOR_DB_HEAL=0 to force)"
+else
+  bash "${SCRIPT_DIR}/lab-harbor-db-heal.sh"
+fi
 
 python3 "${SCRIPT_DIR}/harbor-push-rbac-fix.py"
 

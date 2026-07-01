@@ -72,7 +72,7 @@ function checkLevelToStageStatus(level: PipelineStepCheckLevel): string {
             return "NOT_EXECUTED";
     }
 }
-export function applyJenkinsChecksToDisplayStages(stages: PaasDeployDisplayStage[], checks: PipelineStepCheck[] | undefined): PaasDeployDisplayStage[] {
+export function applyJenkinsChecksToDisplayStages(stages: PaasDeployDisplayStage[], checks: PipelineStepCheck[] | undefined, buildSucceeded?: boolean): PaasDeployDisplayStage[] {
     if (!checks?.length) {
         return stages;
     }
@@ -85,15 +85,18 @@ export function applyJenkinsChecksToDisplayStages(stages: PaasDeployDisplayStage
         const hasFail = stepChecks.some((check) => check.level === "FAIL");
         const hasOk = stepChecks.some((check) => check.level === "OK");
         const allSkip = stepChecks.every((check) => check.level === "SKIP");
-        const worst = hasFail
-            ? "FAIL"
-            : hasOk
-                ? "OK"
-            : allSkip && !hasOk
-                ? "SKIP"
-                : stepChecks.some((check) => check.level === "WARN")
-                    ? "WARN"
-                    : "WARN";
+        const optionalFail = buildSucceeded && OPTIONAL_JENKINS_STEPS.has(stepNum) && hasFail && !hasOk;
+        const worst = optionalFail
+            ? "WARN"
+            : hasFail
+                ? "FAIL"
+                : hasOk
+                    ? "OK"
+                    : allSkip && !hasOk
+                        ? "SKIP"
+                        : stepChecks.some((check) => check.level === "WARN")
+                            ? "WARN"
+                            : "WARN";
         return {
             ...stage,
             status: checkLevelToStageStatus(worst),
@@ -106,12 +109,16 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
     const building = Boolean(wf.building);
     const result = (wf.result || "").toUpperCase();
     if (building) {
-        return labels.map((name) => ({
+        const base = labels.map((name) => ({
             name,
             status: "NOT_EXECUTED",
             durationMs: null,
             synthetic: true
         }));
+        if (wf.jenkinsChecks?.length) {
+            return applyJenkinsChecksToDisplayStages(base, wf.jenkinsChecks, false);
+        }
+        return base;
     }
     if (result === "SUCCESS") {
         const base = labels.map((name) => ({
@@ -120,7 +127,7 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
             durationMs: null,
             synthetic: true
         }));
-        return applyJenkinsChecksToDisplayStages(base, wf.jenkinsChecks);
+        return applyJenkinsChecksToDisplayStages(base, wf.jenkinsChecks, true);
     }
     if (result === "FAILURE" || result === "ABORTED" || result === "UNSTABLE") {
         return labels.map((name) => ({
@@ -138,6 +145,8 @@ export function syntheticStagesWhenWfapiUnavailable(wf: WfMeta): PaasDeployDispl
     }));
 }
 const POST_DEPLOY_VERIFY_STEPS = new Set(["gitops", "argocd_sync", "argocd_ready", "url", "security_gate"]);
+/** Steps 8 and 10 are non-fatal in Jenkins (catchError); do not show FAIL when build succeeded. */
+const OPTIONAL_JENKINS_STEPS = new Set([8, 10]);
 function worstPostDeployStageStatus(deployChecks: Array<{
     step: string;
     status: "OK" | "WARN" | "FAIL";
@@ -161,8 +170,11 @@ export function applyDeployChecksToDisplayStages(stages: PaasDeployDisplayStage[
     step: string;
     status: "OK" | "WARN" | "FAIL";
     detail: string;
-}> | undefined, deploymentStatus?: string): PaasDeployDisplayStage[] {
+}> | undefined, deploymentStatus?: string, jenkinsBuilding?: boolean): PaasDeployDisplayStage[] {
     if (!deployChecks?.length) {
+        return stages;
+    }
+    if (jenkinsBuilding || deploymentStatus?.toUpperCase() === "DEPLOYING" || deploymentStatus?.toUpperCase() === "PENDING") {
         return stages;
     }
     let worst = worstPostDeployStageStatus(deployChecks);
@@ -187,7 +199,7 @@ function fullSuccessSyntheticStages(jenkinsChecks: PipelineStepCheck[] | undefin
         durationMs: null,
         synthetic: true
     }));
-    return applyJenkinsChecksToDisplayStages(base, jenkinsChecks);
+    return applyJenkinsChecksToDisplayStages(base, jenkinsChecks, true);
 }
 export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf: WfMeta | undefined, deployChecks?: Array<{
     step: string;
@@ -197,6 +209,7 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
     let stages: PaasDeployDisplayStage[];
     const jenkinsSucceeded = wf?.buildComplete?.result?.toUpperCase() === "SUCCESS"
         || wf?.result?.toUpperCase() === "SUCCESS";
+    const jenkinsBuilding = Boolean(wf?.building);
     if (jenkinsSucceeded && (wf?.jenkinsChecks?.length || wf?.buildComplete)) {
         stages = fullSuccessSyntheticStages(wf?.jenkinsChecks);
     }
@@ -222,9 +235,10 @@ export function buildPaasDeployDisplayStages(live: JenkinsPipelineStageRow[], wf
             synthetic: true
         }));
     }
-    stages = applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks);
+    stages = applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks, jenkinsSucceeded);
     if (jenkinsSucceeded && stages.filter((stage) => stage.status.toUpperCase() !== "NOT_EXECUTED").length < PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES.length) {
         stages = fullSuccessSyntheticStages(wf?.jenkinsChecks);
+        stages = applyJenkinsChecksToDisplayStages(stages, wf?.jenkinsChecks, true);
     }
-    return applyDeployChecksToDisplayStages(stages, deployChecks, deploymentStatus);
+    return applyDeployChecksToDisplayStages(stages, deployChecks, deploymentStatus, jenkinsBuilding);
 }

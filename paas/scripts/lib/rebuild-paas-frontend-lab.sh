@@ -117,6 +117,9 @@ fi
 if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
   apply_lab_frontend_safety "${DEPLOY_IMAGE}" 1
 else
+  kubectl patch deployment frontend -n "${PAAS_NS}" --type=json -p='[
+    {"op":"remove","path":"/spec/strategy/rollingUpdate"}
+  ]' 2>/dev/null || true
   kubectl patch deployment frontend -n "${PAAS_NS}" --type=merge -p "$(cat <<PATCH
 {
   "spec": {

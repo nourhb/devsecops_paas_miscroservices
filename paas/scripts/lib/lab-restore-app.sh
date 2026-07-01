@@ -108,6 +108,7 @@ main() {
   wait_k8s_api
 
   step "3/6 Jenkins (${JENKINS_NS})"
+  bash "${SCRIPT_DIR}/lab-jenkins-helm-install.sh" ensure-nodeport 2>/dev/null || true
   hc="$(jenkins_http)"
   if [[ "${hc}" =~ ^(200|403)$ ]]; then
     echo "OK: Jenkins already up HTTP ${hc}"

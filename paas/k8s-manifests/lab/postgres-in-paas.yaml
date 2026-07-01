@@ -47,7 +47,8 @@ spec:
         fsGroup: 70
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
           securityContext:
             runAsNonRoot: true
             runAsUser: 70

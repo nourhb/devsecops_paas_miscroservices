@@ -196,6 +196,14 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
                     unreachableReason: `Argo CD HTTP ${response.status}: ${errText || "no body"}`
                 };
             }
+            if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+                return {
+                    health: "Unknown",
+                    syncStatus: "Unknown",
+                    appName,
+                    unreachableReason: `Argo CD application status failed (${response.status}): ${errText || "no body"}`
+                };
+            }
             throw new IntegrationError(`Argo CD application status failed (${response.status}): ${errText || "no body"}`);
         }
         const data = (await response.json()) as {
@@ -216,10 +224,18 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
     }
     catch (e) {
         if (e instanceof IntegrationError) {
+            if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+                return {
+                    health: "Unknown",
+                    syncStatus: "Unknown",
+                    appName,
+                    unreachableReason: e.message
+                };
+            }
             throw e;
         }
         const msg = formatFetchErrorChain(e);
-        if (!allowSimulation()) {
+        if (env.PAAS_STRICT_INTEGRATIONS === "true" && !allowSimulation()) {
             const tlsNote = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
                 ? " If the server uses a self-signed cert, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true."
                 : "";
@@ -274,6 +290,12 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     }
 
     if (!apiConfigured) {
+        if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+            const prefix = ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "";
+            return {
+                logs: `${prefix}[argocd] WARN: Argo CD API not configured — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`
+            };
+        }
         throw new IntegrationError(`Argo CD sync failed for "${appName}": ${ensureLogs.join(" ")}`);
     }
 
@@ -288,8 +310,23 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
     }
     catch (e) {
         const msg = formatFetchErrorChain(e);
+        const lenientIntegrations = env.PAAS_STRICT_INTEGRATIONS !== "true";
+        if (env.KUBERNETES_ENABLED === "true") {
+            const k8s = await syncArgoApplicationViaK8s(appName);
+            if (k8s.ok) {
+                const line = k8s.logs;
+                return { logs: ensureLogs.length ? `${ensureLogs.join("\n")}\n${line}` : line };
+            }
+            ensureLogs.push(k8s.logs);
+        }
         if (allowSimulation()) {
             return { logs: `[argocd] Simulated sync for ${appName} (request failed: ${msg})` };
+        }
+        if (lenientIntegrations) {
+            return {
+                logs: (ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "") +
+                    `[argocd] WARN: sync API unreachable (${msg}) — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`
+            };
         }
         const tlsNote = env.ARGOCD_TLS_SKIP_VERIFY !== "true" && env.INTEGRATIONS_TLS_SKIP_VERIFY !== "true" && base.startsWith("https:")
             ? " If Argo CD uses a self-signed certificate, set ARGOCD_TLS_SKIP_VERIFY=true or INTEGRATIONS_TLS_SKIP_VERIFY=true."
@@ -318,18 +355,42 @@ export async function syncArgoApplication(projectName: string, destinationNamesp
             };
         }
         if (response.status === 404) {
+            if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+                return {
+                    logs: (ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "") +
+                        `[argocd] WARN: Application "${appName}" not found (HTTP 404) — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`
+                };
+            }
             throw new IntegrationError(`Argo CD application "${appName}" was not found after auto-create. Check GITOPS_REPO_URL, ARGOCD_AUTH_TOKEN RBAC, and that chart path exists in GitOps (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").`);
         }
         if (response.status === 401) {
+            if (lenientIntegrations) {
+                return {
+                    logs: (ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "") +
+                        `[argocd] WARN: HTTP 401 on sync for "${appName}" — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`
+                };
+            }
             throw new IntegrationError(`Argo CD authentication failed (HTTP 401). ` +
                 `Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (admin password) in the PaaS frontend environment.`);
         }
         if (response.status === 403) {
+            if (lenientIntegrations) {
+                return {
+                    logs: (ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "") +
+                        `[argocd] WARN: HTTP 403 on sync for "${appName}" — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`
+                };
+            }
             const detail = body.trim() ? ` Response: ${body.slice(0, 500)}` : "";
             throw new IntegrationError(`Argo CD denied this request (HTTP 403) for application "${appName}". ` +
                 `Check RBAC and that the Application exists and your token may sync it. ` +
                 `Expected application name: "${appName}" (ARGOCD_APP_PREFIX="${env.ARGOCD_APP_PREFIX}").` +
                 detail);
+        }
+        if (lenientIntegrations) {
+            return {
+                logs: (ensureLogs.length ? `${ensureLogs.join("\n")}\n` : "") +
+                    `[argocd] WARN: sync failed (HTTP ${response.status}) — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false). ${body.slice(0, 400)}`
+            };
         }
         throw new IntegrationError(`Argo CD sync failed (${response.status}): ${body.slice(0, 800)}`);
     }

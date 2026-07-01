@@ -111,7 +111,7 @@ Or `bash paas/scripts/dev.sh` on a dev machine.
 
 | Command | Purpose |
 |---------|---------|
-| `lab.sh start` | Recover after VM reboot (postgres, env, **frontend-force**, health) |
+| `lab.sh start` | Recover after VM reboot (`quick-up` first; full path only if needed) |
 | `lab.sh env` | Sync `docker-compose.env` → `paas-frontend-env` secret |
 | `lab.sh jenkins` | Push Jenkinsfile to Jenkins + rebuild frontend |
 | `lab.sh frontend` | Rebuild and roll out frontend image only |
@@ -135,8 +135,14 @@ Run **once** after any recovery or fresh clone:
 ```bash
 cd ~/devsecops_paas_miscroservices
 git pull
-bash paas/scripts/lab.sh harden
+sudo bash paas/scripts/lab.sh boot-enable   # harden + systemd auto-start + test
 ```
+
+After VM reboot: wait **5–15 minutes**, then open http://192.168.56.129:30100/login — no SSH required.
+
+Check progress: `tail -50 /var/log/paas-lab-start.log` or `bash paas/scripts/lab.sh boot-status`.
+
+Boot sequence (automatic): wait for k3s → auto SQLite vacuum if stuck → `quick-up` (no k3s restart, no scale-to-0) → health check. Retry timers at 5 / 10 / 18 min if needed.
 
 This installs:
 

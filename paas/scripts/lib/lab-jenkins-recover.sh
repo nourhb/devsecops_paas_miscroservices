@@ -77,9 +77,9 @@ recover_jenkins_workload() {
   local ns="$1"
   local wl
   if ! wl="$(discover_jenkins_workload "${ns}")"; then
-    echo "ERROR: no Jenkins StatefulSet/Deployment in namespace ${ns}" >&2
-    kubectl get deploy,sts -n "${ns}" 2>/dev/null || true
-    return 1
+    echo "WARN: no Jenkins StatefulSet/Deployment in ${ns} — helm install"
+    bash "${SCRIPT_DIR}/lab-jenkins-helm-install.sh" install
+    return $?
   fi
   local kind="${wl%% *}" name="${wl#* }"
   echo "==> Jenkins workload: ${kind}/${name} -n ${ns}"
@@ -104,9 +104,12 @@ jenkins_recover() {
 
   local ns svc
   if ! ns="$(discover_jenkins_ns)"; then
-    echo "ERROR: Jenkins namespace not found (tried cicd, jenkins, devsecops)" >&2
-    kubectl get ns 2>/dev/null | grep -iE 'cicd|jenkins|devsecops' || true
-    return 1
+    echo "WARN: Jenkins namespace not found — running helm install (cicd)"
+    bash "${SCRIPT_DIR}/lab-jenkins-helm-install.sh" install
+    ns="$(discover_jenkins_ns)" || {
+      echo "ERROR: Jenkins still missing after helm install" >&2
+      return 1
+    }
   fi
   echo "==> Jenkins namespace: ${ns}"
   svc="$(discover_jenkins_service "${ns}")"

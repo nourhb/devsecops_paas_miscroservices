@@ -4,6 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JUNE17_COMMIT="${JUNE17_COMMIT:-bb1fef3}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
+ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 
 echo "=============================================="
 echo " Roll back to June 17 2026 (build #756 era)"
@@ -12,10 +13,8 @@ echo "=============================================="
 
 if [[ "${LAB_ROLLBACK_CONFIRM:-}" != "1" ]]; then
   echo ""
-  echo "This restores the Jenkins load() layout that worked on 17 June."
-  echo "Prefer CPS split fix (keeps latest pipeline):"
-  echo "  bash paas/scripts/lab.sh fix-paas-deploy"
-  echo "Or rollback older Jenkinsfile (June 17, fewer features):"
+  echo "Restores the last known-stable Jenkins paas-deploy layout (17 Jun 2026)."
+  echo ""
   echo "  LAB_ROLLBACK_CONFIRM=1 bash paas/scripts/lab.sh rollback-june17"
   echo ""
   exit 1
@@ -36,29 +35,69 @@ git checkout "${JUNE17_COMMIT}" -- \
   paas/scripts/lib/create_jenkins_paas_deploy_job.py \
   paas/scripts/lib/install-jenkins-stages-file.sh
 
-echo "==> Install June 17 stages + sync Jenkins job"
-SKIP_FRONTEND_REBUILD=true LAB_DT_SKIP_HEAL=true \
-  bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh"
+echo "==> Install June 17 stages bundle on Jenkins pod"
+bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 
-echo "==> Frontend recovery image (skip long rebuild)"
-bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || true
+echo "==> Push June 17 job wrapper to Jenkins LIVE (--force)"
+set -a
+# shellcheck disable=SC1091
+source "${ENV_FILE}" 2>/dev/null || true
+set +a
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
+python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only
 
-echo "==> Postgres / DB connectivity"
-PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+echo "==> Disable UI inline job sync (stops reverting wrapper)"
+for f in "${ENV_FILE}" "${REPO_ROOT}/paas/frontend/.env"; do
+  [[ -f "${f}" ]] || continue
+  if grep -q '^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=' "${f}" 2>/dev/null; then
+    sed -i 's|^JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=.*|JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false|' "${f}"
+  else
+    echo 'JENKINS_SYNC_INLINE_JOB_BEFORE_TRIGGER=false' >> "${f}"
+  fi
+done
+PAAS_SKIP_ROLLOUT="${PAAS_SKIP_ROLLOUT:-1}" ENV_FILE="${ENV_FILE}" \
+  bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" 2>/dev/null || true
 
-echo ""
 echo "==> Verify Jenkins stages on cluster"
-bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh"
+DT_STAGES_MARKER=dt-api-server-svc-20260617 bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh" || \
+  bash "${SCRIPT_DIR}/verify-jenkins-stages-on-cluster.sh"
+
+echo "==> Verify LIVE Jenkins job (June 17 single-load layout)"
+set -a
+# shellcheck disable=SC1091
+source "${ENV_FILE}" 2>/dev/null || true
+set +a
+python3 <<'PY'
+import base64, os, sys, urllib.request
+from pathlib import Path
+vals = {}
+for line in Path("paas/frontend/docker-compose.env").read_text().splitlines():
+    if "=" in line and not line.strip().startswith("#"):
+        k, _, v = line.partition("="); vals[k.strip()] = v.strip().strip('"')
+base = (vals.get("JENKINS_PROBE_URL") or "http://192.168.56.129:30090").rstrip("/")
+user = os.environ.get("JENKINS_USERNAME") or vals.get("JENKINS_USERNAME")
+token = os.environ.get("JENKINS_API_TOKEN") or vals.get("JENKINS_API_TOKEN")
+auth = base64.b64encode(f"{user}:{token}".encode()).decode()
+live = urllib.request.urlopen(
+    urllib.request.Request(f"{base}/job/paas-deploy/config.xml", headers={"Authorization": f"Basic {auth}"}),
+    timeout=60,
+).read().decode()
+if "paas-deploy-stages-load-20260620-cps-split" in live and "load paasStagesP3" in live:
+    sys.exit("FAIL: LIVE job still has broken CPS split wrapper")
+if "paas-deploy-stages.groovy" not in live and "paasDeployStages" not in live:
+    sys.exit("FAIL: LIVE job missing single stages load path")
+print("OK: LIVE job uses June 17 style stages load (not CPS split)")
+PY
 
 echo ""
 echo "=============================================="
 echo " OK — rolled back Jenkins pipeline to June 17"
 echo ""
 echo " 1. Open PaaS:  http://${NODE_IP}:30100"
-echo " 2. Deploy your project (new build, NOT Replay of #770+)"
+echo " 2. Trigger NEW paas-deploy build (NOT Replay of #858+)"
 echo " 3. Jenkins:    http://${NODE_IP}:30090/job/paas-deploy/"
 echo ""
 echo " Console should show:"
-echo "   paas-deploy-stages-load-20260617 (Steps 1-12 via load inside node"
-echo " Then Step 1 — Params validation"
+echo "   paas-deploy-stages-load-20260617"
+echo "   Step 1 — Params validation / Check Parameters"
 echo "=============================================="

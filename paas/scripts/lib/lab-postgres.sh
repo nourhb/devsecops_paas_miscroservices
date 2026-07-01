@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
 MANIFEST="${PAAS_DIR}/k8s-manifests/lab/postgres-in-paas.yaml"
@@ -12,6 +14,14 @@ DOCKERFILE_DB="${FRONTEND_DIR}/Dockerfile.db"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 postgres_deploy() {
+  if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1 \
+    && kubectl exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas >/dev/null 2>&1; then
+    echo "=== Postgres already healthy — skip Service delete/recreate ==="
+    kubectl get pods,svc,endpoints -n "${PAAS_NS}" | grep -E 'postgres|frontend|NAME' || true
+    return 0
+  fi
+  echo "=== Ensure namespace ${PAAS_NS} ==="
+  kubectl create namespace "${PAAS_NS}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   echo "=== Remove broken ExternalName / headless postgres Service (if any) ==="
   kubectl delete svc postgres -n "${PAAS_NS}" --ignore-not-found
   echo "=== Deploy Postgres in ${PAAS_NS} (PVC postgres-pvc keeps users/projects) ==="
@@ -55,6 +65,11 @@ postgres_wait() {
 
 postgres_push_schema() {
   kubectl wait --for=condition=ready pod -l app=postgres -n "${PAAS_NS}" --timeout=120s
+  if kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -tAc \
+    "SELECT 1 FROM information_schema.tables WHERE table_name='User'" 2>/dev/null | grep -q 1; then
+    echo "OK: Prisma schema already applied (User table exists)"
+    return 0
+  fi
   local pg_ip
   pg_ip="$(kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
   [[ -n "${pg_ip}" ]] || die "No postgres endpoints — run: bash paas/scripts/lab.sh start"
@@ -77,18 +92,20 @@ postgres_push_schema() {
     echo "=== prisma db push (docker → ${pg_ip}) ==="
     docker run --rm -e DATABASE_URL="${db_url}" "${IMAGE}"
   }
-  if [[ -f "${DOCKERFILE_DB}" ]] && [[ "$(wc -c < "${DOCKERFILE_DB}")" -gt 80 ]]; then
+  echo "=== prisma db push (prefer fast node image) ==="
+  if push_via_node_image; then
+    schema_pushed=1
+  elif [[ -f "${DOCKERFILE_DB}" ]] && [[ "$(wc -c < "${DOCKERFILE_DB}")" -gt 80 ]]; then
+    echo "WARN: node image push failed — trying Dockerfile.db"
     if push_via_dockerfile; then
       schema_pushed=1
     fi
   else
     echo "WARN: ${DOCKERFILE_DB} missing or empty — run: git checkout paas/frontend/Dockerfile.db"
   fi
-  if [[ "${schema_pushed}" -eq 0 ]]; then
-    push_via_node_image
-  fi
+  [[ "${schema_pushed}" -eq 1 ]] || die "schema push failed"
   echo "=== Tables ==="
-  kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -c '\dt' | head -20
+  kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -c '\dt' 2>/dev/null | head -20 || true
   echo "OK: register/login at http://192.168.56.129:30100"
 }
 

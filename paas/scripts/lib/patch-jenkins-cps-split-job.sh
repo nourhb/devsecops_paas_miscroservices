@@ -3,107 +3,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
-PAAS_DIR="${JENKINS_PAAS_REMOTE_DIR:-/var/jenkins_home/paas}"
-MARKER="${DT_STAGES_MARKER:-helm-portable-20260620-cps-split}"
+ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 LOAD_MARKER="${PAAS_DEPLOY_STAGES_LOAD_MARKER:-paas-deploy-stages-load-20260620-cps-split}"
 JOB_CFG="/var/jenkins_home/jobs/paas-deploy/config.xml"
+# shellcheck source=lab-jenkins-pod.sh
+source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 
 echo "==> patch-jenkins-cps-split-job (ns=${JENKINS_NS}, marker=${LOAD_MARKER})"
 
-kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- test -f "${JOB_CFG}"
-kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
-  cat "${JOB_CFG}" > /tmp/paas-deploy-config.xml
+echo "==> Refresh CPS bundle on Jenkins pod (monolith paas-deploy-stages.groovy + split files)"
+SKIP_JOB_PATCH=1 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 
-export LOAD_MARKER MARKER PAAS_DIR
-python3 << 'PY'
-import os
-import re
-import sys
-from pathlib import Path
-
-marker = os.environ["LOAD_MARKER"]
-bundle = os.environ["MARKER"]
-paas_dir = os.environ["PAAS_DIR"]
-p = Path("/tmp/paas-deploy-config.xml")
-t = p.read_text(encoding="utf-8")
-needs_patch = (
-    "load paasStagesP3" not in t
-    or "load paasDeployStagesPath" in t
-    or marker not in t
-)
-if needs_patch:
-    print("==> rewriting job wrapper to 7-file CPS load bundle")
-else:
-    print(f"OK: job config already has {marker} + 7-file load (refreshing anyway)")
-new_script = f"""def paasLoadH1 = '{paas_dir}/paas-deploy-load-h1.groovy'
-def paasLoadH2 = '{paas_dir}/paas-deploy-load-h2.groovy'
-def paasLoadH3 = '{paas_dir}/paas-deploy-load-h3.groovy'
-def paasStagesVars = '{paas_dir}/paas-deploy-stages-vars.groovy'
-def paasStagesP1 = '{paas_dir}/paas-deploy-stages-p1.groovy'
-def paasStagesP2 = '{paas_dir}/paas-deploy-stages-p2.groovy'
-def paasStagesP3 = '{paas_dir}/paas-deploy-stages-p3.groovy'
-println '[paas-jenkinsfile] marker={marker} (Steps 1-12 via multi load — CPS split 7 files)'
-def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
-def paasRequireFreshStages = {{
-  def bundlePaths = [paasLoadH1, paasLoadH2, paasLoadH3, paasStagesVars, paasStagesP1, paasStagesP2, paasStagesP3]
-  bundlePaths.each {{ p ->
-    if (!fileExists(p)) {{ error("Missing ${{p}}") }}
-    if (!readFile(p).contains('{bundle}')) {{ error("Stale ${{p}} — re-run: bash paas/scripts/lab.sh fix-paas-deploy") }}
-  }}
-  if (!readFile(paasStagesP3).contains('def runPaasDeploy = {{')) {{
-    error("Stale stages bundle (missing runPaasDeploy in p3)")
-  }}
-  load paasLoadH1
-  load paasLoadH2
-  load paasLoadH3
-  load paasStagesVars
-  load paasStagesP1
-  load paasStagesP2
-  load paasStagesP3
-  runPaasDeploy()
-}}
-if (!agentLabel || agentLabel == 'built-in') {{
-  println "[paas] node: default Built-In Node (agentLabel=${{agentLabel ?: 'empty'}})"
-  node {{ paasRequireFreshStages() }}
-}} else {{
-  println "[paas] node: agentLabel=${{agentLabel}}"
-  node(agentLabel) {{ paasRequireFreshStages() }}
-}}
-"""
-cdata_pat = re.compile(
-    r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>\s*<!\[CDATA\[)([\s\S]*?)(\]\]>\s*</script>)',
-    re.I,
-)
-plain_pat = re.compile(
-    r'(<definition\b[^>]*class="org\.jenkinsci\.plugins\.workflow\.cps\.CpsFlowDefinition"[^>]*>\s*<script>)([\s\S]*?)(</script>)',
-    re.I,
-)
-m = cdata_pat.search(t)
-use_cdata = bool(m)
-if not m:
-    m = plain_pat.search(t)
-if not m:
-    print("ERROR: Pipeline script block not found in config.xml — use API path:", file=sys.stderr)
-    print("  set -a; source paas/frontend/docker-compose.env; set +a", file=sys.stderr)
-    print("  python3 paas/scripts/lib/create_jenkins_paas_deploy_job.py --force --force-full", file=sys.stderr)
-    sys.exit(1)
-if use_cdata:
-    inner = new_script.replace("]]>", "]]]]><![CDATA[>")
-else:
-    from xml.sax.saxutils import escape
-    inner = escape(new_script)
-p.write_text(t[: m.start(2)] + inner + t[m.end(2) :], encoding="utf-8")
-print("OK patched config.xml (7-file wrapper)")
-PY
-
-kubectl exec -i -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
-  tee "${JOB_CFG}" < /tmp/paas-deploy-config.xml >/dev/null
+echo "==> POST 7-file CPS wrapper to Jenkins LIVE job"
+set -a
+# shellcheck disable=SC1091
+source "${ENV_FILE}" 2>/dev/null || true
+set +a
+python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"
 
 echo "==> Reload Jenkins in-memory job (disk-only patch is NOT enough for builds)"
 bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh"
 
-kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- sh -c "
+jenkins_exec "${JENKINS_NS}" sh -c "
   grep -qF '${LOAD_MARKER}' ${JOB_CFG} && echo OK:job-marker
-  grep -qF 'load paasStagesP3' ${JOB_CFG} && echo OK:multi-load
+  grep -qF 'load paasStagesP3' ${JOB_CFG} && echo OK:cps-split-load
   grep -qF 'runPaasDeploy()' ${JOB_CFG} && echo OK:run-call
+  ! grep -qF 'def paas = load paasDeployStages' ${JOB_CFG} && echo OK:no-monolith-load
 "

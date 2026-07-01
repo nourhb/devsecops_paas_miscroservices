@@ -75,6 +75,23 @@ if auto_heal_blocked; then
   exit 0
 fi
 
+if [[ -f /var/tmp/paas-lab-boot-in-progress ]]; then
+  log "boot recover in progress — skip watchdog"
+  exit 0
+fi
+
+if [[ -f /var/tmp/paas-lab-boot-ok ]]; then
+  boot_ts="$(cat /var/tmp/paas-lab-boot-ok 2>/dev/null || echo "")"
+  if [[ -n "${boot_ts}" ]]; then
+    boot_epoch="$(date -d "${boot_ts}" +%s 2>/dev/null || echo 0)"
+    now_epoch="$(date +%s)"
+    if (( now_epoch - boot_epoch < 1500 )); then
+      log "boot grace period (<25 min since last boot OK) — skip aggressive heals"
+      exit 0
+    fi
+  fi
+fi
+
 if ! timeout 15 kubectl get --raw=/healthz >/dev/null 2>&1; then
   log "k8s API not ready — skip"
   exit 0

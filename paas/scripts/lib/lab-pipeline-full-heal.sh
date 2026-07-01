@@ -146,11 +146,20 @@ main() {
   elif sonar_validate "${token}" "${url}"; then
     ok "Sonar token valid at ${url}"
   else
-    fail "Sonar token invalid at ${url} (got valid:false)"
-    echo "  Bypass UI password loop and create token via API:"
-    echo "  bash paas/scripts/lab.sh sonar-bootstrap"
-    echo "  Or: SONAR_TOKEN=sqa_... bash paas/scripts/lab.sh pipeline-heal"
-    FAIL=1
+    warn "Sonar token invalid at ${url} — running sonar-bootstrap"
+    if bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh"; then
+      token="$(read_env_sonar_token)"
+      if sonar_validate "${token}" "${url}"; then
+        ok "Sonar token refreshed via sonar-bootstrap"
+      else
+        fail "Sonar token still invalid after sonar-bootstrap"
+        FAIL=1
+      fi
+    else
+      fail "sonar-bootstrap failed"
+      echo "  Manual: bash paas/scripts/lab.sh sonar-bootstrap"
+      FAIL=1
+    fi
   fi
 
   if [[ "${FAIL}" -ne 0 ]]; then

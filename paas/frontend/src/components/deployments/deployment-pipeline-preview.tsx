@@ -50,7 +50,7 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
             jenkinsChecks,
             buildComplete: data.buildComplete ?? logParsed?.buildComplete ?? null,
             result: data.result ?? logParsed?.buildComplete?.result ?? null,
-            building: data.building && !logParsed?.buildComplete
+            building: Boolean((data?.building || deployBusy) && !logParsed?.buildComplete)
         }
         : logParsed?.jenkinsChecks?.length || logParsed?.buildComplete
             ? {
@@ -101,8 +101,11 @@ export function DeploymentPipelinePreview({ projectId, buildNumber, buildProvide
         {deployChecks.some((check) => check.status === "FAIL") ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
             Jenkins finished successfully, but PaaS post-deploy verification failed (GitOps, Argo CD, or URL probe). See console output below.
           </p>) : null}
-        {stagesQuery.isError ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
+        {stagesQuery.isError && !logParsed?.jenkinsChecks?.length && !deploymentLogs ? (<p className="rounded-md border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
             Could not load pipeline stages. Console output below may still show progress.
+          </p>) : null}
+        {stagesQuery.isError && (logParsed?.jenkinsChecks?.length || deploymentLogs) ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+            Jenkins stage API slow — showing progress from console logs.
           </p>) : null}
         {data?.skipped ? (<p className="text-sm text-muted">{data.reason || "Jenkins stages are not available."}</p>) : null}
         {data?.error ? (<p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">{data.error}</p>) : null}

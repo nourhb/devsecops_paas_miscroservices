@@ -1,7 +1,7 @@
 import type { V1Secret } from "@kubernetes/client-node";
 import { env } from "@/server/config/env";
 import { harborDockerConfigSecretData } from "@/server/deploy/harbor-pull-secret";
-import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
+import { getCoreV1Api, readNamespacedSecretData, upsertNamespacedSecret } from "@/server/integrations/kubernetes-client";
 
 const HARBOR_PULL_SECRET = "harbor-regcred";
 
@@ -16,7 +16,7 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
     const warnings: string[] = [];
     const logs: string[] = [];
     const api = getCoreV1Api();
-    if (!api || env.KUBERNETES_ENABLED !== "true") {
+    if (!api && env.KUBERNETES_ENABLED !== "true") {
         return {
             logs: "[k8s] Kubernetes API unavailable — namespace pull-secret sync skipped (Argo may still create the namespace).",
             warnings
@@ -26,31 +26,25 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
     if (!ns) {
         return { logs: "[k8s] Empty namespace — skipped.", warnings };
     }
-    try {
-        await api.readNamespace(ns);
-    }
-    catch {
+    if (api) {
         try {
-            await api.createNamespace({ metadata: { name: ns } });
-            logs.push(`[k8s] Created namespace ${ns}`);
+            await api.readNamespace(ns);
         }
-        catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            warnings.push(`Could not create namespace ${ns}: ${msg}`);
+        catch {
+            try {
+                await api.createNamespace({ metadata: { name: ns } });
+                logs.push(`[k8s] Created namespace ${ns}`);
+            }
+            catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                warnings.push(`Could not create namespace ${ns}: ${msg}`);
+            }
         }
     }
     const sourceNs = harborSecretSourceNamespace();
-    let secretData: Record<string, string> | null = null;
-    try {
-        const { body: sourceSecret } = await api.readNamespacedSecret(HARBOR_PULL_SECRET, sourceNs);
-        secretData = sourceSecret.data ?? null;
-        if (!secretData) {
-            warnings.push(`Harbor pull secret ${HARBOR_PULL_SECRET} in ${sourceNs} has no data.`);
-        }
-    }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        warnings.push(`Could not read ${HARBOR_PULL_SECRET} from ${sourceNs}: ${msg}`);
+    let secretData: Record<string, string> | null = await readNamespacedSecretData(sourceNs, HARBOR_PULL_SECRET);
+    if (!secretData) {
+        warnings.push(`Could not read ${HARBOR_PULL_SECRET} from ${sourceNs} via Kubernetes API.`);
     }
     if (!secretData) {
         secretData = harborDockerConfigSecretData();
@@ -66,24 +60,16 @@ export async function ensureProjectNamespaceReady(namespace: string): Promise<{
         };
         let copied = false;
         for (let attempt = 1; attempt <= 3 && !copied; attempt++) {
-            try {
-                await api.createNamespacedSecret(ns, copy);
+            const result = await upsertNamespacedSecret(ns, copy);
+            if (result.ok) {
                 logs.push(`[k8s] Copied ${HARBOR_PULL_SECRET} into namespace ${ns}`);
                 copied = true;
             }
-            catch (createError) {
-                const msg = createError instanceof Error ? createError.message : String(createError);
-                if (/already exists|409/i.test(msg)) {
-                    await api.replaceNamespacedSecret(HARBOR_PULL_SECRET, ns, copy);
-                    logs.push(`[k8s] Updated ${HARBOR_PULL_SECRET} in namespace ${ns}`);
-                    copied = true;
-                }
-                else if (attempt < 3) {
-                    await new Promise((r) => setTimeout(r, 2000));
-                }
-                else {
-                    warnings.push(`Could not copy ${HARBOR_PULL_SECRET} to ${ns}: ${msg}`);
-                }
+            else if (attempt < 3) {
+                await new Promise((r) => setTimeout(r, 2000));
+            }
+            else {
+                warnings.push(`Could not copy ${HARBOR_PULL_SECRET} to ${ns}: ${result.error ?? "unknown error"}`);
             }
         }
     }

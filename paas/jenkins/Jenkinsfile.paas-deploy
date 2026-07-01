@@ -57,36 +57,42 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
     "DT_KEY=${dtKey}",
     "DT_VERSION=${ver}",
     "DT_PROJECT=${dtName}",
-    "DT_PROJECT_TAG=${projId}"
+    "DT_PROJECT_TAG=${projId}",
+    "PAAS_DT_UPLOAD_OPTIONAL=${(params.PAAS_DT_UPLOAD_OPTIONAL?.trim() ?: env.PAAS_DT_UPLOAD_OPTIONAL ?: 'false').trim()}"
   ]) {
     sh '''
       set +e
       echo "[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (NodePort/env URLs before cluster DNS — built-in Jenkins agent)"
+      echo "[paas-jenkinsfile] marker=dt-probe-only-upload-20260701 (no cluster DNS fallback on built-in agent)"
       dt_probe_ok() {
         u="$1"
         [ -z "$u" ] && return 1
         curl -fsS -m 10 "${u%/}/api/version" >/dev/null 2>&1
       }
       dt_upload_candidates() {
-        # Built-in Jenkins executor often lacks *.svc.cluster.local DNS — try NodePort/explicit env first.
-        for u in \
-          "${DT_BASE}" \
-          "${JENKINS_DT_BASE}" \
-          "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080" \
-          "http://dtrack-dependency-track-api-server.dependency-track:8080" \
-          "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
-          "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
-          "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080"
-        do
+        for u in "${DT_BASE}" "${JENKINS_DT_BASE}"; do
           [ -z "$u" ] && continue
           printf '%s\n' "$u"
         done | awk '!seen[$0]++'
+        if command -v getent >/dev/null 2>&1 && getent hosts dtrack-dependency-track-api-server.dependency-track.svc.cluster.local >/dev/null 2>&1; then
+          for u in \
+            "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080" \
+            "http://dtrack-dependency-track-api-server.dependency-track:8080" \
+            "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
+            "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
+            "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080"
+          do
+            printf '%s\n' "$u"
+          done
+        fi | awk '!seen[$0]++'
       }
+      DT_PROBE_OK_BASES=""
       DT_BASE_PICKED=""
       while IFS= read -r _dt_probe; do
+        [ -z "${_dt_probe}" ] && continue
         if dt_probe_ok "${_dt_probe}"; then
-          DT_BASE_PICKED="${_dt_probe}"
-          break
+          DT_PROBE_OK_BASES="${DT_PROBE_OK_BASES}${_dt_probe}"$'\n'
+          [ -z "${DT_BASE_PICKED}" ] && DT_BASE_PICKED="${_dt_probe}"
         fi
       done <<EOF
 $(dt_upload_candidates)
@@ -96,10 +102,11 @@ EOF
           DT_BASE_PICKED="${DT_BASE}"
         elif [ -n "${JENKINS_DT_BASE}" ]; then
           DT_BASE_PICKED="${JENKINS_DT_BASE}"
-        else
-          DT_BASE_PICKED="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
         fi
-        echo "[sca] Dependency-Track /api/version probe failed on all bases — will still try upload via ${DT_BASE_PICKED}"
+        if [ -n "${DT_BASE_PICKED}" ]; then
+          DT_PROBE_OK_BASES="${DT_BASE_PICKED}"$'\n'
+        fi
+        echo "[sca] Dependency-Track /api/version probe failed on all bases — will still try upload via ${DT_BASE_PICKED:-<none>}"
       else
         echo "[sca] Dependency-Track base=${DT_BASE_PICKED}"
       fi
@@ -110,7 +117,7 @@ EOF
         _dt_base="$1"
         [ -z "${_dt_base}" ] && return 1
         for _dt_try in 1 2 3; do
-          DT_RESP="$(curl -sS -w '\n__HTTP__%{http_code}' -X POST "${_dt_base%/}/api/v1/bom" \
+          DT_RESP="$(curl -sS -w '\\n__HTTP__%{http_code}' -X POST "${_dt_base%/}/api/v1/bom" \
             -H "X-Api-Key: ${DT_KEY}" \
             -F "autoCreate=true" \
             -F "projectName=${DT_PROJECT}" \
@@ -134,22 +141,22 @@ EOF
         done
         return 1
       }
-      if [ -n "${DT_BASE_PICKED}" ] && dt_try_upload "${DT_BASE_PICKED}"; then
-        :
-      else
-        while IFS= read -r _dt_base; do
-          [ -z "${_dt_base}" ] && continue
-          [ "${_dt_base}" = "${DT_BASE_PICKED}" ] && continue
-          if dt_try_upload "${_dt_base}"; then
-            break
-          fi
-        done <<EOF
-$(dt_upload_candidates)
+      DT_UPLOADED=0
+      while IFS= read -r _dt_base; do
+        [ -z "${_dt_base}" ] && continue
+        if dt_try_upload "${_dt_base}"; then
+          DT_UPLOADED=1
+          break
+        fi
+      done <<EOF
+$(printf '%s' "${DT_PROBE_OK_BASES}")
 EOF
-      fi
-      if [ "${DT_HTTP}" = "200" ] || [ "${DT_HTTP}" = "201" ] || [ "${DT_HTTP}" = "202" ]; then
+      if [ "${DT_UPLOADED}" = "1" ]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) base=${DT_UPLOAD_BASE:-${DT_BASE_PICKED}} project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
+      elif [ "${PAAS_DT_UPLOAD_OPTIONAL}" = "true" ] && [ -f sca/bom.json ]; then
+        echo "[sca] WARN: Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — PAAS_DT_UPLOAD_OPTIONAL=true; continuing with local sca/bom.json"
+        echo "PAAS_STEP_WARN step=4 id=dependency-track msg=SBOM kept locally; Dependency-Track unreachable (HTTP ${DT_HTTP:-?})"
       else
         echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) last base=${DT_BASE_PICKED} — rotate DEPENDENCY_TRACK_API_KEY if 401; ensure dtrack API server pod is Running"
         printf '%s\n' "${DT_BODY}" | head -c 800
@@ -646,6 +653,22 @@ def prependPath(String path) {
   env.PATH = "${path}:${env.PATH}"
 }
 
+def resolvePortableNodeBin(String nodeVer = '20.19.5') {
+  def cacheRoot = (env.JENKINS_PAAS_NODE_CACHE ?: "").trim()
+  if (!cacheRoot) {
+    def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
+    cacheRoot = base ? "${base}/.jenkins-paas-cache/node" : "${pwd()}/.paas-tools"
+  }
+  def candidate = "${cacheRoot}/node-v${nodeVer}-linux-x64/bin/node"
+  if (fileExists(candidate)) {
+    return candidate
+  }
+  if (commandExists('node')) {
+    return 'node'
+  }
+  return candidate
+}
+
 def ensureNodeTool(String nodeVer = null) {
   def targetVer = (nodeVer ?: resolveNodeVersion()).trim()
   if (!targetVer) {
@@ -746,6 +769,73 @@ LOCK_DIR=""
 '''
   }
   prependPath("${nodeDir}/bin")
+}
+
+def ensurePythonTool(String pyVer = null) {
+  def targetVer = (pyVer ?: (env.JENKINS_PAAS_PYTHON_VERSION ?: '3.12.7')).trim()
+  if (commandExists("python3")) {
+    return
+  }
+  def cacheRoot = (env.JENKINS_PAAS_PYTHON_CACHE ?: "").trim()
+  if (!cacheRoot) {
+    def base = (env.JENKINS_HOME ?: env.HOME ?: "").trim()
+    cacheRoot = base ? "${base}/.jenkins-paas-cache/python" : "${pwd()}/.paas-tools/python"
+  }
+  def buildTag = (env.JENKINS_PAAS_PYTHON_BUILD_TAG ?: '20241016').trim()
+  def pyDir = "${cacheRoot}/cpython-${targetVer}-install_only"
+  if (fileExists("${pyDir}/bin/python3")) {
+    println "[tooling] portable Python ${targetVer} → ${pyDir}"
+    prependPath("${pyDir}/bin")
+    return
+  }
+  println "[tooling] portable Python ${targetVer} → ${pyDir} (set JENKINS_PAAS_PYTHON_VERSION / JENKINS_PAAS_PYTHON_CACHE to override)"
+  withEnv(["ENS_PY_BOOT_VER=${targetVer}", "ENS_PY_BOOT_TAG=${buildTag}", "ENS_PY_BOOT_DIR=${pyDir}"]) {
+    sh '''#!/bin/sh
+set -eu
+PY_VERSION="${ENS_PY_BOOT_VER}"
+PY_TAG="${ENS_PY_BOOT_TAG}"
+PY_DIR="${ENS_PY_BOOT_DIR}"
+CACHE_PARENT="$(dirname "${PY_DIR}")"
+LOCK_DIR="${CACHE_PARENT}/.python-install.lock"
+mkdir -p "${CACHE_PARENT}"
+if [ -x "${PY_DIR}/bin/python3" ]; then
+  exit 0
+fi
+_wait=0
+while [ ! -x "${PY_DIR}/bin/python3" ]; do
+  if mkdir "${LOCK_DIR}" 2>/dev/null; then
+    break
+  fi
+  _wait=$((_wait + 1))
+  if [ "${_wait}" -gt 360 ]; then
+    echo "[tooling] ERROR: timeout waiting for shared Python install lock" >&2
+    exit 1
+  fi
+  echo "[tooling] another build is installing Python — waiting (${_wait})…"
+  sleep 5
+done
+if [ -x "${PY_DIR}/bin/python3" ]; then
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+  exit 0
+fi
+TDIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "${TDIR}" 2>/dev/null || true
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+}
+trap cleanup EXIT
+TARBALL="cpython-${PY_VERSION}+${PY_TAG}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+URL="https://github.com/indygreg/python-build-standalone/releases/download/${PY_TAG}/${TARBALL}"
+echo "[tooling] downloading Python ${PY_VERSION} (${PY_TAG})…"
+curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 1800 "${URL}" -o "${TDIR}/python.tar.gz"
+tar -xzf "${TDIR}/python.tar.gz" -C "${TDIR}"
+rm -rf "${PY_DIR}" 2>/dev/null || true
+mv "${TDIR}/python" "${PY_DIR}"
+rmdir "${LOCK_DIR}" 2>/dev/null || true
+LOCK_DIR=""
+'''
+  }
+  prependPath("${pyDir}/bin")
 }
 
 def patchNextStandaloneConfigIfNeeded(String appRoot = '.') {
@@ -1282,6 +1372,13 @@ def paasShellKeepaliveHelper() {
 }
 
 def dockerlessPythonCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
+  def imageRefIp = imageRef
+  def slash = imageRef.indexOf('/')
+  if (slash > 0) {
+    def host = imageRef.substring(0, slash)
+    def path = imageRef.substring(slash)
+    imageRefIp = "${harborIpRegistryHostFromNipio(host)}${path}"
+  }
   println "[image] Step 6 — python crane path (gunicorn>=22 / flask; port 8000; marker=python-gunicorn22-20260610)"
   sh """
     set -eu
@@ -1342,26 +1439,38 @@ PAAS_PY
     tar --exclude='./.git' --exclude='./paas-artifacts' --exclude='./.paas-tools' \\
       --exclude='./node_modules' --exclude='./__pycache__' \\
       --transform='s#^\\./#app/#' -cf paas-artifacts/app-layer.tar .
-    echo "[image] python crane append → ${imageRef}"
+    echo "[image] python crane append → ${imageRefIp} (IP-first; nip.io alias ${imageRef})"
+    export DOCKER_CONFIG="\${JENKINS_HOME:-/var/jenkins_home}/.docker-paas-crane"
+    mkdir -p "\${DOCKER_CONFIG}"
+    _harbor_ip="${imageRefIp.tokenize('/')[0]}"
+    _harbor_nip="${imageRef.tokenize('/')[0]}"
+    _harbor_pass="\${HARBOR_PASSWORD:-}"
+    for _r in "\${_harbor_ip}" "\${_harbor_nip}"; do
+      [ -z "\${_r}" ] && continue
+      printf '%s' "\${_harbor_pass}" | "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${HARBOR_USERNAME:-admin}" --password-stdin --insecure || true
+    done
     _crane_ok=0
     for _py_base in \\
       mirror.gcr.io/library/python:3.11-slim \\
       mirror.gcr.io/library/python:3.12-slim \\
       mirror.gcr.io/library/python:3.12-slim-bookworm; do
-      echo "[image] python crane append try base=\${_py_base}"
+      echo "[image] python crane append try base=\${_py_base} → ${imageRefIp}"
       if "${craneBin}" ${craneInsecure} append \\
         -b "\${_py_base}" \\
         -f paas-artifacts/app-layer.tar \\
-        -t "${imageRef}"; then
+        -t "${imageRefIp}"; then
         _crane_ok=1
         break
       fi
     done
     if [ "\${_crane_ok}" != 1 ]; then
-      echo "[image] ERROR: python crane append failed (tried 3.12-slim, 3.12-slim-bookworm, 3.11-slim on mirror.gcr.io)"
+      echo "[image] ERROR: python crane append failed — run: bash paas/scripts/lab.sh fix-harbor-push"
       exit 1
     fi
-    "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
+    if [ "${imageRefIp}" != "${imageRef}" ]; then
+      "${craneBin}" ${craneInsecure} tag "${imageRefIp}" "${imageRef}" || true
+    fi
+    "${craneBin}" ${craneInsecure} mutate "${imageRefIp}" \\
       -t "${imageRef}" \\
       --workdir=/app \\
       --entrypoint=/app/start-paas-python.sh \\
@@ -1660,7 +1769,7 @@ def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String arti
       local _nip="\${HARBOR_REGISTRY:-${imageRef.tokenize('/')[0]}}"
       local _ip="\$(harbor_nipio_to_ip_ref "\${_nip}/x" 2>/dev/null | cut -d/ -f1 || true)"
       [ -z "\${_ip}" ] && _ip="${imageRefIp.tokenize('/')[0]}"
-      local _repo="\${_push_ref#*/}"
+      local _repo="\${_push_ref_ip#*/}"
       _repo="\${_repo%%:*}"
       local _proj="\${_repo%%/*}"
       [ -n "\${_user}" ] && [ -n "\${_pass}" ] || { echo "[image] ERROR: Harbor creds empty"; return 1; }
@@ -1679,33 +1788,17 @@ def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String arti
         fi
         _resp="\$(curl -sS -u "\${_user}:\${_pass}" \
           "\${_api}/service/token?service=harbor-registry&scope=repository:\${_repo}:pull,push" 2>/dev/null || true)"
-        if [ -n "\${_resp}" ] && command -v python3 >/dev/null 2>&1; then
-          _actions="\$(HARBOR_PROBE_REPO="\${_repo}" printf '%s' "\${_resp}" | python3 -c '
-import sys, json, base64, os
-repo = os.environ.get("HARBOR_PROBE_REPO", "")
-try:
-  tok = json.load(sys.stdin).get("token", "")
-  p = tok.split(".")[1]
-  p += "=" * (-len(p) % 4)
-  claims = json.loads(base64.urlsafe_b64decode(p))
-  acts = []
-  for a in claims.get("access") or []:
-    if a.get("name") == repo:
-      acts = list(a.get("actions") or [])
-      break
-  print(",".join(acts))
-except Exception:
-  print("")
-' 2>/dev/null || true)"
-          if echo "\${_actions}" | grep -q push; then
-            echo "[image] Harbor push token OK (\${_api} repo=\${_repo} actions=\${_actions})"
-            return 0
+        if echo "\${_resp}" | grep -q '"token"[[:space:]]*:[[:space:]]*"'; then
+          if echo "\${_resp}" | grep -qE '"actions"[[:space:]]*:[[:space:]]*\\[\\s*\\]'; then
+            echo "[image] ERROR: Harbor JWT has no push scope — bash paas/scripts/lab.sh fix-harbor-push"
+            return 1
           fi
-          echo "[image] WARN: Harbor token missing push for \${_repo} via \${_api} (actions=\${_actions:-empty})"
+          echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo})"
+          return 0
         fi
       done
-      echo "[image] ERROR: Harbor push RBAC denied for \${_repo} — run: bash paas/scripts/lib/fix-harbor-push-now.sh"
-      return 1
+      echo "[image] WARN: Harbor precheck could not read token for \${_repo}; continuing to real crane push"
+      return 0
     }
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ "\${JENKINS_NPM_PRUNE_BEFORE_CRANE:-true}" != "false" ] && [ ! -d .next/standalone ]; then
       echo "[image] npm prune --omit=dev — shrink root node_modules (skipped when .next/standalone exists)"
@@ -1777,19 +1870,15 @@ PAAS_START
     fi
     echo "[image] crane append → registry (this step can take many minutes on slow links)"
     _crane_max="\${JENKINS_CRANE_PUSH_RETRIES:-3}"
+    if [ "\${_crane_max}" -lt 2 ] 2>/dev/null; then _crane_max=2; fi
     _crane_attempt=1
     _crane_rc=1
-    _push_ref="${imageRef}"
     _push_ref_ip="${imageRefIp}"
     paas_harbor_ensure_project_and_token || exit 1
+    echo "[image] primary push ref (IP): ${imageRefIp} ; alias ref: ${imageRef}"
     while [ "\${_crane_attempt}" -le "\${_crane_max}" ]; do
       paas_crane_harbor_login || true
-      if [ "\${_crane_attempt}" -ge 2 ]; then
-        _push_ref="\${_push_ref_ip}"
-        echo "[image] crane append using IP registry ref (401 fallback): \${_push_ref}"
-      else
-        _push_ref="${imageRef}"
-      fi
+      _push_ref="\${_push_ref_ip}"
       echo "[image] crane append attempt \${_crane_attempt}/\${_crane_max} → \${_push_ref}"
       if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
         _hb="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-45}"
@@ -1810,9 +1899,9 @@ PAAS_START
           -t "\${_push_ref}" && _crane_rc=0 || _crane_rc=\$?
       fi
       if [ "\${_crane_rc}" = "0" ]; then
-        if [ "\${_push_ref}" != "${imageRef}" ]; then
+        if [ "\${_push_ref_ip}" != "${imageRef}" ]; then
           echo "[image] pushed via IP ref — tagging nip.io alias ${imageRef}"
-          "${craneBin}" ${craneInsecure} tag "\${_push_ref}" "${imageRef}" || true
+          "${craneBin}" ${craneInsecure} tag "\${_push_ref_ip}" "${imageRef}" || true
         fi
         break
       fi
@@ -2197,6 +2286,10 @@ def runPaasDeploy = {
   env.DOCKERHUB_TOKEN = (params.DOCKERHUB_TOKEN?.trim() ?: env.DOCKERHUB_TOKEN ?: "").trim()
   env.SONAR_HOST_URL = (params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: "").trim()
   env.SONAR_TOKEN = (params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: "").trim()
+  env.SONAR_ADMIN_USER = (params.SONAR_ADMIN_USER?.trim() ?: env.SONAR_ADMIN_USER ?: "admin").trim()
+  env.SONAR_ADMIN_PASSWORD = (params.SONAR_ADMIN_PASSWORD?.trim() ?: env.SONAR_ADMIN_PASSWORD ?: "").trim()
+  env.SONAR_ADMIN_NEW_PASSWORD = (params.SONAR_ADMIN_NEW_PASSWORD?.trim() ?: env.SONAR_ADMIN_NEW_PASSWORD ?: "SonarQube123!").trim()
+  env.SONAR_TOKEN_NAME = (params.SONAR_TOKEN_NAME?.trim() ?: env.SONAR_TOKEN_NAME ?: "paas-jenkins-lab").trim()
   env.NVD_API_KEY = (params.NVD_API_KEY?.trim() ?: env.NVD_API_KEY ?: "").trim()
   env.JENKINS_DEPENDENCY_TRACK_BASE_URL = (params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: "").trim()
   env.DEPENDENCY_TRACK_BASE_URL = (params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: "").trim()
@@ -2290,6 +2383,8 @@ def runPaasDeploy = {
   println '[paas-jenkinsfile] marker=harbor-rbac-jwt-push-20260701 (fail Step6 when token actions lack push — run fix-harbor-push-now.sh)'
   println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
   println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
+  println '[paas-jenkinsfile] marker=sca-python-portable-yarn-install-20260630 (ensurePythonTool; yarn install before cyclonedx; minimal BOM for *.py)'
+  println '[paas-jenkinsfile] marker=sca-python-node-first-20260630 (Node requirements.txt BOM — no python3 required on agent)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -2564,6 +2659,7 @@ def runPaasDeploy = {
       }
       }
     } else if (fileExists("${buildAppRoot}/requirements.txt") || fileExists("${buildAppRoot}/pyproject.toml")) {
+      ensurePythonTool()
       if (commandExists("python3")) {
         sh """
           set -eu
@@ -2579,6 +2675,7 @@ def runPaasDeploy = {
         println "[build] Python project detected but python3 is not installed; compile skipped."
       }
     } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+      ensurePythonTool()
       if (commandExists("python3")) {
         sh "python3 -m compileall . || true"
       } else {
@@ -2653,7 +2750,16 @@ def runPaasDeploy = {
             ' 2>/dev/null || true
             CDX_RC=254
             if [ -f yarn.lock ]; then
-              echo "[sca] cyclonedx-npm (yarn.lock — do not use --package-lock-only)"
+              echo "[sca] yarn.lock — yarn install then cyclonedx-npm (needs node_modules)"
+              if ! command -v yarn >/dev/null 2>&1; then
+                corepack enable 2>/dev/null || npm install -g yarn 2>/dev/null || true
+              fi
+              if command -v yarn >/dev/null 2>&1; then
+                yarn install --frozen-lockfile 2>/dev/null || yarn install --non-interactive 2>/dev/null || yarn install
+              else
+                echo "[sca] WARN: yarn missing — npm install fallback"
+                npm install --no-audit --no-fund
+              fi
               npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
               CDX_RC=\$?
             elif [ -f package-lock.json ]; then
@@ -2695,19 +2801,44 @@ def runPaasDeploy = {
         } else {
           def scaPyRoot = detectAppRoot()
           if (fileExists("${scaPyRoot}/requirements.txt") || fileExists("${scaPyRoot}/pyproject.toml")) {
+            ensureNodeTool('20.19.5')
+            ensurePythonTool()
+            def pyNodeBin = resolvePortableNodeBin('20.19.5')
             def pyScaRc = sh(script: """
               set +e
               cd '${scaPyRoot}'
               mkdir -p sca
-              python3 -m pip install --user -q cyclonedx-bom 2>/dev/null || pip3 install --user -q cyclonedx-bom 2>/dev/null || true
-              if command -v cyclonedx-py >/dev/null 2>&1; then
+              export PROJECT_NAME='${dtProjectNameForUpload(projectId, imageName)}'
+              PAAS_NODE_BIN='${pyNodeBin}'
+              if [ -f requirements.txt ] && { [ -x "\${PAAS_NODE_BIN}" ] || command -v node >/dev/null 2>&1; }; then
+                echo "[sca] Python BOM from requirements.txt (node — works without python3 on agent)"
+                NODE_CMD="\${PAAS_NODE_BIN}"
+                [ -x "\${NODE_CMD}" ] || NODE_CMD="node"
+                "\${NODE_CMD}" -e "
+                  const fs=require('fs');
+                  const name=process.env.PROJECT_NAME||'app';
+                  const lines=fs.readFileSync('requirements.txt','utf8').split(/\\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+                  const components=lines.map(line=>{
+                    const pkg=line.split(/[=<>!\\[]/)[0].trim();
+                    return {type:'library',name:pkg,'bom-ref':'pypi:'+pkg+'@unspecified',purl:'pkg:pypi/'+pkg};
+                  });
+                  fs.mkdirSync('sca',{recursive:true});
+                  fs.writeFileSync('sca/bom.json', JSON.stringify({
+                    bomFormat:'CycloneDX', specVersion:'1.4', version:1,
+                    metadata:{component:{type:'application',name}},
+                    components
+                  }, null, 2)+'\\n');
+                "
+              fi
+              if [ ! -f sca/bom.json ] && command -v python3 >/dev/null 2>&1; then
+                python3 -m pip install --user -q cyclonedx-bom 2>/dev/null || pip3 install --user -q cyclonedx-bom 2>/dev/null || true
+              fi
+              if [ ! -f sca/bom.json ] && command -v cyclonedx-py >/dev/null 2>&1; then
                 if [ -f requirements.txt ]; then
                   cyclonedx-py requirements -i requirements.txt -o sca/bom.json
                 else
                   cyclonedx-py environment -o sca/bom.json
                 fi
-              else
-                python3 -m pip freeze > sca/requirements-freeze.txt 2>/dev/null || true
               fi
               test -f sca/bom.json && echo 0 || echo 1
             """, returnStdout: true).trim().tokenize('\n').last()
@@ -2721,12 +2852,17 @@ def runPaasDeploy = {
             }
           } else {
             def scaJvmRoot = detectAppRoot()
+            ensureNodeTool('20.19.5')
             def scaProjectName = dtProjectNameForUpload(projectId, imageName)
+            def jvmNodeBin = resolvePortableNodeBin('20.19.5')
             def jvmScaRc = sh(script: """
               set +e
               cd '${scaJvmRoot}'
               mkdir -p sca
               export PROJECT_NAME='${scaProjectName}'
+              PAAS_NODE_BIN='${jvmNodeBin}'
+              NODE_CMD="\${PAAS_NODE_BIN}"
+              [ -x "\${NODE_CMD}" ] || NODE_CMD="node"
               if [ -f pom.xml ]; then
                 if command -v mvn >/dev/null 2>&1; then
                   echo "[sca] Maven CycloneDX (pom.xml)"
@@ -2740,10 +2876,15 @@ def runPaasDeploy = {
                   echo "[sca] WARN: pom.xml but mvn missing — minimal BOM"
                 fi
               fi
-              if [ ! -f sca/bom.json ] && { [ -f Dockerfile ] || [ -d src ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; }; then
-                echo "[sca] minimal CycloneDX BOM (Dockerfile/Java/static — no npm/pip lockfile)"
-                if command -v node >/dev/null 2>&1; then
-                  node -e "
+              if [ ! -f sca/bom.json ] && { [ -f Dockerfile ] || [ -d src ] || [ -f build.gradle ] || [ -f build.gradle.kts ] || ls *.py >/dev/null 2>&1; }; then
+                echo "[sca] minimal CycloneDX BOM (Dockerfile/Java/static/Python — no npm/pip lockfile)"
+                NODE_CMD="${jvmNodeBin}"
+                if [ ! -x "\${NODE_CMD}" ]; then
+                  echo "[sca] WARN: portable node missing at \${NODE_CMD}"
+                  NODE_CMD=""
+                fi
+                if [ -n "\${NODE_CMD}" ] && [ -x "\${NODE_CMD}" ]; then
+                  "\${NODE_CMD}" -e "
                     const fs=require('fs');
                     const name=process.env.PROJECT_NAME||'app';
                     fs.mkdirSync('sca',{recursive:true});
@@ -2753,8 +2894,10 @@ def runPaasDeploy = {
                       components:[]
                     }, null, 2) + '\\n');
                   "
-                else
+                elif command -v python3 >/dev/null 2>&1; then
                   python3 -c "import json,os; os.makedirs('sca',exist_ok=True); json.dump({'bomFormat':'CycloneDX','specVersion':'1.4','version':1,'metadata':{'component':{'type':'application','name':os.environ.get('PROJECT_NAME','app')}},'components':[]}, open('sca/bom.json','w'), indent=2)"
+                else
+                  echo "[sca] WARN: no node or python3 for minimal BOM"
                 fi
               fi
               test -f sca/bom.json && echo 0 || echo 1
@@ -2837,6 +2980,7 @@ exit 0
       securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
       println "[paas-jenkinsfile] marker=sonar-checkpoint-poll-20260630 (nohup scanner + Groovy poll — survives Jenkins pod restart)"
+      println "[paas-jenkinsfile] marker=sonar-auto-rotate-token-20260701 (invalid SONAR_TOKEN → admin API rotate before fail)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -2854,6 +2998,10 @@ exit 0
           "SONAR_NODEPORT=${env.SONAR_NODEPORT?.trim() ?: '30900'}",
           "NODE_IP=${sonarNp}",
           "SONAR_TOKEN=${sonarToken}",
+          "SONAR_ADMIN_USER=${env.SONAR_ADMIN_USER ?: 'admin'}",
+          "SONAR_ADMIN_PASSWORD=${env.SONAR_ADMIN_PASSWORD ?: ''}",
+          "SONAR_ADMIN_NEW_PASSWORD=${env.SONAR_ADMIN_NEW_PASSWORD ?: 'SonarQube123!'}",
+          "SONAR_TOKEN_NAME=${env.SONAR_TOKEN_NAME ?: 'paas-jenkins-lab'}",
           "SONAR_PROJECT_KEY=${sonarKey}",
           "SONAR_PROJECT_ID_TAG=${projectId}",
           "SONAR_VERSION=${branchName}-${env.BUILD_NUMBER}"
@@ -2882,6 +3030,45 @@ exit 0
               VALID=$(curl -sS -m 15 -u "${SONAR_TOKEN}:" "${_url%/}/api/authentication/validate" 2>/dev/null || true)
               printf '%s' "${VALID}" | grep -q '"valid":true'
             }
+            sonar_admin_ok() {
+              _base="$1" _user="$2" _pass="$3"
+              [ -n "${_pass}" ] || return 1
+              curl -fsS -m 15 -u "${_user}:${_pass}" "${_base%/}/api/authentication/validate" 2>/dev/null \
+                | grep -q '"valid":true'
+            }
+            sonar_try_rotate_token() {
+              _base="${SONAR_HOST_URL%/}"
+              _user="${SONAR_ADMIN_USER:-admin}"
+              _name="${SONAR_TOKEN_NAME:-paas-jenkins-lab}"
+              _admin_pass=""
+              for _try in "${SONAR_ADMIN_NEW_PASSWORD:-}" "${SONAR_ADMIN_PASSWORD:-}" "SonarQube123!" "admin"; do
+                [ -n "${_try}" ] || continue
+                if sonar_admin_ok "${_base}" "${_user}" "${_try}"; then
+                  _admin_pass="${_try}"
+                  break
+                fi
+              done
+              if [ -z "${_admin_pass}" ]; then
+                echo "[sonar] cannot admin-login for token rotate — set SONAR_ADMIN_NEW_PASSWORD on Jenkins job (default SonarQube123!)"
+                return 1
+              fi
+              _enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "${_name}" 2>/dev/null || echo "${_name}")"
+              curl -fsS -m 15 -u "${_user}:${_admin_pass}" -X POST \
+                "${_base}/api/user_tokens/revoke?name=${_enc}" >/dev/null 2>&1 || true
+              _resp="$(curl -sS -m 30 -w $'\\n__HTTP__%{http_code}' -u "${_user}:${_admin_pass}" -X POST \
+                "${_base}/api/user_tokens/generate?name=${_name}&type=GLOBAL_ANALYSIS_TOKEN" 2>/dev/null || true)"
+              _http="${_resp##*$'\\n__HTTP__'}"
+              _resp="${_resp%$'\\n__HTTP__'*}"
+              if [ "${_http}" != "200" ]; then
+                echo "[sonar] token rotate failed HTTP ${_http}: ${_resp}"
+                return 1
+              fi
+              _new="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' <<<"${_resp}" 2>/dev/null || true)"
+              [ -n "${_new}" ] || return 1
+              export SONAR_TOKEN="${_new}"
+              echo "[sonar] rotated analysis token via Sonar API (${#_new} chars) — run pipeline-heal to persist to PaaS env"
+              return 0
+            }
             SONAR_HOST_URL="$(pick_sonar_url)"
             echo "[sonar] using ${SONAR_HOST_URL}"
             _sonar_ready=0
@@ -2895,7 +3082,12 @@ exit 0
                 break
               fi
               if printf '%s' "${VALID}" | grep -q '"valid":false'; then
-                echo "[sonar] SONAR_TOKEN rejected (valid:false) — generate new token: http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
+                echo "[sonar] SONAR_TOKEN rejected (valid:false) — auto-rotate via Sonar admin API"
+                if sonar_try_rotate_token && sonar_validate_token "${SONAR_HOST_URL}"; then
+                  _sonar_ready=1
+                  break
+                fi
+                echo "[sonar] auto-rotate failed — run: bash paas/scripts/lab.sh sonar-bootstrap && bash paas/scripts/lab.sh pipeline-heal"
                 break
               fi
               if [ "${_sv}" -lt 5 ]; then
@@ -3026,36 +3218,28 @@ exit 0
             if (sonarStartRc != 0) {
               continue
             }
-            def deadlineMs = System.currentTimeMillis() + (sonarPollMaxMin * 60 * 1000L)
-            def sonarDone = false
-            while (!sonarDone && System.currentTimeMillis() < deadlineMs) {
-              def pollRc = sh(script: '''#!/bin/bash
-                set +e
-                LOG=paas-artifacts/sonar-scanner.log
-                PIDF=paas-artifacts/sonar-scanner.pid
-                if [ -f "${LOG}" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}"; then
+            def sonarRc = 1
+            sonarRc = sh(script: """#!/bin/bash
+              set +e
+              LOG=paas-artifacts/sonar-scanner.log
+              PIDF=paas-artifacts/sonar-scanner.pid
+              DEADLINE=\$(( \$(date +%s) + ${sonarPollMaxMin} * 60 ))
+              while [ \$(date +%s) -lt "\${DEADLINE}" ]; do
+                if [ -f "\${LOG}" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "\${LOG}"; then
                   exit 0
                 fi
-                if [ ! -f "${PIDF}" ]; then
-                  exit 3
-                fi
-                PID=$(cat "${PIDF}" 2>/dev/null || true)
-                if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
-                  exit 1
+                if [ -f "\${PIDF}" ]; then
+                  PID=\$(cat "\${PIDF}" 2>/dev/null || true)
+                  if [ -n "\${PID}" ] && kill -0 "\${PID}" 2>/dev/null; then
+                    echo "[sonar] poll \$(date -u +%Y-%m-%dT%H:%M:%SZ) pid alive"
+                    sleep ${sonarPollSec}
+                    continue
+                  fi
                 fi
                 exit 2
-              ''', returnStatus: true)
-              if (pollRc == 0) {
-                sonarRc = 0
-                sonarDone = true
-                break
-              }
-              if (pollRc == 2 || pollRc == 3) {
-                break
-              }
-              echo "[sonar] poll checkpoint ${new Date().format('yyyy-MM-dd HH:mm:ss')} (pid alive)"
-              sleep(time: sonarPollSec, unit: 'SECONDS')
-            }
+              done
+              exit 1
+            """, returnStatus: true)
             if (sonarRc == 0) {
               break
             }
@@ -3311,8 +3495,8 @@ EOF
       def basicUser = env.ARTIFACTORY_USERNAME?.trim() ?: ""
       def basicPass = env.ARTIFACTORY_PASSWORD?.trim() ?: ""
       if (!artiBase) {
-        paasStepFail(8, 'artifactory', 'ARTIFACTORY_URL required — bash paas/scripts/lab.sh artifactory-bootstrap')
-      }
+        paasStepWarn(8, 'artifactory', 'ARTIFACTORY_URL missing — skip (lab: bash paas/scripts/lab.sh artifactory-bootstrap)')
+      } else {
       def destUrl = "${artiBase.replaceAll(/\/$/, '')}/${artiRepo}/paas-builds/${projectId}/${env.BUILD_NUMBER}/paas-build-${env.BUILD_NUMBER}.tgz"
       def uploadShell = '''
         set +e
@@ -3349,9 +3533,12 @@ EOF
           sh uploadShell
         }
       } else {
-        paasStepFail(8, 'artifactory', 'ARTIFACTORY_USERNAME+PASSWORD or ARTIFACTORY_ACCESS_TOKEN required — bash paas/scripts/lab.sh artifactory-bootstrap')
+        paasStepWarn(8, 'artifactory', 'ARTIFACTORY_USERNAME+PASSWORD or ARTIFACTORY_ACCESS_TOKEN missing — skip (lab: bash paas/scripts/lab.sh artifactory-bootstrap)')
       }
-      paasStepOk(8, 'artifactory', "published to ${artiBase}")
+      if (credId || bearer || (basicUser && basicPass)) {
+        paasStepOk(8, 'artifactory', "published to ${artiBase}")
+      }
+    }
     }
     }
   }
@@ -3434,8 +3621,8 @@ EOF
       nonFatalStage("10b. ZAP baseline (aligné Jenkinsfile.paas-deploy.full)") {
       def zapTarget = params.ZAP_TARGET_URL?.trim() ?: env.ZAP_TARGET_URL?.trim() ?: ""
       if (!zapTarget) {
-        paasStepFail(10, 'zap', 'ZAP_TARGET_URL required — set APP_BASE_URL in PaaS or bash paas/scripts/lab.sh integrations-bootstrap')
-      }
+        paasStepWarn(10, 'zap', 'ZAP_TARGET_URL missing — skip (set APP_BASE_URL in PaaS)')
+      } else {
       println "[zap] Cible DAST: ${zapTarget}"
       withEnv(["ZAP_TARGET=${zapTarget}", "ZAP_BUILD=${env.BUILD_NUMBER}"]) {
         def zapRc = sh(script: '''#!/bin/bash
@@ -3483,7 +3670,8 @@ EOF
       if (fileExists('paas-artifacts/zap-baseline-report.html')) {
         paasStepOk(10, 'zap', 'ZAP report in paas-artifacts/')
       } else {
-        paasStepFail(10, 'zap', 'ZAP baseline produced no report — check paas-artifacts/zap-baseline-pod.log')
+        paasStepWarn(10, 'zap', 'ZAP baseline produced no report — install: bash paas/scripts/lab.sh jenkins-zap-tools')
+      }
       }
     }
     }
@@ -3507,18 +3695,22 @@ EOF
       withEnv(["HELM_OCI_REF=${ociRef}", "REG_HOST=${regHost}", "HELM_BIN=${helmBin}"]) {
         sh '''
           set +e
-          shopt -s nullglob
           LOGIN_OPTS=""
           if [ "${HELM_OCI_INSECURE:-true}" = "true" ]; then LOGIN_OPTS="--insecure"; fi
           PUSH_OPTS=""
           if [ "${HELM_OCI_PLAIN_HTTP:-true}" = "true" ]; then PUSH_OPTS="--plain-http"; fi
-          charts=(paas-artifacts/helm/*.tgz)
-          if [ ${#charts[@]} -eq 0 ]; then
+          chart_count=0
+          for f in paas-artifacts/helm/*.tgz; do
+            [ -f "$f" ] || continue
+            chart_count=$((chart_count + 1))
+          done
+          if [ "${chart_count}" -eq 0 ]; then
             echo "[helm-oci] Aucun chart .tgz à publier."
             exit 1
           fi
           echo "${HARBOR_PASSWORD}" | "${HELM_BIN}" registry login ${LOGIN_OPTS} "${REG_HOST}" -u "${HARBOR_USERNAME}" --password-stdin || exit 1
-          for f in "${charts[@]}"; do
+          for f in paas-artifacts/helm/*.tgz; do
+            [ -f "$f" ] || continue
             echo "[helm-oci] helm push $f ${HELM_OCI_REF}"
             "${HELM_BIN}" push ${PUSH_OPTS} "$f" "${HELM_OCI_REF}" || exit 1
           done

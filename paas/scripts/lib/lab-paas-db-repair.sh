@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lab-kube-env.sh
+source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
 MANIFEST="${PAAS_DIR}/k8s-manifests/lab/postgres-in-paas.yaml"
@@ -95,7 +97,16 @@ fi
 mark_repair
 
 echo "==> Apply Postgres manifest (listen_addresses=*)"
+if grep -qE 'postgres:16' "${MANIFEST}" 2>/dev/null; then
+  echo "WARN: ${MANIFEST} had postgres:16 — rewriting to postgres:15-alpine (lab PVC is PG15)"
+  sed -i 's|postgres:16-alpine|postgres:15-alpine|g; s|postgres:16|postgres:15-alpine|g' "${MANIFEST}"
+fi
 kubectl apply -f "${MANIFEST}"
+kubectl set image deployment/postgres -n "${PAAS_NS}" postgres=postgres:15-alpine
+kubectl patch deployment postgres -n "${PAAS_NS}" --type=json -p='[
+  {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"postgres:15-alpine"},
+  {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}
+]' 2>/dev/null || true
 echo "==> Postgres endpoints"
 kubectl get endpoints postgres -n "${PAAS_NS}" -o wide 2>/dev/null || true
 

@@ -19,8 +19,19 @@ else
   bash "${SCRIPT_DIR}/lab-frontend-schedule-heal.sh" || true
 fi
 
-echo "==> 3/7 Postgres manifest + connectivity"
-bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+echo "==> 3/7 Postgres manifest + connectivity (lab PVC = PG15 only)"
+if [[ -f "${REPO_ROOT}/paas/k8s-manifests/lab/postgres-in-paas.yaml" ]] \
+  && grep -qE 'postgres:16' "${REPO_ROOT}/paas/k8s-manifests/lab/postgres-in-paas.yaml" 2>/dev/null; then
+  sed -i 's|postgres:16-alpine|postgres:15-alpine|g; s|postgres:16|postgres:15-alpine|g' \
+    "${REPO_ROOT}/paas/k8s-manifests/lab/postgres-in-paas.yaml"
+  echo "WARN: rewrote postgres-in-paas.yaml PG16 → PG15 (prevents login crash loop)"
+fi
+if [[ -f "${SCRIPT_DIR}/pin-postgres-pg15-now.sh" ]]; then
+  PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/pin-postgres-pg15-now.sh" 2>/dev/null \
+    || bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+else
+  bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+fi
 
 echo "==> 4/7 Safe disk baseline"
 bash "${SCRIPT_DIR}/lab-stale-pod-cleanup.sh" || true

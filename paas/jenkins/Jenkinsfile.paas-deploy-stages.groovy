@@ -1,4 +1,5 @@
 // STAGES_BUNDLE_VERSION=helm-portable-20260620-cps-split
+// CPS_LOAD_METHOD_SYNTAX=20260626
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def branchName = params.BRANCH?.trim() ?: "main"
 def gitUrl = params.GIT_URL?.trim() ?: ""
@@ -12,7 +13,7 @@ def imagePublishedViaCrane = false
 def cosignImageRef = ""
 
 
-def runPaasDeployEnvInit = {
+def runPaasDeployEnvInit() {
   env.HARBOR_REGISTRY = coerceHarborHostForCosign((params.HARBOR_REGISTRY?.trim() ?: env.HARBOR_REGISTRY ?: "").trim())
   env.HARBOR_FORCE_NODEPORT_PUSH = (params.HARBOR_FORCE_NODEPORT_PUSH?.trim() ?: env.HARBOR_FORCE_NODEPORT_PUSH ?: 'true').trim()
   if (harborForceNodePortPush()) {
@@ -120,7 +121,7 @@ def runPaasDeployEnvInit = {
   println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
   println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
 }
-def runPaasDeploySteps1_2 = {
+def runPaasDeploySteps1_2() {
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
     nonEmptyNoSpace(gitUrl, "GIT_URL PARAMS")
@@ -157,7 +158,7 @@ def runPaasDeploySteps1_2 = {
 
   println "[pipeline] Ordre aligné .full : construction (Step 3) puis SCA/SAST (Steps 4–5), puis image → Helm → Artifactory → Cosign → ZAP → Helm OCI → archive (.full §6–14)."
 }
-def runPaasDeployStep3 = {
+def runPaasDeployStep3() {
   stage("Step 3 — Construction de l'application") {
     println "*** BEGIN : 5. Construction de l'application ***"
     def buildAppRoot = detectAppRoot()
@@ -395,6 +396,7 @@ def runPaasDeployStep3 = {
       }
       }
     } else if (fileExists("${buildAppRoot}/requirements.txt") || fileExists("${buildAppRoot}/pyproject.toml")) {
+      ensurePythonTool()
       if (commandExists("python3")) {
         sh """
           set -eu
@@ -410,6 +412,7 @@ def runPaasDeployStep3 = {
         println "[build] Python project detected but python3 is not installed; compile skipped."
       }
     } else if (fileExists("requirements.txt") || fileExists("pyproject.toml")) {
+      ensurePythonTool()
       if (commandExists("python3")) {
         sh "python3 -m compileall . || true"
       } else {
@@ -457,7 +460,7 @@ def runPaasDeployStep3 = {
     println "*** END : 5. Construction de l'application — voir paas-artifacts/build-artifact-manifest.txt ***"
   }
 }
-def runPaasDeploySteps4_5 = {
+def runPaasDeploySteps4_5() {
   stage("Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)") {
     if (paasFastPipeline) {
       paasStepSkip(4, 'JENKINS_PAAS_FAST_PIPELINE=true')
@@ -485,7 +488,16 @@ def runPaasDeploySteps4_5 = {
             ' 2>/dev/null || true
             CDX_RC=254
             if [ -f yarn.lock ]; then
-              echo "[sca] cyclonedx-npm (yarn.lock — do not use --package-lock-only)"
+              echo "[sca] yarn.lock — yarn install then cyclonedx-npm (needs node_modules)"
+              if ! command -v yarn >/dev/null 2>&1; then
+                corepack enable 2>/dev/null || npm install -g yarn 2>/dev/null || true
+              fi
+              if command -v yarn >/dev/null 2>&1; then
+                yarn install --frozen-lockfile 2>/dev/null || yarn install --non-interactive 2>/dev/null || yarn install
+              else
+                echo "[sca] WARN: yarn missing — npm install fallback"
+                npm install --no-audit --no-fund
+              fi
               npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
               CDX_RC=\$?
             elif [ -f package-lock.json ]; then
@@ -527,19 +539,44 @@ def runPaasDeploySteps4_5 = {
         } else {
           def scaPyRoot = detectAppRoot()
           if (fileExists("${scaPyRoot}/requirements.txt") || fileExists("${scaPyRoot}/pyproject.toml")) {
+            ensureNodeTool('20.19.5')
+            ensurePythonTool()
+            def pyNodeBin = resolvePortableNodeBin('20.19.5')
             def pyScaRc = sh(script: """
               set +e
               cd '${scaPyRoot}'
               mkdir -p sca
-              python3 -m pip install --user -q cyclonedx-bom 2>/dev/null || pip3 install --user -q cyclonedx-bom 2>/dev/null || true
-              if command -v cyclonedx-py >/dev/null 2>&1; then
+              export PROJECT_NAME='${dtProjectNameForUpload(projectId, imageName)}'
+              PAAS_NODE_BIN='${pyNodeBin}'
+              if [ -f requirements.txt ] && { [ -x "\${PAAS_NODE_BIN}" ] || command -v node >/dev/null 2>&1; }; then
+                echo "[sca] Python BOM from requirements.txt (node — works without python3 on agent)"
+                NODE_CMD="\${PAAS_NODE_BIN}"
+                [ -x "\${NODE_CMD}" ] || NODE_CMD="node"
+                "\${NODE_CMD}" -e "
+                  const fs=require('fs');
+                  const name=process.env.PROJECT_NAME||'app';
+                  const lines=fs.readFileSync('requirements.txt','utf8').split(/\\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+                  const components=lines.map(line=>{
+                    const pkg=line.split(/[=<>!\\[]/)[0].trim();
+                    return {type:'library',name:pkg,'bom-ref':'pypi:'+pkg+'@unspecified',purl:'pkg:pypi/'+pkg};
+                  });
+                  fs.mkdirSync('sca',{recursive:true});
+                  fs.writeFileSync('sca/bom.json', JSON.stringify({
+                    bomFormat:'CycloneDX', specVersion:'1.4', version:1,
+                    metadata:{component:{type:'application',name}},
+                    components
+                  }, null, 2)+'\\n');
+                "
+              fi
+              if [ ! -f sca/bom.json ] && command -v python3 >/dev/null 2>&1; then
+                python3 -m pip install --user -q cyclonedx-bom 2>/dev/null || pip3 install --user -q cyclonedx-bom 2>/dev/null || true
+              fi
+              if [ ! -f sca/bom.json ] && command -v cyclonedx-py >/dev/null 2>&1; then
                 if [ -f requirements.txt ]; then
                   cyclonedx-py requirements -i requirements.txt -o sca/bom.json
                 else
                   cyclonedx-py environment -o sca/bom.json
                 fi
-              else
-                python3 -m pip freeze > sca/requirements-freeze.txt 2>/dev/null || true
               fi
               test -f sca/bom.json && echo 0 || echo 1
             """, returnStdout: true).trim().tokenize('\n').last()
@@ -553,12 +590,17 @@ def runPaasDeploySteps4_5 = {
             }
           } else {
             def scaJvmRoot = detectAppRoot()
+            ensureNodeTool('20.19.5')
             def scaProjectName = dtProjectNameForUpload(projectId, imageName)
+            def jvmNodeBin = resolvePortableNodeBin('20.19.5')
             def jvmScaRc = sh(script: """
               set +e
               cd '${scaJvmRoot}'
               mkdir -p sca
               export PROJECT_NAME='${scaProjectName}'
+              PAAS_NODE_BIN='${jvmNodeBin}'
+              NODE_CMD="\${PAAS_NODE_BIN}"
+              [ -x "\${NODE_CMD}" ] || NODE_CMD="node"
               if [ -f pom.xml ]; then
                 if command -v mvn >/dev/null 2>&1; then
                   echo "[sca] Maven CycloneDX (pom.xml)"
@@ -572,10 +614,11 @@ def runPaasDeploySteps4_5 = {
                   echo "[sca] WARN: pom.xml but mvn missing — minimal BOM"
                 fi
               fi
-              if [ ! -f sca/bom.json ] && { [ -f Dockerfile ] || [ -d src ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; }; then
-                echo "[sca] minimal CycloneDX BOM (Dockerfile/Java/static — no npm/pip lockfile)"
-                if command -v node >/dev/null 2>&1; then
-                  node -e "
+              if [ ! -f sca/bom.json ] && { [ -f Dockerfile ] || [ -d src ] || [ -f build.gradle ] || [ -f build.gradle.kts ] || ls *.py >/dev/null 2>&1; }; then
+                echo "[sca] minimal CycloneDX BOM (Dockerfile/Java/static/Python — no npm/pip lockfile)"
+                if [ -x "\${NODE_CMD}" ] || command -v node >/dev/null 2>&1; then
+                  [ -x "\${NODE_CMD}" ] || NODE_CMD="node"
+                  "\${NODE_CMD}" -e "
                     const fs=require('fs');
                     const name=process.env.PROJECT_NAME||'app';
                     fs.mkdirSync('sca',{recursive:true});
@@ -585,8 +628,10 @@ def runPaasDeploySteps4_5 = {
                       components:[]
                     }, null, 2) + '\\n');
                   "
-                else
+                elif command -v python3 >/dev/null 2>&1; then
                   python3 -c "import json,os; os.makedirs('sca',exist_ok=True); json.dump({'bomFormat':'CycloneDX','specVersion':'1.4','version':1,'metadata':{'component':{'type':'application','name':os.environ.get('PROJECT_NAME','app')}},'components':[]}, open('sca/bom.json','w'), indent=2)"
+                else
+                  echo "[sca] WARN: no node or python3 for minimal BOM"
                 fi
               fi
               test -f sca/bom.json && echo 0 || echo 1
@@ -815,12 +860,23 @@ exit 0
             RC=1
             for _sonar_try in 1 2 3; do
               echo "[sonar] scanner attempt ${_sonar_try}/3"
+              _sonar_hb=
+              if [ "${JENKINS_SONAR_HEARTBEAT:-true}" != "false" ]; then
+                ( while true; do echo "[sonar] (heartbeat) scanner still running… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 30; done ) &
+                _sonar_hb=$!
+              fi
+              set +o pipefail
               npx --yes sonarqube-scanner@4.2.8 \
                 -Dsonar.host.url="${SONAR_HOST_URL}" \
                 -Dsonar.token="${SONAR_TOKEN}" \
                 -Dsonar.ws.timeout=300 \
-                > "${LOG}" 2>&1
-              RC=$?
+                2>&1 | tee "${LOG}"
+              RC=${PIPESTATUS[0]}
+              set -o pipefail
+              if [ -n "${_sonar_hb:-}" ]; then
+                kill "${_sonar_hb}" 2>/dev/null || true
+                wait "${_sonar_hb}" 2>/dev/null || true
+              fi
               if [ "${RC}" = "0" ]; then
                 break
               fi
@@ -865,7 +921,7 @@ exit 0
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; verify SONAR_BASE_URL and SONAR_TOKEN in PaaS env")
+            paasStepFail(5, 'sonar', "scanner exit ${sonarRc} — see paas-artifacts/sonar-scanner.log; ${(sonarRc as Integer) == -1 ? 'Jenkins durable-task timeout (JENKINS-48300) — avoid Jenkins restart during scan; retry NEW build' : 'verify SONAR_HOST_URL and SONAR_TOKEN in PaaS env'}")
           }
         }
         return
@@ -924,7 +980,7 @@ echo $?
     }
   }
 }
-def runPaasDeployStep6 = {
+def runPaasDeployStep6() {
     stage("Step 6 — Création de l'image Docker") {
     println "*** BEGIN : 6. Création de l'image Docker (aligné Jenkinsfile.paas-deploy.full) ***"
     def step6AppRoot = detectAppRoot()
@@ -1026,7 +1082,7 @@ def runPaasDeployStep6 = {
     println "*** END : 6. Création de l'image Docker ***"
   }
 }
-def runPaasDeploySteps7_8 = {
+def runPaasDeploySteps7_8() {
   stage("Step 7 — Packaging du chart Helm") {
     nonFatalStage("7. Packaging du chart Helm (aligné Jenkinsfile.paas-deploy.full)") {
       def helmBin = ensureHelmTool()
@@ -1147,7 +1203,7 @@ EOF
     }
   }
 }
-def runPaasDeploySteps9_12 = {
+def runPaasDeploySteps9_12() {
   stage("Step 9 — Signature de l'image (Cosign)") {
     securityMandatoryStage("10. Cosign (aligné Jenkinsfile.paas-deploy.full)") {
       if (!cosignImageRef?.trim()) {
@@ -1339,7 +1395,7 @@ def runPaasDeploySteps9_12 = {
     println "*** END : 14. Archivage des artefacts Jenkins ***"
   }
 }
-def runPaasDeploy = {
+def runPaasDeploy() {
   runPaasDeployEnvInit()
   runPaasDeploySteps1_2()
   runPaasDeployStep3()
@@ -1348,3 +1404,4 @@ def runPaasDeploy = {
   runPaasDeploySteps7_8()
   runPaasDeploySteps9_12()
 }
+return this

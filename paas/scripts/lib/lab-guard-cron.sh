@@ -2,8 +2,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-WATCHDOG_LINE="*/10 * * * * cd ${REPO_ROOT} && git pull -q 2>/dev/null; bash paas/scripts/lab.sh watchdog >>/var/log/paas-lab-watchdog.log 2>&1"
-GUARD_LINE="0 */6 * * * cd ${REPO_ROOT} && git pull -q && bash paas/scripts/lab.sh guard >>/var/log/paas-lab-guard.log 2>&1"
+WATCHDOG_LINE="*/10 * * * * cd ${REPO_ROOT} && bash paas/scripts/lab.sh watchdog >>/var/log/paas-lab-watchdog.log 2>&1"
+GUARD_LINE="0 */6 * * * cd ${REPO_ROOT} && bash paas/scripts/lab.sh guard >>/var/log/paas-lab-guard.log 2>&1"
 
 filter_cron() {
   crontab -l 2>/dev/null | grep -v 'paas/scripts/lab.sh guard' | grep -v 'paas/scripts/lab.sh watchdog' || true

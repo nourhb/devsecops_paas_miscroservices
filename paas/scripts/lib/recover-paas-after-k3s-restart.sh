@@ -41,6 +41,12 @@ for i in $(seq 1 60); do
   fi
 done
 
+if ! kubectl get namespace "${PAAS_NS}" >/dev/null 2>&1; then
+  echo "==> Namespace ${PAAS_NS} missing (k3s etcd was wiped?) — full lab bootstrap"
+  bash "${SCRIPT_DIR}/lab-fresh-cluster.sh"
+  exit $?
+fi
+
 if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
   echo "OK: PaaS already healthy — skip disruptive recover (boot service success)"
   bash "${SCRIPT_DIR}/lab-guard-cron.sh" install 2>/dev/null || true
@@ -49,6 +55,13 @@ if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
   exit 0
 fi
 
+echo "==> Lightweight recover (quick-up — no k3s restart, no scale-to-0)"
+export PAAS_BOOT_RECOVER=1
+if bash "${SCRIPT_DIR}/lab-quick-up.sh"; then
+  bash "${SCRIPT_DIR}/check-paas-lab-health.sh" && exit 0
+fi
+
+echo "==> quick-up incomplete — full recover path"
 PAAS_FORCE_KYVERNO_UNBLOCK="${PAAS_FORCE_KYVERNO_UNBLOCK:-1}" bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard || true
 
 POSTGRES_UP=0
@@ -58,18 +71,18 @@ if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
   fi
 fi
 
-if [[ "${POSTGRES_UP}" -eq 0 ]]; then
+if [[ "${POSTGRES_UP}" -eq 1 ]]; then
+  echo "==> Postgres up — db-repair (non-destructive; keeps Service/endpoints)"
+  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+else
   echo "==> Hold frontend until Postgres is up (prevents Prisma login errors on reboot)"
   if kubectl get deployment frontend -n "${PAAS_NS}" >/dev/null 2>&1; then
     kubectl scale deployment/frontend -n "${PAAS_NS}" --replicas=0 2>/dev/null || true
   fi
-else
-  echo "==> Postgres already available — not scaling frontend down"
+  echo "==> Postgres in namespace ${PAAS_NS} (PVC keeps users/projects)"
+  bash "${SCRIPT_DIR}/lab-postgres.sh" deploy
+  bash "${SCRIPT_DIR}/lab-postgres.sh" wait
 fi
-
-echo "==> Postgres in namespace ${PAAS_NS} (PVC keeps users/projects)"
-bash "${SCRIPT_DIR}/lab-postgres.sh" deploy
-bash "${SCRIPT_DIR}/lab-postgres.sh" wait
 
 if kubectl exec -n "${PAAS_NS}" deploy/postgres -- psql -U postgres -d paas -tAc \
   "SELECT 1 FROM information_schema.tables WHERE table_name='User'" 2>/dev/null | grep -q 1; then
@@ -98,14 +111,31 @@ fi
 kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=false 2>/dev/null || true
 bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh"
 
+HEALTH_OK=0
 for i in $(seq 1 12); do
   if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
+    HEALTH_OK=1
     break
   fi
   echo "health check ${i}/12 failed (UI may still be rolling out); retry in 15s…"
   sleep 15
-  [[ "${i}" -eq 12 ]] && { echo "recover finished but health check still failing"; diagnose_frontend; exit 1; }
 done
+
+if [[ "${HEALTH_OK}" -ne 1 ]]; then
+  echo "recover finished but health check still failing"
+  diagnose_frontend
+  exit 1
+fi
+
+echo "OK — PaaS health passed"
+
+# Boot service must stop here — Harbor bootstrap restarts k3s and needs interactive sudo.
+if [[ "${PAAS_BOOT_RECOVER:-0}" == "1" ]]; then
+  bash "${SCRIPT_DIR}/lab-guard-cron.sh" install 2>/dev/null || true
+  echo ""
+  echo "OK — PaaS login: http://${NODE_IP}:30100/login (boot recover — skipped heavy bootstrap)"
+  exit 0
+fi
 
 echo "==> Platform bootstrap (Harbor cosign realm + Kyverno policy)"
 bash "${SCRIPT_DIR}/lab-kyverno.sh" bootstrap || true

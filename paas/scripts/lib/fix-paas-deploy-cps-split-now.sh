@@ -15,8 +15,63 @@ CPS_MARKER="paas-deploy-stages-load-20260620-cps-split"
 
 cd "${REPO_ROOT}"
 
+# shellcheck source=lab-jenkins-pod.sh
+source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
+
+resolve_jenkins_pod() {
+  if [[ -n "${JENKINS_POD:-}" ]]; then
+    JPOD="${JENKINS_POD}"
+    return 0
+  fi
+  JENKINS_NS="$(jenkins_discover_ns 2>/dev/null || echo "${JENKINS_NS}")"
+  export JENKINS_NS
+  JPOD="$(jenkins_pod_name "${JENKINS_NS}" 2>/dev/null || true)"
+  if [[ -z "${JPOD}" ]]; then
+    echo "WARN: no Jenkins pod in ${JENKINS_NS} — running jenkins-recover (helm install if missing)"
+    bash "${SCRIPT_DIR}/lab-jenkins-recover.sh" recover || true
+    JENKINS_NS="$(jenkins_discover_ns 2>/dev/null || echo cicd)"
+    export JENKINS_NS
+    JPOD="$(jenkins_pod_name "${JENKINS_NS}" 2>/dev/null || true)"
+  fi
+  if [[ -z "${JPOD}" ]]; then
+    echo "FAIL: no Jenkins pod in cluster — run:" >&2
+    echo "  bash paas/scripts/lab.sh jenkins-install" >&2
+    echo "  bash paas/scripts/lab.sh jenkins-recover" >&2
+    kubectl get pods -A 2>/dev/null | grep -i jenkins || kubectl get pods -n cicd 2>/dev/null || true
+    exit 1
+  fi
+  export JPOD
+  echo "OK: Jenkins target ${JENKINS_NS}/${JPOD}"
+}
+
+kubectl_retry() {
+  local attempt rc
+  for attempt in 1 2 3 4 5 6; do
+    if kubectl "$@"; then
+      return 0
+    fi
+    rc=$?
+    if [[ "${attempt}" -lt 6 ]]; then
+      echo "WARN: kubectl failed (attempt ${attempt}/6) — k3s API may be busy; waiting 15s…" >&2
+      bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" 2>/dev/null || true
+      sleep 15
+    fi
+  done
+  return "${rc}"
+}
+
+ensure_k8s_for_jenkins_push() {
+  echo "==> 0a/5 k3s API stable (kubectl exec/cp to Jenkins pod)"
+  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || {
+    echo "WARN: lab-k3s-ensure failed — continuing with kubectl retries" >&2
+  }
+  resolve_jenkins_pod
+  kubectl_retry get pod -n "${JENKINS_NS}" "${JPOD}" >/dev/null \
+    || { echo "FAIL: pod ${JENKINS_NS}/${JPOD} not found after recover" >&2; exit 1; }
+}
+
 echo "=============================================="
-echo " FIX paas-deploy: 7-file CPS split (jenkins-0)"
+echo " FIX paas-deploy: CPS split → Jenkins pod"
 echo "=============================================="
 
 if [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/fix-harbor-push-now.sh" ]]; then
@@ -27,9 +82,38 @@ elif [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-harbor
   bash "${SCRIPT_DIR}/lab-harbor.sh" fix-push || echo "WARN: harbor fix-push failed — Step 6 may still 401 until harbor is healthy"
 fi
 
-kubectl get pod -n "${JENKINS_NS}" "${JPOD}" >/dev/null 2>&1 || {
-  echo "FAIL: pod ${JENKINS_NS}/${JPOD} not found (lab uses StatefulSet jenkins-0, not deploy/jenkins)" >&2
-  exit 1
+if [[ "${SKIP_SONAR_BOOTSTRAP:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
+  echo "==> 0b/5 Sonar token (Step 5 — validate or rotate via API)"
+  SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" \
+    || echo "WARN: sonar-bootstrap failed — Step 5 may fail until: bash paas/scripts/lab.sh sonar-bootstrap"
+  if [[ -f "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" ]]; then
+    python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force \
+      || echo "WARN: Jenkins SONAR_TOKEN param sync skipped"
+  fi
+fi
+
+resolve_jenkins_pod
+
+patch_python_bom_ref_quotes() {
+  local f fixed=0
+  for f in \
+    "${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy" \
+    "${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy-stages.groovy"; do
+    [[ -f "${f}" ]] || continue
+    if grep -q "name:pkg,bom-ref:" "${f}" 2>/dev/null; then
+      sed -i "s/name:pkg,bom-ref:/name:pkg,'bom-ref':/g" "${f}"
+      echo "OK: patched quoted 'bom-ref' in ${f}"
+      fixed=1
+    fi
+  done
+  [[ "${fixed}" -eq 1 ]] || true
+}
+
+patch_python_bom_ref_on_pod() {
+  kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- sh -c \
+    "grep -q \"name:pkg,bom-ref:\" '${REMOTE}/paas-deploy-stages.groovy' 2>/dev/null && \
+     sed -i \"s/name:pkg,bom-ref:/name:pkg,'bom-ref':/g\" '${REMOTE}/paas-deploy-stages.groovy' && \
+     echo patched || echo already-quoted" 2>/dev/null || true
 }
 
 echo "==> 1/5 Render 7-file CPS bundle from paas/jenkins/Jenkinsfile.paas-deploy"
@@ -37,6 +121,7 @@ rm -rf "${RENDER}"
 mkdir -p "${RENDER}"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 RENDER_PY="${REPO_ROOT}/paas/jenkins/render-loadable-stages.py"
+patch_python_bom_ref_quotes
 render_ok=0
 if [[ -f "${RENDER_PY}" ]] && [[ -f "${JENKINSFILE}" ]]; then
   python3 "${REPO_ROOT}/paas/jenkins/split-cps-hotspots.py" 2>/dev/null || true
@@ -52,8 +137,26 @@ if [[ "${render_ok}" != "1" ]] \
   [[ -f "${RENDER}/paas-deploy-stages-p3.groovy" ]] && render_ok=1
 fi
 if [[ "${render_ok}" != "1" ]] && [[ -d "${REPO_ROOT}/paas/jenkins/.render-test" ]]; then
+  stale_h2="${REPO_ROOT}/paas/jenkins/.render-test/paas-deploy-load-h2.groovy"
+  if [[ -f "${stale_h2}" ]] && grep -qF '401 fallback' "${stale_h2}" 2>/dev/null; then
+    echo "FAIL: paas/jenkins/.render-test has stale nip-first crane push (401 fallback)" >&2
+    echo "  Run: bash paas/scripts/lib/fix-harbor-crane-ip-push-now.sh" >&2
+    echo "  Or: rm -rf paas/jenkins/.render-test && git pull && re-run this script" >&2
+    exit 1
+  fi
   echo "WARN: fresh render failed — using paas/jenkins/.render-test/ (may lack latest Jenkinsfile fixes; rm -rf it after git pull)"
   cp "${REPO_ROOT}/paas/jenkins/.render-test"/paas-deploy-*.groovy "${RENDER}/"
+fi
+
+if [[ -f "${RENDER}/paas-deploy-load-h2.groovy" ]] && grep -qF '401 fallback' "${RENDER}/paas-deploy-load-h2.groovy" 2>/dev/null; then
+  echo "FAIL: render bundle has nip-first crane push (401 fallback) — stale Jenkinsfile or .render-test" >&2
+  echo "  Run: bash paas/scripts/lib/fix-harbor-crane-ip-push-now.sh" >&2
+  exit 1
+fi
+if grep -qF 'primary push ref (IP)' "${JENKINSFILE}" 2>/dev/null; then
+  grep -qF 'primary push ref (IP)' "${RENDER}/paas-deploy-load-h2.groovy" 2>/dev/null \
+    || { echo "FAIL: Jenkinsfile has IP-first crane but render h2 does not — run fix-harbor-crane-ip-push-now.sh" >&2; exit 1; }
+  echo "OK: IP-first Harbor crane push present in rendered h2"
 fi
 
 if [[ ! -f "${RENDER}/paas-deploy-stages-p3.groovy" ]]; then
@@ -114,6 +217,66 @@ print(f"OK: p3 deduped to 1 def runPaasDeploy() ({len(out)} bytes)")
 PY
 fi
 
+if [[ -x "${SCRIPT_DIR}/ensure-p3-orchestrator.sh" ]]; then
+  bash "${SCRIPT_DIR}/ensure-p3-orchestrator.sh" "${p3}"
+else
+  python3 - "${p3}" <<'PY'
+import re, sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+marker = "def runPaasDeploy() {"
+orch = """def runPaasDeploy() {
+  runPaasDeployEnvInit()
+  runPaasDeploySteps1_2()
+  runPaasDeployStep3()
+  runPaasDeploySteps4_5()
+  runPaasDeployStep6()
+  runPaasDeploySteps7_8()
+  runPaasDeploySteps9_12()
+}
+// CPS_ORCHESTRATOR=runPaasDeploy-after-all-loads (job wrapper calls runPaasDeploy() — not inside load p3)
+"""
+t = t.replace("def runPaasDeploy = {", marker)
+if marker not in t:
+    t = t.rstrip() + "\n\n" + orch
+    p.write_text(t if t.endswith("\n") else t + "\n", encoding="utf-8")
+    print(f"OK: appended runPaasDeploy orchestrator to {p.name}")
+    sys.exit(0)
+if t.count(marker) == 1:
+    print(f"OK: {p.name} already has runPaasDeploy orchestrator")
+    sys.exit(0)
+
+def end_of_block(s: str, start: int) -> int:
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    raise ValueError("unbalanced braces")
+
+first = t.find(marker)
+fe = end_of_block(t, first + len(marker) - 1)
+rest = t[fe:]
+rest = re.sub(
+    r"def runPaasDeploy(?:\(\)|\s*=\s*\{)[\s\S]*?(?=\n//|\n def |\Z)",
+    "",
+    rest,
+    count=0,
+)
+out = t[:fe] + rest
+out = re.sub(r"\n{3,}", "\n\n", out).rstrip() + "\n"
+if out.count(marker) != 1:
+    sys.exit(f"ERROR: could not normalize {p.name} to 1 runPaasDeploy (found {out.count(marker)})")
+p.write_text(out, encoding="utf-8")
+print(f"OK: deduped runPaasDeploy orchestrator in {p.name}")
+PY
+fi
+
 # Ensure bundle marker on every split file (VM rollback may render dt-api-server-svc-20260617)
 for f in paas-deploy-load-h1.groovy paas-deploy-load-h2.groovy paas-deploy-load-h3.groovy \
          paas-deploy-stages-vars.groovy paas-deploy-stages-p1.groovy paas-deploy-stages-p2.groovy \
@@ -142,6 +305,17 @@ if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
   echo "OK: Sonar checkpoint-poll marker present in rendered p2 (Step 5)"
 fi
 
+if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  rotate_render="$(grep -c 'sonar-auto-rotate-token-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  if [[ "${rotate_render}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has sonar-auto-rotate but render p2 does not — git pull Jenkinsfile.paas-deploy && re-run" >&2
+    exit 1
+  fi
+  echo "OK: Sonar auto-rotate marker present in rendered p2 (Step 5)"
+else
+  echo "WARN: Jenkinsfile missing sonar-auto-rotate-token-20260701 — git pull or copy from dev machine (Step 5 may fail on stale SONAR_TOKEN)"
+fi
+
 if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; then
   harbor_render="$(grep -rc 'harbor-ensure-push-token-20260630' "${RENDER}"/paas-deploy-*.groovy 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
   if [[ "${harbor_render}" -lt 1 ]]; then
@@ -151,20 +325,34 @@ if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; th
   echo "OK: Harbor ensure-push-token marker present in rendered bundle (Step 6)"
 fi
 
+SCA_MARKER='Python BOM from requirements.txt (node — works without python3 on agent)'
+if grep -qF "${SCA_MARKER}" "${JENKINSFILE}" 2>/dev/null; then
+  sca_render="$(grep -c "${SCA_MARKER}" "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  if [[ "${sca_render}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has Python node SCA but render p2 does not (got ${sca_render}) — git pull Jenkinsfile && re-run" >&2
+    exit 1
+  fi
+  echo "OK: Python node-first SCA marker present in rendered p2 (Step 4)"
+fi
+
 echo "==> 2/5 Push 7 split files to ${JENKINS_NS}/${JPOD}:${REMOTE}"
-kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- mkdir -p "${REMOTE}"
+ensure_k8s_for_jenkins_push
+kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s -- mkdir -p "${REMOTE}"
 for f in paas-deploy-load-h1.groovy paas-deploy-load-h2.groovy paas-deploy-load-h3.groovy \
          paas-deploy-stages-vars.groovy paas-deploy-stages-p1.groovy paas-deploy-stages-p2.groovy \
          paas-deploy-stages-p3.groovy; do
   bytes="$(wc -c < "${RENDER}/${f}" | tr -d ' ')"
   echo "   ${f} (${bytes} bytes)"
-  kubectl exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=120s \
-    -- tee "${REMOTE}/${f}" < "${RENDER}/${f}" >/dev/null
+  if ! kubectl_retry cp "${RENDER}/${f}" "${JENKINS_NS}/${JPOD}:${REMOTE}/${f}" -c "${JCONTAINER}"; then
+    echo "WARN: kubectl cp failed for ${f} — fallback to exec tee"
+    kubectl_retry exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=180s \
+      -- tee "${REMOTE}/${f}" < "${RENDER}/${f}" >/dev/null
+  fi
 done
 
-kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
+kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s \
   -- grep -qF "${BUNDLE}" "${REMOTE}/paas-deploy-stages-p3.groovy"
-p3_on_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s \
+p3_on_pod="$(kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s \
   -- grep -c 'def runPaasDeploy()' "${REMOTE}/paas-deploy-stages-p3.groovy" | tr -d '\r\n')"
 [[ "${p3_on_pod}" == "1" ]] || {
   echo "FAIL: pod p3 has ${p3_on_pod} def runPaasDeploy() after push — dedupe failed" >&2
@@ -348,6 +536,16 @@ if grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
     exit 1
   fi
 fi
+if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  rotate_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'sonar-auto-rotate-token-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${rotate_pod}" == "1" ]]; then
+    echo "OK: Sonar auto-rotate marker on pod monolith"
+  else
+    echo "FAIL: pod monolith missing sonar-auto-rotate-token (got ${rotate_pod}) — abort before deploy" >&2
+    exit 1
+  fi
+fi
 if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; then
   harbor_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
     grep -c 'harbor-ensure-push-token-20260630' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
@@ -356,6 +554,33 @@ if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; th
   else
     echo "FAIL: pod monolith missing harbor-ensure-push-token (got ${harbor_pod}) — abort before deploy" >&2
     exit 1
+  fi
+fi
+if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/null; then
+  sca_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'Python BOM from requirements.txt (node' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${sca_pod}" == "1" ]]; then
+    echo "OK: Python node-first SCA marker on pod monolith"
+  else
+    echo "FAIL: pod monolith missing Python node SCA (got ${sca_pod}) — abort before deploy" >&2
+    exit 1
+  fi
+  bomref_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${bomref_pod}" -ge 1 ]]; then
+    echo "OK: Python SCA bom-ref quoted (Node object literal) on pod monolith"
+  else
+    echo "WARN: pod monolith missing quoted 'bom-ref' (got ${bomref_pod}) — patching live groovy"
+    patch_python_bom_ref_quotes
+    patch_python_bom_ref_on_pod
+    bomref_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+      grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    if [[ "${bomref_pod}" -ge 1 ]]; then
+      echo "OK: Python SCA bom-ref quoted after live patch"
+    else
+      echo "FAIL: pod monolith still missing quoted 'bom-ref' (got ${bomref_pod}) — abort before deploy" >&2
+      exit 1
+    fi
   fi
 fi
 

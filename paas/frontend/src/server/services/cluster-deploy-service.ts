@@ -28,6 +28,7 @@ import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
+import { ensureRollingWorkloadManifests } from "@/server/gitops/gitops-direct-apply-service";
 import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
 
 const activePromotions = new Set<string>();
@@ -126,6 +127,28 @@ async function appendArgoSyncAndWait(
     destNamespace: string,
     fastComplete?: FastCompleteParams
 ): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; fastCompleted?: boolean }> {
+    try {
+        return await appendArgoSyncAndWaitInner(sections, projectName, destNamespace, fastComplete);
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+            sections.push(`[argocd] WARN: ${msg} — deploy continues without Argo CD API (PAAS_STRICT_INTEGRATIONS=false).`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=WARN detail=${msg.slice(0, 400)}`);
+            return { argoSyncOk: false, shouldAbort: false };
+        }
+        sections.push(`[argocd] FAILED: ${msg}`);
+        sections.push(`PAAS_DEPLOY_VERIFY step=argocd_sync status=FAIL detail=${msg.slice(0, 400)}`);
+        return { argoSyncOk: false, shouldAbort: true };
+    }
+}
+
+async function appendArgoSyncAndWaitInner(
+    sections: string[],
+    projectName: string,
+    destNamespace: string,
+    fastComplete?: FastCompleteParams
+): Promise<{ argoSyncOk: boolean; shouldAbort: boolean; fastCompleted?: boolean }> {
     let argoSyncOk = false;
     try {
         const argo = await syncArgoApplication(projectName, destNamespace);
@@ -155,22 +178,34 @@ async function appendArgoSyncAndWait(
         if (fastComplete && await tryFastCompleteDeployment(fastComplete)) {
             return { argoSyncOk, shouldAbort: false, fastCompleted: true };
         }
-        const argoWait = await waitForArgoApplicationReady(projectName, {
-            timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS,
-            earlyExit: fastComplete
-                ? async () => tryFastCompleteDeployment(fastComplete)
-                : undefined
-        });
-        sections.push(argoWait.logs);
-        if (argoWait.ready) {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK detail=Healthy+Synced");
+        try {
+            const argoWait = await waitForArgoApplicationReady(projectName, {
+                timeoutMs: env.PAAS_DEPLOY_WAIT_ARGO_MS,
+                earlyExit: fastComplete
+                    ? async () => tryFastCompleteDeployment(fastComplete)
+                    : undefined
+            });
+            sections.push(argoWait.logs);
+            if (argoWait.ready) {
+                sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=OK detail=Healthy+Synced");
+            }
+            else if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+                sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=FAIL detail=timeout");
+                return { argoSyncOk, shouldAbort: true };
+            }
+            else {
+                sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=WARN detail=timeout");
+            }
         }
-        else if (env.PAAS_STRICT_INTEGRATIONS === "true") {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=FAIL detail=timeout");
-            return { argoSyncOk, shouldAbort: true };
-        }
-        else {
-            sections.push("PAAS_DEPLOY_VERIFY step=argocd_ready status=WARN detail=timeout");
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+                sections.push(`[argocd] FAILED: ${msg}`);
+                sections.push(`PAAS_DEPLOY_VERIFY step=argocd_ready status=FAIL detail=${msg.slice(0, 400)}`);
+                return { argoSyncOk, shouldAbort: true };
+            }
+            sections.push(`[argocd] WARN: ${msg} — continuing with cluster workload wait (PAAS_STRICT_INTEGRATIONS=false).`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=argocd_ready status=WARN detail=${msg.slice(0, 400)}`);
         }
     }
     return { argoSyncOk, shouldAbort: false };
@@ -195,6 +230,15 @@ async function reconcileClusterWorkload(
     if (patched.length > 0) {
         const profileNote = containerPort === 80 ? " nginx" : containerPort === 8000 ? " python" : "";
         sections.push(`[deploy] cluster auto-heal image+port=${containerPort}${profileNote} on: ${patched.join(", ")}`);
+    }
+    else {
+        const direct = await ensureRollingWorkloadManifests(destNamespace, projectName, artifactRef, containerPort);
+        for (const line of direct.logs) {
+            sections.push(line);
+        }
+        if (direct.applied) {
+            sections.push(`PAAS_DEPLOY_VERIFY step=direct_apply status=OK detail=${direct.deploymentName}`);
+        }
     }
 }
 
@@ -517,10 +561,16 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        sections.push(`[gitops] FAILED: ${msg}`);
-        sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=FAIL detail=${msg.slice(0, 400)}`);
-        await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
-        return;
+        if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
+            sections.push(`[gitops] WARN: ${msg} — continuing deploy verification (PAAS_STRICT_INTEGRATIONS=false).`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=WARN detail=${msg.slice(0, 400)}`);
+        }
+        else {
+            sections.push(`[gitops] FAILED: ${msg}`);
+            sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=FAIL detail=${msg.slice(0, 400)}`);
+            await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.GITOPS, msg);
+            return;
+        }
     }
     const appUrl = buildAppPublicUrl(projectName);
     const labIp = env.APPS_PUBLIC_LAB_NODE_IP.trim();

@@ -5,6 +5,56 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 STAGES_LOCAL="${PAAS_GENERATED_STAGES_PATH:-/var/tmp/paas-deploy-stages.groovy}"
 STAGES_REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
+JENKINS_PAAS_DIR="${JENKINS_PAAS_REMOTE_DIR:-/var/jenkins_home/paas}"
+CPS_BUNDLE_FILES=(
+  paas-deploy-load-h1.groovy
+  paas-deploy-load-h2.groovy
+  paas-deploy-load-h3.groovy
+  paas-deploy-stages-vars.groovy
+  paas-deploy-stages-p1.groovy
+  paas-deploy-stages-p2.groovy
+  paas-deploy-stages-p3.groovy
+)
+CPS_BUNDLE_OK=0
+
+jenkins_pod_name() {
+  local ns pod
+  for ns in "${JENKINS_K8S_NAMESPACE:-cicd}" cicd jenkins; do
+    pod="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
+    if [[ -n "${pod}" ]]; then
+      echo "${ns}:${pod}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+jenkins_cps_bundle_text() {
+  local ns pod f spec
+  spec="$(jenkins_pod_name || true)"
+  [[ -n "${spec}" ]] || return 1
+  ns="${spec%%:*}"
+  pod="${spec#*:}"
+  kubectl exec -n "${ns}" "${pod}" -- test -f "${JENKINS_PAAS_DIR}/paas-deploy-load-h1.groovy" 2>/dev/null || return 1
+  for f in "${CPS_BUNDLE_FILES[@]}"; do
+    echo "// --- ${JENKINS_PAAS_DIR}/${f} ---"
+    kubectl exec -n "${ns}" "${pod}" -- cat "${JENKINS_PAAS_DIR}/${f}" 2>/dev/null || true
+    echo ""
+  done
+}
+
+jenkins_pod_grep_marker() {
+  local marker="$1"
+  local ns pod f spec
+  spec="$(jenkins_pod_name || true)"
+  [[ -n "${spec}" ]] || return 1
+  ns="${spec%%:*}"
+  pod="${spec#*:}"
+  for f in "${CPS_BUNDLE_FILES[@]}" "${STAGES_REMOTE##*/}"; do
+    kubectl exec -n "${ns}" "${pod}" -- grep -qF "${marker}" "${JENKINS_PAAS_DIR}/${f}" 2>/dev/null && return 0
+  done
+  kubectl exec -n "${ns}" "${pod}" -- grep -qF "${marker}" "${STAGES_REMOTE}" 2>/dev/null
+}
 jenkinsfile_bundle() {
   cat "${JENKINSFILE}"
   for path in "${STAGES_LOCAL}"; do
@@ -39,6 +89,11 @@ jenkins_pipeline_has_marker() {
     for ns in "${JENKINS_K8S_NAMESPACE:-cicd}" cicd jenkins; do
       pod="$(kubectl get pods -n "${ns}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
       [[ -n "${pod}" ]] || continue
+      for f in "${CPS_BUNDLE_FILES[@]}"; do
+        if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${marker}" "${JENKINS_PAAS_DIR}/${f}" 2>/dev/null; then
+          return 0
+        fi
+      done
       if kubectl exec -n "${ns}" "${pod}" -- grep -qF "${marker}" "${STAGES_REMOTE}" 2>/dev/null; then
         return 0
       fi
@@ -210,6 +265,13 @@ REMOTE_CHECK_TEXT="${CFG}"
 if echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260620-cps-split' \
   && echo "${CFG}" | grep -qF 'load paasStagesP3'; then
   echo "OK: Jenkins job uses CPS multi-load layout (20260620-cps-split, 7 files)"
+  if bundle_text="$(jenkins_cps_bundle_text 2>/dev/null || true)" && [[ -n "${bundle_text}" ]]; then
+    REMOTE_CHECK_TEXT="${bundle_text}"
+    CPS_BUNDLE_OK=1
+    echo "OK: loaded CPS bundle from Jenkins pod for marker checks (${#CPS_BUNDLE_FILES[@]} files)"
+  else
+    echo "WARN: could not read CPS bundle from Jenkins pod — marker checks may be incomplete"
+  fi
 elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
   echo "FAIL: Jenkins job uses obsolete single-load layout (20260617) — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
   exit 1
@@ -243,7 +305,9 @@ if jenkins_text_has_mutate_fix "${REMOTE_CHECK_TEXT}"; then
 elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' || echo "${CFG}" | grep -qF 'load paasStagesP3' || echo "${CFG}" | grep -qF 'load paasLoadH1'; then
   JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
   JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
-  if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- sh -c \
+  if [[ "${CPS_BUNDLE_OK:-0}" -eq 1 ]] && jenkins_pod_grep_marker 'entrypoint=/app/start-paas.sh'; then
+    echo "OK: Jenkins CPS bundle has Step 6 mutate fix (start-paas.sh)"
+  elif [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- sh -c \
     'grep -qF "entrypoint=/app/start-paas.sh" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
       || grep -qF "crane mutate OK" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null'; then
     echo "OK: Jenkins stages file has Step 6 mutate fix (load() layout)"
@@ -305,7 +369,10 @@ if { echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" \
   echo "OK: Jenkins job has ${NGINX_CONF_MARKER} (SPA/Angular Step 6 uri fix)"
 else
   STAGES_OK=0
-  if echo "${CFG}" | grep -qF 'load paasDeployStagesPath'; then
+  if [[ "${CPS_BUNDLE_OK:-0}" -eq 1 ]] && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'writeNginxPaasDefaultConf'; then
+    STAGES_OK=1
+    echo "OK: Jenkins CPS bundle has writeNginxPaasDefaultConf"
+  elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath'; then
     JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
     JPOD="$(kubectl get pods -n "${JNS}" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -iE '^jenkins' | head -1 || true)"
     if [[ -n "${JPOD}" ]] && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF 'writeNginxPaasDefaultConf' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
@@ -323,6 +390,10 @@ fi
 if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" \
   && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
   echo "OK: Jenkins job has ${SCA_FULL_MARKER} (Step 4 SBOM for vite projects without lockfile)"
+elif [[ "${CPS_BUNDLE_OK:-0}" -eq 1 ]] \
+  && echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SCA_FULL_MARKER}" \
+  && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'full npm install then cyclonedx-npm'; then
+  echo "OK: Jenkins CPS bundle has ${SCA_FULL_MARKER} (Step 4 SBOM)"
 elif [[ "${STAGES_OK:-0}" -eq 1 ]] \
   && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF "${SCA_FULL_MARKER}" /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
   && kubectl exec -n "${JNS}" "${JPOD}" -- grep -qF 'full npm install then cyclonedx-npm' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
@@ -342,6 +413,15 @@ if echo "${CFG}" | grep -qF 'def runPaasDeploy'; then
   echo "OK: Jenkins job uses monolithic pipeline (def runPaasDeploy)"
   echo ""
   echo "Trigger a NEW build (not Replay) — full security pipeline should run."
+  exit 0
+fi
+if [[ "${CPS_BUNDLE_OK:-0}" -eq 1 ]] \
+  && echo "${REMOTE_CHECK_TEXT}" | grep -qF 'helm-portable-20260620-cps-split' \
+  && jenkins_text_has_crane_fix "${REMOTE_CHECK_TEXT}"; then
+  echo "OK: Jenkins job ${JOB} is up to date (CPS 7-file bundle + wrapper)"
+  echo ""
+  echo "Trigger a NEW build: Jenkins → ${JOB} → Build with Parameters"
+  echo "Do NOT click Replay on old failed builds."
   exit 0
 fi
 if echo "${CFG}" | grep -qF 'load paasDeployStagesPath' \

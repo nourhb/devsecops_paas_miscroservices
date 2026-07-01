@@ -82,22 +82,50 @@ ensure_admin_password() {
 
 revoke_old_token() {
   local name="$1"
+  local enc
+  enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "${name}")"
   curl -fsS -m 15 -u "${SONAR_ADMIN_USER}:${SONAR_ADMIN_PASSWORD}" -X POST \
-    "${SONAR_URL}/api/user_tokens/revoke?name=${name}" >/dev/null 2>&1 || true
+    "${SONAR_URL}/api/user_tokens/revoke?name=${enc}" >/dev/null 2>&1 || true
+}
+
+read_env_sonar_token() {
+  grep -E '^SONAR_TOKEN=' "${ENV_FILE}" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true
+}
+
+sonar_token_valid() {
+  local token="$1"
+  [[ -n "${token}" ]] || return 1
+  curl -fsS -m 15 -u "${token}:" "${SONAR_URL}/api/authentication/validate" 2>/dev/null \
+    | grep -q '"valid":true'
 }
 
 create_analysis_token() {
-  local resp token http
+  local resp token http existing
+  existing="$(read_env_sonar_token)"
+  if sonar_token_valid "${existing}"; then
+    ok "existing SONAR_TOKEN still valid — reusing"
+    printf '%s' "${existing}"
+    return 0
+  fi
   revoke_old_token "${SONAR_TOKEN_NAME}"
   resp="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -u "${SONAR_ADMIN_USER}:${SONAR_ADMIN_PASSWORD}" -X POST \
     "${SONAR_URL}/api/user_tokens/generate?name=${SONAR_TOKEN_NAME}&type=GLOBAL_ANALYSIS_TOKEN" 2>/dev/null)" \
     || true
   http="${resp##*$'\n__HTTP__'}"
   resp="${resp%$'\n__HTTP__'*}"
-  [[ "${http}" == "200" ]] || fail "token generation HTTP ${http}: ${resp}"
-  token="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' <<<"${resp}")"
-  [[ -n "${token}" ]] || fail "empty token from Sonar: ${resp}"
-  printf '%s' "${token}"
+  if [[ "${http}" == "200" ]]; then
+    token="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' <<<"${resp}")"
+    [[ -n "${token}" ]] || fail "empty token from Sonar: ${resp}"
+    printf '%s' "${token}"
+    return 0
+  fi
+  if [[ "${resp}" == *"already exists"* ]]; then
+    warn "token name ${SONAR_TOKEN_NAME} already exists — revoke via UI or run:"
+    echo "  curl -u admin:SonarQube123! -X POST '${SONAR_URL}/api/user_tokens/revoke?name=${SONAR_TOKEN_NAME}'"
+    echo "  then re-run: bash paas/scripts/lab.sh sonar-bootstrap"
+    fail "token generation HTTP ${http}: ${resp}"
+  fi
+  fail "token generation HTTP ${http}: ${resp}"
 }
 
 sync_env_and_jenkins() {
@@ -106,6 +134,9 @@ sync_env_and_jenkins() {
     patch_env_key "${f}" "SONAR_BASE_URL" "${SONAR_URL}"
     patch_env_key "${f}" "SONAR_HOST_URL" "${SONAR_URL}"
     patch_env_key "${f}" "SONAR_TOKEN" "${token}"
+    patch_env_key "${f}" "SONAR_ADMIN_USER" "${SONAR_ADMIN_USER}"
+    patch_env_key "${f}" "SONAR_ADMIN_NEW_PASSWORD" "${SONAR_ADMIN_NEW_PASSWORD}"
+    patch_env_key "${f}" "SONAR_TOKEN_NAME" "${SONAR_TOKEN_NAME}"
     ok "updated ${f}"
   done
   if [[ "${SYNC_JENKINS}" == "true" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
@@ -134,6 +165,14 @@ main() {
   [[ "${verify}" == "200" ]] || fail "token validate HTTP ${verify}"
 
   sync_env_and_jenkins "${token}"
+
+  if [[ "${PAAS_SYNC_K8S_ENV:-true}" == "true" ]] && command -v kubectl >/dev/null 2>&1; then
+    if kubectl get deployment frontend -n "${PAAS_NS:-paas}" >/dev/null 2>&1; then
+      echo "==> Sync paas-frontend-env secret (SONAR_TOKEN)"
+      PAAS_SKIP_ROLLOUT="${PAAS_SKIP_ROLLOUT:-1}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" \
+        || warn "k8s env sync failed — run: bash paas/scripts/lab.sh env"
+    fi
+  fi
 
   echo "=============================================="
   echo "Done."

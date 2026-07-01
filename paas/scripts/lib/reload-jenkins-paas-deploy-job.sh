@@ -3,6 +3,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
+# shellcheck source=lab-jenkins-pod.sh
+source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 JOB="${JENKINS_JOB_NAME:-paas-deploy}"
 JOB_CFG="/var/jenkins_home/jobs/${JOB}/config.xml"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
@@ -82,7 +84,19 @@ def marker_ok(body: str) -> bool:
     m = re.search(r"paas-deploy-stages-load-[0-9a-z-]+", body)
     if "load paasDeployStagesPath" in body:
         return False
-    return bool(m and m.group(0) == want and "load paasStagesP3" in body and "runPaasDeploy()" in body)
+    if "missing runPaasDeploy in p3" in body:
+        return False
+    if not m or m.group(0) != want:
+        return False
+    if "def paas = load paasDeployStages" in body:
+        return False
+    if "load paasStagesP3" in body and "load paasLoadH1" in body and "runPaasDeploy()" in body:
+        return "runPaasDeployEnvInit()" not in body or "runPaasDeploy()" in body
+    if "def paas = load paasDeployStages" in body and "paas.runPaasDeploy()" in body:
+        return "runPaasDeployEnvInit()" not in body
+    if "runPaasDeployEnvInit()" in body and "runPaasDeploy()" not in body:
+        return False
+    return "runPaasDeploy()" in body or "runPaasDeploySteps9_12()" in body
 
 if not wait_api():
     print("FAIL: Jenkins API not ready", file=sys.stderr)
@@ -131,23 +145,45 @@ load_jenkins_creds
 
 echo "==> reload-jenkins-paas-deploy-job (${JENKINS_URL}/job/${JOB}/)"
 
-kubectl exec -n "${JENKINS_NS}" deploy/jenkins -c jenkins --request-timeout=120s -- \
-  cat "${JOB_CFG}" > "${TMP_CFG}"
+jenkins_exec "${JENKINS_NS}" cat "${JOB_CFG}" > "${TMP_CFG}"
 
-export TMP_CFG
+export TMP_CFG FORCE_POST="${FORCE_POST:-0}"
+if [[ "${FORCE_POST}" != "1" ]] && jenkins_live_ok; then
+  exit 0
+fi
 if jenkins_live_ok; then
   exit 0
 fi
 
 if [[ "${VERIFY_ONLY:-0}" == "1" ]]; then
-  echo "FAIL: LIVE job config wrong (VERIFY_ONLY — not posting disk config.xml)" >&2
-  echo "  Expected marker=${CPS_MARKER}, load paasStagesP3, NO load paasDeployStagesPath" >&2
+  disk_ok=0
+  if [[ -f "${TMP_CFG}" ]] && grep -qF "${CPS_MARKER}" "${TMP_CFG}" \
+    && grep -qF 'load paasStagesP3' "${TMP_CFG}" \
+    && grep -qF 'load paasLoadH1' "${TMP_CFG}" \
+    && grep -qF 'runPaasDeploy()' "${TMP_CFG}" \
+    && ! grep -qF 'def paas = load paasDeployStages' "${TMP_CFG}" \
+    && ! grep -qF 'missing runPaasDeploy in p3' "${TMP_CFG}" \
+    && ! grep -qF 'load paasDeployStagesPath' "${TMP_CFG}"; then
+    disk_ok=1
+  fi
+  if [[ "${disk_ok}" == "1" ]]; then
+    echo "WARN: LIVE job stale but disk config.xml has ${CPS_MARKER} — posting disk to Jenkins API…"
+    VERIFY_ONLY=0
+    export TMP_CFG
+    if jenkins_live_ok; then
+      exit 0
+    fi
+  fi
+  echo "FAIL: LIVE job config wrong (VERIFY_ONLY — disk config also stale or POST failed)" >&2
+  echo "  Expected marker=${CPS_MARKER}, 7-file CPS load + runPaasDeploy(), NO monolith load" >&2
+  echo "  Fix: bash paas/scripts/lab.sh fix-paas-deploy" >&2
   exit 1
 fi
 
 echo "WARN: live job still wrong — restarting Jenkins (reload config from PVC disk)"
-kubectl rollout restart deploy/jenkins -n "${JENKINS_NS}"
-kubectl rollout status deploy/jenkins -n "${JENKINS_NS}" --timeout=300s
+wl="$(jenkins_workload_ref "${JENKINS_NS}" || echo statefulset/jenkins)"
+kubectl rollout restart "${wl}" -n "${JENKINS_NS}"
+kubectl rollout status "${wl}" -n "${JENKINS_NS}" --timeout=300s
 
 export TMP_CFG=""
 if jenkins_live_ok; then

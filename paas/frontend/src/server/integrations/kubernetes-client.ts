@@ -399,6 +399,100 @@ function kubernetesErrorMessage(error: unknown): string {
     }
     return e.message || String(error);
 }
+function isKubernetesTransportError(message: string): boolean {
+    return /fetch failed|HTTP request failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|socket hang up|network/i.test(message);
+}
+export async function readNamespacedSecretData(namespace: string, name: string): Promise<Record<string, string> | null> {
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            const { body } = await api.readNamespacedSecret(name, namespace);
+            return body.data ?? null;
+        }
+        catch (error) {
+            if (!isKubernetesTransportError(kubernetesErrorMessage(error))) {
+                return null;
+            }
+        }
+    }
+    if (!canUseInClusterKubernetes()) {
+        return null;
+    }
+    try {
+        const body = await kubernetesApiGetJson<{
+            data?: Record<string, string>;
+        }>(`/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets/${encodeURIComponent(name)}`);
+        return body.data ?? null;
+    }
+    catch {
+        return null;
+    }
+}
+export async function upsertNamespacedSecret(namespace: string, secret: k8s.V1Secret): Promise<{
+    ok: boolean;
+    error?: string;
+}> {
+    const name = secret.metadata?.name?.trim();
+    if (!name) {
+        return { ok: false, error: "missing secret name" };
+    }
+    const api = getCoreV1Api();
+    if (api) {
+        try {
+            await api.createNamespacedSecret(namespace, secret);
+            return { ok: true };
+        }
+        catch (error) {
+            const msg = kubernetesErrorMessage(error);
+            if (/already exists|409/i.test(msg)) {
+                try {
+                    await api.replaceNamespacedSecret(name, namespace, secret);
+                    return { ok: true };
+                }
+                catch (replaceError) {
+                    const replaceMsg = kubernetesErrorMessage(replaceError);
+                    if (!isKubernetesTransportError(replaceMsg)) {
+                        return { ok: false, error: replaceMsg };
+                    }
+                }
+            }
+            else if (!isKubernetesTransportError(msg)) {
+                return { ok: false, error: msg };
+            }
+        }
+    }
+    if (!canUseInClusterKubernetes()) {
+        return { ok: false, error: "Kubernetes API unavailable" };
+    }
+    const payload = JSON.stringify(secret);
+    const collectionUrl = `${kubernetesApiBaseUrl()}/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets`;
+    const itemUrl = `${collectionUrl}/${encodeURIComponent(name)}`;
+    try {
+        const createResponse = await kubernetesAuthenticatedFetch(collectionUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload
+        });
+        if (createResponse.ok) {
+            return { ok: true };
+        }
+        if (createResponse.status !== 409) {
+            return { ok: false, error: `HTTP ${createResponse.status}` };
+        }
+        const replaceResponse = await kubernetesAuthenticatedFetch(itemUrl, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: payload
+        });
+        if (!replaceResponse.ok) {
+            return { ok: false, error: `HTTP ${replaceResponse.status}` };
+        }
+        return { ok: true };
+    }
+    catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+}
 function formatPodReady(pod: V1Pod): string {
     const statuses = pod.status?.containerStatuses ?? [];
     const ready = statuses.filter((status) => status.ready).length;

@@ -11,8 +11,13 @@ fail() { echo "FAIL: $*"; FAIL=1; }
 ok() { echo "OK: $*"; }
 lab_ensure_kubeconfig || true
 if ! lab_k8s_api_ready; then
-  fail "k8s API"
-  exit 1
+  echo "WARN: k8s API slow — waiting up to $(( ${LAB_K8S_API_WAIT_LOOPS:-24} * ${LAB_K8S_API_WAIT_SEC:-5} ))s (disk pressure / k3s restart)…"
+  if ! lab_k8s_api_wait; then
+    echo "  try: bash paas/scripts/lib/lab-k3s-ensure.sh" >&2
+    echo "  try: bash paas/scripts/lab.sh emergency-up" >&2
+    fail "k8s API"
+    exit 1
+  fi
 fi
 ok "k8s API"
 if kubectl get deployment postgres -n "${PAAS_NS}" >/dev/null 2>&1; then
