@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 # shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
+# shellcheck source=lab-sonarqube-helm-lab.sh
+source "${SCRIPT_DIR}/lab-sonarqube-helm-lab.sh"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 SONAR_PORT="${SONAR_NODEPORT:-30900}"
 SONAR_NS="${SONAR_NS:-sonarqube}"
@@ -66,39 +68,11 @@ wipe_sonar() {
 }
 
 install_sonar() {
-  command -v helm >/dev/null 2>&1 || die "helm required"
-  helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube 2>/dev/null || true
-  helm repo update sonarqube 2>/dev/null || true
-  kubectl create namespace "${SONAR_NS}"
-  echo "==> helm install ${SONAR_RELEASE} (9.9 LTS community, master only, NodePort ${SONAR_PORT})"
-  helm upgrade --install "${SONAR_RELEASE}" sonarqube/sonarqube -n "${SONAR_NS}" \
-    --set service.type=NodePort \
-    --set "service.nodePort=${SONAR_PORT}" \
-    --set community.enabled=true \
-    --set "image.tag=9.9.8-community" \
-    --set postgresql.enabled=true \
-    --set postgresql.primary.persistence.enabled=false \
-    --set "postgresql.primary.nodeSelector.kubernetes\.io/hostname=${SONAR_LAB_NODE}" \
-    --set monitoringPasscode=paas-lab-monitor \
-    --set initSysctl.enabled=false \
-    --set initFs.enabled=false \
-    --set 'plugins.install=[]' \
-    --set prometheusExporter.enabled=false \
-    --set "nodeSelector.kubernetes\.io/hostname=${SONAR_LAB_NODE}" \
-    --set-json 'tolerations=[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"},{"key":"node-role.kubernetes.io/master","operator":"Exists","effect":"NoSchedule"}]' \
-    --set startupProbe.initialDelaySeconds=60 \
-    --set startupProbe.periodSeconds=15 \
-    --set startupProbe.failureThreshold=40 \
-    --set startupProbe.timeoutSeconds=5 \
-    --set sonarProperties."sonar\\.web\\.javaOpts"="-Xmx512m -Xms256m" \
-    --set sonarProperties."sonar\\.ce\\.javaOpts"="-Xmx512m -Xms256m" \
-    --set resources.requests.memory=512Mi \
-    --set resources.limits.memory=2Gi \
-    --timeout 20m
+  lab_sonar_helm_upgrade "${SONAR_RELEASE}" "${SONAR_NS}" "${SONAR_LAB_NODE}" "${SONAR_PORT}"
 }
 
 wait_up() {
-  local i pod phase ready
+  local i pod phase ready restarts repaired=0
   for i in $(seq 1 48); do
     if curl -fsS -m 10 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
       ok "SonarQube UP ${SONAR_URL} (${i} checks)"
@@ -109,26 +83,30 @@ wait_up() {
     if [[ -n "${pod}" ]]; then
       phase="$(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
       ready="$(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.containerStatuses[?(@.name=="sonarqube")].ready}' 2>/dev/null || true)"
-      if [[ "${phase}" == "Pending" ]] || kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.initContainerStatuses[0].state.waiting.reason}' 2>/dev/null | grep -q .; then
-        echo "  init: $(kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.status.initContainerStatuses[*].name}:{.status.initContainerStatuses[*].state}' 2>/dev/null || echo ?)"
+      restarts="$(lab_sonar_pod_restarts "${SONAR_NS}")"
+      if [[ "${restarts}" -ge 3 ]] && [[ "${repaired}" -eq 0 ]]; then
+        lab_sonar_repair_crash_loop "${SONAR_NS}" "${SONAR_RELEASE}" "${SONAR_LAB_NODE}" "${SONAR_PORT}"
+        repaired=1
+        continue
       fi
       if [[ "${ready}" != "true" ]] && [[ "${phase}" == "Running" ]] && (( i % 4 == 0 )); then
         kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --tail=5 2>/dev/null || true
+        echo "  restarts=${restarts} (>=3 triggers auto-repair once)"
       fi
     fi
-    echo "  waiting… (${i}/48 — first start can take 10–15 min on 8GB lab; do not Ctrl+C)"
+    echo "  waiting… (${i}/48 — 8GB lab: 10–20 min; do not Ctrl+C; skip k3s-unstick while waiting)"
     sleep 15
   done
   echo "==> last logs"
   pod="$(kubectl get pods -n "${SONAR_NS}" -o name 2>/dev/null | grep sonarqube-sonarqube | head -1 | sed 's|pod/||' || true)"
   [[ -n "${pod}" ]] && kubectl describe pod -n "${SONAR_NS}" "${pod}" 2>/dev/null | tail -25 || true
   [[ -n "${pod}" ]] && kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --tail=40 2>/dev/null || true
-  die "Sonar not UP at ${SONAR_URL} — check: kubectl get pods -n ${SONAR_NS} -o wide"
+  die "Sonar not UP — run: SONAR_FORCE_WIPE=1 bash paas/scripts/lab.sh sonarqube"
 }
 
 sonar_already_installed() {
-  kubectl get statefulset -n "${SONAR_NS}" -l app=sonarqube 2>/dev/null | grep -q sonarqube \
-    || kubectl get statefulset sonarqube-sonarqube -n "${SONAR_NS}" >/dev/null 2>&1
+  kubectl get statefulset sonarqube-sonarqube -n "${SONAR_NS}" >/dev/null 2>&1 \
+    || kubectl get deploy -n "${SONAR_NS}" -l app=sonarqube >/dev/null 2>&1
 }
 
 main() {
@@ -138,7 +116,7 @@ main() {
   lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
   echo "==> k3s API"
   export LAB_K3S_WAIT_LOOPS=24 LAB_K3S_WAIT_SEC=5
-  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || die "k3s API down — wait 2 min then: k3s kubectl get nodes  OR  sudo bash paas/scripts/lab.sh k3s-unstick"
+  bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || die "k3s API down — k3s kubectl get nodes (do NOT k3s-unstick if nodes Ready)"
 
   if curl -fsS -m 8 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
     ok "Sonar already UP at ${SONAR_URL}"
@@ -148,19 +126,22 @@ main() {
     exit 0
   fi
 
-  if sonar_already_installed; then
-    echo "==> Sonar helm release already on cluster — skip wipe (wait for UP only)"
-    wait_up
-    if [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
-      SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh"
+  if [[ "${SONAR_FORCE_WIPE:-}" == "1" ]]; then
+    apply_sysctl_all_nodes
+    wipe_sonar
+    install_sonar
+  elif sonar_already_installed; then
+    echo "==> Sonar already on cluster — skip wipe (wait/repair only)"
+    restarts="$(lab_sonar_pod_restarts "${SONAR_NS}")"
+    if [[ "${restarts}" -ge 3 ]]; then
+      lab_sonar_repair_crash_loop "${SONAR_NS}" "${SONAR_RELEASE}" "${SONAR_LAB_NODE}" "${SONAR_PORT}"
     fi
-    echo "Done. UI: ${SONAR_URL}"
-    exit 0
+  else
+    apply_sysctl_all_nodes
+    wipe_sonar
+    install_sonar
   fi
 
-  apply_sysctl_all_nodes
-  wipe_sonar
-  install_sonar
   wait_up
   if [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
     echo "==> SONAR_TOKEN bootstrap"
@@ -168,7 +149,7 @@ main() {
   fi
   echo ""
   echo "Done. UI: ${SONAR_URL}  (admin / SonarQube123! after bootstrap)"
-  echo "Next: bash paas/scripts/lib/fix-paas-deploy-cps-split-now.sh"
+  echo "Next: trigger NEW paas-deploy build"
 }
 
 main "$@"
