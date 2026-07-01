@@ -133,6 +133,33 @@ def dedupe_run_paas_deploy(text: str) -> str:
 
 body = dedupe_run_paas_deploy(body)
 
+def dedupe_sonar_rc(text: str) -> str:
+    """Stale monoliths may contain checkpoint-poll + shell-wait Sonar blocks (duplicate def sonarRc)."""
+    if "sonar-shell-wait-20260701" in text and "sonar-checkpoint-poll-20260630" in text:
+        start = text.find("sonar-checkpoint-poll-20260630")
+        end = text.find("sonar-shell-wait-20260701", start + 1)
+        if start >= 0 and end > start:
+            line_start = text.rfind("\n", 0, start)
+            line_start = 0 if line_start < 0 else line_start + 1
+            text = text[:line_start] + text[end:]
+    # Same scope cannot declare def sonarRc twice — keep first def, later ones become assignment.
+    seen_def = 0
+    out = []
+    for ln in text.split("\n"):
+        m = re.match(r"^(\s+)def sonarRc(\s*=.*)$", ln)
+        if m:
+            seen_def += 1
+            if seen_def > 1:
+                ln = f"{m.group(1)}sonarRc{m.group(2)}"
+        out.append(ln)
+    return "\n".join(out)
+
+
+body = dedupe_sonar_rc(body)
+sonar_rc_defs = len(re.findall(r"^\s+def sonarRc\s*=", body, re.MULTILINE))
+if sonar_rc_defs != 1:
+    sys.exit(f"FAIL: expected 1 def sonarRc in monolith, found {sonar_rc_defs}")
+
 step_fns = [
     "runPaasDeployEnvInit",
     "runPaasDeploySteps1_2",

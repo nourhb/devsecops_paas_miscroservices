@@ -321,6 +321,11 @@ if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
     exit 1
   fi
   echo "OK: Sonar shell-wait marker present in rendered p2 (Step 5 — no Groovy sleep)"
+  sonar_rc_render="$(grep -c 'def sonarRc' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  [[ "${sonar_rc_render}" == "1" ]] || {
+    echo "FAIL: rendered p2 has ${sonar_rc_render} def sonarRc (expected 1) — rm -rf paas/jenkins/.render-test && re-run" >&2
+    exit 1
+  }
 elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
   echo "WARN: Jenkinsfile still has old sonar-checkpoint-poll (Groovy sleep) — git pull for sonar-shell-wait-20260701"
 fi
@@ -562,6 +567,14 @@ if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
     echo "OK: Sonar shell-wait marker on pod monolith"
   else
     echo "FAIL: pod monolith missing sonar-shell-wait (got ${shell_pod}) — abort before deploy" >&2
+    exit 1
+  fi
+  sonar_rc_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'def sonarRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+  if [[ "${sonar_rc_pod}" == "1" ]]; then
+    echo "OK: pod monolith has 1 def sonarRc (no duplicate Sonar block)"
+  else
+    echo "FAIL: pod monolith has ${sonar_rc_pod} def sonarRc (duplicate Sonar — re-run fix-paas-deploy-cps-split-now.sh)" >&2
     exit 1
   fi
 elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
