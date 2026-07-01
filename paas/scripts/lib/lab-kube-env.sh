@@ -47,20 +47,21 @@ lab_sync_kubeconfig() {
 }
 
 lab_k8s_api_probe() {
-  local req="${1:---request-timeout=${LAB_K8S_API_TIMEOUT_SEC:-15}s}"
+  local req="${1:---request-timeout=${LAB_K8S_API_TIMEOUT_SEC:-8}s}"
+  local to="${LAB_K8S_PROBE_TIMEOUT_SEC:-12}"
   if command -v k3s >/dev/null 2>&1; then
-    if timeout 25 k3s kubectl get --raw=/healthz "${req}" >/dev/null 2>&1; then
+    if timeout "${to}" k3s kubectl get --raw=/healthz "${req}" >/dev/null 2>&1; then
       return 0
     fi
-    if timeout 25 k3s kubectl get nodes "${req}" >/dev/null 2>&1; then
+    if timeout "${to}" k3s kubectl get nodes "${req}" >/dev/null 2>&1; then
       return 0
     fi
   fi
   lab_ensure_kubeconfig || true
-  if timeout 25 kubectl get --raw=/healthz "${req}" >/dev/null 2>&1; then
+  if timeout "${to}" kubectl get --raw=/healthz "${req}" >/dev/null 2>&1; then
     return 0
   fi
-  if timeout 25 kubectl get nodes "${req}" >/dev/null 2>&1; then
+  if timeout "${to}" kubectl get nodes "${req}" >/dev/null 2>&1; then
     return 0
   fi
   return 1

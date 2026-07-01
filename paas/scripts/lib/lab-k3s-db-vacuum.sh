@@ -35,8 +35,14 @@ if ! command -v sqlite3 >/dev/null 2>&1; then
   apt-get update -qq && apt-get install -y sqlite3
 fi
 
-log "VACUUM SQLite (2–15 min — normal if db is bloated)"
-sqlite3 "${STATE_DB}" "VACUUM;"
+log "VACUUM SQLite (can take 5–45 min on bloated db — progress every 30s)"
+sqlite3 "${STATE_DB}" "VACUUM;" &
+vac_pid=$!
+while kill -0 "${vac_pid}" 2>/dev/null; do
+  echo "  …VACUUM running $(date +%H:%M:%S) — state.db ${BEFORE}"
+  sleep 30
+done
+wait "${vac_pid}" || die "VACUUM failed"
 sqlite3 "${STATE_DB}" "PRAGMA optimize;"
 
 AFTER="$(du -sh "${STATE_DB}" | awk '{print $1}')"
