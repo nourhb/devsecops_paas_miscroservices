@@ -6,6 +6,8 @@ NODE_IP="${NODE_IP:-192.168.56.129}"
 SONAR_PORT="${SONAR_NODEPORT:-30900}"
 SONAR_NS="${SONAR_NS:-sonarqube}"
 SONAR_RELEASE="${SONAR_HELM_RELEASE:-sonarqube}"
+SONAR_LAB_NODE="${SONAR_LAB_NODE:-master}"
+SONAR_LAB_IMAGE_TAG="${SONAR_LAB_IMAGE_TAG:-10.8.0-community}"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 SONAR_URL="http://${NODE_IP}:${SONAR_PORT}"
 SONAR_TOKEN="${SONAR_TOKEN:-}"
@@ -102,6 +104,39 @@ sonar_main_pod() {
     | grep -E 'sonarqube-sonarqube|/sonarqube-[0-9]' | head -1 | sed 's|^pod/||' || true
 }
 
+apply_sysctl_all_k3s_nodes() {
+  ensure_node_sysctl_for_sonar
+  local nodes=(master worker1 worker2)
+  local n
+  for n in "${nodes[@]}"; do
+    [[ "${n}" == "$(hostname -s 2>/dev/null || hostname)" ]] && continue
+    if ssh -o ConnectTimeout=6 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${n}" 'echo ok' 2>/dev/null; then
+      echo "==> sysctl vm.max_map_count on ${n}"
+      ssh "${n}" 'sudo sysctl -w vm.max_map_count=524288; sudo sysctl -w fs.file-max=131072' 2>/dev/null \
+        || echo "WARN: sysctl on ${n} failed (passwordless sudo?)"
+    else
+      echo "WARN: ssh ${n} unavailable — if Sonar schedules there, run: sudo sysctl -w vm.max_map_count=524288"
+    fi
+  done
+}
+
+sonar_pod_waiting_reason() {
+  local pod="$1"
+  kubectl get pod -n "${SONAR_NS}" "${pod}" --request-timeout=15s \
+    -o jsonpath='{.status.containerStatuses[?(@.name=="sonarqube")].state.waiting.reason}' 2>/dev/null || true
+}
+
+sonar_pod_needs_helm_repair() {
+  local pod="$1"
+  [[ -n "${pod}" ]] || return 0
+  local reason
+  reason="$(sonar_pod_waiting_reason "${pod}")"
+  if [[ "${reason}" == "CrashLoopBackOff" || "${reason}" == "Error" ]]; then
+    return 0
+  fi
+  sonar_pod_init_stuck "${pod}"
+}
+
 sonar_pod_init_stuck() {
   local pod="$1"
   [[ -n "${pod}" ]] || return 1
@@ -131,6 +166,18 @@ diagnose_sonar_pod() {
     kubectl logs -n "${SONAR_NS}" "${pod}" -c "${c}" --tail=50 2>/dev/null \
       || echo "(no logs yet for ${c})"
   done
+  echo "--- sonarqube container logs (current) ---"
+  kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --tail=80 2>/dev/null \
+    || echo "(no current sonarqube logs)"
+  echo "--- sonarqube container logs (previous crash) ---"
+  kubectl logs -n "${SONAR_NS}" "${pod}" -c sonarqube --previous --tail=80 2>/dev/null \
+    || echo "(no previous sonarqube logs)"
+  local oom
+  oom="$(kubectl get pod -n "${SONAR_NS}" "${pod}" --request-timeout=15s \
+    -o jsonpath='{.status.containerStatuses[?(@.name=="sonarqube")].lastState.terminated.reason}' 2>/dev/null || true)"
+  if [[ "${oom}" == "OOMKilled" ]]; then
+    echo "WARN: sonarqube container was OOMKilled — helm repair raises memory limit"
+  fi
 }
 
 wait_postgres_sonar() {
@@ -156,7 +203,7 @@ wait_postgres_sonar() {
 
 helm_repair_sonar_lab() {
   command -v helm >/dev/null 2>&1 || { echo "WARN: helm missing — cannot helm repair Sonar"; return 1; }
-  echo "==> helm upgrade ${SONAR_RELEASE} (lab: initSysctl/initFs off, NodePort ${SONAR_PORT})"
+  echo "==> helm upgrade ${SONAR_RELEASE} (lab: pin ${SONAR_LAB_NODE}, image ${SONAR_LAB_IMAGE_TAG}, relaxed startup probe)"
   helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube 2>/dev/null || true
   helm repo update sonarqube 2>/dev/null || true
   kubectl get ns "${SONAR_NS}" >/dev/null 2>&1 || kubectl create ns "${SONAR_NS}"
@@ -165,14 +212,24 @@ helm_repair_sonar_lab() {
     --set "service.nodePort=${SONAR_PORT}" \
     --set postgresql.enabled=true \
     --set postgresql.primary.persistence.enabled=false \
+    --set "postgresql.primary.nodeSelector.kubernetes\.io/hostname=${SONAR_LAB_NODE}" \
     --set community.enabled=true \
+    --set "image.tag=${SONAR_LAB_IMAGE_TAG}" \
     --set monitoringPasscode=paas-lab-monitor \
     --set initSysctl.enabled=false \
     --set initFs.enabled=false \
-    --set sonarProperties."sonar\\.web\\.javaOpts"="-Xmx512m -Xms256m" \
-    --set sonarProperties."sonar\\.ce\\.javaOpts"="-Xmx512m -Xms256m" \
-    --set resources.requests.memory=512Mi \
-    --set resources.limits.memory=1536Mi \
+    --set "nodeSelector.kubernetes\.io/hostname=${SONAR_LAB_NODE}" \
+    --set-json 'tolerations=[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"},{"key":"node-role.kubernetes.io/master","operator":"Exists","effect":"NoSchedule"}]' \
+    --set startupProbe.initialDelaySeconds=120 \
+    --set startupProbe.periodSeconds=15 \
+    --set startupProbe.failureThreshold=60 \
+    --set startupProbe.timeoutSeconds=5 \
+    --set sonarProperties."sonar\\.web\\.javaOpts"="-Xmx1024m -Xms512m" \
+    --set sonarProperties."sonar\\.ce\\.javaOpts"="-Xmx1024m -Xms512m" \
+    --set resources.requests.memory=1Gi \
+    --set resources.requests.cpu=250m \
+    --set resources.limits.memory=3Gi \
+    --set resources.limits.cpu=2 \
     --timeout 25m
 }
 
@@ -211,15 +268,15 @@ wait_sonar_ready() {
   return 1
 }
 
-repair_stuck_init() {
-  local pod="$1"
-  ensure_node_sysctl_for_sonar
-  echo "WARN: Sonar pod stuck in init — helm repair + delete pod"
+repair_sonar_pod() {
+  local pod="$1" reason="${2:-unhealthy}"
+  apply_sysctl_all_k3s_nodes
+  echo "WARN: Sonar pod ${reason} — helm repair (pin ${SONAR_LAB_NODE}) + recreate pod"
   diagnose_sonar_pod "${pod}" || true
   helm_repair_sonar_lab || true
-  wait_postgres_sonar || echo "WARN: postgres not Running after helm — check: kubectl get pods -n ${SONAR_NS}"
+  wait_postgres_sonar || echo "WARN: postgres not Running — check: kubectl get pods -n ${SONAR_NS}"
   kubectl delete pod -n "${SONAR_NS}" "${pod}" --ignore-not-found --wait=false --request-timeout=30s 2>/dev/null || true
-  sleep 15
+  sleep 20
 }
 
 main() {
@@ -227,7 +284,7 @@ main() {
   echo "=============================================="
   echo " lab-sonarqube-recover — ${SONAR_URL}"
   echo "=============================================="
-  kubectl get pods -n "${SONAR_NS}" --request-timeout=20s 2>/dev/null || true
+  kubectl get pods -n "${SONAR_NS}" -o wide --request-timeout=20s 2>/dev/null || true
 
   if sonar_status_up && sonar_rules_ok; then
     echo "OK: SonarQube healthy (rules API 200)"
@@ -237,28 +294,24 @@ main() {
     exit 0
   fi
 
-  ensure_node_sysctl_for_sonar
+  apply_sysctl_all_k3s_nodes
 
-  local pod
+  local pod reason
   pod="$(sonar_main_pod)"
-  if sonar_pod_init_stuck "${pod}"; then
-    repair_stuck_init "${pod}"
-  elif [[ -z "${pod}" ]] || ! kubectl get ns "${SONAR_NS}" >/dev/null 2>&1; then
+  reason="$(sonar_pod_waiting_reason "${pod}")"
+
+  if [[ -z "${pod}" ]] || ! kubectl get ns "${SONAR_NS}" >/dev/null 2>&1; then
     echo "WARN: Sonar namespace/pod missing — installing via helm"
     helm_repair_sonar_lab || true
     wait_postgres_sonar || true
-    pod="$(sonar_main_pod)"
+  elif sonar_pod_needs_helm_repair "${pod}"; then
+    repair_sonar_pod "${pod}" "${reason:-init-stuck}"
+  elif sonar_status_up; then
+    echo "WARN: Sonar UP but rules API HTTP $(sonar_rules_http_admin) — helm repair (rules loading)"
+    repair_sonar_pod "${pod}" "rules-api"
   else
-    if sonar_status_up; then
-      echo "WARN: Sonar UP but rules API HTTP $(sonar_rules_http_admin) — restarting"
-    else
-      echo "WARN: SonarQube not UP — restarting workload"
-    fi
-    restart_sonar_workload || true
-    pod="$(sonar_main_pod)"
-    if sonar_pod_init_stuck "${pod}"; then
-      repair_stuck_init "${pod}"
-    fi
+    echo "WARN: SonarQube not UP — helm repair (skip rollout-only restart)"
+    repair_sonar_pod "${pod}" "not-up"
   fi
 
   if wait_sonar_ready; then
@@ -272,9 +325,9 @@ main() {
   echo "FAIL: SonarQube still unhealthy at ${SONAR_URL}" >&2
   pod="$(sonar_main_pod)"
   diagnose_sonar_pod "${pod}" || true
-  kubectl get pods -n "${SONAR_NS}" --request-timeout=20s 2>/dev/null || true
-  echo "  Try: sudo sysctl -w vm.max_map_count=524288" >&2
-  echo "  Then: bash paas/scripts/lab.sh sonarqube" >&2
+  kubectl get pods -n "${SONAR_NS}" -o wide --request-timeout=20s 2>/dev/null || true
+  echo "  On worker nodes: sudo sysctl -w vm.max_map_count=524288" >&2
+  echo "  Or pin stays on master: SONAR_LAB_NODE=master bash paas/scripts/lab.sh sonarqube" >&2
   exit 1
 }
 
