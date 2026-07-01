@@ -136,7 +136,7 @@ body = dedupe_run_paas_deploy(body)
 def dedupe_sonar_rc(text: str) -> str:
     """Stale monoliths may contain old inline scanner + shell-wait Sonar blocks (duplicate def sonarRc)."""
     if "sonar-shell-wait-20260701" in text:
-        # Drop legacy synchronous scanner: def sonarRc = sh(script: ... npx sonarqube-scanner ... entire script
+        # Drop legacy synchronous scanner: def sonarRc = sh(script: ... npx sonarqube-scanner ...
         text = re.sub(
             r"\n\s+def sonarRc = sh\(script: '''#!/bin/bash[\s\S]*?''', returnStatus: true\)\n",
             "\n",
@@ -150,6 +150,8 @@ def dedupe_sonar_rc(text: str) -> str:
                 line_start = text.rfind("\n", 0, start)
                 line_start = 0 if line_start < 0 else line_start + 1
                 text = text[:line_start] + text[end:]
+        # New Sonar block uses sonarWaitRc — any def sonarRc is legacy and breaks CPS compile.
+        text = re.sub(r"^\s+def sonarRc\s*=.*$\n?", "", text, flags=re.MULTILINE)
     # Same scope cannot declare def sonarRc twice — keep first def, later ones become assignment.
     seen_def = 0
     out = []
@@ -166,7 +168,12 @@ def dedupe_sonar_rc(text: str) -> str:
 body = dedupe_sonar_rc(body)
 sonar_rc_defs = len(re.findall(r"^\s+def sonarRc\s*=", body, re.MULTILINE))
 sonar_wait_defs = len(re.findall(r"^\s+def sonarWaitRc\s*=", body, re.MULTILINE))
-if sonar_rc_defs > 1:
+if "sonar-shell-wait-20260701" in body:
+    if sonar_rc_defs != 0:
+        sys.exit(f"FAIL: sonar-shell-wait monolith must have 0 def sonarRc, found {sonar_rc_defs}")
+    if sonar_wait_defs != 1:
+        sys.exit(f"FAIL: expected exactly 1 def sonarWaitRc, found {sonar_wait_defs}")
+elif sonar_rc_defs > 1:
     sys.exit(f"FAIL: expected at most 1 def sonarRc in monolith, found {sonar_rc_defs}")
 if sonar_wait_defs > 1:
     sys.exit(f"FAIL: expected at most 1 def sonarWaitRc in monolith, found {sonar_wait_defs}")
@@ -215,13 +222,22 @@ PY
 echo "==> Push monolith to ${JENKINS_NS}/${JPOD}:${REMOTE_DIR}/paas-deploy-stages.groovy"
 kexec_i tee "${REMOTE_DIR}/paas-deploy-stages.groovy" < "${WORK}/paas-deploy-stages.groovy" >/dev/null
 
-echo "==> Verify on pod (4 wrapper checks)"
+echo "==> Verify on pod (4 wrapper checks + Sonar compile safety)"
 kexec sh -c "
   f=${REMOTE_DIR}/paas-deploy-stages.groovy
   grep -qF 'helm-portable-20260620-cps-split' \"\$f\" && echo '   [OK] helm marker' || { echo '   [FAIL] helm marker'; exit 1; }
   grep -qF 'def runPaasDeploy()' \"\$f\" && echo '   [OK] def runPaasDeploy()' || { echo '   [FAIL] def runPaasDeploy()'; exit 1; }
   tail -1 \"\$f\" | grep -qF 'return this' && echo '   [OK] return this (last line)' || { echo '   [FAIL] return this'; exit 1; }
   grep -qF 'def coerceHarborHostForCosign' \"\$f\" && echo '   [OK] coerceHarborHostForCosign' || { echo '   [FAIL] coerceHarborHostForCosign'; exit 1; }
+  if grep -qF 'sonar-shell-wait-20260701' \"\$f\"; then
+    rc=\$(grep -c 'def sonarRc' \"\$f\" || true)
+    wait=\$(grep -c 'def sonarWaitRc' \"\$f\" || true)
+    if [ \"\$rc\" != 0 ] || [ \"\$wait\" != 1 ]; then
+      echo \"   [FAIL] Sonar compile safety: def sonarRc=\$rc def sonarWaitRc=\$wait (re-run fix-paas-deploy-cps-split-now.sh)\"
+      exit 1
+    fi
+    echo '   [OK] Sonar sonarWaitRc only (no def sonarRc)'
+  fi
 "
 
 echo ""
