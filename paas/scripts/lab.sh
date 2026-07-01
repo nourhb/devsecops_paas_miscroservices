@@ -77,7 +77,8 @@ usage() {
   echo "  frontend-safety   Recreate + master pin (prevent pod storms)"
   echo "  emergency       Kyverno webhook unblock + disk + restore PaaS UI"
   echo "  emergency-up    Unstick everything: kill lab jobs, restart k3s, recover UI"
-  echo "  quick-up        ONE command: master + postgres + frontend UI (use this first)"
+  echo "  platform-heal   k3s + git pull + quick-up + Sonar + CPS sync (run after reboot)"
+  echo "  git-pull        Discard VM script edits and git pull origin/main"
   echo "  reboot          Safe recovery after VM/PC reboot (fixes broken deployment images)"
   echo "  reinstall-platform  Reinstall Jenkins+Harbor+Argo after k3s db wipe (~30-60 min)"
   echo "  fresh-cluster   Full redeploy after k3s db wipe (namespace + postgres + UI :30100)"
@@ -267,6 +268,13 @@ case "$cmd" in
     bash "$LIB/lab-emergency-up.sh" ;;
   quick-up|up|fix)
     bash "$LIB/lab-quick-up.sh" ;;
+  platform-heal|vm-heal|heal-all)
+    bash "$LIB/lab-platform-heal.sh" ;;
+  git-pull|pull-repo)
+    cd "$REPO_ROOT"
+    git checkout -- paas/scripts/lib/fix-paas-deploy-cps-split-now.sh \
+      paas/scripts/lib/lab-sonarqube-fresh-install.sh paas/scripts/lab.sh 2>/dev/null || true
+    git pull ;;
   fresh-cluster|bootstrap-lab|rebuild-lab)
     bash "$LIB/lab-fresh-cluster.sh" ;;
   reboot|reboot-recover|after-reboot)
