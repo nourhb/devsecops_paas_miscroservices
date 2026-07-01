@@ -111,6 +111,13 @@ fi
 
 # Recovery image must be in containerd
 if ! k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+  log "recovery image missing — try Harbor/docker import (frontend-force)"
+  if [[ -f "${SCRIPT_DIR}/lab-frontend-force-recover.sh" ]]; then
+    PAAS_SKIP_MASTER_HEAL=1 bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" \
+      && k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery' || true
+  fi
+fi
+if ! k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
   fail "paas-frontend:recovery missing — run: bash paas/scripts/lab.sh frontend (30 min build)"
 fi
 log "recovery image present"
