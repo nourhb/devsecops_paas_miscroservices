@@ -18,6 +18,13 @@ cd "${REPO_ROOT}"
 # shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 
+# grep -c prints 0 and exits 1 when no matches — never use `grep -c ... || echo 0` (yields "0\n0").
+grep_count() {
+  local n
+  n="$(grep -c "$1" "$2" 2>/dev/null | tail -1 | tr -d '\r\n')" || true
+  echo "${n:-0}"
+}
+
 resolve_jenkins_pod() {
   if [[ -n "${JENKINS_POD:-}" ]]; then
     JPOD="${JENKINS_POD}"
@@ -329,18 +336,18 @@ grep -qF 'def coerceHarborHostForCosign' "${RENDER}/paas-deploy-load-h3.groovy" 
   || { echo "FAIL: helpers missing in h2/h3" >&2; exit 1; }
 
 if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
-  shell_render="$(grep -c 'sonar-shell-wait-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  shell_render="$(grep_count 'sonar-shell-wait-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
   if [[ "${shell_render}" != "1" ]]; then
     echo "FAIL: Jenkinsfile has sonar-shell-wait but render p2 does not — git pull && re-run" >&2
     exit 1
   fi
   echo "OK: Sonar shell-wait marker present in rendered p2 (Step 5 — no Groovy sleep)"
-  sonar_rc_render="$(grep -c 'def sonarWaitRc' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  sonar_rc_render="$(grep_count 'def sonarWaitRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
   [[ "${sonar_rc_render}" == "1" ]] || {
     echo "FAIL: rendered p2 has ${sonar_rc_render} def sonarWaitRc (expected 1) — rm -rf paas/jenkins/.render-test && re-run" >&2
     exit 1
   }
-  legacy_sonar_rc="$(grep -c 'def sonarRc' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  legacy_sonar_rc="$(grep_count 'def sonarRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
   [[ "${legacy_sonar_rc}" == "0" ]] || {
     echo "FAIL: rendered p2 still has ${legacy_sonar_rc} def sonarRc (stale Sonar block) — git pull Jenkinsfile && re-run" >&2
     exit 1
@@ -350,7 +357,7 @@ elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; the
 fi
 
 if grep -qF 'nginx-crane-ip-first-20260701' "${JENKINSFILE}" 2>/dev/null; then
-  nginx_render="$(grep -c 'nginx-crane-ip-first-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  nginx_render="$(grep_count 'nginx-crane-ip-first-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
   if [[ "${nginx_render}" != "1" ]]; then
     echo "FAIL: Jenkinsfile has nginx-crane-ip-first but render p2 does not — git pull && re-run" >&2
     exit 1
@@ -359,7 +366,7 @@ if grep -qF 'nginx-crane-ip-first-20260701' "${JENKINSFILE}" 2>/dev/null; then
 fi
 
 if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
-  rotate_render="$(grep -c 'sonar-auto-rotate-token-20260701' "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  rotate_render="$(grep_count 'sonar-auto-rotate-token-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
   if [[ "${rotate_render}" != "1" ]]; then
     echo "FAIL: Jenkinsfile has sonar-auto-rotate but render p2 does not — git pull Jenkinsfile.paas-deploy && re-run" >&2
     exit 1
@@ -380,7 +387,7 @@ fi
 
 SCA_MARKER='Python BOM from requirements.txt (node — works without python3 on agent)'
 if grep -qF "${SCA_MARKER}" "${JENKINSFILE}" 2>/dev/null; then
-  sca_render="$(grep -c "${SCA_MARKER}" "${RENDER}/paas-deploy-stages-p2.groovy" 2>/dev/null || echo 0)"
+  sca_render="$(grep_count "${SCA_MARKER}" "${RENDER}/paas-deploy-stages-p2.groovy")"
   if [[ "${sca_render}" != "1" ]]; then
     echo "FAIL: Jenkinsfile has Python node SCA but render p2 does not (got ${sca_render}) — git pull Jenkinsfile && re-run" >&2
     exit 1
@@ -581,7 +588,8 @@ kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=6
 echo "OK: pod monolith verified (return this + 1× runPaasDeploy)"
 if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
   shell_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'sonar-shell-wait-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'sonar-shell-wait-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || shell_pod=0
+  shell_pod="${shell_pod:-0}"
   if [[ "${shell_pod}" == "1" ]]; then
     echo "OK: Sonar shell-wait marker on pod monolith"
   else
@@ -589,9 +597,11 @@ if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
     exit 1
   fi
   sonar_wait_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'def sonarWaitRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'def sonarWaitRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_wait_pod=0
+  sonar_wait_pod="${sonar_wait_pod:-0}"
   sonar_rc_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'def sonarRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'def sonarRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_rc_pod=0
+  sonar_rc_pod="${sonar_rc_pod:-0}"
   if [[ "${sonar_wait_pod}" == "1" ]] && [[ "${sonar_rc_pod}" == "0" ]]; then
     echo "OK: pod monolith has sonarWaitRc (no duplicate def sonarRc)"
   else
@@ -603,7 +613,8 @@ elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; the
 fi
 if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
   rotate_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'sonar-auto-rotate-token-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'sonar-auto-rotate-token-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || rotate_pod=0
+  rotate_pod="${rotate_pod:-0}"
   if [[ "${rotate_pod}" == "1" ]]; then
     echo "OK: Sonar auto-rotate marker on pod monolith"
   else
@@ -613,7 +624,8 @@ if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; the
 fi
 if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; then
   harbor_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'harbor-ensure-push-token-20260630' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'harbor-ensure-push-token-20260630' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || harbor_pod=0
+  harbor_pod="${harbor_pod:-0}"
   if [[ "${harbor_pod}" == "1" ]]; then
     echo "OK: Harbor ensure-push-token marker on pod monolith"
   else
@@ -623,7 +635,8 @@ if grep -qF 'harbor-ensure-push-token-20260630' "${JENKINSFILE}" 2>/dev/null; th
 fi
 if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/null; then
   sca_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'Python BOM from requirements.txt (node' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c 'Python BOM from requirements.txt (node' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sca_pod=0
+  sca_pod="${sca_pod:-0}"
   if [[ "${sca_pod}" == "1" ]]; then
     echo "OK: Python node-first SCA marker on pod monolith"
   else
@@ -631,7 +644,8 @@ if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/nul
     exit 1
   fi
   bomref_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+    grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || bomref_pod=0
+  bomref_pod="${bomref_pod:-0}"
   if [[ "${bomref_pod}" -ge 1 ]]; then
     echo "OK: Python SCA bom-ref quoted (Node object literal) on pod monolith"
   else
