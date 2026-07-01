@@ -19,6 +19,27 @@ if [[ -n "${MEM_AVAIL}" && "${MEM_AVAIL}" -lt 400 ]]; then
   log "WARN: low memory (${MEM_AVAIL}MB) — k3s may stay activating until RAM frees"
 fi
 
+ensure_swap() {
+  if swapon --show 2>/dev/null | grep -q .; then
+    log "swap already on"
+    return 0
+  fi
+  local swapfile="/swapfile"
+  if [[ -f "${swapfile}" ]] && swapon "${swapfile}" 2>/dev/null; then
+    log "enabled existing ${swapfile}"
+    return 0
+  fi
+  if [[ "${MEM_AVAIL}" -lt 800 ]] && [[ -n "${DISK_PCT}" && "${DISK_PCT}" -lt 85 ]]; then
+    log "creating 2G swap (low RAM lab — prevents k3s OOM hang)"
+    fallocate -l 2G "${swapfile}" 2>/dev/null || dd if=/dev/zero of="${swapfile}" bs=1M count=2048 status=progress
+    chmod 600 "${swapfile}"
+    mkswap "${swapfile}"
+    swapon "${swapfile}"
+  fi
+}
+
+ensure_swap
+
 log "stop boot timers + k3s"
 systemctl stop paas-lab-start-retry.timer paas-lab-start-retry2.timer paas-lab-start-retry3.timer 2>/dev/null || true
 systemctl stop paas-lab-start.service 2>/dev/null || true

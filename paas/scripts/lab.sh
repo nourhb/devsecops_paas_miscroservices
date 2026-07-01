@@ -294,6 +294,8 @@ case "$cmd" in
     else
       sudo bash "$LIB/lab-k3s-unstick.sh"
     fi ;;
+  k3s-diagnose|diagnose-k3s)
+    bash "$LIB/lab-k3s-diagnose.sh" ;;
   k3s-ensure|k3s)
     bash "$LIB/lab-k3s-ensure.sh" ;;
   restore|fix-app|back)
