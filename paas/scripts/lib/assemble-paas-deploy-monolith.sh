@@ -134,14 +134,22 @@ def dedupe_run_paas_deploy(text: str) -> str:
 body = dedupe_run_paas_deploy(body)
 
 def dedupe_sonar_rc(text: str) -> str:
-    """Stale monoliths may contain checkpoint-poll + shell-wait Sonar blocks (duplicate def sonarRc)."""
-    if "sonar-shell-wait-20260701" in text and "sonar-checkpoint-poll-20260630" in text:
-        start = text.find("sonar-checkpoint-poll-20260630")
-        end = text.find("sonar-shell-wait-20260701", start + 1)
-        if start >= 0 and end > start:
-            line_start = text.rfind("\n", 0, start)
-            line_start = 0 if line_start < 0 else line_start + 1
-            text = text[:line_start] + text[end:]
+    """Stale monoliths may contain old inline scanner + shell-wait Sonar blocks (duplicate def sonarRc)."""
+    if "sonar-shell-wait-20260701" in text:
+        # Drop legacy synchronous scanner: def sonarRc = sh(script: ... npx sonarqube-scanner ... entire script
+        text = re.sub(
+            r"\n\s+def sonarRc = sh\(script: '''#!/bin/bash[\s\S]*?''', returnStatus: true\)\n",
+            "\n",
+            text,
+            count=1,
+        )
+        if "sonar-checkpoint-poll-20260630" in text:
+            start = text.find("sonar-checkpoint-poll-20260630")
+            end = text.find("sonar-shell-wait-20260701", start + 1)
+            if start >= 0 and end > start:
+                line_start = text.rfind("\n", 0, start)
+                line_start = 0 if line_start < 0 else line_start + 1
+                text = text[:line_start] + text[end:]
     # Same scope cannot declare def sonarRc twice — keep first def, later ones become assignment.
     seen_def = 0
     out = []
@@ -157,8 +165,11 @@ def dedupe_sonar_rc(text: str) -> str:
 
 body = dedupe_sonar_rc(body)
 sonar_rc_defs = len(re.findall(r"^\s+def sonarRc\s*=", body, re.MULTILINE))
-if sonar_rc_defs != 1:
-    sys.exit(f"FAIL: expected 1 def sonarRc in monolith, found {sonar_rc_defs}")
+sonar_wait_defs = len(re.findall(r"^\s+def sonarWaitRc\s*=", body, re.MULTILINE))
+if sonar_rc_defs > 1:
+    sys.exit(f"FAIL: expected at most 1 def sonarRc in monolith, found {sonar_rc_defs}")
+if sonar_wait_defs > 1:
+    sys.exit(f"FAIL: expected at most 1 def sonarWaitRc in monolith, found {sonar_wait_defs}")
 
 step_fns = [
     "runPaasDeployEnvInit",

@@ -3233,7 +3233,7 @@ exit 0
           }
           def sonarPollSec = (env.JENKINS_SONAR_POLL_SEC?.trim() ?: '12') as int
           def sonarPollMaxMin = (env.JENKINS_SONAR_POLL_MAX_MIN?.trim() ?: '25') as int
-          def sonarRc = 1
+          def sonarWaitRc = 1
           for (int sonarAttempt = 1; sonarAttempt <= 3; sonarAttempt++) {
             if (sonarAttempt > 1) {
               echo "[sonar] retry attempt ${sonarAttempt}/3 (prior scan interrupted or failed)"
@@ -3275,7 +3275,7 @@ exit 0
             if (sonarStartRc != 0) {
               continue
             }
-            sonarRc = sh(script: """#!/bin/bash
+            sonarWaitRc = sh(script: """#!/bin/bash
               set +e
               LOG=paas-artifacts/sonar-scanner.log
               PIDF=paas-artifacts/sonar-scanner.pid
@@ -3296,12 +3296,12 @@ exit 0
               done
               exit 1
             """, returnStatus: true)
-            if (sonarRc == 0) {
+            if (sonarWaitRc == 0) {
               break
             }
             def sonarLogMid = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
             if (sonarLogMid.contains('EXECUTION SUCCESS') || sonarLogMid.contains('ANALYSIS SUCCESSFUL')) {
-              sonarRc = 0
+              sonarWaitRc = 0
               break
             }
           }
@@ -3322,7 +3322,7 @@ exit 0
             exit 0
           ''', returnStatus: true)
           def sonarLog = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
-          def sonarPassed = (sonarRc as Integer) == 0 \
+          def sonarPassed = (sonarWaitRc as Integer) == 0 \
             || sonarLog.contains('EXECUTION SUCCESS') \
             || sonarLog.contains('ANALYSIS SUCCESSFUL')
           if (sonarPassed) {
