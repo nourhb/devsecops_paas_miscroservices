@@ -357,12 +357,12 @@ elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; the
 fi
 
 if grep -qF 'nginx-crane-ip-first-20260701' "${JENKINSFILE}" 2>/dev/null; then
-  nginx_render="$(grep_count 'nginx-crane-ip-first-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
+  nginx_render="$(grep_count 'nginx-crane-ip-first-20260701' "${RENDER}/paas-deploy-load-h2.groovy")"
   if [[ "${nginx_render}" != "1" ]]; then
-    echo "FAIL: Jenkinsfile has nginx-crane-ip-first but render p2 does not — git pull && re-run" >&2
+    echo "FAIL: Jenkinsfile has nginx-crane-ip-first but render h2 does not — git pull && re-run" >&2
     exit 1
   fi
-  echo "OK: nginx-crane-ip-first marker present in rendered p2 (Vite/Angular Step 6)"
+  echo "OK: nginx-crane-ip-first marker present in rendered h2 (Vite/Angular Step 6)"
 fi
 
 if grep -qF 'sonar-auto-rotate-token-20260701' "${JENKINSFILE}" 2>/dev/null; then
