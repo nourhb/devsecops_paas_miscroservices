@@ -140,6 +140,15 @@ rm -rf "${RENDER}"
 mkdir -p "${RENDER}"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 RENDER_PY="${REPO_ROOT}/paas/jenkins/render-loadable-stages.py"
+# Stale .render-test causes Jenkins CpsCompilationErrorsException: duplicate def sonarRc
+stale_p2="${REPO_ROOT}/paas/jenkins/.render-test/paas-deploy-stages-p2.groovy"
+if [[ -f "${stale_p2}" ]] && grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  if grep -q 'def sonarRc' "${stale_p2}" 2>/dev/null \
+    || ! grep -qF 'sonar-shell-wait-20260701' "${stale_p2}" 2>/dev/null; then
+    echo "WARN: removing stale paas/jenkins/.render-test (old def sonarRc Sonar block)"
+    rm -rf "${REPO_ROOT}/paas/jenkins/.render-test"
+  fi
+fi
 patch_python_bom_ref_quotes
 render_ok=0
 if [[ -f "${RENDER_PY}" ]] && [[ -f "${JENKINSFILE}" ]]; then
@@ -161,6 +170,11 @@ if [[ "${render_ok}" != "1" ]] && [[ -d "${REPO_ROOT}/paas/jenkins/.render-test"
     echo "FAIL: paas/jenkins/.render-test has stale nip-first crane push (401 fallback)" >&2
     echo "  Run: bash paas/scripts/lib/fix-harbor-crane-ip-push-now.sh" >&2
     echo "  Or: rm -rf paas/jenkins/.render-test && git pull && re-run this script" >&2
+    exit 1
+  fi
+  stale_p2_fb="${REPO_ROOT}/paas/jenkins/.render-test/paas-deploy-stages-p2.groovy"
+  if [[ -f "${stale_p2_fb}" ]] && grep -q 'def sonarRc' "${stale_p2_fb}" 2>/dev/null; then
+    echo "FAIL: paas/jenkins/.render-test has stale def sonarRc — rm -rf paas/jenkins/.render-test && git pull && re-run" >&2
     exit 1
   fi
   echo "WARN: fresh render failed — using paas/jenkins/.render-test/ (may lack latest Jenkinsfile fixes; rm -rf it after git pull)"
