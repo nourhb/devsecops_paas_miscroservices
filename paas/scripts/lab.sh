@@ -48,7 +48,7 @@ usage() {
   echo "  force-fix-paas-deploy  fix-paas-deploy + disable UI job revert + restart frontend"
   echo "  break-paas-deploy-loop  Same as fix-paas-deploy (explicit name)"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
-  echo "  sonarqube       Restart SonarQube if NodePort :30900 is not UP"
+  echo "  sonarqube       Wipe + reinstall Sonar 9.9 LTS on master (:30900)"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
   echo "  artifactory-bootstrap  Deploy JFrog Artifactory OSS + wire ARTIFACTORY_* (Step 8)"
   echo "  full-pipeline-enable   Steps 7-8+10-11 no-skip: helm, Artifactory, ZAP, Helm OCI"
@@ -184,8 +184,8 @@ case "$cmd" in
     bash -c 'set -a; source paas/frontend/docker-compose.env 2>/dev/null; set +a; exec python3 paas/scripts/lib/apply-jenkins-inline-steps-wrapper.py' ;;
   jenkins-tools|agent-tools)
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
-  sonarqube|sonar-heal|sonar-recover)
-    bash "$LIB/lab-sonarqube-recover.sh" ;;
+  sonarqube|sonar-heal|sonar-recover|sonar-fresh|sonarqube-fresh)
+    bash "$LIB/lab-sonarqube-fresh-install.sh" ;;
   sonar-bootstrap|bootstrap-sonar)
     bash "$LIB/bootstrap-sonarqube-lab.sh" ;;
   artifactory-bootstrap|bootstrap-artifactory|artifactory)

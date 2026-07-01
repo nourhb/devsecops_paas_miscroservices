@@ -83,9 +83,14 @@ elif [[ "${SKIP_HARBOR_FIX_PUSH:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-harbor
 fi
 
 if [[ "${SKIP_SONAR_BOOTSTRAP:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" ]]; then
-  echo "==> 0b/5 Sonar token (Step 5 — validate or rotate via API)"
-  SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" \
-    || echo "WARN: sonar-bootstrap failed — Step 5 may fail until: bash paas/scripts/lab.sh sonar-bootstrap"
+  echo "==> 0b/5 Sonar token (skip heal if UP; else fresh install)"
+  if curl -fsS -m 8 "http://${NODE_IP:-192.168.56.129}:${SONAR_NODEPORT:-30900}/api/system/status" 2>/dev/null \
+    | grep -q '"status":"UP"'; then
+    SYNC_JENKINS=false PAAS_SYNC_K8S_ENV=false bash "${SCRIPT_DIR}/bootstrap-sonarqube-lab.sh" \
+      || echo "WARN: sonar-bootstrap failed"
+  else
+    echo "WARN: Sonar not UP — skip bootstrap here; run: bash paas/scripts/lab.sh sonarqube"
+  fi
   if [[ -f "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" ]]; then
     python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force \
       || echo "WARN: Jenkins SONAR_TOKEN param sync skipped"

@@ -154,10 +154,7 @@ main() {
   echo "=============================================="
 
   if ! curl -fsS -m 12 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
-    warn "Sonar not UP at ${SONAR_URL} — running lab-sonarqube-recover"
-    if [[ -f "${SCRIPT_DIR}/lab-sonarqube-recover.sh" ]]; then
-      bash "${SCRIPT_DIR}/lab-sonarqube-recover.sh" || true
-    fi
+    die "Sonar not UP at ${SONAR_URL} — run: bash paas/scripts/lab.sh sonarqube"
   fi
 
   wait_sonar_up
