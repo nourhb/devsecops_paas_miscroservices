@@ -653,7 +653,8 @@ if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/nul
     patch_python_bom_ref_quotes
     patch_python_bom_ref_on_pod
     bomref_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-      grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' || echo 0)"
+      grep -c "'bom-ref':" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || bomref_pod=0
+    bomref_pod="${bomref_pod:-0}"
     if [[ "${bomref_pod}" -ge 1 ]]; then
       echo "OK: Python SCA bom-ref quoted after live patch"
     else
