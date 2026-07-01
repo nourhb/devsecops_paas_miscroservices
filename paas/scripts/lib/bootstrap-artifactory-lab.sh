@@ -58,14 +58,35 @@ ensure_artifactory_release() {
   kubectl get ns "${ARTI_NS}" >/dev/null 2>&1 || kubectl create ns "${ARTI_NS}"
   helm repo add jfrog https://charts.jfrog.io >/dev/null 2>&1 || true
   helm repo update jfrog >/dev/null 2>&1 || true
+
+  local pg_tag=""
+  local pg_pod="${ARTI_RELEASE}-postgresql-0"
+  if kubectl get pod -n "${ARTI_NS}" "${pg_pod}" >/dev/null 2>&1; then
+    pg_tag="$(kubectl get pod -n "${ARTI_NS}" "${pg_pod}" \
+      -o jsonpath='{.spec.containers[0].image}' 2>/dev/null | sed -n 's/.*:\([^/]*\)$/\1/p')"
+    [[ -n "${pg_tag}" ]] && ok "retain postgresql.image.tag=${pg_tag} for helm upgrade"
+  fi
+
+  local helm_extra=()
+  if [[ -n "${pg_tag}" ]]; then
+    helm_extra+=(--set "postgresql.image.tag=${pg_tag}" --set databaseUpgradeReady=true)
+  fi
+
   echo "==> helm upgrade --install ${ARTI_RELEASE} (NodePort ${ARTI_PORT})"
-  helm upgrade --install "${ARTI_RELEASE}" jfrog/artifactory \
+  if ! helm upgrade --install "${ARTI_RELEASE}" jfrog/artifactory \
     -n "${ARTI_NS}" \
     --set nginx.service.type=NodePort \
     --set "nginx.service.nodePort=${ARTI_PORT}" \
     --set artifactory.persistence.enabled=false \
     --set postgresql.enabled=true \
-    --wait --timeout 15m
+    "${helm_extra[@]}" \
+    --wait --timeout 15m; then
+    if arti_ping; then
+      warn "helm upgrade failed but Artifactory ping OK — continuing"
+    else
+      fail "helm upgrade failed and Artifactory not reachable"
+    fi
+  fi
   wait_artifactory
 }
 
