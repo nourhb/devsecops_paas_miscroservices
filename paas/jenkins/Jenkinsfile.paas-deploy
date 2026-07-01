@@ -64,7 +64,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       set +e
       echo "[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (NodePort/env URLs before cluster DNS — built-in Jenkins agent)"
       echo "[paas-jenkinsfile] marker=dt-probe-only-upload-20260701 (no cluster DNS fallback on built-in agent)"
-      echo "[paas-jenkinsfile] marker=dt-listfile-no-ansi-20260701 (no \$'\\n' — fixes 32336\$ curl port error in CPS monolith)"
+      echo "[paas-jenkinsfile] marker=dt-listfile-posix-20260701 (temp file list — dash/sh safe, no process substitution)"
       dt_probe_ok() {
         u="$1"
         [ -z "$u" ] && return 1
