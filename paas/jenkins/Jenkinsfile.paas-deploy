@@ -3275,7 +3275,6 @@ exit 0
             if (sonarStartRc != 0) {
               continue
             }
-            def sonarRc = 1
             sonarRc = sh(script: """#!/bin/bash
               set +e
               LOG=paas-artifacts/sonar-scanner.log
