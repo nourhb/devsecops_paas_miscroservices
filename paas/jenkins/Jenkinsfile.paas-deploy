@@ -64,6 +64,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       set +e
       echo "[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (NodePort/env URLs before cluster DNS — built-in Jenkins agent)"
       echo "[paas-jenkinsfile] marker=dt-probe-only-upload-20260701 (no cluster DNS fallback on built-in agent)"
+      echo "[paas-jenkinsfile] marker=dt-listfile-no-ansi-20260701 (no \$'\\n' — fixes 32336\$ curl port error in CPS monolith)"
       dt_probe_ok() {
         u="$1"
         [ -z "$u" ] && return 1
@@ -86,17 +87,16 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
           done
         fi | awk '!seen[$0]++'
       }
-      DT_PROBE_OK_BASES=""
+      DT_LIST_FILE="sca/.dt-bases-$$.txt"
+      : > "${DT_LIST_FILE}"
       DT_BASE_PICKED=""
       while IFS= read -r _dt_probe; do
         [ -z "${_dt_probe}" ] && continue
         if dt_probe_ok "${_dt_probe}"; then
-          DT_PROBE_OK_BASES="${DT_PROBE_OK_BASES}${_dt_probe}"$'\n'
+          printf '%s\n' "${_dt_probe}" >> "${DT_LIST_FILE}"
           [ -z "${DT_BASE_PICKED}" ] && DT_BASE_PICKED="${_dt_probe}"
         fi
-      done <<EOF
-$(dt_upload_candidates)
-EOF
+      done < <(dt_upload_candidates)
       if [ -z "${DT_BASE_PICKED}" ]; then
         if [ -n "${DT_BASE}" ]; then
           DT_BASE_PICKED="${DT_BASE}"
@@ -104,7 +104,7 @@ EOF
           DT_BASE_PICKED="${JENKINS_DT_BASE}"
         fi
         if [ -n "${DT_BASE_PICKED}" ]; then
-          DT_PROBE_OK_BASES="${DT_BASE_PICKED}"$'\n'
+          printf '%s\n' "${DT_BASE_PICKED}" > "${DT_LIST_FILE}"
         fi
         echo "[sca] Dependency-Track /api/version probe failed on all bases — will still try upload via ${DT_BASE_PICKED:-<none>}"
       else
@@ -148,9 +148,8 @@ EOF
           DT_UPLOADED=1
           break
         fi
-      done <<EOF
-$(printf '%s' "${DT_PROBE_OK_BASES}")
-EOF
+      done < "${DT_LIST_FILE}"
+      rm -f "${DT_LIST_FILE}"
       if [ "${DT_UPLOADED}" = "1" ]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) base=${DT_UPLOAD_BASE:-${DT_BASE_PICKED}} project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
