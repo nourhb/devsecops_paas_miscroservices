@@ -83,6 +83,7 @@ usage() {
   echo "  reinstall-platform  Reinstall Jenkins+Harbor+Argo after k3s db wipe (~30-60 min)"
   echo "  fresh-cluster   Full redeploy after k3s db wipe (namespace + postgres + UI :30100)"
   echo "  k3s-vacuum      Fix k3s stuck activating (slow SQLite — run with sudo)"
+  echo "  k3s-unstick     Hard reset k3s when stuck activating (API wait, killall)"
   echo "  k3s-ensure      Wait for / restart k3s API when 127.0.0.1:6443 times out"
   echo "  break-loop      STOP cron + pause frontend + break db-repair loop"
   echo "  worker1         Heal worker1 NotReady (Harbor DB PVC node)"
@@ -286,6 +287,12 @@ case "$cmd" in
       bash "$LIB/lab-k3s-db-vacuum.sh"
     else
       sudo bash "$LIB/lab-k3s-db-vacuum.sh"
+    fi ;;
+  k3s-unstick|unstick-k3s)
+    if [[ "$(id -u)" -eq 0 ]]; then
+      bash "$LIB/lab-k3s-unstick.sh"
+    else
+      sudo bash "$LIB/lab-k3s-unstick.sh"
     fi ;;
   k3s-ensure|k3s)
     bash "$LIB/lab-k3s-ensure.sh" ;;

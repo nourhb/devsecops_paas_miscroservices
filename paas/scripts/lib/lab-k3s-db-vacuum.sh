@@ -48,18 +48,30 @@ sqlite3 "${STATE_DB}" "PRAGMA optimize;"
 AFTER="$(du -sh "${STATE_DB}" | awk '{print $1}')"
 log "state.db size after: ${AFTER}"
 
-log "start k3s — wait up to 10 min for active"
+log "start k3s — wait for API (systemd may stay 'activating' while API is up)"
 systemctl start k3s
-for i in $(seq 1 60); do
-  if systemctl is-active k3s >/dev/null 2>&1; then
-    log "OK: k3s active (attempt ${i})"
+sleep 20
+
+api_up() {
+  timeout 15 k3s kubectl get --raw=/healthz --request-timeout=12s >/dev/null 2>&1 \
+    || timeout 15 k3s kubectl get nodes --request-timeout=12s >/dev/null 2>&1
+}
+
+for i in $(seq 1 90); do
+  if api_up; then
+    log "OK: k3s API up (attempt ${i}/90, systemd=$(systemctl is-active k3s 2>/dev/null || echo ?))"
     echo ""
     echo "Next: bash paas/scripts/lab.sh quick-up"
     exit 0
   fi
-  echo "  …${i}/60 ($(systemctl is-active k3s 2>/dev/null || echo unknown))"
+  st="$(systemctl is-active k3s 2>/dev/null || echo unknown)"
+  echo "  …${i}/90 API down systemd=${st}"
+  if (( i % 6 == 0 )); then
+    journalctl -u k3s -n 6 --no-pager 2>/dev/null | tail -6 || true
+  fi
   sleep 10
 done
 
-log "still not active — check: journalctl -u k3s -n 30 --no-pager"
+log "API still down — try hard unstick: sudo bash paas/scripts/lab.sh k3s-unstick"
+journalctl -u k3s -n 30 --no-pager 2>/dev/null | tail -30 || true
 exit 1

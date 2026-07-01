@@ -21,13 +21,13 @@ fi
 export LAB_K3S_WAIT_LOOPS="${LAB_K3S_WAIT_LOOPS:-24}"
 export LAB_K3S_WAIT_SEC="${LAB_K3S_WAIT_SEC:-5}"
 if ! bash "${SCRIPT_DIR}/lab-k3s-ensure.sh"; then
-  die "k3s API still down after ~$(( LAB_K3S_WAIT_LOOPS * LAB_K3S_WAIT_SEC ))s — run VACUUM in a separate terminal (can take 45 min):
+  die "k3s API still down after ~$(( LAB_K3S_WAIT_LOOPS * LAB_K3S_WAIT_SEC ))s — run:
 
-  sudo bash paas/scripts/lab.sh k3s-vacuum
+  sudo bash paas/scripts/lab.sh k3s-unstick
 
-Then re-run:
+If journal shows Slow SQL / compact_rev_key:
 
-  bash paas/scripts/lab.sh platform-heal"
+  sudo bash paas/scripts/lab.sh k3s-vacuum"
 fi
 
 log "2/6 git pull"
