@@ -15,7 +15,7 @@ SYNC_JENKINS="${SYNC_JENKINS:-true}"
 
 SONAR_URL="http://${NODE_IP}:${SONAR_PORT}"
 
-ok() { echo "OK: $*"; }
+ok() { echo "OK: $*" >&2; }
 warn() { echo "WARN: $*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -26,11 +26,25 @@ need_cmd() {
 patch_env_key() {
   local file="$1" key="$2" value="$3"
   [[ -f "${file}" ]] || touch "${file}"
-  if grep -qE "^${key}=" "${file}"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
-  else
-    echo "${key}=${value}" >> "${file}"
-  fi
+  export _PAAS_PATCH_KEY="${key}" _PAAS_PATCH_VAL="${value}" _PAAS_PATCH_FILE="${file}"
+  python3 - <<'PY'
+import os
+from pathlib import Path
+f = Path(os.environ["_PAAS_PATCH_FILE"])
+key = os.environ["_PAAS_PATCH_KEY"]
+val = os.environ["_PAAS_PATCH_VAL"]
+lines = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+out, seen = [], False
+for line in lines:
+    if line.startswith(key + "="):
+        out.append(f"{key}={val}")
+        seen = True
+    else:
+        out.append(line)
+if not seen:
+    out.append(f"{key}={val}")
+f.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+PY
 }
 
 wait_sonar_up() {
@@ -115,7 +129,7 @@ create_analysis_token() {
   http="${resp##*$'\n__HTTP__'}"
   resp="${resp%$'\n__HTTP__'*}"
   if [[ "${http}" == "200" ]]; then
-    token="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' <<<"${resp}")"
+    token="$(printf '%s' "${resp}" | grep -o '"token":"[^"]*"' | head -1 | sed 's/.*"token":"//;s/"$//')"
     [[ -n "${token}" ]] || fail "empty token from Sonar: ${resp}"
     printf '%s' "${token}"
     return 0
