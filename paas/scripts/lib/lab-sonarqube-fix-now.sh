@@ -140,13 +140,33 @@ sonar_has_pvc() {
   kubectl get pvc -n "${SONAR_NS}" 2>/dev/null | grep -qi 'sonarqube'
 }
 
+# "Already UP" is not enough to skip the upgrade: a pod can be transiently UP between
+# OOMKill/restart cycles while still running stale (undersized) resources/javaOpts from a
+# previous helm release — see 20260702 incident where this short-circuit silently prevented
+# a memory bump from ever being applied, leaving Sonar OOMKilling every build. Only skip when
+# the running pod's memory limit already matches this file's target.
+TARGET_MEM_LIMIT="4608Mi"
+sonar_current_mem_limit() {
+  local pod
+  pod="$(kubectl get pods -n "${SONAR_NS}" -o name 2>/dev/null | grep sonarqube-sonarqube | head -1 | sed 's|pod/||' || true)"
+  [[ -n "${pod}" ]] || return 0
+  kubectl get pod -n "${SONAR_NS}" "${pod}" -o jsonpath='{.spec.containers[0].resources.limits.memory}' 2>/dev/null || true
+}
+
+CURRENT_MEM_LIMIT="$(sonar_current_mem_limit)"
+echo "==> current pod memory limit=${CURRENT_MEM_LIMIT:-unknown} target=${TARGET_MEM_LIMIT}"
+
 if curl -fsS -m 8 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
-  if [[ "${SONAR_FORCE_WIPE:-0}" != "1" ]] && sonar_has_pvc; then
-    ok "Sonar already UP at ${SONAR_URL} (PVC present — persistent)"
+  if [[ "${SONAR_FORCE_WIPE:-0}" != "1" ]] && sonar_has_pvc && [[ "${CURRENT_MEM_LIMIT}" == "${TARGET_MEM_LIMIT}" ]]; then
+    ok "Sonar already UP at ${SONAR_URL} (PVC present, resources up to date — persistent)"
     exit 0
   fi
-  echo "WARN: Sonar is UP but has NO PersistentVolumeClaim — data (tokens/password) is ephemeral."
-  echo "==> Recreating StatefulSet with a 2Gi PVC so tokens survive pod restarts (one-time restart, ~5-15 min)."
+  if [[ "${CURRENT_MEM_LIMIT}" != "${TARGET_MEM_LIMIT}" ]]; then
+    echo "WARN: Sonar resources outdated (current=${CURRENT_MEM_LIMIT:-unknown} != target=${TARGET_MEM_LIMIT}) — forcing helm upgrade even though pod reports UP"
+  else
+    echo "WARN: Sonar is UP but has NO PersistentVolumeClaim — data (tokens/password) is ephemeral."
+    echo "==> Recreating StatefulSet with a 2Gi PVC so tokens survive pod restarts (one-time restart, ~5-15 min)."
+  fi
 fi
 
 sonar_helm_upgrade_lab

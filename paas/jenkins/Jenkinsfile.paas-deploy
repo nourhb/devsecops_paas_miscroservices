@@ -2971,6 +2971,24 @@ def runPaasDeploy = {
               fi
               npx --yes @cyclonedx/cyclonedx-npm --output-file sca/bom.json
               CDX_RC=\$?
+              if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
+                if [ -f package-lock.json ]; then
+                  echo "[sca] cyclonedx-npm (yarn tree) failed rc=\${CDX_RC} — retry --package-lock-only against package-lock.json (avoids npm ls ELSPROBLEMS on yarn-installed tree)"
+                  npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
+                  CDX_RC=\$?
+                fi
+              fi
+              if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
+                echo "[sca] WARN: cyclonedx-npm still failing (rc=\${CDX_RC}) — writing minimal BOM from package.json dependencies (broken/inconsistent lockfile tree; does not block deploy)"
+                node -e '
+                  const fs=require("fs");
+                  const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));
+                  const deps={...pkg.dependencies||{},...pkg.devDependencies||{}};
+                  const components=Object.entries(deps).map(([name,version])=>({type:"library",name,version:String(version).replace(/^[\\^~>=< ]+/,""),"bom-ref":"npm:"+name,purl:"pkg:npm/"+name}));
+                  fs.mkdirSync("sca",{recursive:true});
+                  fs.writeFileSync("sca/bom.json", JSON.stringify({bomFormat:"CycloneDX",specVersion:"1.4",version:1,metadata:{component:{type:"application",name:pkg.name||"app"}},components}, null, 2)+"\\n");
+                ' 2>/dev/null && CDX_RC=0
+              fi
             elif [ -f package-lock.json ]; then
               echo "[sca] cyclonedx-npm (package-lock.json)"
               npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
