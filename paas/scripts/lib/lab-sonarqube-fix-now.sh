@@ -120,15 +120,16 @@ livenessProbe:
   failureThreshold: 20
   timeoutSeconds: 5
 sonarProperties:
-  sonar.web.javaOpts: "-Xmx256m -Xms128m -XX:+UseSerialGC"
-  sonar.ce.javaOpts: "-Xmx256m -Xms128m -XX:+UseSerialGC"
+  sonar.web.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
+  sonar.ce.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
+  sonar.search.javaOpts: "-Xmx768m -Xms512m -XX:+UseSerialGC"
 resources:
   requests:
-    memory: 256Mi
-    cpu: 100m
+    memory: 768Mi
+    cpu: 250m
   limits:
-    memory: 1280Mi
-    cpu: "1"
+    memory: 3072Mi
+    cpu: "2"
 YAML
 ok "wrote ${SONAR_VALUES}"
 
