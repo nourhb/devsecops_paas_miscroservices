@@ -1846,7 +1846,7 @@ ${paasForceFreshNextBuildShellSnippet()}
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ]; then
         echo "[image] crane-next16-202605-j48300: npx next build"
         NB_FLAGS=""
-        if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then NB_FLAGS="--webpack"; fi
+        if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then NB_FLAGS="--webpack"; fi
         _next_hb=""
         if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
           _hb_sec="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-20}"
@@ -1856,6 +1856,13 @@ ${paasForceFreshNextBuildShellSnippet()}
         fi
 ${paasSourceBuildEnvShellSnippet()}
         run_with_keepalive npx next build \$NB_FLAGS
+        _NB_RC=\$?
+        if [ "\${_NB_RC}" != "0" ] && [ -z "\${NB_FLAGS}" ]; then
+          echo "[image] WARN: Turbopack failed — retry with --webpack (fonts.gstatic.com often blocked on lab)"
+          run_with_keepalive npx next build --webpack
+          _NB_RC=\$?
+        fi
+        [ "\${_NB_RC}" = "0" ] || exit "\${_NB_RC}"
         if [ -n "\${_next_hb}" ]; then kill "\${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
       fi
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ]; then
@@ -2694,8 +2701,8 @@ def runPaasDeploy = {
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS=""
                 if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
-                  echo "[build] Next.js 16+: omitting --no-lint (removed in Next 16 CLI); default bundler is Turbopack. Set JENKINS_NEXT_BUILD_WEBPACK=true for webpack only if needed."
-                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-false}" = "true" ]; then
+                  echo "[build] Next.js 16+: default --webpack on lab (Turbopack needs fonts.gstatic.com). Set JENKINS_NEXT_BUILD_WEBPACK=false to force Turbopack."
+                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
                     NB_FLAGS="--webpack"
                   fi
                 else
@@ -2720,6 +2727,13 @@ def runPaasDeploy = {
                 fi
 ''' + paasSourceBuildEnvShellSnippet() + '''
                 run_with_keepalive npx next build $NB_FLAGS
+                _NB_RC=$?
+                if [ "${_NB_RC}" != "0" ] && [ -z "${NB_FLAGS}" ]; then
+                  echo "[build] WARN: Turbopack failed (lab VMs often block fonts.gstatic.com) — retry with --webpack"
+                  run_with_keepalive npx next build --webpack
+                  _NB_RC=$?
+                fi
+                [ "${_NB_RC}" = "0" ] || exit "${_NB_RC}"
                 if [ -n "${_next_hb}" ]; then kill "${_next_hb}" 2>/dev/null || true; trap - EXIT; fi
                 if [ -d .next/standalone ]; then
                   echo "[build] .next/standalone OK — stage 6 will use a small crane layer."

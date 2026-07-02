@@ -19,7 +19,7 @@ const ENV_BACKED_PARAMETER_DEFAULTS: Readonly<Record<string, string>> = {
     JENKINS_DEPENDENCY_TRACK_BASE_URL: process.env.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim()
         || env.DEPENDENCY_TRACK_BASE_URL?.trim()
         || "",
-    PAAS_DT_UPLOAD_OPTIONAL: process.env.PAAS_DT_UPLOAD_OPTIONAL?.trim() || "false",
+    PAAS_DT_UPLOAD_OPTIONAL: process.env.PAAS_DT_UPLOAD_OPTIONAL?.trim() || "true",
     NVD_API_KEY: env.NVD_API_KEY,
     ZAP_TARGET_URL: env.ZAP_TARGET_URL,
     BUILD_PACKAGE_PROXY_URL: env.BUILD_PACKAGE_PROXY_URL,
@@ -64,7 +64,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["DEPENDENCY_TRACK_BASE_URL", ""],
     ["DEPENDENCY_TRACK_API_KEY", ""],
     ["JENKINS_DEPENDENCY_TRACK_BASE_URL", env.DEPENDENCY_TRACK_BASE_URL?.trim() || ""],
-    ["PAAS_DT_UPLOAD_OPTIONAL", "false"],
+    ["PAAS_DT_UPLOAD_OPTIONAL", "true"],
     ["NVD_API_KEY", ""],
     ["ZAP_TARGET_URL", ""],
     ["BUILD_PACKAGE_PROXY_URL", ""],
@@ -74,7 +74,7 @@ const PARAMETER_DEFINITIONS: ParamDef[] = [
     ["JENKINS_SH_KEEPALIVE", "true"],
     ["JENKINS_PAAS_FAST_PIPELINE", "false"],
     ["PROJECT_BUILD_ENV_B64", ""],
-    ["JENKINS_NEXT_BUILD_WEBPACK", "false"],
+    ["JENKINS_NEXT_BUILD_WEBPACK", "true"],
     ["JENKINS_NEXT_PERSIST_CACHE", "true"],
     ["JENKINS_NEXT_BUILD_HEARTBEAT", "true"],
     ["JENKINS_NEXT_BUILD_HEARTBEAT_SEC", "45"],
