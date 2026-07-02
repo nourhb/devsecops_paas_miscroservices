@@ -425,7 +425,16 @@ if grep -qF "${SCA_MARKER}" "${JENKINSFILE}" 2>/dev/null; then
   echo "OK: Python node-first SCA marker present in rendered p2 (Step 4)"
 fi
 
-if grep -qF 'dt-cluster-first-20260702' "${JENKINSFILE}" 2>/dev/null; then
+if grep -qF 'dt-nodeport-first-lab-20260702' "${JENKINSFILE}" 2>/dev/null; then
+  dt_cf="$(grep_count 'dt-nodeport-first-lab-20260702' "${RENDER}/paas-deploy-load-h1.groovy")"
+  if [[ "${dt_cf}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has dt-nodeport-first-lab but render h1 does not — git pull && re-run" >&2
+    exit 1
+  fi
+  grep -qF 'dt_kubectl_portforward_upload' "${RENDER}/paas-deploy-load-h1.groovy" \
+    || { echo "FAIL: render h1 missing dt_kubectl_portforward_upload" >&2; exit 1; }
+  echo "OK: dt-nodeport-first-lab in rendered h1 (NodePort + 401 warn + kubectl port-forward)"
+elif grep -qF 'dt-cluster-first-20260702' "${JENKINSFILE}" 2>/dev/null; then
   dt_cf="$(grep_count 'dt-cluster-first-20260702' "${RENDER}/paas-deploy-load-h1.groovy")"
   if [[ "${dt_cf}" != "1" ]]; then
     echo "FAIL: Jenkinsfile has dt-cluster-first but render h1 does not — git pull && re-run" >&2
@@ -751,6 +760,17 @@ if grep -qF 'Python BOM from requirements.txt (node' "${JENKINSFILE}" 2>/dev/nul
     fi
   fi
 fi
+if grep -qF 'dt-nodeport-first-lab-20260702' "${JENKINSFILE}" 2>/dev/null; then
+  dt_np_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+    grep -c 'dt-nodeport-first-lab-20260702' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || dt_np_pod=0
+  dt_np_pod="${dt_np_pod:-0}"
+  if [[ "${dt_np_pod}" -ge 1 ]]; then
+    echo "OK: dt-nodeport-first-lab on pod monolith (Step 4: 401 warn + NodePort first)"
+  else
+    echo "FAIL: pod monolith missing dt-nodeport-first-lab (got ${dt_np_pod}) — re-run fix-paas-deploy-cps-split-now.sh" >&2
+    exit 1
+  fi
+fi
 if grep -qF 'dt-listfile-posix-20260701' "${JENKINSFILE}" 2>/dev/null; then
   dt_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
     grep -c 'dt-listfile-posix-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || dt_pod=0
@@ -774,5 +794,6 @@ echo " Console MUST show:"
  echo "   marker=${CPS_MARKER}"
  echo "   load paas-deploy-stages.groovy + paas.runPaasDeploy()"
  echo "   *** BEGIN : Check Parameters ***"
+echo "   marker=dt-nodeport-first-lab-20260702 (Step 4: NodePort first; 401 → WARN not FAIL)"
 echo "   PAAS_DT_UPLOAD_OPTIONAL=true → Step 4 WARN (not FAIL) when DT down"
 echo "=============================================="

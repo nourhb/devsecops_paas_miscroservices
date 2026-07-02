@@ -49,7 +49,8 @@ usage() {
   echo "  jenkins   Sync Jenkinsfile + rebuild PaaS frontend image"
   echo "  jenkins-stages  Render + install CPS-split load bundles (no frontend rebuild)"
   echo "  fix-paas-deploy Fix MethodTooLarge: CPS bundles + API job wrapper (break loop)"
-  echo "  force-fix-paas-deploy  fix-paas-deploy + disable UI job revert + restart frontend"
+  echo "  force-fix-paas-deploy  ONE SHOT: sync + heal + CPS + params (break failure loop)"
+  echo "  deploy-now|force-ready  Same as force-fix-paas-deploy"
   echo "  break-paas-deploy-loop  Same as fix-paas-deploy (explicit name)"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Wipe + reinstall Sonar 9.9 LTS on master (:30900)"
@@ -193,8 +194,8 @@ case "$cmd" in
     bash "$LIB/fix-p3-no-self-invoke.sh" ;;
   fix-paas-deploy|cps-split|fix-method-too-large|break-paas-deploy-loop)
     bash "$LIB/fix-paas-deploy-cps-split-now.sh" ;;
-  force-fix-paas-deploy|force-fix)
-    bash "$LIB/restore-paas-deploy-working.sh" ;;
+  force-fix-paas-deploy|force-fix|deploy-now|force-ready)
+    bash "$LIB/lab-deploy-force-ready.sh" ;;
   force-api-paas-deploy|api-wrapper-now)
     bash "$LIB/force-api-jenkins-paas-deploy-now.sh" ;;
   apply-inline-wrapper|inline-wrapper)

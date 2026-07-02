@@ -337,7 +337,11 @@ if [[ "${LAB_DT_ENV_ONLY:-false}" == "true" ]]; then
     exit 0
   fi
   sync_dt_env_urls || exit 1
-  verify_dt_api_key || true
+  if ! verify_dt_api_key; then
+    warn "DEPENDENCY_TRACK_API_KEY invalid — auto dt-bootstrap (LAB_DT_ENV_ONLY)"
+    bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh" || true
+    verify_dt_api_key || true
+  fi
   echo "lab-dependency-track: env URLs synced (LAB_DT_ENV_ONLY)"
   exit 0
 fi

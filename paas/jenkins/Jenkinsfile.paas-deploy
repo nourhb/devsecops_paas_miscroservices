@@ -58,13 +58,16 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
     "DT_VERSION=${ver}",
     "DT_PROJECT=${dtName}",
     "DT_PROJECT_TAG=${projId}",
-    "PAAS_DT_UPLOAD_OPTIONAL=${(params.PAAS_DT_UPLOAD_OPTIONAL?.trim() ?: env.PAAS_DT_UPLOAD_OPTIONAL ?: 'false').trim()}"
+    "PAAS_DT_UPLOAD_OPTIONAL=${(params.PAAS_DT_UPLOAD_OPTIONAL?.trim() ?: env.PAAS_DT_UPLOAD_OPTIONAL ?: 'true').trim()}"
   ]) {
     sh '''#!/usr/bin/env bash
       set +e
-      echo "[paas-jenkinsfile] marker=dt-cluster-first-20260702 (in-cluster URL first; kubectl port-forward fallback)"
+      export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
+      echo "[paas-jenkinsfile] marker=dt-nodeport-first-lab-20260702 (NodePort before cluster DNS; 401/5xx warn when bom present)"
       echo "[paas-jenkinsfile] marker=dt-listfile-posix-20260701 (temp file list — dash/sh safe, no process substitution)"
       IN_CLUSTER_DT="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
+      DT_NODE_IP="${NODE_IP:-192.168.56.129}"
+      DT_NODEPORT_URL="http://${DT_NODE_IP}:${DEPENDENCY_TRACK_NODEPORT:-32336}"
       dt_probe_ok() {
         u="$1"
         [ -z "$u" ] && return 1
@@ -72,10 +75,11 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       }
       dt_upload_candidates() {
         for u in \
-          "${IN_CLUSTER_DT}" \
-          "http://dtrack-dependency-track-api-server.dependency-track:8080" \
+          "${DT_NODEPORT_URL}" \
           "${JENKINS_DT_BASE}" \
           "${DT_BASE}" \
+          "${IN_CLUSTER_DT}" \
+          "http://dtrack-dependency-track-api-server.dependency-track:8080" \
           "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
           "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080"
         do
@@ -136,8 +140,10 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       }
       dt_kubectl_portforward_upload() {
         KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
-        command -v kubectl >/dev/null 2>&1 && KCTL=kubectl
-        [ -x "${KCTL}" ] || { echo "[sca] kubectl missing — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
+        if ! [ -x "${KCTL}" ]; then
+          command -v kubectl >/dev/null 2>&1 && KCTL=kubectl
+        fi
+        [ -x "${KCTL}" ] || { echo "[sca] kubectl missing at ${KCTL} — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
         DT_PF_PORT="${DT_PF_PORT:-18080}"
         for DT_SVC in dtrack-dependency-track-api-server dependency-track-api-server; do
           "${KCTL}" get svc -n dependency-track "${DT_SVC}" >/dev/null 2>&1 || continue
@@ -184,6 +190,9 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       elif [ "${PAAS_DT_UPLOAD_OPTIONAL}" = "true" ] && [ -f sca/bom.json ]; then
         echo "[sca] WARN: Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — PAAS_DT_UPLOAD_OPTIONAL=true; continuing with local sca/bom.json"
         echo "PAAS_STEP_WARN step=4 id=dependency-track msg=SBOM kept locally; Dependency-Track unreachable (HTTP ${DT_HTTP:-?})"
+      elif [ -f sca/bom.json ] && { [ "${DT_HTTP}" = "401" ] || [ "${DT_HTTP}" = "403" ]; }; then
+        echo "[sca] WARN: Dependency-Track HTTP ${DT_HTTP} (stale API key) — SBOM kept locally; run: bash paas/scripts/lab.sh dt-bootstrap"
+        echo "PAAS_STEP_WARN step=4 id=dependency-track msg=SBOM local only (DT auth HTTP ${DT_HTTP}) — fix key then re-deploy"
       else
         echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — ensure API pod Running: kubectl get pods -n dependency-track"
         echo "[sca] Fix: bash paas/scripts/lab.sh dependency-track && bash paas/scripts/lab.sh jenkins-zap-tools"
@@ -1846,7 +1855,10 @@ ${paasForceFreshNextBuildShellSnippet()}
       if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ]; then
         echo "[image] crane-next16-202605-j48300: npx next build"
         NB_FLAGS=""
-        if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then NB_FLAGS="--webpack"; fi
+        NB_FLAGS="--webpack"
+        if [ "\${JENKINS_NEXT_BUILD_WEBPACK:-true}" = "false" ]; then
+          echo "[image] WARN: JENKINS_NEXT_BUILD_WEBPACK=false ignored — lab uses --webpack"
+        fi
         _next_hb=""
         if [ "\${JENKINS_NEXT_BUILD_HEARTBEAT:-true}" != "false" ]; then
           _hb_sec="\${JENKINS_NEXT_BUILD_HEARTBEAT_SEC:-20}"
@@ -2701,10 +2713,8 @@ def runPaasDeploy = {
               elif [ "${JENKINS_NEXT_BUILD_USE_NPM_SCRIPT:-}" != "true" ] && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)"; then
                 NB_FLAGS=""
                 if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
-                  echo "[build] Next.js 16+: default --webpack on lab (Turbopack needs fonts.gstatic.com). Set JENKINS_NEXT_BUILD_WEBPACK=false to force Turbopack."
-                  if [ "${JENKINS_NEXT_BUILD_WEBPACK:-true}" != "false" ]; then
-                    NB_FLAGS="--webpack"
-                  fi
+                  echo "[build] Next.js 16+: forcing --webpack (lab — Turbopack needs fonts.gstatic.com; ignores JENKINS_NEXT_BUILD_WEBPACK=false)"
+                  NB_FLAGS="--webpack"
                 else
                   echo "[build] Next.js 15: --no-lint only (do not pass --webpack — not supported on next build CLI; see Step 6b crane-next16 fix)."
                   NB_FLAGS="--no-lint"
