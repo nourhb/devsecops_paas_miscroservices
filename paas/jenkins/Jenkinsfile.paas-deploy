@@ -2428,7 +2428,9 @@ def runPaasDeploy = {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
-  def paasFastPipeline = false
+  // paasFastPipeline is permanently false (security steps always run) — hardcoded at each
+  // use site below instead of a closure-local var, because split CPS step-functions
+  // (runPaasDeployStep3/4_5/6/7_8/9_12) cannot reliably read a cross-function local `def`.
   def fastParam = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim()
   env.JENKINS_PAAS_FAST_PIPELINE = "false"
   println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${fastParam} effective=false (security steps always run)"
@@ -2440,17 +2442,22 @@ def runPaasDeploy = {
   } else {
     paasStepWarn(1, 'build-env', 'No PROJECT_BUILD_ENV_B64 from PaaS — save Application environment in Edit project and redeploy frontend if needed')
   }
-  if (paasFastPipeline) {
+  if (false) {
     env.JENKINS_SKIP_NEXT_BUILD = "true"
     println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Next.js production build still runs before crane tar when using dockerless push (Dockerfile is not executed)."
   }
 
-  def cranePushTimeoutMin = 240
+  // Stored via env (not a closure-local def) — Step 6 runs in a different split
+  // CPS function (runPaasDeployStep6) and cannot reliably read a cross-function local.
+  env.PAAS_CRANE_PUSH_TIMEOUT_MIN = "240"
   try {
     def rawTp = (params.JENKINS_CRANE_PUSH_TIMEOUT_MIN?.trim() ?: env.JENKINS_CRANE_PUSH_TIMEOUT_MIN ?: "").trim()
-    if (rawTp) cranePushTimeoutMin = Integer.parseInt(rawTp)
+    if (rawTp) {
+      Integer.parseInt(rawTp)
+      env.PAAS_CRANE_PUSH_TIMEOUT_MIN = rawTp
+    }
   } catch (Exception ignored) {
-    cranePushTimeoutMin = 240
+    env.PAAS_CRANE_PUSH_TIMEOUT_MIN = "240"
   }
 
   println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
@@ -2557,7 +2564,7 @@ def runPaasDeploy = {
       if (deferAngularToStep6) {
         def nodeVer = resolveNodeVersion(buildAppRoot)
         println "[build] Angular/static SPA — skip Step 3 npm build (Step 6 builds dist with Node ${nodeVer} + nginx on port 80)"
-      } else if (paasFastPipeline) {
+      } else if (false) {
         println "[build] JENKINS_PAAS_FAST_PIPELINE=true — skip workspace npm in Step 3 (npm ci + next build run in Step 6 crane/Docker path)."
       } else {
       ensureNodeTool(resolveNodeVersion(buildAppRoot))
@@ -2822,7 +2829,7 @@ def runPaasDeploy = {
     """
     def buildProof = 'workspace'
     if (buildAppRoot != '.') { buildProof = "app root ${buildAppRoot}" }
-    if (paasFastPipeline && fileExists("${buildAppRoot}/package.json")) {
+    if (false && fileExists("${buildAppRoot}/package.json")) {
       buildProof = 'fast-pipeline: compile deferred to Step 6 (crane/Docker)'
     } else if (fileExists("${buildAppRoot}/.next/BUILD_ID")) { buildProof = "${buildAppRoot}/.next build present" }
     else if (fileExists("${buildAppRoot}/target") || fileExists('target')) { buildProof = 'target/ present' }
@@ -2833,7 +2840,7 @@ def runPaasDeploy = {
   }
 
   stage("Step 4 — Tests SCA (Dependency-Check, CycloneDX, Dependency-Track)") {
-    if (paasFastPipeline) {
+    if (false) {
       paasStepSkip(4, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 4 (SCA / Dependency-Check / cdxgen)."
     } else {
@@ -3082,7 +3089,7 @@ exit 0
   }
 
   stage("Step 5 — Tests SAST (SonarQube)") {
-    if (paasFastPipeline) {
+    if (false) {
       paasStepSkip(5, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
@@ -3455,7 +3462,7 @@ echo $?
         ensureNodeTool(resolveNodeVersion(step6AppRoot))
       }
       def craneBin = ensureCraneTool()
-      def step6TimeoutMin = cranePushTimeoutMin
+      def step6TimeoutMin = (env.PAAS_CRANE_PUSH_TIMEOUT_MIN ?: "240") as Integer
       if (isLegacyAngularProject(step6AppRoot)) {
         step6TimeoutMin = Math.max(step6TimeoutMin, 360)
         println "[image] legacy Angular ivy build — Step 6 timeout ${step6TimeoutMin} min (set JENKINS_CRANE_PUSH_TIMEOUT_MIN to override)"
@@ -3572,7 +3579,7 @@ EOF
   }
 
   stage("Step 8 — Publication des artefacts (Artifactory)") {
-    if (paasFastPipeline) {
+    if (false) {
       paasStepSkip(8, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 8 (Artifactory bundle upload)."
     } else {
@@ -3703,7 +3710,7 @@ EOF
   }
 
   stage("Step 10 — DAST (OWASP ZAP baseline)") {
-    if (paasFastPipeline) {
+    if (false) {
       paasStepSkip(10, 'JENKINS_PAAS_FAST_PIPELINE=true')
       println "[paas] Fast pipeline: skip Step 10 (OWASP ZAP baseline)."
     } else {
