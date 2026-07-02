@@ -12,6 +12,43 @@ def commandExists(String commandName) {
   return sh(script: "command -v ${commandName} >/dev/null 2>&1", returnStatus: true) == 0
 }
 
+def pauseFrontendForSonar() {
+  sh(script: '''#!/bin/bash
+    set +e
+    mkdir -p paas-artifacts
+    export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
+    KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
+    command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM on 8GB lab)"; exit 0; }
+    NS="${PAAS_NS:-paas}"
+    PRIOR="$("${KCTL}" get deployment frontend -n "${NS}" -o jsonpath="{.spec.replicas}" 2>/dev/null)"
+    PRIOR="$(printf "%s" "${PRIOR}" | grep -oE "^[0-9]+$")"
+    [ -n "${PRIOR}" ] && [ "${PRIOR}" -gt 0 ] 2>/dev/null || PRIOR=1
+    echo "${PRIOR}" > paas-artifacts/.frontend-prior-replicas 2>/dev/null || true
+    echo "[sonar-ram] pausing frontend (prior replicas=${PRIOR}) to free RAM for SonarQube scan (8GB lab)"
+    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas=0 2>/dev/null || echo "[sonar-ram] scale-down failed (non-fatal)"
+    sleep 5
+    exit 0
+  ''', returnStatus: true)
+}
+
+def restoreFrontendAfterSonar() {
+  sh(script: '''#!/bin/bash
+    set +e
+    export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
+    KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
+    command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip restore (verify frontend manually: bash paas/scripts/lab.sh frontend-up)"; exit 0; }
+    NS="${PAAS_NS:-paas}"
+    TARGET="$(cat paas-artifacts/.frontend-prior-replicas 2>/dev/null)"
+    TARGET="$(printf "%s" "${TARGET}" | grep -oE "^[0-9]+$")"
+    [ -n "${TARGET}" ] && [ "${TARGET}" -gt 0 ] 2>/dev/null || TARGET=1
+    echo "[sonar-ram] restoring frontend replicas=${TARGET}"
+    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed — run: bash paas/scripts/lab.sh frontend-up"
+    exit 0
+  ''', returnStatus: true)
+}
+
 def nonFatalStage(String label, Closure body) {
   catchError(buildResult: "SUCCESS", stageResult: "SUCCESS") {
     println "*** BEGIN : ${label} ***"
@@ -140,10 +177,8 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       }
       dt_kubectl_portforward_upload() {
         KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
-        if ! [ -x "${KCTL}" ]; then
-          command -v kubectl >/dev/null 2>&1 && KCTL=kubectl
-        fi
-        [ -x "${KCTL}" ] || { echo "[sca] kubectl missing at ${KCTL} — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
+        command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
+        command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sca] kubectl missing at ${KCTL} — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
         DT_PF_PORT="${DT_PF_PORT:-18080}"
         for DT_SVC in dtrack-dependency-track-api-server dependency-track-api-server; do
           "${KCTL}" get svc -n dependency-track "${DT_SVC}" >/dev/null 2>&1 || continue
@@ -3108,8 +3143,11 @@ exit 0
       }
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
+        println "[paas-jenkinsfile] marker=sonar-ram-pause-frontend-20260702 (scale frontend to 0 during scan on 8GB lab; auto-restore in finally)"
         ensureNodeTool()
         prependPath("/opt/java/openjdk/bin")
+        try {
+        pauseFrontendForSonar()
         withEnv([
           "SONAR_HOST_URL_PARAM=${sonarUrlParam}",
           "SONAR_NODEPORT=${env.SONAR_NODEPORT?.trim() ?: '30900'}",
@@ -3373,6 +3411,9 @@ exit 0
           } else {
             paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; on 8GB lab run: bash paas/scripts/lab.sh sonar-scan-window")
           }
+        }
+        } finally {
+          restoreFrontendAfterSonar()
         }
         return
       }
@@ -3743,8 +3784,8 @@ EOF
           run_zap_kubectl() {
             local ns="${ZAP_K8S_NAMESPACE:-cicd}" pod="paas-zap-${ZAP_BUILD:-0}"
             local kctl="${JENKINS_KUBECTL_BIN:-${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl}"
-            command -v kubectl >/dev/null 2>&1 && kctl=kubectl
-            [ -x "$kctl" ] || { echo "[zap] kubectl missing at $kctl"; return 127; }
+            command -v "$kctl" >/dev/null 2>&1 || kctl=kubectl
+            command -v "$kctl" >/dev/null 2>&1 || { echo "[zap] kubectl missing at $kctl"; return 127; }
             "$kctl" delete pod -n "$ns" "$pod" --ignore-not-found --wait=false 2>/dev/null || true
             "$kctl" run "$pod" -n "$ns" --restart=Never --image=ghcr.io/zaproxy/zaproxy:stable \
               --command -- zap-baseline.py -t "$ZAP_TARGET" -J /tmp/zap.json -r /tmp/zap.html 2>/dev/null
