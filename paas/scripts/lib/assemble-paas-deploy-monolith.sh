@@ -49,21 +49,38 @@ ensure_fresh_splits_on_pod() {
 
 ensure_fresh_splits_on_pod
 
-echo "==> Pull 7 split files from ${JENKINS_NS}/${JPOD}:${REMOTE_DIR}"
+echo "==> Pull 7 split files from ${JENKINS_NS}/${JPOD}:${REMOTE_DIR} (1 tar stream — fewer round-trips than 7 separate reads)"
+bulk_ok=0
+for attempt in 1 2 3; do
+  if kexec sh -c "cd '${REMOTE_DIR}' && tar -cf - ${SPLIT_FILES[*]}" > "${WORK}/bundle.tar" 2>/dev/null \
+    && [[ -s "${WORK}/bundle.tar" ]] \
+    && tar -xf "${WORK}/bundle.tar" -C "${WORK}" 2>/dev/null; then
+    bulk_ok=1
+    break
+  fi
+  echo "WARN: bulk tar pull-back attempt ${attempt}/3 failed (flaky kubectl exec on loaded VM) — retrying in 4s"
+  sleep 4
+done
+[[ "${bulk_ok}" == "1" ]] && echo "OK: bulk tar pull-back succeeded" || echo "WARN: bulk tar pull-back failed — falling back to per-file reads"
+
 for f in "${SPLIT_FILES[@]}"; do
   bytes=0
-  for attempt in 1 2 3 4 5; do
-    kexec cat "${REMOTE_DIR}/${f}" > "${WORK}/${f}" 2>/dev/null || true
-    bytes="$(wc -c < "${WORK}/${f}" 2>/dev/null | tr -d ' ')"
-    [[ -n "${bytes}" ]] || bytes=0
-    if [[ "${bytes}" -gt 0 ]] && grep -qF "${BUNDLE}" "${WORK}/${f}" 2>/dev/null; then
-      break
-    fi
-    echo "WARN: ${f} read-back attempt ${attempt}/5 got ${bytes} bytes (flaky kubectl exec on loaded VM) — retrying in 4s"
-    sleep 4
-  done
-  [[ "${bytes}" -gt 0 ]] || { echo "FAIL: ${f} empty on pod after 5 attempts — k3s API may be too unstable right now (bash paas/scripts/lab.sh k3s-unstick)" >&2; exit 1; }
-  grep -qF "${BUNDLE}" "${WORK}/${f}" || { echo "FAIL: ${f} missing ${BUNDLE} after 5 attempts" >&2; exit 1; }
+  [[ -f "${WORK}/${f}" ]] && bytes="$(wc -c < "${WORK}/${f}" 2>/dev/null | tr -d ' ')"
+  [[ -n "${bytes}" ]] || bytes=0
+  if [[ "${bytes}" -eq 0 ]] || ! grep -qF "${BUNDLE}" "${WORK}/${f}" 2>/dev/null; then
+    for attempt in 1 2 3 4 5; do
+      kexec cat "${REMOTE_DIR}/${f}" > "${WORK}/${f}" 2>/dev/null || true
+      bytes="$(wc -c < "${WORK}/${f}" 2>/dev/null | tr -d ' ')"
+      [[ -n "${bytes}" ]] || bytes=0
+      if [[ "${bytes}" -gt 0 ]] && grep -qF "${BUNDLE}" "${WORK}/${f}" 2>/dev/null; then
+        break
+      fi
+      echo "WARN: ${f} read-back attempt ${attempt}/5 got ${bytes} bytes (flaky kubectl exec on loaded VM) — retrying in 4s"
+      sleep 4
+    done
+  fi
+  [[ "${bytes}" -gt 0 ]] || { echo "FAIL: ${f} empty on pod after all attempts — k3s API may be too unstable right now (bash paas/scripts/lab.sh k3s-unstick)" >&2; exit 1; }
+  grep -qF "${BUNDLE}" "${WORK}/${f}" || { echo "FAIL: ${f} missing ${BUNDLE} after all attempts" >&2; exit 1; }
   echo "   ${f} (${bytes} bytes)"
 done
 
