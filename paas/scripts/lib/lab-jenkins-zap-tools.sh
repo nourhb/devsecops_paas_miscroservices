@@ -205,14 +205,38 @@ YAML
   ok "RBAC jenkins → scale deployments cluster-wide (RAM pause: frontend/harbor/dependency-track during Sonar, 8GB lab)"
 }
 
+jenkins_workload_present() {
+  # StatefulSet (jenkins-0) on most lab installs; Deployment on some. Retry a few times —
+  # the k3s API on an 8GB node under memory pressure blips transiently, and a single
+  # NotFound here used to hard-abort this whole script (set -euo pipefail) before it ever
+  # reached ensure_kubectl_in_jenkins / RBAC below.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if kubectl get pod -n "${JENKINS_NS}" jenkins-0 --request-timeout=30s >/dev/null 2>&1; then
+      return 0
+    fi
+    if kubectl get deploy/jenkins -n "${JENKINS_NS}" --request-timeout=30s >/dev/null 2>&1; then
+      return 0
+    fi
+    if kubectl get pod -n "${JENKINS_NS}" -l app.kubernetes.io/component=jenkins-controller \
+      --request-timeout=30s -o name 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    warn "Jenkins pod/deploy lookup attempt ${attempt}/5 failed (k3s API busy?) — retrying in 5s"
+    sleep 5
+  done
+  return 1
+}
+
 main() {
   echo "==> Jenkins ZAP tools (kubectl in pod + RBAC)"
   if ! lab_k8s_api_ready; then
     warn "Kubernetes API not reachable — restart k3s first"
     exit 1
   fi
-  kubectl get pod/jenkins-0 -n "${JENKINS_NS}" --request-timeout=30s >/dev/null 2>&1 \
-    || kubectl get deploy/jenkins -n "${JENKINS_NS}" --request-timeout=30s >/dev/null
+  if ! jenkins_workload_present; then
+    warn "no Jenkins pod/deployment found in ns=${JENKINS_NS} after retries — continuing anyway (ensure_kubectl_in_jenkins does its own pod resolution)"
+  fi
   ensure_kubectl_in_jenkins
   ensure_zap_rbac
   ensure_dt_rbac
