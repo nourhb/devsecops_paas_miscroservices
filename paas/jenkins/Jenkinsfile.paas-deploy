@@ -26,7 +26,7 @@ def pauseFrontendForSonar() {
       : > "${statefile}"
       local deploys deploys_err
       deploys_err="$(mktemp 2>/dev/null || echo /tmp/.pns-err-$$)"
-      deploys="$("${KCTL}" get deployments -n "${ns}" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.replicas}{"\n"}{end}' 2>"${deploys_err}")"
+      deploys="$("${KCTL}" get deployments -n "${ns}" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.replicas}{"\\n"}{end}' 2>"${deploys_err}")"
       if [ -z "${deploys}" ]; then
         echo "[sonar-ram] WARN: no deployments found in ns=${ns} — kubectl said: $(head -c 200 "${deploys_err}" 2>/dev/null | tr '\n' ' ')"
         rm -f "${deploys_err}" 2>/dev/null || true

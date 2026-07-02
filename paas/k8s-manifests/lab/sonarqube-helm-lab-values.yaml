@@ -64,8 +64,8 @@ sonarProperties:
   sonar.search.javaOpts: "-Xmx768m -Xms512m -XX:+UseSerialGC"
 resources:
   requests:
-    memory: 768Mi
+    memory: 1024Mi
     cpu: 250m
   limits:
-    memory: 3072Mi
+    memory: 4608Mi
     cpu: "2"
