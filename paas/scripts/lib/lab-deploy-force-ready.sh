@@ -58,10 +58,16 @@ preflight() {
     fail=1
   fi
   if kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c jenkins --request-timeout=45s -- \
-    test -x /var/jenkins_home/bin/kubectl 2>/dev/null; then
-    echo "OK: kubectl in Jenkins pod"
+    sh -c '/var/jenkins_home/bin/kubectl version --client >/dev/null 2>&1' 2>/dev/null; then
+    echo "OK: kubectl in Jenkins pod (working)"
   else
-    echo "WARN: kubectl missing in Jenkins pod"
+    echo "WARN: kubectl missing/broken in Jenkins pod — run: bash paas/scripts/lab.sh jenkins-zap-tools"
+    fail=1
+  fi
+  if kubectl get clusterrolebinding jenkins-lab-ram-pause >/dev/null 2>&1; then
+    echo "OK: RAM-pause RBAC present (frontend/harbor/dependency-track scale during Sonar)"
+  else
+    echo "WARN: RAM-pause RBAC missing — run: bash paas/scripts/lab.sh jenkins-zap-tools"
     fail=1
   fi
   marker_ok="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c jenkins --request-timeout=45s -- \

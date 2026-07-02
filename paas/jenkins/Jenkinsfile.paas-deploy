@@ -19,15 +19,40 @@ def pauseFrontendForSonar() {
     export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
     KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
     command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM on 8GB lab)"; exit 0; }
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM on 8GB lab) — run: bash paas/scripts/lab.sh jenkins-zap-tools"; exit 0; }
+
+    pause_ns_deployments() {
+      local ns="$1" statefile="$2"
+      : > "${statefile}"
+      local deploys
+      deploys="$("${KCTL}" get deployments -n "${ns}" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.replicas}{"\n"}{end}' 2>/dev/null)"
+      [ -z "${deploys}" ] && return 0
+      while read -r name replicas; do
+        [ -z "${name}" ] && continue
+        case "${replicas}" in ''|0) replicas=1 ;; esac
+        echo "${name} ${replicas}" >> "${statefile}"
+        "${KCTL}" scale "deployment/${name}" -n "${ns}" --replicas=0 2>/dev/null || true
+      done <<< "${deploys}"
+      echo "[sonar-ram] paused deployments in ns=${ns} (state: ${statefile})"
+    }
+
     NS="${PAAS_NS:-paas}"
     PRIOR="$("${KCTL}" get deployment frontend -n "${NS}" -o jsonpath="{.spec.replicas}" 2>/dev/null)"
     PRIOR="$(printf "%s" "${PRIOR}" | grep -oE "^[0-9]+$")"
     [ -n "${PRIOR}" ] && [ "${PRIOR}" -gt 0 ] 2>/dev/null || PRIOR=1
     echo "${PRIOR}" > paas-artifacts/.frontend-prior-replicas 2>/dev/null || true
     echo "[sonar-ram] pausing frontend (prior replicas=${PRIOR}) to free RAM for SonarQube scan (8GB lab)"
-    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas=0 2>/dev/null || echo "[sonar-ram] scale-down failed (non-fatal)"
-    sleep 5
+    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas=0 2>/dev/null || echo "[sonar-ram] frontend scale-down failed (non-fatal)"
+
+    # Harbor (push happens later in Step 6) and Dependency-Track (SBOM upload already
+    # attempted in Step 4) are not needed during the Sonar scan — pause them too to give
+    # the SonarQube server pod a real chance to survive on an 8GB lab node.
+    pause_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
+    pause_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
+
+    echo "[sonar-ram] node memory after pause:"
+    "${KCTL}" top node 2>/dev/null || free -h 2>/dev/null || true
+    sleep 10
     exit 0
   ''', returnStatus: true)
 }
@@ -38,13 +63,28 @@ def restoreFrontendAfterSonar() {
     export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
     KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
     command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip restore (verify frontend manually: bash paas/scripts/lab.sh frontend-up)"; exit 0; }
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip restore (verify manually: bash paas/scripts/lab.sh platform-heal)"; exit 0; }
+
+    restore_ns_deployments() {
+      local ns="$1" statefile="$2"
+      [ -s "${statefile}" ] || return 0
+      while read -r name replicas; do
+        [ -z "${name}" ] && continue
+        "${KCTL}" scale "deployment/${name}" -n "${ns}" --replicas="${replicas}" 2>/dev/null || true
+      done < "${statefile}"
+      echo "[sonar-ram] restored deployments in ns=${ns}"
+    }
+
     NS="${PAAS_NS:-paas}"
     TARGET="$(cat paas-artifacts/.frontend-prior-replicas 2>/dev/null)"
     TARGET="$(printf "%s" "${TARGET}" | grep -oE "^[0-9]+$")"
     [ -n "${TARGET}" ] && [ "${TARGET}" -gt 0 ] 2>/dev/null || TARGET=1
     echo "[sonar-ram] restoring frontend replicas=${TARGET}"
     "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed — run: bash paas/scripts/lab.sh frontend-up"
+
+    # Restore Harbor first (Step 6 needs it next) then Dependency-Track.
+    restore_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
+    restore_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
     exit 0
   ''', returnStatus: true)
 }
@@ -3152,7 +3192,7 @@ exit 0
       }
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
-        println "[paas-jenkinsfile] marker=sonar-ram-pause-frontend-20260702 (scale frontend to 0 during scan on 8GB lab; auto-restore in finally)"
+        println "[paas-jenkinsfile] marker=sonar-ram-pause-wide-20260702b (scale frontend+harbor+dependency-track to 0 during scan on 8GB lab; auto-restore in finally)"
         ensureNodeTool()
         prependPath("/opt/java/openjdk/bin")
         try {

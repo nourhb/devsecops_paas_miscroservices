@@ -23,19 +23,79 @@ jenkins_exec() {
 }
 
 ensure_kubectl_in_jenkins() {
+  local kbin_path="/var/jenkins_home/bin/kubectl"
+  local target="${JENKINS_POD:-}"
+
+  if jenkins_exec sh -c "test -x '${kbin_path}' && '${kbin_path}' version --client >/dev/null 2>&1"; then
+    ok "kubectl already installed and working in Jenkins pod: ${kbin_path}"
+    return 0
+  fi
+
+  jenkins_exec sh -c "mkdir -p \"\$(dirname '${kbin_path}')\"; rm -f '${kbin_path}'" 2>/dev/null || true
+
+  if [[ -z "${target}" ]]; then
+    if kubectl get pod -n "${JENKINS_NS}" jenkins-0 >/dev/null 2>&1; then
+      target="jenkins-0"
+    else
+      target="$(kubectl get pod -n "${JENKINS_NS}" -l app.kubernetes.io/component=jenkins-controller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      [[ -n "${target}" ]] || target="$(kubectl get pod -n "${JENKINS_NS}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    fi
+  else
+    target="${target#pod/}"
+  fi
+
+  # Preferred: copy a REAL local kubectl binary via `kubectl cp` (same VM/arch — no pod
+  # internet egress required at all). This is far more reliable than curl-in-pod on labs
+  # where the Jenkins container has no route to dl.k8s.io.
+  local local_kubectl="" candidate resolved
+  for candidate in "$(command -v kubectl 2>/dev/null || true)" /usr/local/bin/kubectl /usr/bin/kubectl /var/lib/rancher/k3s/data/current/bin/kubectl; do
+    [[ -n "${candidate}" ]] || continue
+    resolved="$(readlink -f "${candidate}" 2>/dev/null || echo "${candidate}")"
+    [[ -f "${resolved}" ]] || continue
+    local_kubectl="${resolved}"
+    break
+  done
+  if [[ -z "${local_kubectl}" ]] && command -v k3s >/dev/null 2>&1; then
+    local_kubectl="$(readlink -f "$(command -v k3s)" 2>/dev/null || command -v k3s)"
+  fi
+
+  if [[ -n "${local_kubectl}" && -n "${target}" ]]; then
+    echo "==> copying local kubectl (${local_kubectl}) into pod/${target} via kubectl cp (no pod egress needed)"
+    if kubectl cp "${local_kubectl}" "${JENKINS_NS}/${target}:${kbin_path}" -c jenkins 2>/dev/null \
+      || kubectl cp "${local_kubectl}" "${JENKINS_NS}/${target}:${kbin_path}" 2>/dev/null; then
+      jenkins_exec sh -c "chmod +x '${kbin_path}'" 2>/dev/null || true
+      if jenkins_exec sh -c "'${kbin_path}' version --client >/dev/null 2>&1"; then
+        ok "kubectl installed via kubectl cp: ${kbin_path}"
+        return 0
+      fi
+      warn "copied kubectl but it does not run in the pod — falling back to curl download"
+    else
+      warn "kubectl cp failed — falling back to curl download inside pod"
+    fi
+  else
+    warn "no local kubectl/k3s binary resolvable on host — falling back to curl download inside pod"
+  fi
+
+  # Fallback: download inside the pod (requires pod egress to dl.k8s.io / GCS mirror).
   jenkins_exec sh -s <<EOF
 set -eu
 KVER="${KUBECTL_VERSION}"
-KBIN="\${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
+KBIN="${kbin_path}"
 mkdir -p "\$(dirname "\${KBIN}")"
-if [ -x "\${KBIN}" ]; then
-  echo "OK: kubectl already installed: \${KBIN}"
-  "\${KBIN}" version --client --short 2>/dev/null || "\${KBIN}" version --client
-  exit 0
+rm -f "\${KBIN}"
+for url in \
+  "https://dl.k8s.io/release/v\${KVER}/bin/linux/amd64/kubectl" \
+  "https://storage.googleapis.com/kubernetes-release/release/v\${KVER}/bin/linux/amd64/kubectl"; do
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 "\${url}" -o "\${KBIN}" && [ -s "\${KBIN}" ] && break
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --timeout=300 "\${url}" -O "\${KBIN}" && [ -s "\${KBIN}" ] && break
+  fi
+done
+if [ ! -s "\${KBIN}" ]; then
+  echo "FAIL: kubectl download failed (no pod egress to dl.k8s.io and no local binary to cp)" >&2
+  exit 1
 fi
-curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 \\
-  "https://dl.k8s.io/release/v\${KVER}/bin/linux/amd64/kubectl" \\
-  -o "\${KBIN}"
 chmod +x "\${KBIN}"
 echo "OK: installed \${KBIN}"
 "\${KBIN}" version --client --short 2>/dev/null || "\${KBIN}" version --client
@@ -115,6 +175,36 @@ YAML
   ok "RBAC jenkins → dependency-track port-forward (Step 4 SBOM upload fallback)"
 }
 
+ensure_ram_pause_rbac() {
+  kubectl apply -f - <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: jenkins-lab-ram-pause
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-lab-ram-pause
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: jenkins-lab-ram-pause
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: ${JENKINS_NS}
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: ${JENKINS_NS}
+YAML
+  ok "RBAC jenkins → scale deployments cluster-wide (RAM pause: frontend/harbor/dependency-track during Sonar, 8GB lab)"
+}
+
 main() {
   echo "==> Jenkins ZAP tools (kubectl in pod + RBAC)"
   if ! lab_k8s_api_ready; then
@@ -126,6 +216,7 @@ main() {
   ensure_kubectl_in_jenkins
   ensure_zap_rbac
   ensure_dt_rbac
+  ensure_ram_pause_rbac
   ok "Jenkins can run ZAP via kubectl run in ${ZAP_NS}"
 }
 

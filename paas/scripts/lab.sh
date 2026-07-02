@@ -59,7 +59,7 @@ usage() {
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
   echo "  artifactory-bootstrap  Deploy JFrog Artifactory OSS + wire ARTIFACTORY_* (Step 8)"
   echo "  full-pipeline-enable   Steps 7-8+10-11 no-skip: helm, Artifactory, ZAP, Helm OCI"
-  echo "  jenkins-zap-tools   kubectl in Jenkins pod + RBAC for Step 10 ZAP"
+  echo "  jenkins-zap-tools   kubectl in Jenkins pod (kubectl cp, no pod egress needed) + RBAC for Step 10 ZAP / Step 4 DT / Step 5 Sonar RAM-pause"
   echo "  jenkins-bootstrap  Create JENKINS_API_TOKEN after fresh Jenkins install (no UI)"
   echo "  jenkins-auth       Fix JENKINS_USERNAME+token in .env (env-quick reads .env, not docker-compose.env)"
   echo "  jenkins-create-job  Create paas-deploy job + CPS bundle (fresh Jenkins)"
