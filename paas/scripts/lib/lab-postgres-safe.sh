@@ -47,7 +47,19 @@ state_active() {
   [[ -f "${STATE_FILE}" ]]
 }
 
+postgres_pod_ready() {
+  local ready
+  ready="$(kubectl_try get deployment postgres -n "${PAAS_NS}" \
+    -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+  [[ "${ready:-0}" -ge 1 ]]
+}
+
 postgres_ready() {
+  # Deployment readyReplicas=1 means the in-pod readinessProbe (pg_isready) already passed.
+  # After k3s-unstick, kubectl exec often times out even when Postgres is fine — trust Ready first.
+  if postgres_pod_ready; then
+    return 0
+  fi
   kubectl_try exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas >/dev/null 2>&1
 }
 
