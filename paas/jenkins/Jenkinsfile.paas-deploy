@@ -3064,7 +3064,7 @@ exit 0
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
-      println "[paas-jenkinsfile] marker=sonar-shell-wait-20260701 (nohup scanner + bash DEADLINE poll — no Groovy sleep)"
+      println "[paas-jenkinsfile] marker=sonar-foreground-heartbeat-20260702 (foreground npx+tee; no fragile nohup pid poll)"
       println "[paas-jenkinsfile] marker=sonar-cluster-dns-first-20260702 (in-cluster URL before flaky NodePort :30900)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
@@ -3249,111 +3249,95 @@ exit 0
               exit 1
             fi
             echo "[sonar] java: $(java -version 2>&1 | head -1)"
-            mkdir -p paas-artifacts
             printf '%s\n' "${SONAR_HOST_URL}" > paas-artifacts/sonar-host-url.txt
             exit 0
           ''', returnStatus: true)
           if (sonarPrepRc != 0) {
             paasStepFail(5, 'sonar', 'Sonar prep failed — check SONAR_HOST_URL / SONAR_TOKEN')
           }
-          def sonarPollSec = (env.JENKINS_SONAR_POLL_SEC?.trim() ?: '12') as int
-          def sonarPollMaxMin = (env.JENKINS_SONAR_POLL_MAX_MIN?.trim() ?: '25') as int
-          def sonarWaitRc = 1
-          for (int sonarAttempt = 1; sonarAttempt <= 3; sonarAttempt++) {
-            if (sonarAttempt > 1) {
-              echo "[sonar] retry attempt ${sonarAttempt}/3 (prior scan interrupted or failed)"
-            }
-            def sonarStartRc = sh(script: """#!/bin/bash
-              set +e
-              LOG=paas-artifacts/sonar-scanner.log
-              PIDF=paas-artifacts/sonar-scanner.pid
-              if grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "\${LOG}" 2>/dev/null; then
-                echo "[sonar] log already shows success — skip start"
-                exit 0
-              fi
-              if [ -f "\${PIDF}" ]; then
-                OLD=\$(cat "\${PIDF}" 2>/dev/null || true)
-                if [ -n "\${OLD}" ] && kill -0 "\${OLD}" 2>/dev/null; then
-                  echo "[sonar] scanner pid \${OLD} still running"
-                  exit 0
-                fi
-              fi
-              export SONAR_TOKEN="\${SONAR_TOKEN}"
-              export SONAR_HOST_URL="\$(cat paas-artifacts/sonar-host-url.txt 2>/dev/null || echo "\${SONAR_HOST_URL_PARAM}")"
-              export SONAR_SCANNER_OPTS="\${SONAR_SCANNER_OPTS:--Xmx768m}"
-              echo "[sonar] === background start attempt ${sonarAttempt} \$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> "\${LOG}"
-              nohup npx --yes sonarqube-scanner@4.2.8 \
-                -Dsonar.host.url="\${SONAR_HOST_URL}" \
-                -Dsonar.token="\${SONAR_TOKEN}" \
-                -Dsonar.scanner.responseTimeout=300 \
-                >> "\${LOG}" 2>&1 &
-              echo \$! > "\${PIDF}"
-              sleep 2
-              if kill -0 "\$(cat "\${PIDF}")" 2>/dev/null; then
-                echo "[sonar] background pid \$(cat "\${PIDF}")"
-                exit 0
-              fi
-              echo "[sonar] ERROR: scanner failed to stay up"
-              tail -20 "\${LOG}" 2>/dev/null || true
-              exit 1
-            """, returnStatus: true)
-            if (sonarStartRc != 0) {
-              continue
-            }
-            sonarWaitRc = sh(script: """#!/bin/bash
-              set +e
-              LOG=paas-artifacts/sonar-scanner.log
-              PIDF=paas-artifacts/sonar-scanner.pid
-              DEADLINE=\$(( \$(date +%s) + ${sonarPollMaxMin} * 60 ))
-              while [ \$(date +%s) -lt "\${DEADLINE}" ]; do
-                if [ -f "\${LOG}" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "\${LOG}"; then
-                  exit 0
-                fi
-                if [ -f "\${PIDF}" ]; then
-                  PID=\$(cat "\${PIDF}" 2>/dev/null || true)
-                  if [ -n "\${PID}" ] && kill -0 "\${PID}" 2>/dev/null; then
-                    echo "[sonar] poll \$(date -u +%Y-%m-%dT%H:%M:%SZ) pid alive"
-                    sleep ${sonarPollSec}
-                    continue
-                  fi
-                fi
-                exit 2
-              done
-              exit 1
-            """, returnStatus: true)
-            if (sonarWaitRc == 0) {
-              break
-            }
-            def sonarLogMid = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
-            if (sonarLogMid.contains('EXECUTION SUCCESS') || sonarLogMid.contains('ANALYSIS SUCCESSFUL')) {
-              sonarWaitRc = 0
-              break
-            }
-          }
-          sh(script: '''#!/bin/bash
+          def sonarScanRc = sh(script: '''#!/bin/bash
             set +e
-            PIDF=paas-artifacts/sonar-scanner.pid
-            if [ -f "${PIDF}" ]; then
-              PID=$(cat "${PIDF}" 2>/dev/null || true)
-              if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
-                kill "${PID}" 2>/dev/null || true
-              fi
-            fi
-            rm -f sonar-project.properties .sonar-tsconfig.json paas-artifacts/sonar-scanner.pid
             LOG=paas-artifacts/sonar-scanner.log
-            if [ -f "${LOG}" ]; then
-              tail -60 "${LOG}" || true
+            mkdir -p paas-artifacts
+            : > "${LOG}"
+            export SONAR_TOKEN="${SONAR_TOKEN}"
+            export SONAR_HOST_URL="$(cat paas-artifacts/sonar-host-url.txt 2>/dev/null || echo "${SONAR_HOST_URL_PARAM}")"
+            export SONAR_SCANNER_OPTS="${SONAR_SCANNER_OPTS:--Xmx384m -XX:+UseSerialGC}"
+            echo "[sonar] SONAR_SCANNER_OPTS=${SONAR_SCANNER_OPTS}"
+            pick_sonar_url() {
+              _np="http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
+              for u in \
+                "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
+                "${SONAR_HOST_URL_PARAM}" \
+                "${_np}" \
+                "http://sonarqube-service.sonarqube.svc.cluster.local:9000"
+              do
+                [ -z "$u" ] && continue
+                if curl -fsS -m 15 "${u%/}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
+                  echo "$u"
+                  return 0
+                fi
+              done
+              echo "${SONAR_HOST_URL:-${_np}}"
+            }
+            RC=1
+            for _sonar_try in 1 2 3; do
+              echo "[sonar] scanner attempt ${_sonar_try}/3 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              _sonar_hb=
+              if [ "${JENKINS_SONAR_HEARTBEAT:-true}" != "false" ]; then
+                ( while true; do echo "[sonar] (heartbeat) scanner still running… $(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 30; done ) &
+                _sonar_hb=$!
+              fi
+              set +o pipefail
+              npx --yes sonarqube-scanner@4.2.8 \
+                -Dsonar.host.url="${SONAR_HOST_URL}" \
+                -Dsonar.token="${SONAR_TOKEN}" \
+                -Dsonar.scanner.responseTimeout=300 \
+                2>&1 | tee -a "${LOG}"
+              RC=${PIPESTATUS[0]}
+              set -o pipefail
+              if [ -n "${_sonar_hb:-}" ]; then
+                kill "${_sonar_hb}" 2>/dev/null || true
+                wait "${_sonar_hb}" 2>/dev/null || true
+              fi
+              if [ "${RC}" = "0" ]; then
+                break
+              fi
+              if grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}" 2>/dev/null; then
+                RC=0
+                break
+              fi
+              if grep -qE 'SocketTimeoutException|Read timed out|ConnectException|Connection refused|Error 500 on|values\\.protobuf' "${LOG}" 2>/dev/null \
+                && [ "${_sonar_try}" -lt 3 ]; then
+                echo "[sonar] WARN: transient Sonar API error — retry in 45s (avoid parallel builds on 8GB lab)"
+                sleep 45
+                SONAR_HOST_URL="$(pick_sonar_url)"
+                echo "[sonar] retry using ${SONAR_HOST_URL}"
+                continue
+              fi
+              if grep -qiE 'Killed|OutOfMemory|exit code 137|ENOMEM|java\\.lang\\.OutOfMemoryError' "${LOG}" 2>/dev/null; then
+                echo "[sonar] HINT: likely OOM on 8GB lab — before next build: bash paas/scripts/lab.sh sonar-scan-window"
+                break
+              fi
+              break
+            done
+            if [ "${RC}" != "0" ] && grep -qE 'ANALYSIS SUCCESSFUL|EXECUTION SUCCESS' "${LOG}" 2>/dev/null; then
+              echo "[sonar] success in log despite exit ${RC}"
+              RC=0
             fi
-            exit 0
+            rm -f sonar-project.properties .sonar-tsconfig.json
+            echo "[sonar] === log tail ==="
+            tail -60 "${LOG}" 2>/dev/null || true
+            exit "${RC}"
           ''', returnStatus: true)
           def sonarLog = fileExists('paas-artifacts/sonar-scanner.log') ? readFile('paas-artifacts/sonar-scanner.log') : ''
-          def sonarPassed = (sonarWaitRc as Integer) == 0 \
+          def sonarPassed = (sonarScanRc as Integer) == 0 \
             || sonarLog.contains('EXECUTION SUCCESS') \
             || sonarLog.contains('ANALYSIS SUCCESSFUL')
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; sync pipeline: bash paas/scripts/lib/fix-paas-deploy-cps-split-now.sh")
+            paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; on 8GB lab run: bash paas/scripts/lab.sh sonar-scan-window")
           }
         }
         return

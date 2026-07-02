@@ -351,25 +351,39 @@ grep -qF 'def coerceHarborHostForCosign' "${RENDER}/paas-deploy-load-h3.groovy" 
   || grep -qF 'def coerceHarborHostForCosign' "${RENDER}/paas-deploy-load-h2.groovy" \
   || { echo "FAIL: helpers missing in h2/h3" >&2; exit 1; }
 
-if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
-  shell_render="$(grep_count 'sonar-shell-wait-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
+if grep -qE 'sonar-foreground-heartbeat-20260702|sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  if grep -qF 'sonar-foreground-heartbeat-20260702' "${JENKINSFILE}" 2>/dev/null; then
+    shell_render="$(grep_count 'sonar-foreground-heartbeat-20260702' "${RENDER}/paas-deploy-stages-p2.groovy")"
+    sonar_marker='sonar-foreground-heartbeat-20260702'
+  else
+    shell_render="$(grep_count 'sonar-shell-wait-20260701' "${RENDER}/paas-deploy-stages-p2.groovy")"
+    sonar_marker='sonar-shell-wait-20260701'
+  fi
   if [[ "${shell_render}" != "1" ]]; then
-    echo "FAIL: Jenkinsfile has sonar-shell-wait but render p2 does not — git pull && re-run" >&2
+    echo "FAIL: Jenkinsfile has ${sonar_marker} but render p2 does not — git pull && re-run" >&2
     exit 1
   fi
-  echo "OK: Sonar shell-wait marker present in rendered p2 (Step 5 — no Groovy sleep)"
-  sonar_rc_render="$(grep_count 'def sonarWaitRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
-  [[ "${sonar_rc_render}" == "1" ]] || {
-    echo "FAIL: rendered p2 has ${sonar_rc_render} def sonarWaitRc (expected 1) — rm -rf paas/jenkins/.render-test && re-run" >&2
-    exit 1
-  }
+  echo "OK: Sonar ${sonar_marker} present in rendered p2 (Step 5)"
+  if grep -qF 'sonar-foreground-heartbeat-20260702' "${JENKINSFILE}" 2>/dev/null; then
+    sonar_scan_render="$(grep_count 'def sonarScanRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
+    [[ "${sonar_scan_render}" == "1" ]] || {
+      echo "FAIL: rendered p2 has ${sonar_scan_render} def sonarScanRc (expected 1) — rm -rf paas/jenkins/.render-test && re-run" >&2
+      exit 1
+    }
+  else
+    sonar_rc_render="$(grep_count 'def sonarWaitRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
+    [[ "${sonar_rc_render}" == "1" ]] || {
+      echo "FAIL: rendered p2 has ${sonar_rc_render} def sonarWaitRc (expected 1) — rm -rf paas/jenkins/.render-test && re-run" >&2
+      exit 1
+    }
+  fi
   legacy_sonar_rc="$(grep_count 'def sonarRc' "${RENDER}/paas-deploy-stages-p2.groovy")"
   [[ "${legacy_sonar_rc}" == "0" ]] || {
     echo "FAIL: rendered p2 still has ${legacy_sonar_rc} def sonarRc (stale Sonar block) — git pull Jenkinsfile && re-run" >&2
     exit 1
   }
 elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
-  echo "WARN: Jenkinsfile still has old sonar-checkpoint-poll (Groovy sleep) — git pull for sonar-shell-wait-20260701"
+  echo "WARN: Jenkinsfile still has old sonar-checkpoint-poll (Groovy sleep) — git pull for sonar-foreground-heartbeat-20260702"
 fi
 
 if grep -qF 'nginx-crane-ip-first-20260701' "${JENKINSFILE}" 2>/dev/null; then
@@ -639,28 +653,49 @@ kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=6
 kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
   sh -c "test \"\$(grep -c 'def runPaasDeploy()' '${REMOTE}/paas-deploy-stages.groovy' | tr -d '\\r')\" = 1"
 echo "OK: pod monolith verified (return this + 1× runPaasDeploy)"
-if grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+if grep -qE 'sonar-foreground-heartbeat-20260702|sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
+  if grep -qF 'sonar-foreground-heartbeat-20260702' "${JENKINSFILE}" 2>/dev/null; then
+    sonar_marker='sonar-foreground-heartbeat-20260702'
+  else
+    sonar_marker='sonar-shell-wait-20260701'
+  fi
   shell_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'sonar-shell-wait-20260701' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || shell_pod=0
+    grep -c "${sonar_marker}" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || shell_pod=0
   shell_pod="${shell_pod:-0}"
   if [[ "${shell_pod}" == "1" ]]; then
-    echo "OK: Sonar shell-wait marker on pod monolith"
+    echo "OK: Sonar ${sonar_marker} on pod monolith"
   else
-    echo "FAIL: pod monolith missing sonar-shell-wait (got ${shell_pod}) — abort before deploy" >&2
+    echo "FAIL: pod monolith missing ${sonar_marker} (got ${shell_pod}) — abort before deploy" >&2
     exit 1
   fi
-  sonar_wait_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
-    grep -c 'def sonarWaitRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_wait_pod=0
-  sonar_wait_pod="${sonar_wait_pod:-0}"
+  if grep -qF 'sonar-foreground-heartbeat-20260702' "${JENKINSFILE}" 2>/dev/null; then
+    sonar_scan_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+      grep -c 'def sonarScanRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_scan_pod=0
+    sonar_scan_pod="${sonar_scan_pod:-0}"
+    if [[ "${sonar_scan_pod}" == "1" ]]; then
+      echo "OK: pod monolith has sonarScanRc (foreground scanner)"
+    else
+      echo "FAIL: pod monolith sonarScanRc=${sonar_scan_pod} — re-run fix-paas-deploy-cps-split-now.sh" >&2
+      exit 1
+    fi
+  else
+    sonar_wait_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
+      grep -c 'def sonarWaitRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_wait_pod=0
+    sonar_wait_pod="${sonar_wait_pod:-0}"
+    if [[ "${sonar_wait_pod}" == "1" ]]; then
+      echo "OK: pod monolith has sonarWaitRc (no duplicate def sonarRc)"
+    else
+      echo "FAIL: pod monolith sonarWaitRc=${sonar_wait_pod} — re-run fix-paas-deploy-cps-split-now.sh" >&2
+      exit 1
+    fi
+  fi
   sonar_rc_pod="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=60s -- \
     grep -c 'def sonarRc' "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null | tr -d '\r\n' | tail -1)" || sonar_rc_pod=0
   sonar_rc_pod="${sonar_rc_pod:-0}"
-  if [[ "${sonar_wait_pod}" == "1" ]] && [[ "${sonar_rc_pod}" == "0" ]]; then
-    echo "OK: pod monolith has sonarWaitRc (no duplicate def sonarRc)"
-  else
-    echo "FAIL: pod monolith sonarWaitRc=${sonar_wait_pod} def sonarRc=${sonar_rc_pod} — re-run fix-paas-deploy-cps-split-now.sh" >&2
+  [[ "${sonar_rc_pod}" == "0" ]] || {
+    echo "FAIL: pod monolith def sonarRc=${sonar_rc_pod} — re-run fix-paas-deploy-cps-split-now.sh" >&2
     exit 1
-  fi
+  }
 elif grep -qF 'sonar-checkpoint-poll-20260630' "${JENKINSFILE}" 2>/dev/null; then
   echo "WARN: pod still has old sonar-checkpoint-poll — git pull Jenkinsfile and re-run this script"
 fi
