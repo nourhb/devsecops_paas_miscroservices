@@ -3097,6 +3097,7 @@ exit 0
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
       println "[paas-jenkinsfile] marker=sonar-foreground-heartbeat-20260702 (foreground npx+tee; no fragile nohup pid poll)"
       println "[paas-jenkinsfile] marker=sonar-cluster-dns-first-20260702 (in-cluster URL before flaky NodePort :30900)"
+      println "[paas-jenkinsfile] marker=sonar-scanner-cli6-login-20260607 (sonar.login required — scanner-cli 6.x + SonarQube 9.9 reject sonar.token-only auth)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -3248,6 +3249,7 @@ exit 0
             {
               printf 'sonar.host.url=%s\n' "${SONAR_HOST_URL}"
               printf 'sonar.token=%s\n' "${SONAR_TOKEN}"
+              printf 'sonar.login=%s\n' "${SONAR_TOKEN}"
               printf 'sonar.projectKey=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectName=%s\n' "${SONAR_PROJECT_KEY}"
               printf 'sonar.projectVersion=%s\n' "${SONAR_VERSION}"
@@ -3323,6 +3325,7 @@ exit 0
               npx --yes sonarqube-scanner@4.2.8 \
                 -Dsonar.host.url="${SONAR_HOST_URL}" \
                 -Dsonar.token="${SONAR_TOKEN}" \
+                -Dsonar.login="${SONAR_TOKEN}" \
                 -Dsonar.scanner.responseTimeout=300 \
                 2>&1 | tee -a "${LOG}"
               RC=${PIPESTATUS[0]}
@@ -3397,6 +3400,7 @@ SP="${SONAR_WS}/sonar-project.properties"
 cat > "${SP}" <<SONARPROP
 sonar.host.url=${SONAR_SCAN_HOST_URL}
 sonar.token=${SONAR_SCAN_TOKEN}
+sonar.login=${SONAR_SCAN_TOKEN}
 sonar.projectKey=${SONAR_SCAN_PROJECT_KEY}
 sonar.ws.timeout=300
 sonar.projectName=${SONAR_SCAN_PROJECT_KEY}
