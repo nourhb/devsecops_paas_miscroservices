@@ -135,9 +135,17 @@ ok "wrote ${SONAR_VALUES}"
 lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
 sudo sysctl -w vm.max_map_count=524288 2>/dev/null || true
 
+sonar_has_pvc() {
+  kubectl get pvc -n "${SONAR_NS}" 2>/dev/null | grep -qi 'sonarqube'
+}
+
 if curl -fsS -m 8 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
-  ok "Sonar already UP at ${SONAR_URL}"
-  exit 0
+  if [[ "${SONAR_FORCE_WIPE:-0}" != "1" ]] && sonar_has_pvc; then
+    ok "Sonar already UP at ${SONAR_URL} (PVC present — persistent)"
+    exit 0
+  fi
+  echo "WARN: Sonar is UP but has NO PersistentVolumeClaim — data (tokens/password) is ephemeral."
+  echo "==> Recreating StatefulSet with a 2Gi PVC so tokens survive pod restarts (one-time restart, ~5-15 min)."
 fi
 
 sonar_helm_upgrade_lab

@@ -3137,21 +3137,18 @@ exit 0
                 echo "[sonar] cannot admin-login for token rotate — set SONAR_ADMIN_NEW_PASSWORD on Jenkins job (default SonarQube123!)"
                 return 1
               fi
-              _enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "${_name}" 2>/dev/null || echo "${_name}")"
+              _enc="${_name}"
               curl -fsS -m 15 -u "${_user}:${_admin_pass}" -X POST \
                 "${_base}/api/user_tokens/revoke?name=${_enc}" >/dev/null 2>&1 || true
-              _resp="$(curl -sS -m 30 -w $'\\n__HTTP__%{http_code}' -u "${_user}:${_admin_pass}" -X POST \
+              _resp="$(curl -sS -m 30 -u "${_user}:${_admin_pass}" -X POST \
                 "${_base}/api/user_tokens/generate?name=${_name}&type=GLOBAL_ANALYSIS_TOKEN" 2>/dev/null || true)"
-              _http="${_resp##*$'\\n__HTTP__'}"
-              _resp="${_resp%$'\\n__HTTP__'*}"
-              if [ "${_http}" != "200" ]; then
-                echo "[sonar] token rotate failed HTTP ${_http}: ${_resp}"
+              _new="$(printf '%s' "${_resp}" | grep -o '"token":"[^"]*"' | head -1 | sed 's/.*"token":"//;s/"$//')"
+              if [ -z "${_new}" ]; then
+                echo "[sonar] token rotate failed (no token in response): ${_resp}"
                 return 1
               fi
-              _new="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' <<<"${_resp}" 2>/dev/null || true)"
-              [ -n "${_new}" ] || return 1
               export SONAR_TOKEN="${_new}"
-              echo "[sonar] rotated analysis token via Sonar API (${#_new} chars) — run pipeline-heal to persist to PaaS env"
+              echo "[sonar] rotated analysis token via Sonar API (${#_new} chars, no python3) — persisted for this build"
               return 0
             }
             SONAR_HOST_URL="$(pick_sonar_url)"
