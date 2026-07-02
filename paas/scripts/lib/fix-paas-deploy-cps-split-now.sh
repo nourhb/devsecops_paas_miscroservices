@@ -464,17 +464,46 @@ fi
 echo "==> 2/5 Push 7 split files to ${JENKINS_NS}/${JPOD}:${REMOTE}"
 ensure_k8s_for_jenkins_push
 kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s -- mkdir -p "${REMOTE}"
-for f in paas-deploy-load-h1.groovy paas-deploy-load-h2.groovy paas-deploy-load-h3.groovy \
-         paas-deploy-stages-vars.groovy paas-deploy-stages-p1.groovy paas-deploy-stages-p2.groovy \
-         paas-deploy-stages-p3.groovy; do
+
+SPLIT_FILES_LIST=(
+  paas-deploy-load-h1.groovy paas-deploy-load-h2.groovy paas-deploy-load-h3.groovy
+  paas-deploy-stages-vars.groovy paas-deploy-stages-p1.groovy paas-deploy-stages-p2.groovy
+  paas-deploy-stages-p3.groovy
+)
+
+# Bundle all 7 files into ONE tar and push with 2 kubectl round-trips (1 cp + 1 exec untar)
+# instead of up to 14 (7x cp, each with an exec-tee fallback). On a flaky/overloaded k3s API
+# every extra round-trip is a chance to hit "context deadline exceeded" + a 15s retry wait,
+# so fewer round-trips is the single biggest lever for wall-clock time here.
+BUNDLE_TAR="${RENDER}/paas-deploy-bundle.tar.gz"
+rm -f "${BUNDLE_TAR}"
+( cd "${RENDER}" && tar -czf "${BUNDLE_TAR}" "${SPLIT_FILES_LIST[@]}" )
+tar_bytes="$(wc -c < "${BUNDLE_TAR}" | tr -d ' ')"
+for f in "${SPLIT_FILES_LIST[@]}"; do
   bytes="$(wc -c < "${RENDER}/${f}" | tr -d ' ')"
   echo "   ${f} (${bytes} bytes)"
-  if ! kubectl_retry cp "${RENDER}/${f}" "${JENKINS_NS}/${JPOD}:${REMOTE}/${f}" -c "${JCONTAINER}"; then
-    echo "WARN: kubectl cp failed for ${f} — fallback to exec tee"
-    kubectl_retry exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=180s \
-      -- tee "${REMOTE}/${f}" < "${RENDER}/${f}" >/dev/null
-  fi
 done
+echo "   bundled into 1 tar (${tar_bytes} bytes) — pushing with 1 kubectl cp + 1 kubectl exec"
+
+push_ok=0
+if kubectl_retry cp "${BUNDLE_TAR}" "${JENKINS_NS}/${JPOD}:/tmp/paas-deploy-bundle.tar.gz" -c "${JCONTAINER}" \
+  && kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s \
+    -- sh -c "tar -C '${REMOTE}' -xzf /tmp/paas-deploy-bundle.tar.gz && rm -f /tmp/paas-deploy-bundle.tar.gz"; then
+  push_ok=1
+  echo "OK: tar bundle pushed + extracted on pod"
+else
+  echo "WARN: tar bundle push failed — falling back to slower per-file cp/tee"
+fi
+
+if [[ "${push_ok}" != "1" ]]; then
+  for f in "${SPLIT_FILES_LIST[@]}"; do
+    if ! kubectl_retry cp "${RENDER}/${f}" "${JENKINS_NS}/${JPOD}:${REMOTE}/${f}" -c "${JCONTAINER}"; then
+      echo "WARN: kubectl cp failed for ${f} — fallback to exec tee"
+      kubectl_retry exec -i -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=180s \
+        -- tee "${REMOTE}/${f}" < "${RENDER}/${f}" >/dev/null
+    fi
+  done
+fi
 
 kubectl_retry exec -n "${JENKINS_NS}" "${JPOD}" -c "${JCONTAINER}" --request-timeout=90s \
   -- grep -qF "${BUNDLE}" "${REMOTE}/paas-deploy-stages-p3.groovy"
