@@ -1383,12 +1383,21 @@ def paasHarborCranePushShellHelpers(String craneBin, String imageRef, String ima
         fi
         _resp="\$(curl -sS -u "\${_user}:\${_pass}" \\
           "\${_api}/service/token?service=harbor-registry&scope=repository:\${_repo}:pull,push" 2>/dev/null || true)"
-        if echo "\${_resp}" | grep -q '"token"[[:space:]]*:[[:space:]]*"'; then
-          if echo "\${_resp}" | grep -qE '"actions"[[:space:]]*:[[:space:]]*\\[\\s*\\]'; then
-            echo "[image] ERROR: Harbor JWT has no push scope — bash paas/scripts/lab.sh fix-harbor-push"
+        _tok="\$(printf '%s' "\${_resp}" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)"
+        if [ -n "\${_tok}" ]; then
+          _payload_b64="\$(printf '%s' "\${_tok}" | cut -d. -f2 | tr '_-' '/+')"
+          while [ \$(( \${#_payload_b64} % 4 )) -ne 0 ]; do _payload_b64="\${_payload_b64}="; done
+          _decoded="\$(printf '%s' "\${_payload_b64}" | base64 -d 2>/dev/null || true)"
+          echo "[paas-jenkinsfile] marker=harbor-jwt-decode-actions-20260702 (decode JWT payload — raw resp never contains literal actions text)"
+          if [ -n "\${_decoded}" ]; then
+            if printf '%s' "\${_decoded}" | grep -q '"push"'; then
+              echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo}) — decoded JWT actions include push"
+              return 0
+            fi
+            echo "[image] ERROR: Harbor JWT decoded but missing push action for \${_repo}: \${_decoded} — bash paas/scripts/lab.sh fix-harbor-push-now.sh"
             return 1
           fi
-          echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo})"
+          echo "[image] WARN: Harbor token present but could not base64-decode JWT payload for \${_repo}; continuing to real crane push"
           return 0
         fi
       done
