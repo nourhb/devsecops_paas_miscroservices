@@ -3321,6 +3321,9 @@ exit 0
             fi
             echo "[sonar] java: $(java -version 2>&1 | head -1)"
             printf '%s\n' "${SONAR_HOST_URL}" > paas-artifacts/sonar-host-url.txt
+            umask 077
+            printf '%s\n' "${SONAR_TOKEN}" > paas-artifacts/.sonar-token.txt
+            echo "[sonar] marker=sonar-token-persist-across-sh-20260702 (rotated token written to file — sh() steps do not share env)"
             exit 0
           ''', returnStatus: true)
           if (sonarPrepRc != 0) {
@@ -3331,7 +3334,7 @@ exit 0
             LOG=paas-artifacts/sonar-scanner.log
             mkdir -p paas-artifacts
             : > "${LOG}"
-            export SONAR_TOKEN="${SONAR_TOKEN}"
+            export SONAR_TOKEN="$(cat paas-artifacts/.sonar-token.txt 2>/dev/null || echo "${SONAR_TOKEN}")"
             export SONAR_HOST_URL="$(cat paas-artifacts/sonar-host-url.txt 2>/dev/null || echo "${SONAR_HOST_URL_PARAM}")"
             export SONAR_SCANNER_OPTS="${SONAR_SCANNER_OPTS:--Xmx384m -XX:+UseSerialGC}"
             echo "[sonar] SONAR_SCANNER_OPTS=${SONAR_SCANNER_OPTS}"
@@ -3397,7 +3400,7 @@ exit 0
               echo "[sonar] success in log despite exit ${RC}"
               RC=0
             fi
-            rm -f sonar-project.properties .sonar-tsconfig.json
+            rm -f sonar-project.properties .sonar-tsconfig.json paas-artifacts/.sonar-token.txt
             echo "[sonar] === log tail ==="
             tail -60 "${LOG}" 2>/dev/null || true
             exit "${RC}"
