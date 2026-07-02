@@ -51,10 +51,19 @@ ensure_fresh_splits_on_pod
 
 echo "==> Pull 7 split files from ${JENKINS_NS}/${JPOD}:${REMOTE_DIR}"
 for f in "${SPLIT_FILES[@]}"; do
-  kexec cat "${REMOTE_DIR}/${f}" > "${WORK}/${f}"
-  bytes="$(wc -c < "${WORK}/${f}" | tr -d ' ')"
-  [[ "${bytes}" -gt 0 ]] || { echo "FAIL: ${f} empty on pod" >&2; exit 1; }
-  grep -qF "${BUNDLE}" "${WORK}/${f}" || { echo "FAIL: ${f} missing ${BUNDLE}" >&2; exit 1; }
+  bytes=0
+  for attempt in 1 2 3 4 5; do
+    kexec cat "${REMOTE_DIR}/${f}" > "${WORK}/${f}" 2>/dev/null || true
+    bytes="$(wc -c < "${WORK}/${f}" 2>/dev/null | tr -d ' ')"
+    [[ -n "${bytes}" ]] || bytes=0
+    if [[ "${bytes}" -gt 0 ]] && grep -qF "${BUNDLE}" "${WORK}/${f}" 2>/dev/null; then
+      break
+    fi
+    echo "WARN: ${f} read-back attempt ${attempt}/5 got ${bytes} bytes (flaky kubectl exec on loaded VM) — retrying in 4s"
+    sleep 4
+  done
+  [[ "${bytes}" -gt 0 ]] || { echo "FAIL: ${f} empty on pod after 5 attempts — k3s API may be too unstable right now (bash paas/scripts/lab.sh k3s-unstick)" >&2; exit 1; }
+  grep -qF "${BUNDLE}" "${WORK}/${f}" || { echo "FAIL: ${f} missing ${BUNDLE} after 5 attempts" >&2; exit 1; }
   echo "   ${f} (${bytes} bytes)"
 done
 
