@@ -59,6 +59,13 @@ if ! bash "${SCRIPT_DIR}/lab-k3s-ensure.sh"; then
   exit 1
 fi
 
+if [[ -f "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ensure 2>/dev/null || true
+fi
+if [[ -f "${SCRIPT_DIR}/lab-postgres-safe.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-postgres-safe.sh" ensure 2>/dev/null || true
+fi
+
 kubectl taint nodes master node.kubernetes.io/unreachable:NoExecute- 2>/dev/null || true
 kubectl taint nodes master node.kubernetes.io/unreachable:NoSchedule- 2>/dev/null || true
 

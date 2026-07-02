@@ -152,6 +152,10 @@ wait_postgres_ready() {
 }
 
 echo "==> Postgres preflight (frontend on master must reach postgres Service)"
+if lab_worker_notready worker2 2>/dev/null; then
+  echo "WARN: worker2 NotReady — Postgres PVC is on worker2; healing before wait loop"
+  bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || true
+fi
 if ! wait_postgres_ready; then
   bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || true
   wait_postgres_ready || exit 1

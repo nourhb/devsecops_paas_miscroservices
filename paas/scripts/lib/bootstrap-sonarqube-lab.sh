@@ -34,11 +34,12 @@ patch_env_key() {
 }
 
 wait_sonar_up() {
-  local n=0
-  until curl -fsS -m 12 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; do
+  local n=0 body
+  until body="$(curl -sS -m 15 "${SONAR_URL}/api/system/status" 2>/dev/null || true)" \
+    && echo "${body}" | grep -q '"status":"UP"'; do
     n=$((n + 1))
-    [[ "${n}" -le 36 ]] || fail "SonarQube not UP at ${SONAR_URL}"
-    echo "  waiting Sonar UP (${n}/36)…"
+    [[ "${n}" -le 60 ]] || fail "SonarQube not UP at ${SONAR_URL} (last: ${body:-connection failed})"
+    echo "  waiting Sonar UP (${n}/60)…"
     sleep 10
   done
   ok "SonarQube UP at ${SONAR_URL}"
@@ -152,10 +153,6 @@ main() {
   echo "=============================================="
   echo " bootstrap-sonarqube-lab (CLI — bypass UI loop)"
   echo "=============================================="
-
-  if ! curl -fsS -m 12 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -q '"status":"UP"'; then
-    die "Sonar not UP at ${SONAR_URL} — run: bash paas/scripts/lab.sh sonarqube"
-  fi
 
   wait_sonar_up
   ensure_admin_password

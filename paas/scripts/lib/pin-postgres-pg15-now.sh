@@ -11,6 +11,8 @@ echo "=============================================="
 echo " pin-postgres-pg15-now (lab data is PG15 only)"
 echo "=============================================="
 
+bash "${SCRIPT_DIR}/lab-postgres-safe.sh" begin pin-pg15
+
 bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" 2>/dev/null || true
 
 if [[ ! -f "${MANIFEST}" ]]; then

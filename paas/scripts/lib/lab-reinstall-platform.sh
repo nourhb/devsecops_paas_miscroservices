@@ -28,18 +28,25 @@ if ! curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${NODE_
   helm repo add harbor https://helm.goharbor.io 2>/dev/null || true
   helm repo update harbor
   kubectl create namespace harbor --dry-run=client -o yaml | kubectl apply -f -
-  helm upgrade --install harbor harbor/harbor -n harbor \
-    --set expose.type=nodePort \
-    --set expose.tls.enabled=false \
-    --set expose.nodePort.ports.http.nodePort=30002 \
-    --set externalURL="http://${NODE_IP}:30002" \
-    --set harborAdminPassword=Harbor12345 \
-    --set persistence.persistentVolumeClaim.registry.storageClass=local-path \
-    --set persistence.persistentVolumeClaim.jobservice.storageClass=local-path \
-    --set persistence.persistentVolumeClaim.database.storageClass=local-path \
-    --set persistence.persistentVolumeClaim.redis.storageClass=local-path \
-    --set persistence.persistentVolumeClaim.trivy.storageClass=local-path \
-    --timeout 10m || log "WARN: harbor helm returned non-zero — polling :30002"
+  HARBOR_VALUES="${REPO_ROOT}/paas/k8s-manifests/lab/harbor-helm-lab-values.yaml"
+  local -a harbor_args=(upgrade --install harbor harbor/harbor -n harbor --timeout 10m)
+  if [[ -f "${HARBOR_VALUES}" ]]; then
+    harbor_args+=(-f "${HARBOR_VALUES}" --set externalURL="http://${NODE_IP}:30002")
+  else
+    harbor_args+=(
+      --set expose.type=nodePort
+      --set expose.tls.enabled=false
+      --set expose.nodePort.ports.http.nodePort=30002
+      --set externalURL="http://${NODE_IP}:30002"
+      --set harborAdminPassword=Harbor12345
+      --set persistence.persistentVolumeClaim.registry.storageClass=local-path
+      --set persistence.persistentVolumeClaim.jobservice.storageClass=local-path
+      --set persistence.persistentVolumeClaim.database.storageClass=local-path
+      --set persistence.persistentVolumeClaim.redis.storageClass=local-path
+      --set persistence.persistentVolumeClaim.trivy.storageClass=local-path
+    )
+  fi
+  helm "${harbor_args[@]}" || log "WARN: harbor helm returned non-zero — polling :30002"
   for i in $(seq 1 40); do
     h="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${NODE_IP}:30002/v2/" 2>/dev/null || echo 000)"
     log "harbor http=${h} (${i}/40)"

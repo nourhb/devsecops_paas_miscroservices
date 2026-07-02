@@ -68,24 +68,35 @@ helm_install_dtrack() {
   helm repo update dependency-track 2>/dev/null || helm repo update
   kubectl create namespace "${DT_NS}" --dry-run=client -o yaml | kubectl apply -f -
   kyverno_exempt_namespace "${DT_NS}"
-  echo "==> helm upgrade --install ${RELEASE} (${profile}, NodePort)"
+  DT_VALUES="${REPO_ROOT}/paas/k8s-manifests/lab/dependency-track-helm-lab-values.yaml"
+  echo "==> helm upgrade --install ${RELEASE} (${profile}, NodePort, PVC)"
   local -a helm_args=(
     upgrade --install "${RELEASE}" dependency-track/dependency-track -n "${DT_NS}"
-    --set apiServer.service.type=NodePort
-    --set frontend.service.type=NodePort
-    --set persistence.storageClass=local-path
     --wait --timeout 15m
   )
+  if [[ -f "${DT_VALUES}" ]]; then
+    helm_args+=(-f "${DT_VALUES}")
+  else
+    helm_args+=(
+      --set apiServer.service.type=NodePort
+      --set frontend.service.type=NodePort
+      --set apiServer.persistence.enabled=true
+      --set apiServer.persistence.storageClass=local-path
+      --set apiServer.persistence.size=1Gi
+    )
+  fi
   if [[ "${profile}" == "lab" ]]; then
     helm_args+=(
-      --set-string apiServer.resources.requests.cpu=500m
-      --set-string apiServer.resources.requests.memory=1Gi
-      --set-string apiServer.resources.limits.cpu=2
-      --set-string apiServer.resources.limits.memory=2Gi
-      --set-string frontend.resources.requests.cpu=100m
-      --set-string frontend.resources.requests.memory=256Mi
-      --set-string frontend.resources.limits.cpu=1
-      --set-string frontend.resources.limits.memory=512Mi
+      --set-string apiServer.service.nodePort=32336
+      --set-string apiServer.nodeSelector.kubernetes\\.io/hostname=master
+      --set-string apiServer.resources.requests.cpu=200m
+      --set-string apiServer.resources.requests.memory=512Mi
+      --set-string apiServer.resources.limits.cpu=1500m
+      --set-string apiServer.resources.limits.memory=1536Mi
+      --set-string frontend.resources.requests.cpu=50m
+      --set-string frontend.resources.requests.memory=128Mi
+      --set-string frontend.resources.limits.cpu=500m
+      --set-string frontend.resources.limits.memory=384Mi
     )
   fi
   helm "${helm_args[@]}"
@@ -209,9 +220,10 @@ sync_dt_env_urls() {
       else
         ok "${env_file} DEPENDENCY_TRACK_BASE_URL=${want_url}"
       fi
-      patch_env_key "${env_file}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${want_url}"
+      patch_env_key "${env_file}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${in_cluster}"
     done
-    ok "JENKINS_DEPENDENCY_TRACK_BASE_URL=${want_url} (NodePort — built-in Jenkins lacks cluster DNS)"
+    ok "DEPENDENCY_TRACK_BASE_URL=${want_url} (browser/UI NodePort)"
+    ok "JENKINS_DEPENDENCY_TRACK_BASE_URL=${in_cluster} (Jenkins pod — cluster DNS, not NodePort)"
     sync_dt_frontend_api_base_url || true
     return 0
   fi
@@ -396,7 +408,14 @@ elif [[ "${API_PHASE}" != "Running" ]]; then
 fi
 
 sync_dt_env_urls || FAIL=1
-verify_dt_api_key || FAIL=1
+if ! verify_dt_api_key; then
+  warn "DEPENDENCY_TRACK_API_KEY invalid or NodePort down — auto dt-bootstrap"
+  if bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh"; then
+    verify_dt_api_key || FAIL=1
+  else
+    FAIL=1
+  fi
+fi
 
 echo "=============================================="
 if [[ "${FAIL}" -eq 0 ]]; then

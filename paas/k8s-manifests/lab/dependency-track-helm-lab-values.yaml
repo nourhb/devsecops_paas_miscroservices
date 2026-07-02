@@ -1,0 +1,28 @@
+# 8GB lab: PVC for DT API (projects, BOMs, API keys survive pod restart).
+apiServer:
+  service:
+    type: NodePort
+    nodePort: 32336
+  nodeSelector:
+    kubernetes.io/hostname: master
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 1536Mi
+frontend:
+  service:
+    type: NodePort
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi

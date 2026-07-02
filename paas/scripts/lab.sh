@@ -27,6 +27,10 @@ usage() {
   echo "  bootstrap Harbor/Kyverno cosign bootstrap"
   echo "  harbor    Recover Harbor registry (502 / crane failures)"
   echo "  db-repair Fix frontend -> Postgres TCP connectivity"
+  echo "  postgres-up       Restore Postgres after maintenance / orphaned scale-to-0"
+  echo "  auth-reset        Reset login password (fixes Invalid credentials)"
+  echo "  data-persist      Enable PVCs + retain annotations (never lose service data)"
+  echo "  pvc-status        List lab PVCs and retention state"
   echo "  pin-pg15  Force postgres:15-alpine (lab PVC is PG15 — fixes PG16 crash loop)"
   echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
@@ -49,6 +53,8 @@ usage() {
   echo "  break-paas-deploy-loop  Same as fix-paas-deploy (explicit name)"
   echo "  jenkins-tools   Pre-install helm + crane under JENKINS_HOME on Jenkins pod"
   echo "  sonarqube       Wipe + reinstall Sonar 9.9 LTS on master (:30900)"
+  echo "  sonarqube-fix   Repair Sonar helm (httpGet probes, no plugins.install=[] bug)"
+  echo "  sonar-scan-window  Pause UI safely for Sonar Step 5 RAM — auto-restore on exit"
   echo "  sonar-bootstrap   Fix admin password loop + create SONAR_TOKEN via API (no UI)"
   echo "  artifactory-bootstrap  Deploy JFrog Artifactory OSS + wire ARTIFACTORY_* (Step 8)"
   echo "  full-pipeline-enable   Steps 7-8+10-11 no-skip: helm, Artifactory, ZAP, Helm OCI"
@@ -72,6 +78,7 @@ usage() {
   echo "  argocd-bootstrap  Set ARGOCD_BASE_URL + admin password in env (no UI)"
   echo "  integrations-bootstrap  Wire Grafana/Trivy/DT URLs + scale monitoring stack"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
+  echo "  frontend-up       Restore UI after Sonar RAM window / orphaned scale-to-0"
   echo "  frontend-force    RS cleanup + pin recovery image when rollout hangs"
   echo "  frontend-stop     Scale frontend to 0 + pause (stop eviction storm)"
   echo "  frontend-safety   Recreate + master pin (prevent pod storms)"
@@ -131,6 +138,14 @@ case "$cmd" in
     bash "$LIB/lab-harbor-db-heal.sh" ;;
   db-repair)
     bash "$LIB/lab-paas-db-repair.sh" ;;
+  postgres-up|db-up|restore-db)
+    bash "$LIB/lab-postgres-safe.sh" restore ;;
+  auth-reset)
+    bash "$LIB/lab-auth-reset.sh" "${2:-reset}" "${3:-}" "${4:-}" "${5:-}" ;;
+  data-persist|persist-data|pvc-persist)
+    bash "$LIB/lab-data-persist.sh" ;;
+  pvc-status|pvc-list)
+    bash "$LIB/lab-pvc-retain.sh" status ;;
   pin-pg15|pin-postgres|fix-pg15)
     bash "$LIB/pin-postgres-pg15-now.sh" ;;
   postgres)
@@ -188,6 +203,10 @@ case "$cmd" in
     bash "$LIB/lab-jenkins-agent-tools.sh" ;;
   sonarqube|sonar-heal|sonar-recover|sonar-fresh|sonarqube-fresh)
     bash "$LIB/lab-sonarqube-fresh-install.sh" ;;
+  sonarqube-fix|sonar-fix|fix-sonarqube)
+    bash "$LIB/lab-sonarqube-fix-now.sh" ;;
+  sonar-scan-window|sonar-ram-window|ram-window)
+    bash "$LIB/lab-frontend-ram-window.sh" run sonar-scan-window ;;
   sonar-bootstrap|bootstrap-sonar)
     bash "$LIB/bootstrap-sonarqube-lab.sh" ;;
   artifactory-bootstrap|bootstrap-artifactory|artifactory)
@@ -253,6 +272,8 @@ case "$cmd" in
     bash "$LIB/bootstrap-integrations-lab.sh" ;;
   frontend-heal)
     bash "$LIB/lab-frontend-schedule-heal.sh" ;;
+  frontend-up|ui-up|restore-ui)
+    bash "$LIB/lab-frontend-ram-window.sh" restore ;;
   frontend-unstick|unstick-frontend)
     bash "$LIB/lab-frontend-rollout-unstick.sh" ;;
   frontend-recover)

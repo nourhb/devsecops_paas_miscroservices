@@ -81,6 +81,8 @@ for i in $(seq 1 90); do
     k3s kubectl get nodes -o wide 2>/dev/null || true
     echo ""
     echo "Next: bash paas/scripts/lab.sh quick-up"
+    echo "      bash paas/scripts/lab.sh frontend-up   (if UI was scaled to 0 for Sonar RAM)"
+    echo "      bash paas/scripts/lab.sh postgres-up   (if DB was left down after maintenance)"
     exit 0
   fi
   st="$(systemctl is-active k3s 2>/dev/null || echo unknown)"

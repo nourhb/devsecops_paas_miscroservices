@@ -1,0 +1,28 @@
+# 8GB lab: cap Harbor PVCs (chart defaults ~13Gi total — too large for lab disk).
+expose:
+  type: nodePort
+  tls:
+    enabled: false
+  nodePort:
+    ports:
+      http:
+        nodePort: 30002
+externalURL: http://harbor.192.168.56.129.nip.io:30002
+harborAdminPassword: Harbor12345
+persistence:
+  persistentVolumeClaim:
+    registry:
+      storageClass: local-path
+      size: 2Gi
+    database:
+      storageClass: local-path
+      size: 512Mi
+    jobservice:
+      storageClass: local-path
+      size: 256Mi
+    redis:
+      storageClass: local-path
+      size: 256Mi
+    trivy:
+      storageClass: local-path
+      size: 512Mi

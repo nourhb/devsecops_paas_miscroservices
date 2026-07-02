@@ -67,6 +67,17 @@ for i in $(seq 1 "${MAX_API_TRIES}"); do
 done
 [[ "${API_OK}" -eq 1 ]] || fail "k3s API down — wait 5 min after last restart, then: sudo systemctl restart k3s && sleep 120"
 
+# Never leave UI at replicas=0 after manual Sonar RAM pause or SSH drop
+if [[ -f "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ensure 2>/dev/null || true
+fi
+if [[ -f "${SCRIPT_DIR}/lab-postgres-safe.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-postgres-safe.sh" ensure 2>/dev/null || true
+fi
+if [[ -f "${SCRIPT_DIR}/lab-pvc-retain.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-pvc-retain.sh" guard 2>/dev/null || true
+fi
+
 if ! api_try get namespace "${PAAS_NS}" >/dev/null 2>&1; then
   log "namespace ${PAAS_NS} missing — run full bootstrap"
   bash "${SCRIPT_DIR}/lab-fresh-cluster.sh"
@@ -92,14 +103,30 @@ if [[ "${MASTER_READY}" != "True" ]]; then
 fi
 [[ "${MASTER_READY}" == "True" ]] || fail "master still NotReady — check: k3s kubectl describe node master"
 
+# Dependency-Track — install/heal if API pod not Running (Step 4 needs DT in cluster)
+DT_PHASE="$(api_try get pods -n dependency-track -l app.kubernetes.io/component=api-server \
+  -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)"
+if [[ "${DT_PHASE}" != "Running" ]]; then
+  log "Dependency-Track API not Running (phase=${DT_PHASE:-missing}) — install/heal once"
+  bash "${SCRIPT_DIR}/lab-dependency-track.sh" 2>/dev/null || log "WARN: dependency-track heal failed — Step 4 may fail until fixed"
+fi
+
 # Kyverno fail-open (fast)
 [[ -f "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" ]] && \
   PAAS_FORCE_KYVERNO_UNBLOCK=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
-# Postgres — light check only
-if ! api_try exec -n "${PAAS_NS}" deploy/postgres -- pg_isready -U postgres -d paas >/dev/null 2>&1; then
-  log "postgres not ready — db-repair once"
-  PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+# Postgres — light check only (PVC is on worker2; heal node before hammering db-repair)
+if lab_worker_notready worker2; then
+  log "worker2 NotReady — Postgres PVC node; heal once before db-repair"
+  bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || log "WARN: worker2-heal failed — fix worker2 manually"
+fi
+if ! api_try exec -n "${PAAS_NS}" deploy/postgres --request-timeout=15s -- pg_isready -U postgres -d paas >/dev/null 2>&1; then
+  if api_try get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
+    log "postgres has endpoints but pg_isready slow — skip db-repair (avoid API storm)"
+  else
+    log "postgres not ready — db-repair once"
+    PAAS_DB_REPAIR_COOLDOWN_SEC=0 bash "${SCRIPT_DIR}/lab-paas-db-repair.sh" || true
+  fi
 fi
 
 # busybox for init container (if missing)
@@ -109,15 +136,15 @@ if ! k3s crictl images 2>/dev/null | grep -q 'busybox.*1.36'; then
   docker save busybox:1.36 2>/dev/null | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
 fi
 
-# Recovery image must be in containerd
-if ! k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+# Recovery image must be in containerd (sudo crictl counts — do not call frontend-force if present)
+if ! lab_paas_frontend_recovery_image_present; then
   log "recovery image missing — try Harbor/docker import (frontend-force)"
   if [[ -f "${SCRIPT_DIR}/lab-frontend-force-recover.sh" ]]; then
     PAAS_SKIP_MASTER_HEAL=1 bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" \
-      && k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery' || true
+      && lab_paas_frontend_recovery_image_present || true
   fi
 fi
-if ! k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+if ! lab_paas_frontend_recovery_image_present; then
   fail "paas-frontend:recovery missing — run: bash paas/scripts/lab.sh frontend (30 min build)"
 fi
 log "recovery image present"

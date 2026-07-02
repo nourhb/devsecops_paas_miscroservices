@@ -3,6 +3,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
   namespace: paas
+  annotations:
+    helm.sh/resource-policy: keep
+    paas.lab/retain: "true"
+  labels:
+    paas.lab/data-retain: "true"
 spec:
   accessModes:
     - ReadWriteOnce

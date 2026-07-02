@@ -80,6 +80,41 @@ YAML
   ok "RBAC jenkins → ${ZAP_NS} pods (ZAP baseline)"
 }
 
+ensure_dt_rbac() {
+  kubectl apply -f - <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-dt-portforward
+  namespace: dependency-track
+rules:
+  - apiGroups: [""]
+    resources: ["services", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-dt-portforward
+  namespace: dependency-track
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: jenkins-dt-portforward
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: ${JENKINS_NS}
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: ${JENKINS_NS}
+YAML
+  ok "RBAC jenkins → dependency-track port-forward (Step 4 SBOM upload fallback)"
+}
+
 main() {
   echo "==> Jenkins ZAP tools (kubectl in pod + RBAC)"
   if ! lab_k8s_api_ready; then
@@ -90,6 +125,7 @@ main() {
     || kubectl get deploy/jenkins -n "${JENKINS_NS}" --request-timeout=30s >/dev/null
   ensure_kubectl_in_jenkins
   ensure_zap_rbac
+  ensure_dt_rbac
   ok "Jenkins can run ZAP via kubectl run in ${ZAP_NS}"
 }
 

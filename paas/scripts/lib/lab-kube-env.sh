@@ -94,6 +94,30 @@ lab_k8s_api_wait() {
   return 1
 }
 
+# paas-frontend:recovery may only appear under sudo crictl on some lab VMs.
+lab_paas_frontend_recovery_image_present() {
+  if k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+    return 0
+  fi
+  if sudo k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
+    return 0
+  fi
+  if k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'; then
+    return 0
+  fi
+  if sudo k3s ctr -n k8s.io images ls 2>/dev/null | grep -qF 'paas-frontend:recovery'; then
+    return 0
+  fi
+  return 1
+}
+
+lab_worker_notready() {
+  local node="${1:-worker2}"
+  local status
+  status="$(kubectl get node "${node}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo False)"
+  [[ "${status}" != "True" ]]
+}
+
 # Lab VMs: k3s kubectl is more reliable than standalone kubectl against 127.0.0.1:6443.
 if command -v k3s >/dev/null 2>&1; then
   kubectl() {

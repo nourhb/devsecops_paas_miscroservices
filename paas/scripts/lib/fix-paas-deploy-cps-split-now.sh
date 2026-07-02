@@ -118,6 +118,22 @@ if [[ "${SKIP_ZAP_TOOLS:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-jenkins-zap-to
   bash "${SCRIPT_DIR}/lab-jenkins-zap-tools.sh" || echo "WARN: jenkins-zap-tools failed — Step 10 may skip until re-run"
 fi
 
+if [[ "${SKIP_DT_HEAL:-}" != "1" ]] && [[ -f "${SCRIPT_DIR}/lab-dependency-track.sh" ]]; then
+  echo "==> 0d/5 Dependency-Track (install/heal + sync NodePort URL)"
+  NODE_IP="${NODE_IP:-192.168.56.129}"
+  dt_code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 \
+    "http://${NODE_IP}:32336/api/version" 2>/dev/null || echo 000)"
+  if [[ "${dt_code}" != "200" ]]; then
+    bash "${SCRIPT_DIR}/lab-dependency-track.sh" || echo "WARN: dependency-track heal failed — Step 4 may WARN/FAIL"
+  else
+    LAB_DT_ENV_ONLY=true bash "${SCRIPT_DIR}/lab-dependency-track.sh" || true
+  fi
+  if [[ -f "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" ]]; then
+    python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force \
+      || echo "WARN: Jenkins DT URL param sync skipped"
+  fi
+fi
+
 resolve_jenkins_pod
 
 patch_python_bom_ref_quotes() {
@@ -395,6 +411,17 @@ if grep -qF "${SCA_MARKER}" "${JENKINSFILE}" 2>/dev/null; then
   echo "OK: Python node-first SCA marker present in rendered p2 (Step 4)"
 fi
 
+if grep -qF 'dt-cluster-first-20260702' "${JENKINSFILE}" 2>/dev/null; then
+  dt_cf="$(grep_count 'dt-cluster-first-20260702' "${RENDER}/paas-deploy-load-h1.groovy")"
+  if [[ "${dt_cf}" != "1" ]]; then
+    echo "FAIL: Jenkinsfile has dt-cluster-first but render h1 does not — git pull && re-run" >&2
+    exit 1
+  fi
+  grep -qF 'dt_kubectl_portforward_upload' "${RENDER}/paas-deploy-load-h1.groovy" \
+    || { echo "FAIL: render h1 missing dt_kubectl_portforward_upload" >&2; exit 1; }
+  echo "OK: dt-cluster-first in rendered h1 (in-cluster URL + kubectl port-forward)"
+fi
+
 if grep -qF 'dt-listfile-posix-20260701' "${JENKINSFILE}" 2>/dev/null; then
   dt_render="$(grep_count 'dt-listfile-posix-20260701' "${RENDER}/paas-deploy-load-h1.groovy")"
   dt_stale="$(grep_count 'dt-listfile-no-ansi-20260701' "${RENDER}/paas-deploy-load-h1.groovy")"
@@ -470,14 +497,24 @@ for f in "${ENV_FILE}" "${REPO_ROOT}/paas/frontend/.env"; do
 done
 
 echo "==> 4/5 POST monolith CPS wrapper to Jenkins LIVE"
+if [[ -f "${SCRIPT_DIR}/lab-jenkins-recover.sh" ]]; then
+  bash "${SCRIPT_DIR}/lab-jenkins-recover.sh" recover 2>/dev/null || true
+fi
 set -a
 # shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 
+post_wrapper_ok=0
 if [[ -f "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py" ]] \
   && [[ -f "${SCRIPT_DIR}/jenkins_merge_cps_wrapper.py" ]]; then
-  python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"
+  if python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"; then
+    post_wrapper_ok=1
+  else
+    echo "WARN: POST wrapper failed (Jenkins HTTP?) — monolith already on ${REMOTE}/paas-deploy-stages.groovy" >&2
+    echo "  bash paas/scripts/lab.sh jenkins-recover" >&2
+    echo "  python3 paas/scripts/lib/post-paas-deploy-wrapper-live.py" >&2
+  fi
 else
   python3 <<'PY'
 import base64, json, os, re, sys, urllib.error, urllib.request, http.cookiejar
@@ -702,4 +739,5 @@ echo " Console MUST show:"
  echo "   marker=${CPS_MARKER}"
  echo "   load paas-deploy-stages.groovy + paas.runPaasDeploy()"
  echo "   *** BEGIN : Check Parameters ***"
+echo "   PAAS_DT_UPLOAD_OPTIONAL=true → Step 4 WARN (not FAIL) when DT down"
 echo "=============================================="

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Shared SonarQube helm values for 8GB lab (embedded H2, low heap, no liveness kill).
+# Shared SonarQube helm values for 8GB lab (embedded H2, low heap, httpGet probes).
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+SONAR_VALUES="${SONAR_HELM_VALUES:-${REPO_ROOT}/paas/k8s-manifests/lab/sonarqube-helm-lab-values.yaml}"
 
 lab_sonar_helm_upgrade() {
   local release="${1:-sonarqube}"
@@ -9,35 +12,30 @@ lab_sonar_helm_upgrade() {
   local port="${4:-30900}"
 
   command -v helm >/dev/null 2>&1 || return 1
+  [[ -f "${SONAR_VALUES}" ]] || {
+    echo "FAIL: missing ${SONAR_VALUES}" >&2
+    return 1
+  }
   helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube 2>/dev/null || true
   helm repo update sonarqube 2>/dev/null || true
+  if [[ -f "${SCRIPT_DIR}/lab-k3s-ensure.sh" ]]; then
+    export LAB_K3S_WAIT_LOOPS="${LAB_K3S_WAIT_LOOPS:-24}"
+    export LAB_K3S_WAIT_SEC="${LAB_K3S_WAIT_SEC:-5}"
+    bash "${SCRIPT_DIR}/lab-k3s-ensure.sh" || {
+      echo "FAIL: k3s API unreachable — sudo bash paas/scripts/lab.sh k3s-unstick" >&2
+      return 1
+    }
+  fi
   kubectl get ns "${ns}" >/dev/null 2>&1 || kubectl create namespace "${ns}"
 
-  echo "==> helm upgrade ${release} (9.9 LTS, embedded H2, master, NodePort ${port}, 8GB-lab tuning)"
+  echo "==> helm upgrade ${release} (9.9 LTS, embedded H2, ${node}, NodePort ${port}, httpGet probes)"
   helm upgrade --install "${release}" sonarqube/sonarqube -n "${ns}" \
-    --set service.type=NodePort \
+    --reset-values \
+    -f "${SONAR_VALUES}" \
     --set "service.nodePort=${port}" \
-    --set community.enabled=true \
-    --set "image.tag=9.9.8-community" \
-    --set postgresql.enabled=false \
-    --set monitoringPasscode=paas-lab-monitor \
-    --set initSysctl.enabled=false \
-    --set initFs.enabled=false \
-    --set 'plugins.install=[]' \
-    --set prometheusExporter.enabled=false \
-    --set livenessProbe.enabled=false \
     --set "nodeSelector.kubernetes\.io/hostname=${node}" \
-    --set-json 'tolerations=[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"},{"key":"node-role.kubernetes.io/master","operator":"Exists","effect":"NoSchedule"}]' \
-    --set startupProbe.initialDelaySeconds=120 \
-    --set startupProbe.periodSeconds=20 \
-    --set startupProbe.failureThreshold=90 \
-    --set startupProbe.timeoutSeconds=5 \
-    --set sonarProperties."sonar\\.web\\.javaOpts"="-Xmx256m -Xms128m -XX:+UseSerialGC" \
-    --set sonarProperties."sonar\\.ce\\.javaOpts"="-Xmx256m -Xms128m -XX:+UseSerialGC" \
-    --set resources.requests.memory=256Mi \
-    --set resources.requests.cpu=100m \
-    --set resources.limits.memory=1280Mi \
-    --set resources.limits.cpu=1 \
+    --set readinessProbe.exec=null \
+    --set livenessProbe.exec=null \
     --timeout 20m
 }
 
@@ -57,7 +55,7 @@ lab_sonar_repair_crash_loop() {
   local pod restarts
   restarts="$(lab_sonar_pod_restarts "${ns}")"
   pod="$(kubectl get pods -n "${ns}" -o name 2>/dev/null | grep sonarqube-sonarqube | head -1 | sed 's|pod/||' || true)"
-  echo "WARN: Sonar pod restarts=${restarts} — helm repair (embedded H2, liveness off, 256m heap)"
+  echo "WARN: Sonar pod restarts=${restarts} — helm repair (httpGet probes, 256m heap, no curl exec)"
   [[ -n "${pod}" ]] && kubectl describe pod -n "${ns}" "${pod}" 2>/dev/null | tail -15 || true
   lab_sonar_helm_upgrade "${release}" "${ns}" "${node}" "${port}"
   [[ -n "${pod}" ]] && kubectl delete pod -n "${ns}" "${pod}" --wait=false 2>/dev/null || true

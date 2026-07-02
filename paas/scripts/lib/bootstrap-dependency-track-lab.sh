@@ -13,6 +13,28 @@ DT_ADMIN_NEW_PASSWORD="${DT_ADMIN_NEW_PASSWORD:-DependencyTrack123!}"
 TEAM_NAME="${DT_API_TEAM:-Automation}"
 SYNC_JENKINS="${SYNC_JENKINS:-true}"
 
+read_env_val() {
+  local key="$1" file line
+  for file in "${ENV_FILE}" "${DOT_ENV}"; do
+    [[ -f "${file}" ]] || continue
+    line="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"' || true)"
+    [[ -n "${line}" ]] && printf '%s' "${line}" && return 0
+  done
+  return 1
+}
+
+load_dt_admin_creds() {
+  local from_env
+  from_env="$(read_env_val DT_ADMIN_USER || true)"
+  [[ -n "${from_env}" ]] && DT_ADMIN_USER="${from_env}"
+  from_env="$(read_env_val DT_ADMIN_PASSWORD || true)"
+  [[ -n "${from_env}" ]] && DT_ADMIN_PASSWORD="${from_env}"
+  from_env="$(read_env_val DT_ADMIN_NEW_PASSWORD || true)"
+  [[ -n "${from_env}" ]] && DT_ADMIN_NEW_PASSWORD="${from_env}"
+}
+
+load_dt_admin_creds
+
 ok() { echo "OK: $*"; }
 warn() { echo "WARN: $*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -68,14 +90,35 @@ dt_curl() {
 }
 
 wait_api() {
-  local n=0
+  local n=0 pod
   until curl -fsS -m 5 "${API_BASE}/api/version" >/dev/null 2>&1; do
     n=$((n + 1))
-    [[ "${n}" -le 30 ]] || fail "API not ready at ${API_BASE}/api/version"
+    if [[ "${n}" -eq 6 ]]; then
+      pod="$(kubectl get pods -n "${DT_NS}" -l app.kubernetes.io/component=api-server \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      if [[ -n "${pod}" ]]; then
+        echo "==> NodePort unreachable — port-forward pod/${pod} for bootstrap"
+        kubectl port-forward -n "${DT_NS}" "pod/${pod}" "127.0.0.1:32399:8080" >/tmp/dt-bootstrap-pf.log 2>&1 &
+        DT_PF_PID=$!
+        sleep 4
+        API_BASE="http://127.0.0.1:32399"
+        if curl -fsS -m 5 "${API_BASE}/api/version" >/dev/null 2>&1; then
+          ok "API ready via port-forward ${API_BASE}/api/version"
+          return 0
+        fi
+      fi
+    fi
+    [[ "${n}" -le 30 ]] || fail "API not ready at ${API_BASE}/api/version (pod Running? kubectl get pods -n ${DT_NS})"
     sleep 5
   done
   ok "API ready ${API_BASE}/api/version"
 }
+
+DT_PF_PID=""
+cleanup_dt_pf() {
+  [[ -n "${DT_PF_PID:-}" ]] && kill "${DT_PF_PID}" 2>/dev/null || true
+}
+trap cleanup_dt_pf EXIT
 
 dt_login_raw() {
   local user="$1" pass="$2"
@@ -92,23 +135,36 @@ parse_login() {
 }
 
 acquire_token() {
-  local raw
-  raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}")"
-  parse_login "${raw}"
-  if [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" && "${LOGIN_BODY}" != *"FORCE_PASSWORD_CHANGE"* ]]; then
-    printf '%s' "${LOGIN_BODY}"
-    return 0
-  fi
-  if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
-    ok "first login — forcing password change"
-    force_change_password "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}" "${DT_ADMIN_NEW_PASSWORD}"
-    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}")"
+  local raw pass tried="" 
+  for pass in "${DT_ADMIN_PASSWORD}" "${DT_ADMIN_NEW_PASSWORD}" "DependencyTrack123!" "admin"; do
+    [[ -n "${pass}" ]] || continue
+    case " ${tried} " in *" ${pass} "*) continue ;; esac
+    tried="${tried} ${pass}"
+    echo "==> DT login user=${DT_ADMIN_USER} (trying password len=${#pass})"
+    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}")"
     parse_login "${raw}"
-    [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
-    printf '%s' "${LOGIN_BODY}"
-    return 0
-  fi
-  fail "login failed HTTP ${LOGIN_HTTP}: ${LOGIN_BODY} — try: DT_ADMIN_USER=admin DT_ADMIN_PASSWORD=admin bash paas/scripts/lab.sh dt-bootstrap"
+    if [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" && "${LOGIN_BODY}" != *"FORCE_PASSWORD_CHANGE"* ]]; then
+      DT_ADMIN_PASSWORD="${pass}"
+      patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${pass}"
+      patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${pass}"
+      ok "logged in as ${DT_ADMIN_USER}"
+      printf '%s' "${LOGIN_BODY}"
+      return 0
+    fi
+    if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
+      ok "first login — forcing password change to ${DT_ADMIN_NEW_PASSWORD}"
+      force_change_password "${DT_ADMIN_USER}" "${pass}" "${DT_ADMIN_NEW_PASSWORD}"
+      raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}")"
+      parse_login "${raw}"
+      [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
+      patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
+      patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
+      printf '%s' "${LOGIN_BODY}"
+      return 0
+    fi
+    warn "login HTTP ${LOGIN_HTTP} with tried password — next candidate"
+  done
+  fail "login failed for user ${DT_ADMIN_USER} — set DT_ADMIN_PASSWORD (UI: http://${NODE_IP}:30212) then re-run dt-bootstrap"
 }
 
 force_change_password() {
@@ -164,9 +220,9 @@ sync_env_and_jenkins() {
   for f in "${ENV_FILE}" "${DOT_ENV}"; do
     patch_env_key "${f}" "DEPENDENCY_TRACK_BASE_URL" "${api_base}"
     patch_env_key "${f}" "NEXT_PUBLIC_DEPENDENCY_TRACK_URL" "${api_base}"
-    patch_env_key "${f}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${api_base}"
+    patch_env_key "${f}" "JENKINS_DEPENDENCY_TRACK_BASE_URL" "${in_cluster}"
     patch_env_key "${f}" "DEPENDENCY_TRACK_API_KEY" "${api_key}"
-    ok "updated ${f}"
+    ok "updated ${f} (UI=${api_base}, Jenkins=${in_cluster})"
   done
   if [[ "${SYNC_JENKINS}" == "true" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
     python3 "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" --params-only --force
@@ -194,7 +250,6 @@ main() {
   wait_api
 
   token="$(acquire_token)"
-  ok "logged in as ${DT_ADMIN_USER}"
 
   team_uuid="$(find_team_uuid "${token}")"
   ok "team ${TEAM_NAME} uuid=${team_uuid}"
@@ -203,8 +258,8 @@ main() {
   ok "API key created (${#api_key} chars, starts with ${api_key:0:4}...)"
 
   verify_http="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 \
-    -H "X-Api-Key: ${api_key}" "${api_base}/api/v1/project?pageNumber=1&pageSize=1")"
-  [[ "${verify_http}" == "200" ]] || fail "API key verify HTTP ${verify_http}"
+    -H "X-Api-Key: ${api_key}" "${API_BASE}/api/v1/project?pageNumber=1&pageSize=1")"
+  [[ "${verify_http}" == "200" ]] || fail "API key verify HTTP ${verify_http} against ${API_BASE}"
 
   sync_env_and_jenkins "${api_base}" "${api_key}"
 

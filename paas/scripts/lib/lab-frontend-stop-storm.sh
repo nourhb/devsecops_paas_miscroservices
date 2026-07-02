@@ -20,3 +20,4 @@ kubectl delete pods -n "${PAAS_NS}" --field-selector=status.phase=Failed --force
 LEFT="$(kubectl get pods -n "${PAAS_NS}" -l app=frontend --no-headers --request-timeout=15s 2>/dev/null | wc -l | tr -d ' ' || echo '?')"
 echo "frontend pods remaining: ${LEFT} (Terminating pods clear in background; skip count if API slow)"
 echo "OK: storm stopped — fix disk before: kubectl scale deployment/frontend -n ${PAAS_NS} --replicas=1"
+echo "NOTE: For Sonar Step 5 RAM only, use: bash paas/scripts/lab.sh sonar-scan-window (auto-restore UI)"

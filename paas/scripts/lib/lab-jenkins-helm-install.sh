@@ -197,7 +197,7 @@ helm_jenkins_values() {
     --set controller.resources.limits.memory=4Gi \
     --set persistence.enabled=true \
     --set persistence.storageClass=local-path \
-    --set persistence.size=8Gi \
+    --set persistence.size=2Gi \
     --set agent.enabled=false \
     "${extra_sets[@]}" \
     --timeout 10m
@@ -213,8 +213,9 @@ repair_jenkins_init() {
     kubectl delete pod -n "${JENKINS_NS}" jenkins-0 --force --grace-period=0 2>/dev/null || true
     sleep 20
     if jenkins_init_failing; then
-      log "still failing — wiping PVC (set JENKINS_WIPE_PVC=0 to skip auto-wipe)"
-      wipe_jenkins_pvc
+      log "still failing — NOT auto-wiping PVC (data preserved)"
+      log "  To wipe Jenkins home: JENKINS_WIPE_PVC=1 bash paas/scripts/lab.sh jenkins-install"
+      log "  Or fix permissions: bash paas/scripts/lib/lab-jenkins-helm-install.sh (fix_jenkins_pvc_permissions)"
     fi
   fi
   helm_jenkins_values || log "WARN: helm returned non-zero — continuing"

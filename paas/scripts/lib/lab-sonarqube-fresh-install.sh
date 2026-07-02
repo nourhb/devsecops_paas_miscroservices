@@ -56,7 +56,13 @@ YAML
 }
 
 wipe_sonar() {
-  echo "==> Remove broken Sonar release + PVCs"
+  if [[ "${SONAR_FORCE_WIPE:-}" != "1" ]]; then
+    echo "==> Repair Sonar release (keeps PVC — data retained)"
+    helm uninstall "${SONAR_RELEASE}" -n "${SONAR_NS}" 2>/dev/null || true
+    kubectl delete statefulset,deploy,pod,secret,configmap -n "${SONAR_NS}" --all --ignore-not-found --wait=false 2>/dev/null || true
+    return 0
+  fi
+  echo "==> SONAR_FORCE_WIPE=1 — remove release + PVCs (DESTROYS Sonar data)"
   helm uninstall "${SONAR_RELEASE}" -n "${SONAR_NS}" 2>/dev/null || true
   kubectl delete statefulset,deploy,pod,pvc,secret,configmap -n "${SONAR_NS}" --all --ignore-not-found --wait=false 2>/dev/null || true
   kubectl delete namespace "${SONAR_NS}" --ignore-not-found --timeout=120s 2>/dev/null || true

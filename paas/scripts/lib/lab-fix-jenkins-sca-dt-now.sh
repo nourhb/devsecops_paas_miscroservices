@@ -1,48 +1,61 @@
 #!/usr/bin/env bash
-# Push Step 4 SCA + Dependency-Track fixes to live Jenkins and sync DT URL on the job.
+# One shot: Jenkins up → DT API key fresh → CPS monolith on pod → job params synced.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
-
-echo "==> Push CPS monolith (bom-ref, node-first Python BOM, DT probe-only upload)"
-SKIP_HARBOR_FIX_PUSH=1 bash "${SCRIPT_DIR}/fix-paas-deploy-cps-split-now.sh"
-
-echo "==> Verify live Jenkins markers"
+NODE_IP="${NODE_IP:-192.168.56.129}"
 JNS="${JENKINS_K8S_NAMESPACE:-cicd}"
 JPOD="${JENKINS_POD:-jenkins-0}"
 REMOTE="${JENKINS_PAAS_REMOTE_DIR:-/var/jenkins_home/paas}"
-for m in "'bom-ref':" "dt-probe-only-upload-20260701" "resolvePortableNodeBin"; do
-  kubectl exec -n "${JNS}" "${JPOD}" -c jenkins -- grep -q "${m}" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null \
-    || kubectl exec -n "${JNS}" "${JPOD}" -c jenkins -- grep -q "${m}" "${REMOTE}/paas-deploy-load-h1.groovy" 2>/dev/null \
-    || echo "WARN: marker ${m} not found in live groovy" >&2
-done
+IN_CLUSTER_DT="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
 
-if [[ -f "${ENV_FILE}" ]]; then
-  DT_URL="$(grep -E '^DEPENDENCY_TRACK_BASE_URL=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
-  DT_KEY="$(grep -E '^DEPENDENCY_TRACK_API_KEY=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '\r"' | xargs || true)"
-  if [[ -n "${DT_URL}" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
-    echo "==> Sync Jenkins job params DEPENDENCY_TRACK_BASE_URL=${DT_URL}"
-    export DEPENDENCY_TRACK_BASE_URL="${DT_URL}"
-    export JENKINS_DEPENDENCY_TRACK_BASE_URL="${DT_URL}"
-    export DEPENDENCY_TRACK_API_KEY="${DT_KEY}"
-    export PAAS_DT_UPLOAD_OPTIONAL="${PAAS_DT_UPLOAD_OPTIONAL:-true}"
-    python3 "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" --params-only --force 2>/dev/null || true
-  fi
+echo "==> 1/4 Jenkins recover (HTTP :30090 — required for job POST)"
+bash "${SCRIPT_DIR}/lab-jenkins-recover.sh" recover || {
+  echo "FAIL: Jenkins not up — check: kubectl get pods -n ${JNS}" >&2
+  exit 1
+}
+
+echo "==> 2/4 Dependency-Track API key + env (auto-bootstrap if NodePort/key stale)"
+if ! bash "${SCRIPT_DIR}/lab-dependency-track.sh"; then
+  echo "==> dependency-track heal failed — dt-bootstrap (new API key)"
+  bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh"
 fi
 
-echo "==> Probe Dependency-Track from master"
-NODE_IP="${NODE_IP:-192.168.56.129}"
-for port in 32336 31260 32337; do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 "http://${NODE_IP}:${port}/api/version" 2>/dev/null || echo 000)"
-  echo "  :${port} => HTTP ${code}"
+echo "==> 3/4 Jenkins ZAP + DT port-forward RBAC"
+bash "${SCRIPT_DIR}/lab-jenkins-zap-tools.sh"
+
+echo "==> 4/4 Push CPS monolith to Jenkins pod + POST wrapper"
+SKIP_HARBOR_FIX_PUSH=1 SKIP_DT_HEAL=1 bash "${SCRIPT_DIR}/fix-paas-deploy-cps-split-now.sh"
+
+echo "==> Verify live Jenkins markers"
+for m in dt-cluster-first-20260702 dt-listfile-posix-20260701 dt_kubectl_portforward_upload; do
+  kubectl exec -n "${JNS}" "${JPOD}" -c jenkins --request-timeout=60s -- \
+    grep -q "${m}" "${REMOTE}/paas-deploy-stages.groovy" 2>/dev/null \
+    || echo "WARN: marker ${m} not in monolith — git pull Jenkinsfile.paas-deploy && re-run" >&2
 done
 
+if [[ -f "${ENV_FILE}" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ENV_FILE}" 2>/dev/null || true
+  set +a
+  export JENKINS_DEPENDENCY_TRACK_BASE_URL="${JENKINS_DEPENDENCY_TRACK_BASE_URL:-${IN_CLUSTER_DT}}"
+  python3 "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" --params-only --force \
+    || echo "WARN: Jenkins param sync skipped (Jenkins HTTP?)"
+fi
+
 echo ""
-echo "OK: Jenkins Step 4 fixes pushed."
-echo "Re-run failed projects from PaaS UI. Console must show:"
-echo "  marker=dt-probe-only-upload-20260701"
-echo "  [sca] Python BOM from requirements.txt (node"
-echo "  'bom-ref': (quoted in node -e block)"
+echo "==> Probes"
+for port in 30090 32336; do
+  code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${NODE_IP}:${port}/" 2>/dev/null || echo 000)"
+  echo "  :${port} => HTTP ${code}"
+done
+kubectl exec -n "${JNS}" "${JPOD}" -c jenkins --request-timeout=30s -- \
+  curl -fsS -m 15 "${IN_CLUSTER_DT}/api/version" 2>/dev/null \
+  && echo "  Jenkins pod -> DT in-cluster: OK" \
+  || echo "  WARN: Jenkins pod -> DT in-cluster failed (Step 4 uses kubectl port-forward fallback)"
+
 echo ""
-echo "If DT still down: bash paas/scripts/lab.sh dependency-track"
+echo "OK — trigger NEW paas-deploy from http://${NODE_IP}:30090 or PaaS UI"
+echo "Console must show: marker=dt-cluster-first-20260702"

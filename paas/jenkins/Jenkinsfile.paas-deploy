@@ -41,7 +41,7 @@ def paasStepSkip(int step, String reason) { println "PAAS_STEP_SKIP step=${step}
 def uploadBomToDependencyTrack(String projId, String dtProjectName, String branchOrVersionLabel) {
   def inClusterDt = 'http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080'
   def dtBase = params.DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.DEPENDENCY_TRACK_BASE_URL ?: ''
-  def jenkinsDtBase = params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: dtBase ?: inClusterDt
+  def jenkinsDtBase = params.JENKINS_DEPENDENCY_TRACK_BASE_URL?.trim() ?: env.JENKINS_DEPENDENCY_TRACK_BASE_URL ?: inClusterDt
   def dtKey = params.DEPENDENCY_TRACK_API_KEY?.trim() ?: env.DEPENDENCY_TRACK_API_KEY ?: ""
   def ver = "${branchOrVersionLabel}-${env.BUILD_NUMBER}"
   def dtName = (dtProjectName ?: projId).trim()
@@ -62,30 +62,26 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
   ]) {
     sh '''#!/usr/bin/env bash
       set +e
-      echo "[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (NodePort/env URLs before cluster DNS — built-in Jenkins agent)"
-      echo "[paas-jenkinsfile] marker=dt-probe-only-upload-20260701 (no cluster DNS fallback on built-in agent)"
+      echo "[paas-jenkinsfile] marker=dt-cluster-first-20260702 (in-cluster URL first; kubectl port-forward fallback)"
       echo "[paas-jenkinsfile] marker=dt-listfile-posix-20260701 (temp file list — dash/sh safe, no process substitution)"
+      IN_CLUSTER_DT="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
       dt_probe_ok() {
         u="$1"
         [ -z "$u" ] && return 1
         curl -fsS -m 10 "${u%/}/api/version" >/dev/null 2>&1
       }
       dt_upload_candidates() {
-        for u in "${DT_BASE}" "${JENKINS_DT_BASE}"; do
+        for u in \
+          "${IN_CLUSTER_DT}" \
+          "http://dtrack-dependency-track-api-server.dependency-track:8080" \
+          "${JENKINS_DT_BASE}" \
+          "${DT_BASE}" \
+          "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
+          "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080"
+        do
           [ -z "$u" ] && continue
           printf '%s\n' "$u"
         done | awk '!seen[$0]++'
-        if command -v getent >/dev/null 2>&1 && getent hosts dtrack-dependency-track-api-server.dependency-track.svc.cluster.local >/dev/null 2>&1; then
-          for u in \
-            "http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080" \
-            "http://dtrack-dependency-track-api-server.dependency-track:8080" \
-            "http://dtrack-dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
-            "http://dependency-track-apiserver.dependency-track.svc.cluster.local:8080" \
-            "http://dtrack-apiserver.dependency-track.svc.cluster.local:8080"
-          do
-            printf '%s\n' "$u"
-          done
-        fi | awk '!seen[$0]++'
       }
       DT_LIST_FILE="sca/.dt-bases-$$.txt"
       DT_CANDIDATES_FILE="sca/.dt-candidates-$$.txt"
@@ -101,15 +97,9 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       done < "${DT_CANDIDATES_FILE}"
       rm -f "${DT_CANDIDATES_FILE}"
       if [ -z "${DT_BASE_PICKED}" ]; then
-        if [ -n "${DT_BASE}" ]; then
-          DT_BASE_PICKED="${DT_BASE}"
-        elif [ -n "${JENKINS_DT_BASE}" ]; then
-          DT_BASE_PICKED="${JENKINS_DT_BASE}"
-        fi
-        if [ -n "${DT_BASE_PICKED}" ]; then
-          printf '%s\n' "${DT_BASE_PICKED}" > "${DT_LIST_FILE}"
-        fi
-        echo "[sca] Dependency-Track /api/version probe failed on all bases — will still try upload via ${DT_BASE_PICKED:-<none>}"
+        dt_upload_candidates > "${DT_LIST_FILE}"
+        DT_BASE_PICKED="${IN_CLUSTER_DT}"
+        echo "[sca] Dependency-Track /api/version probe failed — will try upload + kubectl port-forward"
       else
         echo "[sca] Dependency-Track base=${DT_BASE_PICKED}"
       fi
@@ -144,6 +134,35 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
         done
         return 1
       }
+      dt_kubectl_portforward_upload() {
+        KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
+        command -v kubectl >/dev/null 2>&1 && KCTL=kubectl
+        [ -x "${KCTL}" ] || { echo "[sca] kubectl missing — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
+        DT_PF_PORT="${DT_PF_PORT:-18080}"
+        for DT_SVC in dtrack-dependency-track-api-server dependency-track-api-server; do
+          "${KCTL}" get svc -n dependency-track "${DT_SVC}" >/dev/null 2>&1 || continue
+          echo "[sca] kubectl port-forward dependency-track/${DT_SVC} -> 127.0.0.1:${DT_PF_PORT}"
+          "${KCTL}" port-forward -n dependency-track "svc/${DT_SVC}" "127.0.0.1:${DT_PF_PORT}:8080" >/tmp/dt-pf-$$.log 2>&1 &
+          PF_PID=$!
+          _pf_ok=0
+          for _w in 1 2 3 4 5 6 8 10; do
+            if dt_probe_ok "http://127.0.0.1:${DT_PF_PORT}"; then
+              _pf_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${_pf_ok}" = "1" ] && dt_try_upload "http://127.0.0.1:${DT_PF_PORT}"; then
+            kill "${PF_PID}" 2>/dev/null || true
+            wait "${PF_PID}" 2>/dev/null || true
+            return 0
+          fi
+          kill "${PF_PID}" 2>/dev/null || true
+          wait "${PF_PID}" 2>/dev/null || true
+          [ -f /tmp/dt-pf-$$.log ] && tail -5 /tmp/dt-pf-$$.log 2>/dev/null || true
+        done
+        return 1
+      }
       DT_UPLOADED=0
       while IFS= read -r _dt_base; do
         [ -z "${_dt_base}" ] && continue
@@ -153,6 +172,12 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
         fi
       done < "${DT_LIST_FILE}"
       rm -f "${DT_LIST_FILE}"
+      if [ "${DT_UPLOADED}" != "1" ]; then
+        echo "[sca] curl upload failed on all bases — trying kubectl port-forward (works when NodePort/down but pod Running)"
+        if dt_kubectl_portforward_upload; then
+          DT_UPLOADED=1
+        fi
+      fi
       if [ "${DT_UPLOADED}" = "1" ]; then
         echo "[sca] Dependency-Track upload OK (HTTP ${DT_HTTP}) base=${DT_UPLOAD_BASE:-${DT_BASE_PICKED}} project=${DT_PROJECT} version=${DT_VERSION}"
         echo "PAAS_STEP_OK step=4 id=dependency-track msg=SBOM uploaded to Dependency-Track HTTP ${DT_HTTP}"
@@ -160,7 +185,8 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
         echo "[sca] WARN: Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — PAAS_DT_UPLOAD_OPTIONAL=true; continuing with local sca/bom.json"
         echo "PAAS_STEP_WARN step=4 id=dependency-track msg=SBOM kept locally; Dependency-Track unreachable (HTTP ${DT_HTTP:-?})"
       else
-        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) last base=${DT_BASE_PICKED} — rotate DEPENDENCY_TRACK_API_KEY if 401; ensure dtrack API server pod is Running"
+        echo "[sca] Dependency-Track upload failed (HTTP ${DT_HTTP:-?}) — ensure API pod Running: kubectl get pods -n dependency-track"
+        echo "[sca] Fix: bash paas/scripts/lab.sh dependency-track && bash paas/scripts/lab.sh jenkins-zap-tools"
         printf '%s\n' "${DT_BODY}" | head -c 800
         echo ""
         echo "PAAS_STEP_FAIL step=4 id=dependency-track msg=Dependency-Track upload HTTP ${DT_HTTP:-?}"
@@ -3039,7 +3065,7 @@ exit 0
       securityMandatoryStage("4. SAST — SonarQube") {
       println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
       println "[paas-jenkinsfile] marker=sonar-shell-wait-20260701 (nohup scanner + bash DEADLINE poll — no Groovy sleep)"
-      println "[paas-jenkinsfile] marker=sonar-auto-rotate-token-20260701 (invalid SONAR_TOKEN → admin API rotate before fail)"
+      println "[paas-jenkinsfile] marker=sonar-cluster-dns-first-20260702 (in-cluster URL before flaky NodePort :30900)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -3070,9 +3096,9 @@ exit 0
             pick_sonar_url() {
               _np="http://${NODE_IP}:${SONAR_NODEPORT:-30900}"
               for u in \
-                "${_np}" \
-                "${SONAR_HOST_URL_PARAM}" \
                 "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000" \
+                "${SONAR_HOST_URL_PARAM}" \
+                "${_np}" \
                 "http://sonarqube-service.sonarqube.svc.cluster.local:9000" \
                 "http://sonarqube.sonarqube.svc.cluster.local:9000"
               do
