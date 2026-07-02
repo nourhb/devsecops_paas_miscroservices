@@ -122,7 +122,10 @@ livenessProbe:
 sonarProperties:
   sonar.web.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
   sonar.ce.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
-  sonar.search.javaOpts: "-Xmx768m -Xms512m -XX:+UseSerialGC"
+  # NO -XX:+UseSerialGC here: bundled Elasticsearch hard-codes -XX:+UseG1GC in its own
+  # jvm.options; appending SerialGC causes "Multiple garbage collectors selected" —
+  # a fatal JVM init error that CrashLoopBackOff's forever (20260702 incident).
+  sonar.search.javaOpts: "-Xmx768m -Xms512m"
 resources:
   requests:
     memory: 1024Mi
