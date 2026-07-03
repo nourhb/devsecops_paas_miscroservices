@@ -23,6 +23,20 @@ GITOPS_BRANCH="$(read_env GITOPS_DEFAULT_BRANCH main)"
 GITOPS_TOKEN="$(read_env GITOPS_REPO_TOKEN "")"
 DEST_SERVER="$(read_env ARGOCD_DEST_SERVER https://kubernetes.default.svc)"
 
+argocd_safe_name() {
+  local raw="$1"
+  local safe
+  safe="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.-]+/-/g; s/-+/-/g; s/^-+//; s/-+$//')"
+  if [[ -z "${safe}" ]]; then
+    safe="app"
+  fi
+  if [[ ${#safe} -gt 253 ]]; then
+    safe="${safe:0:253}"
+    safe="${safe%-}"
+  fi
+  printf '%s' "${safe}"
+}
+
 if ! kubectl get crd applications.argoproj.io >/dev/null 2>&1; then
   echo "ERROR: Argo CD Application CRD missing — run: bash paas/scripts/lib/lab-install-argocd-now.sh" >&2
   exit 1
@@ -54,15 +68,18 @@ for app_dir in "${GITOPS}/apps"/*; do
   [[ -d "${app_dir}" ]] || continue
   project="$(basename "${app_dir}")"
   [[ -f "${app_dir}/values.yaml" ]] || continue
-  app_name="${ARGOCD_APP_PREFIX}-${project}"
-  dest_ns="${project}"
+  app_name="$(argocd_safe_name "${ARGOCD_APP_PREFIX}-${project}")"
+  dest_ns="$(argocd_safe_name "${project}")"
   chart_path="apps/${project}"
+  if [[ "${app_name}" != "${ARGOCD_APP_PREFIX}-${project}" ]]; then
+    echo "  note: ${ARGOCD_APP_PREFIX}-${project} → ${app_name} (RFC 1123 name)"
+  fi
   if kubectl get application "${app_name}" -n "${ARGOCD_NS}" >/dev/null 2>&1; then
     echo "  exists: ${app_name}"
     kubectl annotate application "${app_name}" -n "${ARGOCD_NS}" argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
     continue
   fi
-  kubectl apply -f - <<EOF
+  if ! kubectl apply -f - <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -86,6 +103,10 @@ spec:
     syncOptions:
       - CreateNamespace=true
 EOF
+  then
+    echo "  WARN: failed to create ${app_name} (invalid name or Argo CD rejected)" >&2
+    continue
+  fi
   echo "  created: ${app_name} → ${chart_path} (ns ${dest_ns})"
   created=$((created + 1))
 done

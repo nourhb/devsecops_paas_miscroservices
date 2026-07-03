@@ -22,9 +22,10 @@ ENV NODE_ENV=production \
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 --ingroup nodejs nextjs \
     && apk add --no-cache wget openssl \
-    && wget -qO /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64 \
-    && chmod +x /usr/local/bin/cosign \
-    && chown root:root /usr/local/bin/cosign
+    && (wget -qO /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64 \
+        && chmod +x /usr/local/bin/cosign \
+        && chown root:root /usr/local/bin/cosign) \
+    || echo "WARN: cosign download skipped (offline lab build — Step 9 verify may use Jenkins cosign)"
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@kubernetes ./node_modules/@kubernetes
