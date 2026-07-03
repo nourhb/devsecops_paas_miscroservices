@@ -172,7 +172,7 @@ main() {
       patch_both "ELASTICSEARCH_PROBE_URL" "http://${NODE_IP}:${np}"
     fi
   else
-    warn "Elasticsearch service not found (may be scaled to 0
+    warn "Elasticsearch service not found (may be scaled to 0)"
   fi
 
   svc="$(first_running_svc monitoring kibana-kibana kibana 2>/dev/null || true)"

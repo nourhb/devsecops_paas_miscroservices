@@ -187,7 +187,7 @@ main() {
     bash "${SCRIPT_DIR}/install-jenkins-workflow-plugins.sh" || \
     fail "Pipeline plugins required for paas-deploy job"
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force || fail "paas-deploy job create failed"
-  python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py" || warn "wrapper POST failed
+  python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py" || warn "wrapper POST failed"
   PAAS_SKIP_DT=1 bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || warn "env sync failed"
 
   echo "=============================================="

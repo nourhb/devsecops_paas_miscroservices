@@ -9,7 +9,7 @@ MARKER = "cps-split-dockerless-6abc-20260620"
 def main() -> int:
     path = Path(__file__).resolve().parent / "Jenkinsfile.paas-deploy"
     text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    if MARKER in text:
+    if MARKER in text or "dockerlessImagePushCraneNode6a" in text:
         print(f"SKIP: {path.name} already has {MARKER}")
         return 0
     start = text.index("def dockerlessImagePush(String craneBin, String imageRef, String dockerfilePath) {")

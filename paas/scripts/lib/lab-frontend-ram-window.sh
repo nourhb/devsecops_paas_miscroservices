@@ -75,7 +75,7 @@ restore_frontend() {
   log "restore UI — replicas=${target}"
   kubectl_try rollout resume deployment/frontend -n "${PAAS_NS}" 2>/dev/null || true
   kubectl_try scale deployment/frontend -n "${PAAS_NS}" --replicas="${target}" \
-    || warn "scale to ${target} failed
+    || warn "scale to ${target} failed"
 
   clear_state
 
@@ -92,7 +92,7 @@ restore_frontend() {
     fi
     sleep 10
   done
-  warn "UI not HTTP 200 yet
+  warn "UI not HTTP 200 yet"
   return 0
 }
 

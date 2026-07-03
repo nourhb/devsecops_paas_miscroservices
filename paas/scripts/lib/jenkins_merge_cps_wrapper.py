@@ -43,7 +43,8 @@ def build_wrapper(
 ) -> str:
     """Assembled monolith load + paas.runPaasDeploy()."""
     stages = stages_path or f"{paas_dir}/paas-deploy-stages.groovy"
-    return f"""def paasDir = '{paas_dir}'
+    return f"""// {marker}
+def paasDir = '{paas_dir}'
 def paasDeployStages = '{stages}'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def paasRequireFreshStages = {{

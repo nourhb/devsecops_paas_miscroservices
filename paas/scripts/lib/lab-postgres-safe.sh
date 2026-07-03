@@ -69,7 +69,7 @@ wait_postgres_ready() {
     log "  waiting postgres… (${i}/36)"
     sleep 10
   done
-  warn "postgres not ready
+  warn "postgres not ready"
   return 1
 }
 
@@ -90,7 +90,7 @@ restore_postgres() {
 
   log "restore postgres — replicas=${target}"
   kubectl_try scale deployment/postgres -n "${PAAS_NS}" --replicas="${target}" \
-    || warn "scale postgres failed
+    || warn "scale postgres failed"
 
   wait_postgres_ready || true
 

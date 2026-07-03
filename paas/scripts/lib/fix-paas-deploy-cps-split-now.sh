@@ -579,7 +579,8 @@ stale = "\n".join(
   if (!readFile({v}).contains('{BUNDLE}')) {{ error("Stale ${{{v}.tokenize('/')[-1]}}") }}"""
     for v, _ in SPLIT
 )
-wrapper = f"""def paasDir = '{PAAS_DIR}'
+wrapper = f"""// {MARKER}
+def paasDir = '{PAAS_DIR}'
 def paasDeployStages = '{PAAS_DIR}/paas-deploy-stages.groovy'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def paasRequireFreshStages = {{
