@@ -14,10 +14,17 @@ const BUNDLED_SIMPLE_APP_CHART = "/app/paas-bundled/paas/gitops/apps/simple-app"
 const CHART_RELATIVE_FILES = [
     "Chart.yaml",
     "templates/_helpers.tpl",
+    "templates/_nginx.tpl",
+    "templates/configmap-nginx.yaml",
     "templates/deployment.yaml",
     "templates/deployment-bluegreen.yaml",
     "templates/service.yaml",
     "templates/ingress.yaml"
+];
+const STATIC_NGINX_SYNC_FILES = [
+    "templates/_nginx.tpl",
+    "templates/configmap-nginx.yaml",
+    "templates/deployment.yaml"
 ];
 const githubHeaders = (token: string) => ({
     Authorization: `Bearer ${token}`,
@@ -149,6 +156,40 @@ export async function ensureGitOpsHelmChartFromReference(projectName: string, bu
     }
     return { bootstrapped: filesWritten.length > 0, filesWritten };
 }
+
+/** Refresh nginx chart templates on every static SPA promote (Argo otherwise reverts kubectl patches). */
+export async function syncStaticNginxChartTemplates(projectName: string, buildProfile: BuildProfile = "static"): Promise<{
+    updated: string[];
+}> {
+    if (buildProfile !== "static" || !env.GITOPS_REPO_URL || !env.GITOPS_REPO_TOKEN) {
+        return { updated: [] };
+    }
+    const { owner, repo } = parseGithubRepo(env.GITOPS_REPO_URL);
+    const branch = env.GITOPS_DEFAULT_BRANCH;
+    const token = env.GITOPS_REPO_TOKEN;
+    const chartPath = gitopsHelmChartPathForProject(projectName);
+    const profileSpec = resolveDeployProfileSpec(buildProfile);
+    const chartSlug = sanitizeDeployImageName(projectName);
+    const referenceName = (env.GITOPS_BOOTSTRAP_CHART_PATH.trim() || "apps/simple-app").split("/").filter(Boolean).pop() ?? "simple-app";
+    const updated: string[] = [];
+    for (const rel of STATIC_NGINX_SYNC_FILES) {
+        const destPath = `${chartPath}/${rel}`;
+        let text = readBundledBootstrapChartFile(rel);
+        if (!text) {
+            continue;
+        }
+        if (referenceName !== chartSlug) {
+            text = text.replaceAll(referenceName, chartSlug);
+        }
+        if (rel === "templates/deployment.yaml") {
+            text = patchDeploymentForProfile(text, profileSpec);
+        }
+        await githubPutText(owner, repo, destPath, branch, token, text, `chore(gitops): sync ${projectName} static-nginx chart templates`);
+        updated.push(destPath);
+    }
+    return { updated };
+}
+
 function readBundledBootstrapChartFile(rel: string): string | null {
     const filePath = `${BUNDLED_SIMPLE_APP_CHART}/${rel.replace(/\\/g, "/")}`;
     try {
@@ -204,6 +245,9 @@ export function applyDeployValuesDefaults(doc: Record<string, unknown>, projectN
         : {};
     doc.service = service;
     service.targetPort = profileSpec.containerPort;
+    if (buildProfile === "static") {
+        doc.staticNginx = true;
+    }
     if (!doc.probes || typeof doc.probes !== "object" || doc.probes === null) {
         doc.probes = probeDefaultsForProfile(buildProfile);
     }

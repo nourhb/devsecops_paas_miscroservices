@@ -23,6 +23,7 @@ import {
     deleteStaleBlueGreenDeployments,
     readFirstReadyPodImage,
     remediateRollingDeployments,
+    STATIC_NGINX_CONTAINER_PORT,
     waitForAnyDeploymentReady
 } from "@/server/integrations/kubernetes-client";
 import { augmentBuildEnvForPipeline } from "@/server/projects/project-build-env";
@@ -33,7 +34,7 @@ import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
 import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
 import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
-import { ensureRollingWorkloadManifests } from "@/server/gitops/gitops-direct-apply-service";
+import { ensureRollingWorkloadManifests, ensureWorkloadNetworking } from "@/server/gitops/gitops-direct-apply-service";
 import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
 
 const activePromotions = new Set<string>();
@@ -256,7 +257,11 @@ async function reconcileClusterWorkload(
     const candidates = rollingDeploymentNameCandidates(projectName);
     const patched = await remediateRollingDeployments(destNamespace, candidates, artifactRef, containerPort);
     if (patched.length > 0) {
-        const profileNote = containerPort === 80 ? " nginx" : containerPort === 8000 ? " python" : "";
+        const profileNote = containerPort === STATIC_NGINX_CONTAINER_PORT || containerPort === 80
+            ? " nginx"
+            : containerPort === 8000
+                ? " python"
+                : "";
         sections.push(`[deploy] cluster auto-heal image+port=${containerPort}${profileNote} on: ${patched.join(", ")}`);
     }
     else {
@@ -267,6 +272,13 @@ async function reconcileClusterWorkload(
         if (direct.applied) {
             sections.push(`PAAS_DEPLOY_VERIFY step=direct_apply status=OK detail=${direct.deploymentName}`);
         }
+    }
+    const networking = await ensureWorkloadNetworking(destNamespace, projectName);
+    for (const line of networking.logs) {
+        sections.push(line);
+    }
+    if (networking.applied) {
+        sections.push(`PAAS_DEPLOY_VERIFY step=ingress status=OK detail=${networking.ingressHost}`);
     }
 }
 

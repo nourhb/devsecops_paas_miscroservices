@@ -29,7 +29,7 @@ gitops_reset_to_origin_main "${GITOPS}" main "${AUTH_URL}"
 
 echo "==> Repair GitOps chart at ${APP_DIR}"
 mkdir -p "${APP_DIR}/templates"
-for rel in Chart.yaml templates/_helpers.tpl templates/deployment.yaml templates/deployment-bluegreen.yaml templates/service.yaml templates/ingress.yaml; do
+for rel in Chart.yaml templates/_helpers.tpl templates/_nginx.tpl templates/configmap-nginx.yaml templates/deployment.yaml templates/deployment-bluegreen.yaml templates/service.yaml templates/ingress.yaml; do
   src="${REF_CHART}/${rel}"
   dest="${APP_DIR}/${rel}"
   mkdir -p "$(dirname "${dest}")"

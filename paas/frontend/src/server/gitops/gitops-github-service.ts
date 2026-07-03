@@ -9,7 +9,7 @@ import {
     resolveDeploymentStrategy,
     type BlueGreenSlot
 } from "@/server/gitops/gitops-blue-green";
-import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference } from "@/server/gitops/gitops-chart-bootstrap";
+import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference, syncStaticNginxChartTemplates } from "@/server/gitops/gitops-chart-bootstrap";
 import { mergeBuildEnvIntoHelmValues } from "@/server/projects/project-build-env";
 import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
 import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
@@ -157,6 +157,9 @@ async function commitHelmValuesGitHubUnlocked(projectName: string, imageTag: str
     }
     const { owner, repo } = parseGithubRepo(env.GITOPS_REPO_URL);
     const bootstrap = await ensureGitOpsHelmChartFromReference(projectName, buildProfile);
+    if (buildProfile === "static") {
+        await syncStaticNginxChartTemplates(projectName, buildProfile);
+    }
     const path = gitopsValuesPathForProject(projectName);
     const branch = env.GITOPS_DEFAULT_BRANCH;
     const token = env.GITOPS_REPO_TOKEN;

@@ -3,6 +3,7 @@ import type { V1Pod } from "@kubernetes/client-node";
 import fs from "node:fs";
 import { Agent, fetch as undiciFetch } from "undici";
 import { env } from "@/server/config/env";
+import { harborClusterPullImageRef } from "@/server/deploy/deploy-image";
 import { TtlCache } from "@/server/http/ttl-cache";
 const kubeInsecureAgent = new Agent({
     connect: {
@@ -1146,7 +1147,7 @@ export async function deleteStaleBlueGreenDeployments(namespace: string): Promis
 
 const PAAS_NGINX_CM = "paas-nginx-override";
 const PAAS_NGINX_DEFAULT_CONF = `server {
-    listen 80;
+    listen 8080;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -1154,6 +1155,9 @@ const PAAS_NGINX_DEFAULT_CONF = `server {
         try_files $uri $uri/ /index.html;
     }
 }`;
+
+/** Non-privileged port + nginx user (101) — required with runAsNonRoot in lab chart. */
+export const STATIC_NGINX_CONTAINER_PORT = 8080;
 
 async function ensurePaasNginxConfigMap(namespace: string): Promise<void> {
     const api = getCoreV1Api();
@@ -1195,7 +1199,7 @@ function applyProbeRemediation(container: k8s.V1Container, containerPort: number
         };
         return;
     }
-    if (containerPort === 80) {
+    if (containerPort === 80 || containerPort === STATIC_NGINX_CONTAINER_PORT) {
         container.readinessProbe = {
             tcpSocket: { port: "http" },
             initialDelaySeconds: 3,
@@ -1211,7 +1215,48 @@ function applyProbeRemediation(container: k8s.V1Container, containerPort: number
     }
 }
 
-function applyStaticNginxRemediation(podSpec: k8s.V1PodSpec, container: k8s.V1Container): void {
+/** Writable mounts required when nginx runs as UID 101 (non-root). */
+const STATIC_NGINX_WRITABLE_MOUNTS: ReadonlyArray<{ volume: string; mountPath: string }> = [
+    { volume: "paas-nginx-cache", mountPath: "/var/cache/nginx" },
+    { volume: "paas-nginx-run", mountPath: "/var/run" },
+    { volume: "paas-nginx-log", mountPath: "/var/log/nginx" },
+    { volume: "paas-nginx-tmp", mountPath: "/tmp" }
+];
+
+function appendStaticNginxWritableVolumes(podSpec: k8s.V1PodSpec, container: k8s.V1Container): void {
+    const volumes = podSpec.volumes ?? [];
+    const mounts = container.volumeMounts ?? [];
+    for (const { volume, mountPath } of STATIC_NGINX_WRITABLE_MOUNTS) {
+        if (!volumes.some((v) => v.name === volume)) {
+            volumes.push({ name: volume, emptyDir: {} });
+        }
+        if (!mounts.some((m) => m.name === volume)) {
+            mounts.push({ name: volume, mountPath });
+        }
+    }
+    podSpec.volumes = volumes;
+    container.volumeMounts = mounts;
+}
+
+function applyStaticNginxRemediation(
+    podSpec: k8s.V1PodSpec,
+    container: k8s.V1Container,
+    containerPort: number = STATIC_NGINX_CONTAINER_PORT
+): void {
+    podSpec.securityContext = {
+        ...(podSpec.securityContext ?? {}),
+        runAsNonRoot: true,
+        runAsUser: 101,
+        fsGroup: 101
+    };
+    container.securityContext = {
+        ...(container.securityContext ?? {}),
+        runAsNonRoot: true,
+        runAsUser: 101,
+        allowPrivilegeEscalation: false,
+        readOnlyRootFilesystem: false
+    };
+    container.ports = [{ name: "http", containerPort, protocol: "TCP" }];
     container.command = ["nginx"];
     container.args = ["-g", "daemon off;"];
     const volumes = podSpec.volumes ?? [];
@@ -1228,6 +1273,18 @@ function applyStaticNginxRemediation(podSpec: k8s.V1PodSpec, container: k8s.V1Co
         });
     }
     container.volumeMounts = mounts;
+    appendStaticNginxWritableVolumes(podSpec, container);
+}
+
+/** Mount nginx ConfigMap + non-root nginx user for static SPA images (vite/angular). */
+export async function prepareStaticNginxDeployment(
+    podSpec: k8s.V1PodSpec,
+    container: k8s.V1Container,
+    namespace: string,
+    containerPort: number = STATIC_NGINX_CONTAINER_PORT
+): Promise<void> {
+    await ensurePaasNginxConfigMap(namespace);
+    applyStaticNginxRemediation(podSpec, container, containerPort);
 }
 
 function applyPythonStartRemediation(container: k8s.V1Container, containerPort: number): void {
@@ -1246,7 +1303,10 @@ export async function remediateRollingDeployments(
     if (!api) {
         return [];
     }
-    if (containerPort === 80) {
+    const clusterImage = harborClusterPullImageRef(imageRef);
+    const isStaticNginx = containerPort === 80 || containerPort === STATIC_NGINX_CONTAINER_PORT;
+    const effectivePort = isStaticNginx ? STATIC_NGINX_CONTAINER_PORT : containerPort;
+    if (isStaticNginx) {
         await ensurePaasNginxConfigMap(namespace);
     }
     const patched: string[] = [];
@@ -1260,22 +1320,22 @@ export async function remediateRollingDeployments(
                 continue;
             }
             const container = containers[0];
-            container.image = imageRef;
+            container.image = clusterImage;
             if (!container.ports?.length) {
-                container.ports = [{ name: "http", containerPort, protocol: "TCP" }];
+                container.ports = [{ name: "http", containerPort: effectivePort, protocol: "TCP" }];
             }
             else {
-                container.ports[0].containerPort = containerPort;
+                container.ports[0].containerPort = effectivePort;
                 container.ports[0].name = container.ports[0].name || "http";
             }
             const envVars = container.env ?? [];
             const portEnv = envVars.find((entry) => entry.name === "PORT");
             if (portEnv) {
-                portEnv.value = String(containerPort);
+                portEnv.value = String(effectivePort);
             }
-            applyProbeRemediation(container, containerPort);
-            if (containerPort === 80) {
-                applyStaticNginxRemediation(podSpec, container);
+            applyProbeRemediation(container, effectivePort);
+            if (isStaticNginx) {
+                applyStaticNginxRemediation(podSpec, container, effectivePort);
             }
             else if (containerPort === 8000) {
                 applyPythonStartRemediation(container, containerPort);

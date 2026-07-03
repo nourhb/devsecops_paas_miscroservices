@@ -13,7 +13,7 @@ export function resolveDeployProfileSpec(profile: BuildProfile): DeployProfileSp
         case "java":
             return { profile, containerPort: 8080, probePath: "/" };
         case "static":
-            return { profile, containerPort: 80, probePath: "/" };
+            return { profile, containerPort: 8080, probePath: "/" };
         case "node":
             return { profile, containerPort: 3000, probePath: "/" };
         default:

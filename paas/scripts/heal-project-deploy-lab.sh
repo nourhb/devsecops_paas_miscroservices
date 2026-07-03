@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-PROJECT_NAME="${1:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber> [80|8000|3000]}"
+PROJECT_NAME="${1:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber> [8080|8000|3000]}"
 TAG="${2:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber>}"
 TARGET_PORT="${3:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -140,7 +140,7 @@ patch_nginx_deploy_lab() {
   [[ -n "${ns}" ]] || return 1
   kubectl create configmap "${cm}" -n "${ns}" --dry-run=client -o yaml \
     --from-literal=default.conf='server {
-    listen 80;
+    listen 8080;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -160,21 +160,37 @@ for dep in data.get("items", []):
     if name.endswith("-blue") or name.endswith("-green"):
         continue
     spec = dep.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    spec.setdefault("securityContext", {})
+    spec["securityContext"].update({"runAsNonRoot": True, "runAsUser": 101, "fsGroup": 101})
     volumes = spec.setdefault("volumes", [])
     if not any(v.get("name") == "paas-nginx-conf" for v in volumes):
         volumes.append({"name": "paas-nginx-conf", "configMap": {"name": cm}})
+    for vol_name in ("paas-nginx-cache", "paas-nginx-run", "paas-nginx-log", "paas-nginx-tmp"):
+        if not any(v.get("name") == vol_name for v in volumes):
+            volumes.append({"name": vol_name, "emptyDir": {}})
     containers = spec.get("containers") or []
     if not containers:
         continue
-    mounts = containers[0].setdefault("volumeMounts", [])
+    c0 = containers[0]
+    c0.setdefault("securityContext", {})
+    c0["securityContext"].update({"runAsNonRoot": True, "runAsUser": 101, "allowPrivilegeEscalation": False})
+    mounts = c0.setdefault("volumeMounts", [])
     if not any(m.get("name") == "paas-nginx-conf" for m in mounts):
         mounts.append({
             "name": "paas-nginx-conf",
             "mountPath": "/etc/nginx/conf.d/default.conf",
             "subPath": "default.conf",
         })
-    containers[0]["command"] = ["nginx"]
-    containers[0]["args"] = ["-g", "daemon off;"]
+    for vol_name, mount_path in (
+        ("paas-nginx-cache", "/var/cache/nginx"),
+        ("paas-nginx-run", "/var/run"),
+        ("paas-nginx-log", "/var/log/nginx"),
+        ("paas-nginx-tmp", "/tmp"),
+    ):
+        if not any(m.get("name") == vol_name for m in mounts):
+            mounts.append({"name": vol_name, "mountPath": mount_path})
+    c0["command"] = ["nginx"]
+    c0["args"] = ["-g", "daemon off;"]
     patch = json.dumps({"spec": dep["spec"]})
     subprocess.run(
         ["kubectl", "patch", "deployment", name, "-n", ns, "--type", "merge", "-p", patch],
@@ -217,7 +233,7 @@ ARGO_WAIT_SECONDS="${ARGO_WAIT_SECONDS:-120}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-120s}"
 if [[ -z "${TARGET_PORT}" ]]; then
   case "${PROJECT_NAME}" in
-    *angular*|*demo-angular*) TARGET_PORT=80 ;;
+    *angular*|*demo-angular*|*vite*|*spa*) TARGET_PORT=8080 ;;
     *python*|docker-demo*) TARGET_PORT=8000 ;;
     *) TARGET_PORT=3000 ;;
   esac
@@ -429,7 +445,7 @@ if port == 8000:
         "readiness": {"initialDelaySeconds": 30, "periodSeconds": 10, "failureThreshold": 12},
         "liveness": {"initialDelaySeconds": 90, "periodSeconds": 20, "failureThreshold": 6},
     }
-elif port == 80:
+elif port in (80, 8080):
     doc["probes"] = {
         "type": "tcp",
         "readiness": {"initialDelaySeconds": 3, "periodSeconds": 5, "failureThreshold": 6},
@@ -488,9 +504,24 @@ for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name
       -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds","value":30},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":12},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds","value":90}]' 2>/dev/null || true
   fi
 done
-if [[ "${TARGET_PORT}" == "80" ]]; then
+if [[ "${TARGET_PORT}" == "80" || "${TARGET_PORT}" == "8080" ]]; then
   echo "==> Nginx config override (fixes invalid repo nginx.conf in existing images)"
   patch_nginx_deploy_lab "${NS}" || true
+  for dep in $(kubectl get deploy -n "${NS}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    [[ "${dep}" == *-blue ]] || [[ "${dep}" == *-green ]] && continue
+    kubectl patch deployment "${dep}" -n "${NS}" --type=merge \
+      -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"master"}}}}}' 2>/dev/null || true
+  done
+  kubectl get rs -n "${NS}" -o json 2>/dev/null | python3 -c "
+import json, subprocess, sys
+data = json.load(sys.stdin)
+for rs in data.get('items', []):
+    desired = rs.get('status', {}).get('replicas', 0) or 0
+    if desired == 0:
+        name = rs['metadata']['name']
+        ns = rs['metadata']['namespace']
+        subprocess.run(['kubectl', 'delete', 'rs', name, '-n', ns, '--ignore-not-found'], check=False)
+" 2>/dev/null || true
 fi
 if [[ "${TARGET_PORT}" == "8000" ]]; then
   echo "==> Python start override (gunicorn>=22 for Python 3.12)"

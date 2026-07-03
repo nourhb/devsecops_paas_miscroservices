@@ -689,7 +689,7 @@ NODE
 def writeNginxPaasDefaultConf(String appRoot = '.') {
   def confDir = appRoot == '.' ? 'paas-artifacts/_nginx_conf/conf.d' : "${appRoot}/paas-artifacts/_nginx_conf/conf.d"
   writeFile file: "${confDir}/default.conf", text: '''server {
-    listen 80;
+    listen 8080;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -1523,11 +1523,14 @@ def detectAppRoot() {
       return dir
     }
   }
-  if (!fileExists('package.json')) {
-    for (def dir in ['server', 'backend', 'api', 'app']) {
-      if (fileExists("${dir}/requirements.txt") || fileExists("${dir}/pyproject.toml")) {
-        return dir
-      }
+  for (def dir in ['server', 'backend', 'api', 'app']) {
+    if (fileExists("${dir}/requirements.txt") || fileExists("${dir}/pyproject.toml")) {
+      return dir
+    }
+  }
+  for (def dir in ['server', 'backend', 'api', 'app']) {
+    if (fileExists("${dir}/main.py") || fileExists("${dir}/app.py")) {
+      return dir
     }
   }
   return '.'
@@ -1878,6 +1881,17 @@ run_gunicorn() {
   fi
   exec python3 -m gunicorn -b "0.0.0.0:\${PORT}" "\${_target}"
 }
+for _py_mod in main server.main app.main; do
+  _py_file="\$(printf '%s' "\${_py_mod}" | tr '.' '/').py"
+  if [ -f "\${_py_file}" ]; then
+    if python3 -c "import uvicorn" 2>/dev/null; then
+      exec python3 -m uvicorn "\${_py_mod}:app" --host 0.0.0.0 --port "\${PORT}"
+    fi
+    if python3 -c "import \${_py_mod%%.*}" 2>/dev/null; then
+      run_gunicorn "\${_py_mod}:app"
+    fi
+  fi
+done
 if [ -f main.py ] && python3 -c "import main" 2>/dev/null; then
   run_gunicorn main:app
 fi
