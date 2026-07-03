@@ -1,50 +1,41 @@
-# Lab kube-prometheus-stack — minimal footprint, NodePorts match probe-prometheus-lab.sh
+# Lab kube-prometheus-stack — Prometheus + node-exporter only (charts need node_* metrics).
+# Grafana/Alertmanager disabled by default — enable via PROMETHEUS_LAB_FULL_STACK=1 on install.
 prometheus:
   service:
     type: NodePort
     nodePort: 30536
   prometheusSpec:
     retention: 2d
+    scrapeInterval: 30s
+    evaluationInterval: 30s
     resources:
       requests:
-        cpu: 100m
+        cpu: 50m
         memory: 256Mi
       limits:
         memory: 512Mi
 
 grafana:
-  enabled: true
-  service:
-    type: NodePort
-    nodePort: 30083
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 256Mi
+  enabled: false
 
 alertmanager:
-  enabled: true
-  alertmanagerSpec:
-    resources:
-      requests:
-        cpu: 25m
-        memory: 64Mi
-      limits:
-        memory: 128Mi
+  enabled: false
 
 kubeStateMetrics:
-  resources:
-    requests:
-      cpu: 25m
-      memory: 64Mi
+  enabled: false
+
+defaultRules:
+  create: false
+
+prometheus-node-exporter:
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule
 
 prometheusOperator:
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
-
-defaultRules:
-  create: true
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

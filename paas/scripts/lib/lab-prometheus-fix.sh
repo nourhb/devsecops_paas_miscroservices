@@ -12,6 +12,8 @@ echo "=============================================="
 echo " lab-prometheus-fix — monitoring charts"
 echo "=============================================="
 
+export PROMETHEUS_RECOVER_SKIP_GRAFANA="${PROMETHEUS_RECOVER_SKIP_GRAFANA:-1}"
+
 bash "${SCRIPT_DIR}/lab-prometheus-recover.sh" || warn "prometheus recover incomplete — continuing"
 
 bash "${SCRIPT_DIR}/bootstrap-integrations-lab.sh" || true

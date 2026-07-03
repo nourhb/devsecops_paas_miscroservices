@@ -65,8 +65,17 @@ ensure_prometheus_installed() {
   if prometheus_stack_present; then
     return 0
   fi
-  echo "==> No Prometheus stack in ${MON_NS} — helm install"
+  echo "==> No Prometheus stack in ${MON_NS} — helm install (async, no --wait)"
   bash "${SCRIPT_DIR}/lab-prometheus-install.sh"
+  echo "==> Waiting for operator deployment (up to 5 min)"
+  for i in $(seq 1 30); do
+    if kubectl get deployment kube-prometheus-stack-operator -n "${MON_NS}" >/dev/null 2>&1; then
+      kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=60s 2>/dev/null && break
+    fi
+    echo "... operator not ready yet (${i}/30)"
+    kubectl get pods -n "${MON_NS}" 2>/dev/null | head -12 || true
+    sleep 10
+  done
 }
 
 scale_if_zero() {
