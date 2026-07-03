@@ -15,7 +15,7 @@ SYNC_JENKINS="${SYNC_JENKINS:-true}"
 API_POD=""
 API_BASE=""
 
-ok() { echo "OK: $*"; }
+ok() { echo "OK: $*" >&2; }
 warn() { echo "WARN: $*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -24,7 +24,10 @@ read_env_val() {
   for file in "${ENV_FILE}" "${DOT_ENV}"; do
     [[ -f "${file}" ]] || continue
     line="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"' || true)"
-    [[ -n "${line}" ]] && printf '%s' "${line}" && return 0
+    if [[ -n "${line}" ]]; then
+      printf '%s' "${line}"
+      return 0
+    fi
   done
   return 1
 }
@@ -85,7 +88,9 @@ ensure_dt_installed() {
   local api_port
   if kubectl get ns "${DT_NS}" >/dev/null 2>&1 && helm status "${RELEASE}" -n "${DT_NS}" >/dev/null 2>&1; then
     api_port="$(discover_api_port)"
-    [[ -n "${api_port}" && "${api_port}" != "null" ]] && return 0
+    if [[ -n "${api_port}" && "${api_port}" != "null" ]]; then
+      return 0
+    fi
     warn "Dependency-Track release exists but API NodePort missing — healing"
   else
     warn "Dependency-Track missing — install/heal via lab-dependency-track"
@@ -186,12 +191,23 @@ cleanup_dt_pf() {
 trap cleanup_dt_pf EXIT
 
 dt_login_raw() {
-  local user="$1" pass="$2"
-  dt_http POST "/api/v1/user/login" \
+  local user="$1" pass="$2" raw
+  raw="$(dt_http POST "/api/v1/user/login" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -w $'\n__HTTP__%{http_code}' \
     --data-urlencode "username=${user}" \
-    --data-urlencode "password=${pass}"
+    --data-urlencode "password=${pass}" 2>&1)" || return $?
+  printf '%s' "${raw}"
+}
+
+dt_login_json() {
+  local user="$1" pass="$2" payload raw
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"username":sys.argv[1],"password":sys.argv[2]}))' "${user}" "${pass}")"
+  raw="$(dt_http POST "/api/v1/user/login" \
+    -H "Content-Type: application/json" \
+    -w $'\n__HTTP__%{http_code}' \
+    -d "${payload}" 2>&1)" || return $?
+  printf '%s' "${raw}"
 }
 
 parse_login() {
@@ -219,59 +235,125 @@ print(raw)
 parse_login_token() {
   local body="$1"
   local token=""
+  body="$(printf '%s' "${body}" | tr -d '\r\n')"
+  if [[ "${body}" == *"INVALID_CREDENTIALS"* || "${body}" == *"Unauthorized"* ]]; then
+    fail "login rejected: ${body:0:120}"
+  fi
   token="$(normalize_bearer_token "${body}" 2>/dev/null)" || true
   [[ -n "${token}" ]] || fail "could not parse login token from: ${body:0:200}"
+  if [[ "${token}" != *.*.* ]]; then
+    fail "login token does not look like JWT: ${token:0:120}"
+  fi
   printf '%s' "${token}"
 }
 
+verify_bearer_token() {
+  local token="$1" http
+  token="$(printf '%s' "${token}" | tr -d '\r\n')"
+  http="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 \
+    -H "Authorization: Bearer ${token}" "${API_BASE}/api/v1/team" 2>/dev/null || echo "000")"
+  [[ "${http}" == "200" ]]
+}
+
+try_login_password() {
+  local pass="$1" raw rc
+  echo "==> DT login user=${DT_ADMIN_USER} (trying password len=${#pass})" >&2
+  raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}" 2>&1)"
+  rc=$?
+  if [[ "${rc}" -ne 0 || -z "${raw}" ]]; then
+    raw="$(dt_login_json "${DT_ADMIN_USER}" "${pass}" 2>&1)"
+    rc=$?
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    warn "login transport failed (rc=${rc}): ${raw:0:200}"
+    return 1
+  fi
+  parse_login "${raw}"
+  if [[ "${LOGIN_HTTP}" == "401" || "${LOGIN_HTTP}" == "403" ]]; then
+    warn "login HTTP ${LOGIN_HTTP} with password len=${#pass}"
+    [[ -n "${LOGIN_BODY}" ]] && warn "login body: ${LOGIN_BODY:0:180}"
+    return 1
+  fi
+  if [[ "${LOGIN_BODY}" == *"INVALID_CREDENTIALS"* ]]; then
+    warn "login INVALID_CREDENTIALS with password len=${#pass}"
+    return 1
+  fi
+  if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
+    ok "first login — forcing password change to ${DT_ADMIN_NEW_PASSWORD}"
+    force_change_password "${DT_ADMIN_USER}" "${pass}" "${DT_ADMIN_NEW_PASSWORD}"
+    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}" 2>&1)"
+    rc=$?
+    [[ "${rc}" -eq 0 ]] || raw="$(dt_login_json "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}" 2>&1)"
+    parse_login "${raw}"
+    [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
+    DT_ADMIN_PASSWORD="${DT_ADMIN_NEW_PASSWORD}"
+    return 0
+  fi
+  [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || {
+    warn "login HTTP ${LOGIN_HTTP} with password len=${#pass}"
+    [[ -n "${LOGIN_BODY}" ]] && warn "login body: ${LOGIN_BODY:0:180}"
+    return 1
+  }
+  DT_ADMIN_PASSWORD="${pass}"
+  return 0
+}
+
+reset_dt_admin_data_lab() {
+  local ss="${RELEASE}-dependency-track-api-server"
+  warn "resetting Dependency-Track API data (lab only — admin password will be admin/admin)"
+  kubectl scale statefulset -n "${DT_NS}" "${ss}" --replicas=0 2>/dev/null || true
+  kubectl delete pod -n "${DT_NS}" -l app.kubernetes.io/component=api-server --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl delete pvc -n "${DT_NS}" -l app.kubernetes.io/component=api-server --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl get pvc -n "${DT_NS}" 2>/dev/null | awk '/dependency-track-api-server/{print $1}' | while read -r pvc; do
+    [[ -n "${pvc}" ]] && kubectl delete pvc -n "${DT_NS}" "${pvc}" --ignore-not-found --wait=false 2>/dev/null || true
+  done
+  kubectl scale statefulset -n "${DT_NS}" "${ss}" --replicas=1 2>/dev/null || true
+  LAB_DT_NO_AUTO_BOOTSTRAP=1 bash "${SCRIPT_DIR}/lab-dependency-track.sh" || true
+  setup_api_pod
+  wait_api
+  DT_ADMIN_PASSWORD="admin"
+  patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "admin"
+  patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "admin"
+}
+
 acquire_token() {
-  local raw pass tried="" token rc
-  set +e
-  for pass in "DependencyTrack123!" "admin" "${DT_ADMIN_NEW_PASSWORD}" "${DT_ADMIN_PASSWORD}"; do
+  local pass tried="" token body
+  for pass in "admin" "DependencyTrack123!" "${DT_ADMIN_NEW_PASSWORD}" "${DT_ADMIN_PASSWORD}"; do
     [[ -n "${pass}" ]] || continue
     case " ${tried} " in *" ${pass} "*) continue ;; esac
     tried="${tried} ${pass}"
-    echo "==> DT login user=${DT_ADMIN_USER} (trying password len=${#pass})"
-    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}" 2>&1)"
-    rc=$?
-    if [[ "${rc}" -ne 0 ]]; then
-      warn "login transport failed (rc=${rc}): ${raw:0:200}"
+    if ! try_login_password "${pass}"; then
       continue
     fi
-    parse_login "${raw}"
-    if [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" && "${LOGIN_BODY}" != *"FORCE_PASSWORD_CHANGE"* ]]; then
-      token="$(parse_login_token "${LOGIN_BODY}")"
+    token="$(parse_login_token "${LOGIN_BODY}")"
+    if verify_bearer_token "${token}"; then
       DT_ADMIN_PASSWORD="${pass}"
-      patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${pass}"
-      patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${pass}"
-      ok "logged in as ${DT_ADMIN_USER}"
-      set -e
-      printf '%s' "${token}"
-      return 0
-    fi
-    if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
-      set -e
-      ok "first login — forcing password change to ${DT_ADMIN_NEW_PASSWORD}"
-      force_change_password "${DT_ADMIN_USER}" "${pass}" "${DT_ADMIN_NEW_PASSWORD}"
-      set +e
-      raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}" 2>&1)"
-      rc=$?
-      set -e
-      [[ "${rc}" -eq 0 ]] || fail "login after password change transport failed (rc=${rc})"
-      parse_login "${raw}"
-      [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
-      token="$(parse_login_token "${LOGIN_BODY}")"
+      if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
+        DT_ADMIN_PASSWORD="${DT_ADMIN_NEW_PASSWORD}"
+      fi
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
+      ok "logged in as ${DT_ADMIN_USER}"
       printf '%s' "${token}"
       return 0
     fi
-    warn "login HTTP ${LOGIN_HTTP} with password len=${#pass} — next candidate"
-    if [[ -n "${LOGIN_BODY}" ]]; then
-      warn "login body: ${LOGIN_BODY:0:180}"
+    warn "login returned token but /api/v1/team rejected it — next candidate"
+  done
+
+  reset_dt_admin_data_lab
+  for pass in "admin"; do
+    if try_login_password "${pass}"; then
+      token="$(parse_login_token "${LOGIN_BODY}")"
+      if verify_bearer_token "${token}"; then
+        patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_NEW_PASSWORD}"
+        patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_NEW_PASSWORD}"
+        ok "logged in after DT data reset as ${DT_ADMIN_USER}"
+        printf '%s' "${token}"
+        return 0
+      fi
     fi
   done
-  set -e
+
   fail "login failed for user ${DT_ADMIN_USER} — open http://${NODE_IP}:$(discover_frontend_port || echo 30212) or set DT_ADMIN_PASSWORD in .env"
 }
 
@@ -292,8 +374,14 @@ force_change_password() {
 }
 
 find_team_uuid() {
-  local token="$1" teams_json
-  teams_json="$(dt_http GET "/api/v1/team" -H "Authorization: Bearer ${token}" 2>&1)" || fail "list teams failed: ${teams_json:0:200}"
+  local token="$1" teams_json http
+  token="$(printf '%s' "${token}" | tr -d '\r\n')"
+  teams_json="$(dt_http GET "/api/v1/team" -H "Authorization: Bearer ${token}" -w $'\n__HTTP__%{http_code}' 2>&1)" \
+    || fail "list teams request failed: ${teams_json:0:200}"
+  http="${teams_json##*$'\n__HTTP__'}"
+  teams_json="${teams_json%$'\n__HTTP__'*}"
+  [[ "${http}" == "200" ]] || fail "list teams HTTP ${http}: ${teams_json:0:200}"
+  [[ -n "${teams_json}" ]] || fail "list teams returned empty body (HTTP ${http})"
   printf '%s' "${teams_json}" | python3 -c "
 import json, sys
 name = sys.argv[1]
@@ -351,7 +439,7 @@ sync_env_and_jenkins() {
 }
 
 main() {
-  echo "==> bootstrap-dependency-track-lab starting (repo=${REPO_ROOT})"
+  echo "==> bootstrap-dependency-track-lab starting (repo=${REPO_ROOT})" >&2
   load_dt_admin_creds
   need_cmd kubectl
   need_cmd helm
