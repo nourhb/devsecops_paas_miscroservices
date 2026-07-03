@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# k3s systemd stuck in "activating" — hard stop, killall, API-based wait (not systemd active).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

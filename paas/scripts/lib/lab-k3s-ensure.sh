@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Wait for / start k3s — restart only if API still dead after a short wait.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 if [[ "${PAAS_BOOT_K3S_ROOT_DONE:-0}" == "1" ]] || [[ "${PAAS_BOOT_RECOVER:-0}" == "1" ]]; then
@@ -58,7 +56,6 @@ if lab_k8s_api_ready; then
   exit 0
 fi
 
-# Boot service runs paas-boot-k3s-root.sh as root in ExecStartPre — never restart k3s here.
 if [[ "${PAAS_BOOT_K3S_ROOT_DONE:-0}" == "1" ]] || [[ "${PAAS_BOOT_RECOVER:-0}" == "1" ]]; then
   if lab_k8s_api_ready || lab_k3s_wait_api; then
     exit 0

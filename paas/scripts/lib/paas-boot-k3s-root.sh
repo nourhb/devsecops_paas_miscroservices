@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Run as root from paas-lab-start.service (ExecStartPre=+) — no sudo password needed.
-# Waits for k3s on boot; vacuums SQLite if stuck activating; never restarts while activating.
 set -uo pipefail
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -104,7 +102,6 @@ if k3s_api_up; then
   exit 0
 fi
 
-# Wait with optional mid-wait vacuum when activating + slow SQL
 for i in $(seq 1 "${WAIT_LOOPS}"); do
   if k3s_api_up; then
     log "OK: k3s API ready (attempt ${i}/${WAIT_LOOPS})"
@@ -122,7 +119,6 @@ for i in $(seq 1 "${WAIT_LOOPS}"); do
   sleep "${WAIT_SEC}"
 done
 
-# Last resort: restart only if NOT activating (failed/inactive)
 st="$(k3s_unit_state)"
 if [[ "${st}" == "activating" ]]; then
   log "ERROR: k3s still activating after long wait — try manual: sudo bash paas/scripts/lab.sh k3s-vacuum"

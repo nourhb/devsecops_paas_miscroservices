@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Heal every project under ~/gitops/apps using values.yaml image.tag + service.targetPort.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

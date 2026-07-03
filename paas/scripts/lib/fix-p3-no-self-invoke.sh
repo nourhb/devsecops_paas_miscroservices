@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Remove runPaasDeploy() self-invoke from p3 (must run from job wrapper after all loads).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

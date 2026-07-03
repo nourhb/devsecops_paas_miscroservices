@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Install Argo CD when Application CRD is missing (root cause: GitOps commits never reach the cluster).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

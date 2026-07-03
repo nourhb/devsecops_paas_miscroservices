@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# systemd ExecStart — PaaS recover after VM/k3s boot (no manual SSH required).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 BOOT_OK_MARKER="/var/tmp/paas-lab-boot-ok"

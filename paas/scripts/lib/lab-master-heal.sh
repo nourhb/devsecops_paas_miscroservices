@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Heal control-plane node when PaaS frontend (pinned to master) cannot schedule.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 NODE="${LAB_MASTER_NODE:-master}"
@@ -67,7 +65,6 @@ if node_ready && api_ok; then
   exit 0
 fi
 
-# Node Ready but API flaky (common right after k3s-vacuum) — wait; do NOT restart k3s.
 if node_ready; then
   log "WARN: ${NODE} is Ready but API slow — waiting (LAB_MASTER_K3S_RESTART=1 to force restart)"
   if wait_for_api; then

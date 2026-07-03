@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Rebuild a CORRECT paas-deploy-stages monolith from the rendered bundle and push to jenkins-0.
-# Fixes the two failure modes seen on the lab VM:
-#   1) stage pieces emitted as closures (def NAME = { ) instead of methods (def NAME() { )
-#      -> paas.runPaasDeploy() (a method call) cannot invoke closure locals -> runtime failure
-#   2) duplicate "def runPaasDeploy()" -> CpsCompilationErrorsException at load
-#   3) helpers (coerceHarborHostForCosign ...) missing from the pushed stages file
-# Runs Python on the HOST (Jenkins image has no python3). Targets StatefulSet pod jenkins-0.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -43,7 +36,6 @@ def strip_hdr(t):
     return "\n".join(l for l in t.splitlines() if not l.startswith(SKIP)).strip() + "\n"
 
 def to_method(t):
-    # closure header -> method header (idempotent; no-op if already method form)
     for n in PIECES + ["runPaasDeploy"]:
         t = t.replace(f"def {n} = {{", f"def {n}() {{")
     return t
@@ -112,7 +104,6 @@ echo "OK: pod has exactly 1 runPaasDeploy()"
 
 if [[ -f "${SCRIPT_DIR}/apply-jenkins-inline-steps-wrapper.py" ]]; then
   set -a
-  # shellcheck disable=SC1091
   source "${REPO_ROOT}/paas/frontend/docker-compose.env" 2>/dev/null || true
   set +a
   echo "==> Re-apply job wrapper (load monolith + paas.runPaasDeploy())"

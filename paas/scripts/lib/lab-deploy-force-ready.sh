@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# ONE SHOT — break the paas-deploy failure loop on the lab VM.
-# Syncs repo → heals DT/Sonar/Jenkins → pushes CPS bundle → fixes job params → verifies.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -35,7 +33,6 @@ ensure_lab_env_defaults() {
 preflight() {
   local fail=0 dt_http sonar_ok kctl_ok marker_ok
   set -a
-  # shellcheck disable=SC1091
   source "${ENV_FILE}" 2>/dev/null || true
   set +a
   dt_http="$(curl -sS -o /dev/null -w '%{http_code}' -m 12 \
@@ -61,13 +58,13 @@ preflight() {
     sh -c '/var/jenkins_home/bin/kubectl version --client >/dev/null 2>&1' 2>/dev/null; then
     echo "OK: kubectl in Jenkins pod (working)"
   else
-    echo "WARN: kubectl missing/broken in Jenkins pod — run: bash paas/scripts/lab.sh jenkins-zap-tools"
+    echo "WARN: kubectl missing/broken in Jenkins pod
     fail=1
   fi
   if kubectl get clusterrolebinding jenkins-lab-ram-pause >/dev/null 2>&1; then
     echo "OK: RAM-pause RBAC present (frontend/harbor/dependency-track scale during Sonar)"
   else
-    echo "WARN: RAM-pause RBAC missing — run: bash paas/scripts/lab.sh jenkins-zap-tools"
+    echo "WARN: RAM-pause RBAC missing
     fail=1
   fi
   marker_ok="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c jenkins --request-timeout=45s -- \
@@ -102,7 +99,6 @@ bash "${SCRIPT_DIR}/force-api-jenkins-paas-deploy-now.sh"
 
 echo "==> 5/6 Jenkins job params (DT key + optional=true + webpack=true)"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 export PAAS_DT_UPLOAD_OPTIONAL=true
@@ -119,13 +115,7 @@ echo "==> 6/6 preflight"
 if preflight; then
   echo ""
   echo "=============================================="
-  echo " READY — trigger NEW paas-deploy build (NOT Replay)"
-  echo ""
-  echo " Console MUST show:"
-  echo "   marker=${CPS_MARKER}"
-  echo "   marker=dt-nodeport-first-lab-20260702"
-  echo "   Step 4: PAAS_STEP_WARN on DT 401 (not FAIL) if key still stale"
-  echo "   Step 3: --webpack on Next.js 16+"
+  echo " READY — trigger a new paas-deploy build"
   echo "=============================================="
 else
   echo ""

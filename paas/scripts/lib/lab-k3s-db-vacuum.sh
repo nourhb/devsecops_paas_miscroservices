@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Fix k3s stuck in "activating" — slow kine/SQLite (compact_rev_key queries).
 set -uo pipefail
 
 DB_DIR="/var/lib/rancher/k3s/server/db"

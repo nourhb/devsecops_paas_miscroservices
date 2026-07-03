@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Install systemd unit so PaaS recovers automatically after VM/k3s boot.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -133,7 +132,6 @@ EOF
   echo "OK: retry timers at 5 / 10 / 18 min after boot"
 
   cat > "${SUDOERS_DROP}" <<EOF
-# PaaS lab: optional passwordless k3s for manual ops (boot uses root ExecStartPre)
 ${LAB_USER} ALL=(ALL) NOPASSWD: /usr/local/bin/k3s, /usr/bin/k3s
 ${LAB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart k3s, /usr/bin/systemctl start k3s, /usr/bin/systemctl is-active k3s
 ${LAB_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart k3s, /bin/systemctl start k3s, /bin/systemctl is-active k3s

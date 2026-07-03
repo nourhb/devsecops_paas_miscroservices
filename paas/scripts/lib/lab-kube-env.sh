@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# kubectl/PATH for non-interactive runs (systemd boot service, cron).
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 lab_ensure_kubeconfig() {
@@ -15,7 +14,6 @@ lab_ensure_kubeconfig() {
     return 0
   fi
 
-  # Never export root-only /etc/rancher/k3s/k3s.yaml — copy to ~/.kube/config instead.
   if [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
     lab_sync_kubeconfig && return 0
   fi
@@ -24,7 +22,6 @@ lab_ensure_kubeconfig() {
   return 1
 }
 
-# Refresh ~/.kube/config from k3s on every VM boot (certs/paths may change).
 lab_sync_kubeconfig() {
   local home="${HOME:-}"
   [[ -n "${home}" ]] || home="/home/master"
@@ -94,7 +91,6 @@ lab_k8s_api_wait() {
   return 1
 }
 
-# paas-frontend:recovery may only appear under sudo crictl on some lab VMs.
 lab_paas_frontend_recovery_image_present() {
   if k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
     return 0
@@ -118,7 +114,6 @@ lab_worker_notready() {
   [[ "${status}" != "True" ]]
 }
 
-# Lab VMs: k3s kubectl is more reliable than standalone kubectl against 127.0.0.1:6443.
 if command -v k3s >/dev/null 2>&1; then
   kubectl() {
     k3s kubectl "$@"

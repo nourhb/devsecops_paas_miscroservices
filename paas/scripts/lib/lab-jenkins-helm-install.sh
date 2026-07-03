@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Install or repair Jenkins via helm (cicd namespace, NodePort :30090).
-# Avoids helm --wait timeouts on slow lab VMs: apply manifests, then poll pod + HTTP.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 NODE_IP="${NODE_IP:-192.168.56.129}"

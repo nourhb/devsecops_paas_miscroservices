@@ -135,7 +135,7 @@ parse_login() {
 }
 
 acquire_token() {
-  local raw pass tried="" 
+  local raw pass tried=""
   for pass in "${DT_ADMIN_PASSWORD}" "${DT_ADMIN_NEW_PASSWORD}" "DependencyTrack123!" "admin"; do
     [[ -n "${pass}" ]] || continue
     case " ${tried} " in *" ${pass} "*) continue ;; esac

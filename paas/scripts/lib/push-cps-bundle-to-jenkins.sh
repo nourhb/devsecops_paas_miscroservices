@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: render CPS bundle → push to Jenkins pod → patch job wrapper → reload.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -21,4 +20,4 @@ echo "==> 3/3 Patch job wrapper (paasMain = load p3)"
 bash "${SCRIPT_DIR}/patch-jenkins-cps-split-job.sh"
 
 echo ""
-echo "OK — trigger NEW paas-deploy build. Console must show Step 1 after seven load lines."
+echo "OK — trigger a new paas-deploy build."

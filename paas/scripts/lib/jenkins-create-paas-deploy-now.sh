@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Create paas-deploy Jenkins job on fresh/reinstalled Jenkins (plugins already OK).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -70,7 +69,7 @@ elif python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force; then
   ok "full job config pushed"
 else
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force || \
-    fail "wrapper sync failed — run: bash paas/scripts/lab.sh fix-paas-deploy"
+    fail "wrapper sync failed
 fi
 
 echo "==> Verify"

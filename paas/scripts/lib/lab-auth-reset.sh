@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Reset PaaS login password or seed admin — fixes "Invalid credentials" after DB recover.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

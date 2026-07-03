@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Minimal recovery when everything is stuck — no git pull required.
 set -uo pipefail
 REPO="${HOME}/devsecops_paas_miscroservices"
 LIB="${REPO}/paas/scripts/lib"

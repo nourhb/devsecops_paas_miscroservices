@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: enable/verify PVC persistence for all lab services (8GB VM).
-# Run after git pull — safe to re-run (does not delete PVCs).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

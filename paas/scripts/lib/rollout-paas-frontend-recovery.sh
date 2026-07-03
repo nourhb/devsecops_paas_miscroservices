@@ -5,7 +5,6 @@ PAAS_NS="${PAAS_NS:-paas}"
 LOCAL_TAG="${LOCAL_TAG:-}"
 RECOVERY="docker.io/library/paas-frontend:recovery"
 
-# shellcheck source=lab-frontend-lab-safety.sh
 source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
 
 if [[ -n "${LOCAL_TAG}" ]]; then

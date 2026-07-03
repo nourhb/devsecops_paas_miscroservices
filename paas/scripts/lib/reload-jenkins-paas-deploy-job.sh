@@ -3,7 +3,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 JOB="${JENKINS_JOB_NAME:-paas-deploy}"
 JOB_CFG="/var/jenkins_home/jobs/${JOB}/config.xml"
@@ -175,7 +174,7 @@ if [[ "${VERIFY_ONLY:-0}" == "1" ]]; then
     fi
   fi
   echo "FAIL: LIVE job config wrong (VERIFY_ONLY — disk config also stale or POST failed)" >&2
-  echo "  Expected marker=${CPS_MARKER}, 7-file CPS load + runPaasDeploy(), NO monolith load" >&2
+  echo "  Expected CPS load + runPaasDeploy()" >&2
   echo "  Fix: bash paas/scripts/lab.sh fix-paas-deploy" >&2
   exit 1
 fi

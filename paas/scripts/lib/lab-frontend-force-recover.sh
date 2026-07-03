@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_NS="${PAAS_NS:-paas}"
 IMG="${IMG:-docker.io/library/paas-frontend:recovery}"

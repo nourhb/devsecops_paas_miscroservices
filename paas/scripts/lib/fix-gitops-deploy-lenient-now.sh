@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Rebuild PaaS frontend with lenient GitOps/Argo deploy verification (PAAS_STRICT_INTEGRATIONS=false).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

@@ -185,7 +185,7 @@ main() {
     if kubectl get deployment frontend -n "${PAAS_NS:-paas}" >/dev/null 2>&1; then
       echo "==> Sync paas-frontend-env secret (SONAR_TOKEN)"
       PAAS_SKIP_ROLLOUT="${PAAS_SKIP_ROLLOUT:-1}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" \
-        || warn "k8s env sync failed — run: bash paas/scripts/lab.sh env"
+        || warn "k8s env sync failed
     fi
   fi
 

@@ -1,4 +1,3 @@
-# 8GB lab: PVC for DT API (projects, BOMs, API keys survive pod restart).
 apiServer:
   service:
     type: NodePort

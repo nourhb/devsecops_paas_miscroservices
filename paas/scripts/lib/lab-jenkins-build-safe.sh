@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Harden Jenkins controller for long paas-deploy steps (Next build, Sonar, crane).
-# Uses JSON patch (merge patch on containers[] wipes image + probe handlers).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 JENKINS_NS="${JENKINS_NS:-cicd}"

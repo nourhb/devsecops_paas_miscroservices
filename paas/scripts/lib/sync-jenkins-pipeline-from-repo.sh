@@ -121,7 +121,7 @@ if command -v kubectl >/dev/null 2>&1; then
 fi
 echo "==> Rebuild PaaS frontend image (TypeScript promote/artifact fixes require docker build, not rollout restart)"
 if [[ "${SKIP_FRONTEND_REBUILD:-false}" != "true" ]] && [[ -f "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" ]]; then
-  bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" || echo "WARN: frontend rebuild failed — run: bash paas/scripts/lab.sh frontend"
+  bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh" || echo "WARN: frontend rebuild failed
 else
   echo "WARN: skipped frontend rebuild (set SKIP_FRONTEND_REBUILD=false to enable)"
 fi

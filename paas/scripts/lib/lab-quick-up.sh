@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# ONE command lab recovery — short timeouts, no scale-to-0 storms, no Harbor/bootstrap.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -31,7 +29,7 @@ DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}' || echo 0
 log "disk ${DISK_PCT}%"
 df -h / | tail -1
 if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 88 ]]; then
-  fail "disk ${DISK_PCT}% — run: bash paas/scripts/lab.sh disk-emergency"
+  fail "disk ${DISK_PCT}%
 fi
 
 if systemctl is-active k3s >/dev/null 2>&1; then
@@ -67,7 +65,6 @@ for i in $(seq 1 "${MAX_API_TRIES}"); do
 done
 [[ "${API_OK}" -eq 1 ]] || fail "k3s API down — wait 5 min after last restart, then: sudo systemctl restart k3s && sleep 120"
 
-# Never leave UI at replicas=0 after manual Sonar RAM pause or SSH drop
 if [[ -f "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ]]; then
   bash "${SCRIPT_DIR}/lab-frontend-ram-window.sh" ensure 2>/dev/null || true
 fi
@@ -89,7 +86,6 @@ api_try get nodes -o wide || true
 api_try taint nodes master node.kubernetes.io/unreachable:NoExecute- 2>/dev/null || true
 api_try taint nodes master node.kubernetes.io/unreachable:NoSchedule- 2>/dev/null || true
 
-# Master must be Ready (frontend image is local on master only)
 MASTER_READY="$(api_try get node master -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' || echo False)"
 if [[ "${MASTER_READY}" != "True" ]]; then
   log "master NotReady — clear taints only (no k3s restart)"
@@ -103,7 +99,6 @@ if [[ "${MASTER_READY}" != "True" ]]; then
 fi
 [[ "${MASTER_READY}" == "True" ]] || fail "master still NotReady — check: k3s kubectl describe node master"
 
-# Dependency-Track — install/heal if API pod not Running (Step 4 needs DT in cluster)
 DT_PHASE="$(api_try get pods -n dependency-track -l app.kubernetes.io/component=api-server \
   -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)"
 if [[ "${DT_PHASE}" != "Running" ]]; then
@@ -111,11 +106,9 @@ if [[ "${DT_PHASE}" != "Running" ]]; then
   bash "${SCRIPT_DIR}/lab-dependency-track.sh" 2>/dev/null || log "WARN: dependency-track heal failed — Step 4 may fail until fixed"
 fi
 
-# Kyverno fail-open (fast)
 [[ -f "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" ]] && \
   PAAS_FORCE_KYVERNO_UNBLOCK=1 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
 
-# Postgres — light check only (PVC is on worker2; heal node before hammering db-repair)
 if lab_worker_notready worker2; then
   log "worker2 NotReady — Postgres PVC node; heal once before db-repair"
   bash "${SCRIPT_DIR}/lab-worker2-heal.sh" 2>/dev/null || log "WARN: worker2-heal failed — fix worker2 manually"
@@ -129,14 +122,12 @@ if ! api_try exec -n "${PAAS_NS}" deploy/postgres --request-timeout=15s -- pg_is
   fi
 fi
 
-# busybox for init container (if missing)
 if ! k3s crictl images 2>/dev/null | grep -q 'busybox.*1.36'; then
   log "import busybox:1.36"
   docker pull busybox:1.36 2>/dev/null || true
   docker save busybox:1.36 2>/dev/null | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
 fi
 
-# Recovery image must be in containerd (sudo crictl counts — do not call frontend-force if present)
 if ! lab_paas_frontend_recovery_image_present; then
   log "recovery image missing — try Harbor/docker import (frontend-force)"
   if [[ -f "${SCRIPT_DIR}/lab-frontend-force-recover.sh" ]]; then
@@ -145,11 +136,10 @@ if ! lab_paas_frontend_recovery_image_present; then
   fi
 fi
 if ! lab_paas_frontend_recovery_image_present; then
-  fail "paas-frontend:recovery missing — run: bash paas/scripts/lab.sh frontend (30 min build)"
+  fail "paas-frontend:recovery missing (30 min build)"
 fi
 log "recovery image present"
 
-# Patch frontend IN PLACE — never scale to 0 first
 log "patch frontend (Recreate, master, replicas=1)"
 api_try patch deployment frontend -n "${PAAS_NS}" --type=merge -p "$(cat <<PATCH
 {

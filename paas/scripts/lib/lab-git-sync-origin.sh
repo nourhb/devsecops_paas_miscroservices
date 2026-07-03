@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Lab VM: discard local repo drift and match origin/main (safe for deploy fixes).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

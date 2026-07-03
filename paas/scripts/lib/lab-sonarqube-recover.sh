@@ -289,7 +289,7 @@ main() {
   if sonar_status_up && sonar_rules_ok; then
     echo "OK: SonarQube healthy (rules API 200)"
     if ! token_valid; then
-      echo "WARN: SONAR_TOKEN in env is invalid — run: bash paas/scripts/lab.sh sonar-bootstrap"
+      echo "WARN: SONAR_TOKEN in env is invalid
     fi
     exit 0
   fi

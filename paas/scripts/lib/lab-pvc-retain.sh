@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Label/annotate lab PVCs so heal scripts never wipe user data unless FORCE_WIPE=1.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 RETAIN_ANNOTATIONS='{"helm.sh/resource-policy":"keep","paas.lab/retain":"true"}'
@@ -28,7 +26,6 @@ annotate_pvc() {
 guard_all() {
   lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
   annotate_pvc paas postgres-pvc
-  # Jenkins / Sonar / DT / Harbor — annotate every PVC in lab namespaces
   for ns in paas cicd sonarqube dependency-track harbor artifactory monitoring; do
     kubectl_try get ns "${ns}" >/dev/null 2>&1 || continue
     while read -r pvc; do
@@ -53,7 +50,7 @@ status_all() {
   echo ""
   echo "==> Ephemeral risk check"
   if kubectl_try get pod -n sonarqube -l app=sonarqube -o yaml 2>/dev/null | grep -q 'emptyDir: {}'; then
-    echo "  WARN: SonarQube still uses emptyDir — run: bash paas/scripts/lab.sh data-persist"
+    echo "  WARN: SonarQube still uses emptyDir
   else
     echo "  OK: SonarQube pod uses PVC (or not installed)"
   fi

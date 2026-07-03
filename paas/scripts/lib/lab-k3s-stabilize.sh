@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Wait for k3s API and clear stale master taints — never restarts k3s unless LAB_MASTER_K3S_RESTART=1.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 NODE="${LAB_MASTER_NODE:-master}"

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Lab PVC data is PostgreSQL 15 — force deployment + manifest to postgres:15-alpine (never 16).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

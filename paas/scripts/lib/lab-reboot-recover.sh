@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Safe post-reboot recovery — re-applies manifests, never wipes container.image via bad merge patches.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 PAAS_NS="${PAAS_NS:-paas}"

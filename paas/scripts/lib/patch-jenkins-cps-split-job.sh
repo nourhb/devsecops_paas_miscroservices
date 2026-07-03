@@ -6,17 +6,15 @@ JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
 LOAD_MARKER="${PAAS_DEPLOY_STAGES_LOAD_MARKER:-paas-deploy-stages-load-20260620-cps-split}"
 JOB_CFG="/var/jenkins_home/jobs/paas-deploy/config.xml"
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 
-echo "==> patch-jenkins-cps-split-job (ns=${JENKINS_NS}, marker=${LOAD_MARKER})"
+echo "==> patch-jenkins-cps-split-job (ns=${JENKINS_NS})"
 
 echo "==> Refresh CPS bundle on Jenkins pod (monolith paas-deploy-stages.groovy + split files)"
 SKIP_JOB_PATCH=1 bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 
 echo "==> POST 7-file CPS wrapper to Jenkins LIVE job"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"

@@ -19,7 +19,7 @@ if [[ "${QUICK}" == "1" || "${1:-}" == "quick" ]]; then
   sudo journalctl --vacuum-size=100M 2>/dev/null || true
   DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
   if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 85 ]]; then
-    echo "WARN: disk at ${DISK_PCT}% — run: bash paas/scripts/lab.sh disk-emergency"
+    echo "WARN: disk at ${DISK_PCT}%
   fi
   exit 0
 fi

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Fix Sonar helm: drop broken plugins.install=[], httpGet probes (no curl), wait for UP.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -122,9 +120,6 @@ livenessProbe:
 sonarProperties:
   sonar.web.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
   sonar.ce.javaOpts: "-Xmx1024m -Xms256m -XX:+UseSerialGC"
-  # NO -XX:+UseSerialGC here: bundled Elasticsearch hard-codes -XX:+UseG1GC in its own
-  # jvm.options; appending SerialGC causes "Multiple garbage collectors selected" —
-  # a fatal JVM init error that CrashLoopBackOff's forever (20260702 incident).
   sonar.search.javaOpts: "-Xmx768m -Xms512m"
 resources:
   requests:
@@ -143,11 +138,6 @@ sonar_has_pvc() {
   kubectl get pvc -n "${SONAR_NS}" 2>/dev/null | grep -qi 'sonarqube'
 }
 
-# "Already UP" is not enough to skip the upgrade: a pod can be transiently UP between
-# OOMKill/restart cycles while still running stale (undersized) resources/javaOpts from a
-# previous helm release — see 20260702 incident where this short-circuit silently prevented
-# a memory bump from ever being applied, leaving Sonar OOMKilling every build. Only skip when
-# the running pod's memory limit already matches this file's target.
 TARGET_MEM_LIMIT="4608Mi"
 sonar_current_mem_limit() {
   local pod
@@ -177,7 +167,7 @@ sonar_helm_upgrade_lab
 echo "==> recycle Sonar pod"
 kubectl delete pod -n "${SONAR_NS}" sonarqube-sonarqube-0 --ignore-not-found --wait=false 2>/dev/null || true
 
-echo "==> wait for UP (max ~20 min on 8GB lab — do not Ctrl+C)"
+echo "==> wait for UP (max ~20 min — do not Ctrl+C)"
 for i in $(seq 1 80); do
   if curl -fsS -m 12 "${SONAR_URL}/api/system/status" 2>/dev/null | grep -qE '"status":"(UP|DB_MIGRATION_NEEDED|DB_MIGRATION_RUNNING)"'; then
     ok "SonarQube UP ${SONAR_URL} (${i} checks)"

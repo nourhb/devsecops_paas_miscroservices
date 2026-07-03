@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Standalone fix: 7-file CPS split on jenkins-0 + POST wrapper (fixes MethodTooLarge).
-# Works on lab StatefulSet jenkins-0 — does NOT use deploy/jenkins or monolith load.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -15,10 +13,8 @@ CPS_MARKER="paas-deploy-stages-load-20260620-cps-split"
 
 cd "${REPO_ROOT}"
 
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 
-# grep -c prints 0 and exits 1 when no matches — never use `grep -c ... || echo 0` (yields "0\n0").
 grep_count() {
   local n
   n="$(grep -c "$1" "$2" 2>/dev/null | tail -1 | tr -d '\r\n')" || true
@@ -163,7 +159,6 @@ rm -rf "${RENDER}"
 mkdir -p "${RENDER}"
 JENKINSFILE="${REPO_ROOT}/paas/jenkins/Jenkinsfile.paas-deploy"
 RENDER_PY="${REPO_ROOT}/paas/jenkins/render-loadable-stages.py"
-# Stale .render-test causes Jenkins CpsCompilationErrorsException: duplicate def sonarRc
 stale_p2="${REPO_ROOT}/paas/jenkins/.render-test/paas-deploy-stages-p2.groovy"
 if [[ -f "${stale_p2}" ]] && grep -qF 'sonar-shell-wait-20260701' "${JENKINSFILE}" 2>/dev/null; then
   if grep -q 'def sonarRc' "${stale_p2}" 2>/dev/null \
@@ -221,7 +216,6 @@ if [[ ! -f "${RENDER}/paas-deploy-stages-p3.groovy" ]]; then
   exit 1
 fi
 
-# Sanitize + dedupe p3 (VM stale render often has 2x def runPaasDeploy())
 p3="${RENDER}/paas-deploy-stages-p3.groovy"
 if [[ -f "${p3}" ]]; then
   if [[ -x "${SCRIPT_DIR}/fix-p3-no-self-invoke.sh" ]]; then
@@ -234,7 +228,6 @@ from pathlib import Path
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
 
-# Stale render-loadable-stages.py used closure syntax; monolith assembler expects methods.
 t = t.replace("def runPaasDeploy = {", "def runPaasDeploy() {")
 
 def end_of_block(s: str, start: int) -> int:
@@ -333,7 +326,6 @@ print(f"OK: deduped runPaasDeploy orchestrator in {p.name}")
 PY
 fi
 
-# Ensure bundle marker on every split file (VM rollback may render dt-api-server-svc-20260617)
 for f in paas-deploy-load-h1.groovy paas-deploy-load-h2.groovy paas-deploy-load-h3.groovy \
          paas-deploy-stages-vars.groovy paas-deploy-stages-p1.groovy paas-deploy-stages-p2.groovy \
          paas-deploy-stages-p3.groovy; do
@@ -471,10 +463,6 @@ SPLIT_FILES_LIST=(
   paas-deploy-stages-p3.groovy
 )
 
-# Bundle all 7 files into ONE tar and push with 2 kubectl round-trips (1 cp + 1 exec untar)
-# instead of up to 14 (7x cp, each with an exec-tee fallback). On a flaky/overloaded k3s API
-# every extra round-trip is a chance to hit "context deadline exceeded" + a 15s retry wait,
-# so fewer round-trips is the single biggest lever for wall-clock time here.
 BUNDLE_TAR="${RENDER}/paas-deploy-bundle.tar.gz"
 rm -f "${BUNDLE_TAR}"
 ( cd "${RENDER}" && tar -czf "${BUNDLE_TAR}" "${SPLIT_FILES_LIST[@]}" )
@@ -553,7 +541,6 @@ if [[ -f "${SCRIPT_DIR}/lab-jenkins-recover.sh" ]]; then
   bash "${SCRIPT_DIR}/lab-jenkins-recover.sh" recover 2>/dev/null || true
 fi
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 
@@ -594,7 +581,6 @@ stale = "\n".join(
 )
 wrapper = f"""def paasDir = '{PAAS_DIR}'
 def paasDeployStages = '{PAAS_DIR}/paas-deploy-stages.groovy'
-println '[paas-jenkinsfile] marker={MARKER} (assembled monolith load + paas.runPaasDeploy)'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def paasRequireFreshStages = {{
   if (!fileExists(paasDeployStages)) {{ error("Missing monolith — run assemble-paas-deploy-monolith.sh") }}
@@ -817,12 +803,5 @@ fi
 
 echo ""
 echo "=============================================="
-echo " DONE — trigger NEW paas-deploy (NOT Replay)"
-echo ""
-echo " Console MUST show:"
- echo "   marker=${CPS_MARKER}"
- echo "   load paas-deploy-stages.groovy + paas.runPaasDeploy()"
- echo "   *** BEGIN : Check Parameters ***"
-echo "   marker=dt-nodeport-first-lab-20260702 (Step 4: NodePort first; 401 → WARN not FAIL)"
-echo "   PAAS_DT_UPLOAD_OPTIONAL=true → Step 4 WARN (not FAIL) when DT down"
+echo " DONE — trigger a new paas-deploy build (not Replay)"
 echo "=============================================="

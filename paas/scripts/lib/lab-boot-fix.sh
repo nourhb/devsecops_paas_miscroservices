@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: install boot service + kubeconfig + start recover now.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

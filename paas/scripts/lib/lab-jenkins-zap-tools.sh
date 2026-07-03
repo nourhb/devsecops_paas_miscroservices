@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 JENKINS_NS="${JENKINS_NS:-cicd}"
 ZAP_NS="${ZAP_K8S_NAMESPACE:-cicd}"
@@ -44,9 +43,6 @@ ensure_kubectl_in_jenkins() {
     target="${target#pod/}"
   fi
 
-  # Preferred: copy a REAL local kubectl binary via `kubectl cp` (same VM/arch — no pod
-  # internet egress required at all). This is far more reliable than curl-in-pod on labs
-  # where the Jenkins container has no route to dl.k8s.io.
   local local_kubectl="" candidate resolved
   for candidate in "$(command -v kubectl 2>/dev/null || true)" /usr/local/bin/kubectl /usr/bin/kubectl /var/lib/rancher/k3s/data/current/bin/kubectl; do
     [[ -n "${candidate}" ]] || continue
@@ -76,7 +72,6 @@ ensure_kubectl_in_jenkins() {
     warn "no local kubectl/k3s binary resolvable on host — falling back to curl download inside pod"
   fi
 
-  # Fallback: download inside the pod (requires pod egress to dl.k8s.io / GCS mirror).
   jenkins_exec sh -s <<EOF
 set -eu
 KVER="${KUBECTL_VERSION}"
@@ -202,14 +197,10 @@ subjects:
     name: jenkins
     namespace: ${JENKINS_NS}
 YAML
-  ok "RBAC jenkins → scale deployments cluster-wide (RAM pause: frontend/harbor/dependency-track during Sonar, 8GB lab)"
+  ok "RBAC jenkins → scale deployments cluster-wide (RAM pause during Sonar)"
 }
 
 jenkins_workload_present() {
-  # StatefulSet (jenkins-0) on most lab installs; Deployment on some. Retry a few times —
-  # the k3s API on an 8GB node under memory pressure blips transiently, and a single
-  # NotFound here used to hard-abort this whole script (set -euo pipefail) before it ever
-  # reached ensure_kubectl_in_jenkins / RBAC below.
   local attempt
   for attempt in 1 2 3 4 5; do
     if kubectl get pod -n "${JENKINS_NS}" jenkins-0 --request-timeout=30s >/dev/null 2>&1; then

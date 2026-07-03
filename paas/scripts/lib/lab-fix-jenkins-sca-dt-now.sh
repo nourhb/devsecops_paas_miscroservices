@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One shot: Jenkins up → DT API key fresh → CPS monolith on pod → job params synced.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -37,7 +36,6 @@ done
 
 if [[ -f "${ENV_FILE}" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
   set -a
-  # shellcheck disable=SC1091
   source "${ENV_FILE}" 2>/dev/null || true
   set +a
   export JENKINS_DEPENDENCY_TRACK_BASE_URL="${JENKINS_DEPENDENCY_TRACK_BASE_URL:-${IN_CLUSTER_DT}}"
@@ -57,5 +55,4 @@ kubectl exec -n "${JNS}" "${JPOD}" -c jenkins --request-timeout=30s -- \
   || echo "  WARN: Jenkins pod -> DT in-cluster failed (Step 4 uses kubectl port-forward fallback)"
 
 echo ""
-echo "OK — trigger NEW paas-deploy from http://${NODE_IP}:30090 or PaaS UI"
-echo "Console must show: marker=dt-cluster-first-20260702"
+echo "OK — trigger a new paas-deploy from http://${NODE_IP}:30090 or the PaaS UI"

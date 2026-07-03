@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Install Pipeline plugins when Jenkins helm used controller.installPlugins=false.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -15,7 +14,6 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 load_creds() {
   if [[ -f "${ENV_FILE}" ]]; then
-    # shellcheck disable=SC1090
     set -a && source "${ENV_FILE}" && set +a
   fi
   JENKINS_USER="${JENKINS_USERNAME:-${JENKINS_USER:-admin}}"

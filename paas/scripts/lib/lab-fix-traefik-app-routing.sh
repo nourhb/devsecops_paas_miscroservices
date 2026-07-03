@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Restore Traefik host-based routing on NodePort 30659.
-# If simple-app (or any app) was patched to NodePort 30659, every app URL shows the same content.
 set -euo pipefail
 NODE_IP="${NODE_IP:-192.168.56.129}"
 INGRESS_PORT="${APPS_PUBLIC_INGRESS_HTTP_PORT:-30659}"
@@ -9,7 +7,6 @@ TRAEFIK_SVC="${TRAEFIK_SERVICE:-traefik}"
 
 echo "==> Fix app routing: Traefik on NodePort ${INGRESS_PORT} (not per-app NodePort)"
 
-# Revert any non-Traefik service that stole NodePort 30659 back to ClusterIP.
 while IFS=$'\t' read -r ns name; do
   [[ -n "${ns}" && -n "${name}" ]] || continue
   if [[ "${ns}" == "${TRAEFIK_NS}" && "${name}" == "${TRAEFIK_SVC}" ]]; then

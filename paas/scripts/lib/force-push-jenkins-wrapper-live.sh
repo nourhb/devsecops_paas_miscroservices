@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Push paas-deploy config.xml from Jenkins PVC to Jenkins LIVE in-memory job (API POST).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -11,7 +10,6 @@ TMP_CFG="/tmp/paas-deploy-config.xml"
 
 cd "${REPO_ROOT}"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 [[ -n "${JENKINS_USERNAME:-}" && -n "${JENKINS_API_TOKEN:-}" ]] || {

@@ -45,12 +45,5 @@ fi
 
 echo ""
 echo "=============================================="
-echo " DONE — deploy from PaaS UI (NEW build, not Replay)"
-echo " Console MUST show:"
-echo "   marker=${CPS_MARKER}"
-echo "   CPS split 7 files"
-echo "   SEVEN [Pipeline] load lines"
-echo "   *** BEGIN : Check Parameters ***"
-echo ""
-echo " If still broken: LAB_ROLLBACK_CONFIRM=1 bash paas/scripts/lab.sh rollback-june17"
+echo " DONE — deploy from the PaaS UI (new build, not Replay)"
 echo "=============================================="

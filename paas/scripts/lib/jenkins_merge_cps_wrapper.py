@@ -41,11 +41,10 @@ def build_wrapper(
     bundle: str = BUNDLE,
     stages_path: str | None = None,
 ) -> str:
-    """Assembled monolith load + paas.runPaasDeploy() — CPS cannot call split load() methods on parent."""
+    """Assembled monolith load + paas.runPaasDeploy()."""
     stages = stages_path or f"{paas_dir}/paas-deploy-stages.groovy"
     return f"""def paasDir = '{paas_dir}'
 def paasDeployStages = '{stages}'
-println '[paas-jenkinsfile] marker={marker} (assembled monolith load + paas.runPaasDeploy)'
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def paasRequireFreshStages = {{
   if (!fileExists(paasDeployStages)) {{
@@ -120,7 +119,7 @@ def live_wrapper_ok(config_xml: str) -> list[str]:
             "broken 7-file split wrapper (CPS load does not expose methods on parent) — use monolith load"
         )
     if not has_monolith:
-        bad.append("missing load paasDeployStages + paas.runPaasDeploy() (assembled monolith)")
+        bad.append("missing load paasDeployStages + paas.runPaasDeploy()")
     if MARKER not in config_xml:
         bad.append(f"missing marker {MARKER}")
     return bad

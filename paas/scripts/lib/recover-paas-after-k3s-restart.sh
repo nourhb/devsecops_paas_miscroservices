@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
@@ -129,7 +128,6 @@ fi
 
 echo "OK — PaaS health passed"
 
-# Boot service must stop here — Harbor bootstrap restarts k3s and needs interactive sudo.
 if [[ "${PAAS_BOOT_RECOVER:-0}" == "1" ]]; then
   bash "${SCRIPT_DIR}/lab-guard-cron.sh" install 2>/dev/null || true
   echo ""
@@ -145,10 +143,10 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 echo "==> Lab guard (images, Prometheus, stale pods)"
-bash "${SCRIPT_DIR}/lab-guard.sh" || echo "WARN: lab-guard reported issues — run: bash paas/scripts/lab.sh guard"
+bash "${SCRIPT_DIR}/lab-guard.sh" || echo "WARN: lab-guard reported issues
 
 echo "==> Install auto-heal cron (watchdog + guard)"
-bash "${SCRIPT_DIR}/lab-guard-cron.sh" install || echo "WARN: could not install cron — run: bash paas/scripts/lab.sh harden"
+bash "${SCRIPT_DIR}/lab-guard-cron.sh" install || echo "WARN: could not install cron
 
 echo ""
 echo "OK — PaaS login: http://${NODE_IP}:30100/login"

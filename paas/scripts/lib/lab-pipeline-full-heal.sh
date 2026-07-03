@@ -72,7 +72,7 @@ verify_twelve_stages_on_jenkins() {
     grep -qF 'helm-portable-20260620-cps-split' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null; then
     ok "Jenkins stages file has Step 12 + CPS split marker"
   else
-    fail "Jenkins stages file stale — run: bash paas/scripts/lab.sh force-fix-paas-deploy"
+    fail "Jenkins stages file stale
   fi
 }
 

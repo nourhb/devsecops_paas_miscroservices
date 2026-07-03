@@ -55,7 +55,7 @@ git fetch "${AUTH_URL}" "${BRANCH}" 2>/dev/null || git fetch origin "${BRANCH}"
 if git rev-parse "origin/${BRANCH}" >/dev/null 2>&1; then
   gitops_abort_rebase "${GITOPS}"
   if ! gitops_pull_rebase_resolve_apps "${AUTH_URL}" "${BRANCH}"; then
-    echo "ERROR: git pull --rebase failed — run: bash paas/scripts/lab.sh repair <slug>" >&2
+    echo "ERROR: git pull --rebase failed <slug>" >&2
     popd >/dev/null
     exit 1
   fi

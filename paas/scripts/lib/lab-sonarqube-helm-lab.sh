@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Shared SonarQube helm values for 8GB lab (embedded H2, low heap, httpGet probes).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

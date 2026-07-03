@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Push multi-framework SCA fixes to live Jenkins (Python/Node/Angular/Yarn).
-# Works even when VM repo is behind — patches live pod then re-assembles monolith.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -79,7 +77,6 @@ def patch_groovy(path: Path) -> bool:
         if t2 != t:
             t = t2
             changed = True
-    # Old python-only SCA shell (no node first)
     old = re.compile(
         r"(mkdir -p sca\n)"
         r"(?:\s*export PROJECT_NAME=[^\n]+\n)?"
@@ -105,7 +102,6 @@ def patch_groovy(path: Path) -> bool:
         repl = m.group(1) + export + NODE_BLOCK + "\n              test -f sca/bom.json"
         t = t[: m.start()] + repl + t[m.end() :]
         changed = True
-    # Yarn: add install before cyclonedx if missing
     if "yarn.lock" in t and "yarn install" not in t.split("yarn.lock")[1][:800]:
         t = t.replace(
             'echo "[sca] cyclonedx-npm (yarn.lock — do not use --package-lock-only)"\n              npx',
@@ -113,13 +109,6 @@ def patch_groovy(path: Path) -> bool:
             '              if ! command -v yarn >/dev/null 2>&1; then corepack enable 2>/dev/null || npm install -g yarn 2>/dev/null || true; fi\n'
             '              if command -v yarn >/dev/null 2>&1; then yarn install --frozen-lockfile 2>/dev/null || yarn install; fi\n'
             '              npx',
-            1,
-        )
-        changed = True
-    if "sca-python-node-first-20260630" not in t:
-        t = t.replace(
-            "marker=helm-portable-20260619",
-            "marker=helm-portable-20260619\n  println '[paas-jenkinsfile] marker=sca-python-node-first-20260630 (Node requirements.txt BOM — no python3 required on agent)'",
             1,
         )
         changed = True
@@ -146,6 +135,4 @@ kubectl exec -n "${JNS}" "${JPOD}" -c jenkins -- grep -c "${MARKER}" "${REMOTE}/
 
 echo ""
 echo "OK: multi-framework SCA on ${JNS}/${JPOD}"
-echo "Trigger NEW paas-deploy — console must show:"
-echo "  marker=sca-python-node-first-20260630"
-echo "  [sca] Python BOM from requirements.txt (node"
+echo "Trigger a new paas-deploy build."

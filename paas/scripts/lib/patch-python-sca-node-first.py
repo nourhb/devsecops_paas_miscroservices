@@ -70,7 +70,6 @@ def main() -> int:
         return 0
     m = OLD.search(text)
     if not m:
-        # Minimal inject after mkdir -p sca
         inj = re.compile(
             r"(mkdir -p sca\n)(\s*export PROJECT_NAME=.*\n)?",
             re.MULTILINE,
@@ -87,7 +86,6 @@ def main() -> int:
         export = export_m.group(0) if export_m else ""
         repl = "mkdir -p sca\n" + export + NODE_BLOCK + "\n              test -f sca/bom.json"
         text2 = text[: m.start()] + repl + text[m.end() :]
-    # ensureNodeTool before python sca block
     if "ensureNodeTool('20.19.5')" not in text2 and "def scaPyRoot" in text2:
         text2 = text2.replace(
             "if (fileExists(\"${scaPyRoot}/requirements.txt\") || fileExists(\"${scaPyRoot}/pyproject.toml\")) {",

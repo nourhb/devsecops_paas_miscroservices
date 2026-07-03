@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Fast k3s diagnosis — no kubectl (avoids hang when API is dead).
 set -uo pipefail
 
 echo "=== k3s diagnose $(date -Is 2>/dev/null || date) ==="

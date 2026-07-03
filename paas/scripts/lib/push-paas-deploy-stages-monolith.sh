@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Build correct paas-deploy-stages monolith (1x runPaasDeploy) and push to jenkins-0.
-# Use when restore-paas-deploy-working.sh fails on deploy/jenkins or pod still has 2x runPaasDeploy.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -78,7 +76,6 @@ echo "OK: pod has exactly 1 runPaasDeploy()"
 
 if [[ -f "${SCRIPT_DIR}/apply-jenkins-inline-steps-wrapper.py" ]]; then
   set -a
-  # shellcheck disable=SC1091
   source "${REPO_ROOT}/paas/frontend/docker-compose.env" 2>/dev/null || true
   set +a
   echo "==> Re-apply job wrapper"

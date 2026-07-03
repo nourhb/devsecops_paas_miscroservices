@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Fresh Jenkins (helm reinstall): read chart admin password, create API token, update env + paas-deploy job.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -128,7 +127,6 @@ EOS
 
 create_api_token() {
   local admin_pass="$1" token
-  # Prefer host NodePort — admin password already verified from master; pod has no python3.
   if token="$(create_api_token_from_host "${admin_pass}" "${JENKINS_TOKEN_NAME}" 2>/dev/null | tr -d '\r\n' | tail -1)" \
     && [[ -n "${token}" && "${token}" != FAIL:* ]]; then
     printf '%s' "${token}"
@@ -189,7 +187,7 @@ main() {
     bash "${SCRIPT_DIR}/install-jenkins-workflow-plugins.sh" || \
     fail "Pipeline plugins required for paas-deploy job"
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force || fail "paas-deploy job create failed"
-  python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py" || warn "wrapper POST failed — run: bash paas/scripts/lab.sh fix-paas-deploy"
+  python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py" || warn "wrapper POST failed
   PAAS_SKIP_DT=1 bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || warn "env sync failed"
 
   echo "=============================================="

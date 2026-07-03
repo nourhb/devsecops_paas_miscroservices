@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Continue push when fix-paas-deploy-cps-split-now.sh rendered OK but died before kubectl push
-# (e.g. missing ensure-p3-orchestrator.sh on VM).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Discover Jenkins pod for kubectl exec (helm chart = StatefulSet jenkins-0, not Deployment).
-# shellcheck disable=SC2034
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 
 jenkins_discover_ns() {

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Reinstall DevSecOps platform after k3s etcd wipe (namespaces/helm releases gone; PVC dirs may remain on disk).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -22,7 +20,6 @@ need kubectl
 
 log "disk $(df / | awk 'NR==2 {print $5}')"
 
-# --- Harbor (registry :30002) ---
 if ! curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${NODE_IP}:30002/v2/" 2>/dev/null | grep -qE '200|401'; then
   log "install Harbor"
   helm repo add harbor https://helm.goharbor.io 2>/dev/null || true
@@ -58,7 +55,6 @@ else
   log "Harbor already responding on :30002"
 fi
 
-# --- Jenkins (cicd :30090) ---
 if ! curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 "http://${NODE_IP}:30090/login" 2>/dev/null | grep -qE '200|403'; then
   log "install Jenkins in namespace cicd"
   bash "${SCRIPT_DIR}/lab-jenkins-helm-install.sh" install || log "WARN: Jenkins install failed — retry: bash paas/scripts/lab.sh jenkins-install"
@@ -66,7 +62,6 @@ else
   log "Jenkins already responding on :30090"
 fi
 
-# --- Argo CD ---
 if ! kubectl get ns argocd >/dev/null 2>&1; then
   log "install Argo CD"
   kubectl create namespace argocd
@@ -78,7 +73,6 @@ else
     kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 fi
 
-# --- SonarQube (:30900 in lab env) ---
 if ! kubectl get ns sonarqube >/dev/null 2>&1; then
   log "install SonarQube (optional — may take 10+ min)"
   helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube 2>/dev/null || true
@@ -110,7 +104,7 @@ bash "${SCRIPT_DIR}/compose-paas-frontend-env.sh" 2>/dev/null || true
 PAAS_SKIP_DT=1 PAAS_SKIP_ROLLOUT=1 bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" 2>/dev/null || true
 SKIP_FRONTEND_REBUILD=true LAB_DT_SKIP_HEAL=true \
   bash "${SCRIPT_DIR}/sync-jenkins-pipeline-from-repo.sh" 2>/dev/null || \
-  log "WARN: jenkins job sync failed — run: bash paas/scripts/lab.sh jenkins"
+  log "WARN: jenkins job sync failed
 
 kubectl get pods -n harbor 2>/dev/null | head -8 || true
 kubectl get pods -n cicd 2>/dev/null | head -5 || true

@@ -32,7 +32,8 @@ const required = [
     "PAAS_BUILD_COMPLETE",
     "Step 1 — Params validation",
     "Step 12 — GitOps",
-    "env-safe-dotenv-loader-20260601"
+    "PROJECT_BUILD_ENV_B64",
+    "dotenvLine"
 ];
 for (const token of required) {
     if (!groovy.includes(token)) {

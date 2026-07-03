@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Push rendered CPS bundle to helm Jenkins StatefulSet pod (jenkins-0).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

@@ -17,7 +17,6 @@ bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 
 echo "==> 2/4 POST correct CPS wrapper to Jenkins LIVE (REST API)"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"
@@ -32,13 +31,6 @@ VERIFY_ONLY=1 bash "${SCRIPT_DIR}/reload-jenkins-paas-deploy-job.sh" || \
 echo ""
 echo "=============================================="
 echo " LOOP BROKEN — safe to deploy."
-echo ""
- echo " Build console MUST show:"
- echo "   marker=${CPS_MARKER}"
- echo "   SEVEN [Pipeline] load lines"
- echo "   runPaasDeploy()"
- echo "   *** BEGIN : Check Parameters ***"
-echo ""
-echo " If this fails again, rollback to June 17 (known working):"
-echo "   LAB_ROLLBACK_CONFIRM=1 bash paas/scripts/lab.sh rollback-june17"
+echo " Trigger a new paas-deploy build (not Replay)."
+echo "=============================================="
 echo "=============================================="

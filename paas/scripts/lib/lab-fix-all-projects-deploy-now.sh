@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# One-shot: Argo CD + bootstrap all apps + heal all GitOps projects + Traefik routing.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

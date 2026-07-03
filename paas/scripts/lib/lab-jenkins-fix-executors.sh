@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Built-in Jenkins controller often has numExecutors=0 (helm default) while agent.enabled=false — queue never runs.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

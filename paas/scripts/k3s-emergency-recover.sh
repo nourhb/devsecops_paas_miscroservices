@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Emergency k3s recovery — loud output, timeouts, log file (when kubectl/scripts hang).
-# Run: sudo bash paas/scripts/k3s-emergency-recover.sh
 exec > >(tee -a /tmp/k3s-emergency.log) 2>&1
 set -x
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -29,7 +27,7 @@ fi
 sleep 8
 
 if ! swapon --show 2>/dev/null | grep -q .; then
-  echo "==> add 2G swap (8GB lab)"
+  echo "==> add 2G swap"
   if [[ ! -f /swapfile ]]; then
     fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
     chmod 600 /swapfile

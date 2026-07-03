@@ -40,7 +40,6 @@ bash "${SCRIPT_DIR}/install-jenkins-stages-file.sh"
 
 echo "==> Push June 17 job wrapper to Jenkins LIVE (--force)"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --force --force-full
@@ -64,7 +63,6 @@ DT_STAGES_MARKER=dt-api-server-svc-20260617 bash "${SCRIPT_DIR}/verify-jenkins-s
 
 echo "==> Verify LIVE Jenkins job (June 17 single-load layout)"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 python3 <<'PY'

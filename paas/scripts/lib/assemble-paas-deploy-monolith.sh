@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Assemble paas-deploy-stages.groovy monolith from the 7 split files ALREADY on jenkins-0,
-# guaranteeing: helm marker, def runPaasDeploy() orchestrator, and trailing `return this`.
-# If pod split files are stale, re-render from repo and push splits first.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -101,14 +98,6 @@ order = [
     "paas-deploy-stages-p3.groovy",
 ]
 def transform(text, deep):
-    # Top-level closures -> methods (survive `load file; obj.method()`):
-    #   `def NAME = { args -> `  -> `def NAME(args) {`
-    #   `def NAME = {`           -> `def NAME() {`
-    # Column-0 scalar state -> binding var (shared param vars across split methods).
-    # In step files (deep=True) also 2-space-indent scalars -> binding: these were
-    # closure-locals in the original single runPaasDeploy closure (e.g. paasFastPipeline,
-    # cranePushTimeoutMin) and are read across split functions. Helper files keep their
-    # internal locals (deep=False) to avoid cross-call clobbering.
     out = []
     for ln in text.split("\n"):
         m = re.match(r'^def (\w+)\s*=\s*\{\s*(.*?)\s*->\s*$', ln)
@@ -140,12 +129,10 @@ for name in order:
     parts.append(transform(text, deep).rstrip("\n") + "\n")
 body = "\n".join(parts)
 
-# Drop any stray top-level `return this` from split files (only the monolith ends with one).
 lines = [ln for ln in body.split("\n")]
 lines = [ln for ln in lines if ln.strip() != "return this"]
 body = "\n".join(lines).rstrip("\n") + "\n"
 
-# Keep exactly one orchestrator (duplicate breaks CPS load with "duplicates another method").
 def dedupe_run_paas_deploy(text: str) -> str:
     pat = re.compile(r"def runPaasDeploy\(\) \{\n.*?\n\}\n", re.DOTALL)
     matches = list(pat.finditer(text))
@@ -162,7 +149,6 @@ body = dedupe_run_paas_deploy(body)
 def dedupe_sonar_rc(text: str) -> str:
     """Stale monoliths may contain old inline scanner + shell-wait Sonar blocks (duplicate def sonarRc)."""
     if "sonar-shell-wait-20260701" in text:
-        # Drop legacy synchronous scanner: def sonarRc = sh(script: ... npx sonarqube-scanner ...
         text = re.sub(
             r"\n\s+def sonarRc = sh\(script: '''#!/bin/bash[\s\S]*?''', returnStatus: true\)\n",
             "\n",
@@ -176,9 +162,7 @@ def dedupe_sonar_rc(text: str) -> str:
                 line_start = text.rfind("\n", 0, start)
                 line_start = 0 if line_start < 0 else line_start + 1
                 text = text[:line_start] + text[end:]
-        # New Sonar block uses sonarWaitRc — any def sonarRc is legacy and breaks CPS compile.
         text = re.sub(r"^\s+def sonarRc\s*=.*$\n?", "", text, flags=re.MULTILINE)
-    # Same scope cannot declare def sonarRc twice — keep first def, later ones become assignment.
     seen_def = 0
     out = []
     for ln in text.split("\n"):
@@ -231,7 +215,6 @@ body = body.rstrip("\n") + "\nreturn this\n"
 out = work / "paas-deploy-stages.groovy"
 out.write_text(body, encoding="utf-8")
 
-# Self-check (same assertions the job wrapper makes)
 checks = {
     "helm marker": body.count("helm-portable-20260620-cps-split") >= 1,
     "def runPaasDeploy()": "def runPaasDeploy()" in body,

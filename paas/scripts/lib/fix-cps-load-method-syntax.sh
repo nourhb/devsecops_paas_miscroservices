@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# CPS split: Jenkins load() only promotes def foo() { } methods, not def foo = { } closures.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

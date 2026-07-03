@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Snapshot Jenkins PVC data BEFORE wipe/reinstall. Old PVs often survive as Released on k3s local-path.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
@@ -48,7 +46,6 @@ else
   log "no ${JPOD} pod — trying Released PV path on node"
 fi
 
-# Capture PV host paths for manual recovery
 kubectl get pv -o json 2>/dev/null | python3 - "${DEST}/released-pvs.txt" <<'PY' || true
 import json, sys
 out = sys.argv[1]

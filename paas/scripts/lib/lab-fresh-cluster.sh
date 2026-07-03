@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap PaaS lab after k3s etcd wipe (rm -rf .../server/db) or greenfield VM.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -43,7 +41,7 @@ k3s kubectl get nodes -o wide 2>/dev/null || true
 DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}' || echo 0)"
 log "disk ${DISK_PCT}%"
 if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 88 ]]; then
-  die "disk ${DISK_PCT}% — run: bash paas/scripts/lab.sh disk-emergency"
+  die "disk ${DISK_PCT}%
 fi
 
 log "1/7 namespace + RBAC"
@@ -89,7 +87,7 @@ if ! k3s crictl images 2>/dev/null | grep -q 'busybox.*1.36'; then
 fi
 if ! k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
   if ! sudo k3s crictl images 2>/dev/null | grep -qE 'paas-frontend.*recovery'; then
-    die "paas-frontend:recovery not in containerd — run: bash paas/scripts/lab.sh frontend (long build)"
+    die "paas-frontend:recovery not in containerd (long build)"
   fi
 fi
 

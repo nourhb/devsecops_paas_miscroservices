@@ -8,7 +8,6 @@ DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260620-cps-split}"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 KTO="${KUBECTL_REQUEST_TIMEOUT:-120s}"
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 RENDER_DIR="${PAAS_RENDER_DIR:-/var/tmp/paas-deploy-bundle}"
 BUNDLE_FILES=(
@@ -95,7 +94,6 @@ python3 "${REPO_ROOT}/paas/jenkins/render-loadable-stages.py" --out-dir "${RENDE
   exit 1
 }
 
-# Stale render on VM may append runPaasDeploy() at EOF or duplicate def runPaasDeploy() — sanitize p3.
 bash "${SCRIPT_DIR}/fix-p3-no-self-invoke.sh" 2>/dev/null || python3 - "${RENDER_DIR}/paas-deploy-stages-p3.groovy" <<'PY'
 import re, sys
 from pathlib import Path

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Enable Steps 7–8 and 10–11 (no skips): helm stub, Artifactory upload, ZAP, Helm OCI push.
-# Keeps June 17 monolith stages load (single paas-deploy-stages.groovy).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ENV_FILE="${ENV_FILE:-${REPO_ROOT}/paas/frontend/docker-compose.env}"
@@ -71,7 +68,6 @@ bash "${SCRIPT_DIR}/install-jenkins-stages-monolith.sh"
 
 echo "==> 6/6 Sync env + Jenkins params (do NOT touch June 17 job wrapper)"
 set -a
-# shellcheck disable=SC1091
 source "${ENV_FILE}" 2>/dev/null || true
 set +a
 PAAS_SKIP_ROLLOUT="${PAAS_SKIP_ROLLOUT:-1}" ENV_FILE="${ENV_FILE}" \
@@ -81,12 +77,5 @@ python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force
 echo ""
 echo "=============================================="
 echo " OK — full pipeline prerequisites installed"
-echo ""
-echo " Trigger NEW paas-deploy build (#880+). Console must show:"
-echo "   Step 7  — Stub chart packagé → paas-artifacts/helm/*.tgz"
-echo "   Step 8  — [artifactory] Publié"
-echo "   Step 10 — [zap] using kubectl run OR docker"
-echo "   Step 11 — [helm-oci] helm push"
-echo ""
-echo " Do NOT run: break-paas-deploy-loop, force-fix-paas-deploy, pipeline-heal"
+echo " Trigger a new paas-deploy build from the PaaS UI or Jenkins."
 echo "=============================================="

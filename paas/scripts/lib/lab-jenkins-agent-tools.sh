@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 JENKINS_NS="${JENKINS_NS:-cicd}"
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 HELM_VERSION="${JENKINS_PAAS_HELM_VERSION:-3.16.3}"
 CRANE_VERSION="${JENKINS_PAAS_CRANE_VERSION:-0.20.6}"

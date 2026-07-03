@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Nuclear fix: install CPS bundle + POST correct 7-file wrapper to Jenkins LIVE via REST API.
-# Use when disk config.xml looks fine but builds still show "Stale stages bundle (missing runPaasDeploy in p3)".
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -31,7 +29,6 @@ done
 echo "==> 3/4 POST correct CPS wrapper to Jenkins LIVE (CDATA or XML-escaped script)"
 python3 "${SCRIPT_DIR}/post-paas-deploy-wrapper-live.py"
 
-# Also refresh params if create_jenkins exists
 if [[ -f "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" ]]; then
   python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only 2>/dev/null || true
 fi
@@ -91,7 +88,6 @@ live = opener.open(
 
 bad = live_wrapper_ok(live)
 
-# p3 on pod (StatefulSet jenkins-0, not deploy/jenkins)
 import subprocess
 ns = os.environ.get("JENKINS_K8S_NAMESPACE", "cicd")
 jpod = subprocess.run(
@@ -122,8 +118,6 @@ if bad:
 print("OK: Jenkins LIVE has 7-file CPS wrapper + valid p3")
 PY
 
-# Sync disk config.xml from LIVE so PVC matches memory
-# shellcheck source=lab-jenkins-pod.sh
 source "${SCRIPT_DIR}/lab-jenkins-pod.sh"
 jenkins_exec "${JENKINS_NS}" test -f "/var/jenkins_home/jobs/${JOB}/config.xml" || true
 python3 <<'PY'
@@ -152,10 +146,5 @@ echo "OK: PVC config.xml synced from LIVE"
 
 echo ""
 echo "=============================================="
-echo " DONE — trigger NEW paas-deploy build (not Replay)"
-echo " Console MUST show:"
-echo "   marker=${CPS_MARKER}"
-echo "   SEVEN [Pipeline] load lines"
-echo "   runPaasDeploy()  (after loads, NOT inside load p3)"
-echo "   *** BEGIN : Check Parameters ***"
+echo " DONE — trigger a new paas-deploy build"
 echo "=============================================="

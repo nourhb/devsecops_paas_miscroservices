@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 PAAS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"
@@ -72,7 +71,7 @@ postgres_push_schema() {
   fi
   local pg_ip
   pg_ip="$(kubectl get endpoints postgres -n "${PAAS_NS}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-  [[ -n "${pg_ip}" ]] || die "No postgres endpoints — run: bash paas/scripts/lab.sh start"
+  [[ -n "${pg_ip}" ]] || die "No postgres endpoints
   local db_url="postgresql://postgres:root@${pg_ip}:5432/paas?options=-c%20lc_messages%3DC"
   local schema_pushed=0
   push_via_node_image() {

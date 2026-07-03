@@ -8,7 +8,6 @@ PAAS_PORT="${PAAS_PORT:-30100}"
 MANIFEST="${REPO_ROOT}/paas/k8s-manifests/hosted/frontend.yaml"
 RECOVERY="${RECOVERY_IMAGE:-docker.io/library/paas-frontend:recovery}"
 
-# shellcheck source=lab-frontend-lab-safety.sh
 source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
 
 echo "==> 1/4 Restore deployment spec (envFrom, probes, ports) from manifest"

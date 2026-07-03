@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Ensure paas-deploy-stages-p3.groovy ends with exactly one def runPaasDeploy() orchestrator.
 set -euo pipefail
 P3="${1:?usage: ensure-p3-orchestrator.sh <path-to-paas-deploy-stages-p3.groovy>}"
 [[ -f "${P3}" ]] || { echo "ERROR: missing ${P3}" >&2; exit 1; }
@@ -38,7 +37,6 @@ if count == 1:
     print(f"OK: {p.name} already has runPaasDeploy orchestrator")
     sys.exit(0)
 
-# Keep first orchestrator block only.
 def end_of_block(s: str, start: int) -> int:
     depth = 0
     for i in range(start, len(s)):

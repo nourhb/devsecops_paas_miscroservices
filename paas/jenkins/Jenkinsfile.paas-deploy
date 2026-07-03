@@ -19,7 +19,7 @@ def pauseFrontendForSonar() {
     export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
     KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
     command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM on 8GB lab) — run: bash paas/scripts/lab.sh jenkins-zap-tools"; exit 0; }
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM) exit 0; }
 
     pause_ns_deployments() {
       local ns="$1" statefile="$2"
@@ -47,12 +47,9 @@ def pauseFrontendForSonar() {
     PRIOR="$(printf "%s" "${PRIOR}" | grep -oE "^[0-9]+$")"
     [ -n "${PRIOR}" ] && [ "${PRIOR}" -gt 0 ] 2>/dev/null || PRIOR=1
     echo "${PRIOR}" > paas-artifacts/.frontend-prior-replicas 2>/dev/null || true
-    echo "[sonar-ram] pausing frontend (prior replicas=${PRIOR}) to free RAM for SonarQube scan (8GB lab)"
+    echo "[sonar-ram] pausing frontend (prior replicas=${PRIOR}) to free RAM for SonarQube scan"
     "${KCTL}" scale deployment/frontend -n "${NS}" --replicas=0 2>/dev/null || echo "[sonar-ram] frontend scale-down failed (non-fatal)"
 
-    # Harbor (push happens later in Step 6) and Dependency-Track (SBOM upload already
-    # attempted in Step 4) are not needed during the Sonar scan — pause them too to give
-    # the SonarQube server pod a real chance to survive on an 8GB lab node.
     pause_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
     pause_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
 
@@ -86,7 +83,7 @@ def restoreFrontendAfterSonar() {
     TARGET="$(printf "%s" "${TARGET}" | grep -oE "^[0-9]+$")"
     [ -n "${TARGET}" ] && [ "${TARGET}" -gt 0 ] 2>/dev/null || TARGET=1
     echo "[sonar-ram] restoring frontend replicas=${TARGET}"
-    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed — run: bash paas/scripts/lab.sh frontend-up"
+    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed
 
     # Restore Harbor first (Step 6 needs it next) then Dependency-Track.
     restore_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
@@ -146,8 +143,6 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
     sh '''#!/usr/bin/env bash
       set +e
       export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
-      echo "[paas-jenkinsfile] marker=dt-nodeport-first-lab-20260702 (NodePort before cluster DNS; 401/5xx warn when bom present)"
-      echo "[paas-jenkinsfile] marker=dt-listfile-posix-20260701 (temp file list — dash/sh safe, no process substitution)"
       IN_CLUSTER_DT="http://dtrack-dependency-track-api-server.dependency-track.svc.cluster.local:8080"
       DT_NODE_IP="${NODE_IP:-192.168.56.129}"
       DT_NODEPORT_URL="http://${DT_NODE_IP}:${DEPENDENCY_TRACK_NODEPORT:-32336}"
@@ -224,7 +219,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       dt_kubectl_portforward_upload() {
         KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
         command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-        command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sca] kubectl missing at ${KCTL} — run: bash paas/scripts/lab.sh jenkins-zap-tools"; return 1; }
+        command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sca] kubectl missing at ${KCTL} return 1; }
         DT_PF_PORT="${DT_PF_PORT:-18080}"
         for DT_SVC in dtrack-dependency-track-api-server dependency-track-api-server; do
           "${KCTL}" get svc -n dependency-track "${DT_SVC}" >/dev/null 2>&1 || continue
@@ -1458,7 +1453,6 @@ def paasHarborCranePushShellHelpers(String craneBin, String imageRef, String ima
           _payload_b64="\$(printf '%s' "\${_tok}" | cut -d. -f2 | tr '_-' '/+')"
           while [ \$(( \${#_payload_b64} % 4 )) -ne 0 ]; do _payload_b64="\${_payload_b64}="; done
           _decoded="\$(printf '%s' "\${_payload_b64}" | base64 -d 2>/dev/null || true)"
-          echo "[paas-jenkinsfile] marker=harbor-jwt-decode-actions-20260702 (decode JWT payload — raw resp never contains literal actions text)"
           if [ -n "\${_decoded}" ]; then
             if printf '%s' "\${_decoded}" | grep -q '"push"'; then
               echo "[image] Harbor token endpoint OK (\${_api} repo=\${_repo}) — decoded JWT actions include push"
@@ -1622,7 +1616,6 @@ def dockerlessPythonCranePush(String craneBin, String imageRef, String artifactI
     def path = imageRef.substring(slash)
     imageRefIp = "${harborIpRegistryHostFromNipio(host)}${path}"
   }
-  println "[image] Step 6 — python crane path (gunicorn>=22 / flask; port 8000; marker=python-gunicorn22-20260610)"
   sh """
     set -eu
     cd '${appRoot}'
@@ -1707,7 +1700,7 @@ PAAS_PY
       fi
     done
     if [ "\${_crane_ok}" != 1 ]; then
-      echo "[image] ERROR: python crane append failed — run: bash paas/scripts/lab.sh fix-harbor-push"
+      echo "[image] ERROR: python crane append failed
       exit 1
     fi
     if [ "${imageRefIp}" != "${imageRef}" ]; then
@@ -1740,14 +1733,11 @@ PAAS_PY
 }
 
 def dockerlessNginxCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot, String framework) {
-  println '[image] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no Groovy $uri in sh """)'
   def legacyAngular = isLegacyAngularProject(appRoot)
   def legacyCra = isLegacyCraProject(appRoot)
   if (legacyAngular) {
-    println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Node16 + ng build --progress=false; 4G heap; Step6 timeout bump)'
   }
   if (legacyCra) {
-    println '[paas-jenkinsfile] marker=cra-legacy-react-scripts-20260703 (react-scripts<5 → Node16 + clean install before nginx build)'
   }
   def nodeVer = resolveNodeVersion(appRoot)
   println "[image] Step 6 — nginx static crane path (angular/spa dist → port 80; Node ${nodeVer})"
@@ -1765,7 +1755,7 @@ ${paasOpensslLegacyShellSnippet()}
       if [ "\${PAAS_LEGACY_CRA:-false}" = "true" ]; then _needs_clean=1; fi
       if [ -f yarn.lock ]; then _needs_clean=1; fi
       if [ "\${_needs_clean}" = "1" ]; then
-        echo "[image] legacy CRA or yarn.lock — rm -rf node_modules before nginx build (committed/mixed trees break postcss on Node 20)"
+        echo "[image] legacy CRA or yarn.lock — rm -rf node_modules before nginx build"
         rm -rf node_modules
       fi
       if [ -f package.json ] && { command -v npm >/dev/null 2>&1 || command -v yarn >/dev/null 2>&1; }; then
@@ -1824,7 +1814,6 @@ ${paasOpensslLegacyShellSnippet()}
   """
   writeNginxPaasDefaultConf(appRoot)
   def imageRefIp = imageRefHarborIp(imageRef)
-  println '[paas-jenkinsfile] marker=nginx-crane-ip-first-20260701 (IP push + nip.io mutate — same Harbor path as Next.js)'
   sh """
     set -eu
     cd '${appRoot}'
@@ -1900,7 +1889,6 @@ ${paasHarborCranePushShellHelpers(craneBin, imageRef, imageRefIp, craneInsecure)
   """
 }
 
-// cps-split-dockerless-6abc-20260620
 def dockerlessImagePushCraneNode6a(String appRoot) {
   println "[image] Step 6a — npm deps (separate durable-task sh; survives Jenkins restart better than one 40+ min script)"
   sh """
@@ -2558,9 +2546,6 @@ def runPaasDeploy = {
   env.JENKINS_CRANE_STANDALONE_LAYER = (params.JENKINS_CRANE_STANDALONE_LAYER?.trim() ?: env.JENKINS_CRANE_STANDALONE_LAYER ?: "auto").trim()
   env.PROJECT_ID = projectId
   env.PROJECT_BUILD_ENV_B64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: "").trim()
-  // paasFastPipeline is permanently false (security steps always run) — hardcoded at each
-  // use site below instead of a closure-local var, because split CPS step-functions
-  // (runPaasDeployStep3/4_5/6/7_8/9_12) cannot reliably read a cross-function local `def`.
   def fastParam = "${params.JENKINS_PAAS_FAST_PIPELINE ?: ''}".trim()
   env.JENKINS_PAAS_FAST_PIPELINE = "false"
   println "[paas] JENKINS_PAAS_FAST_PIPELINE param=${fastParam} effective=false (security steps always run)"
@@ -2577,8 +2562,6 @@ def runPaasDeploy = {
     println "[paas] JENKINS_PAAS_FAST_PIPELINE=true — skipping Steps 4–5 (SCA/SAST), Step 8 (Artifactory bundle), Step 10 (ZAP). Next.js production build still runs before crane tar when using dockerless push (Dockerfile is not executed)."
   }
 
-  // Stored via env (not a closure-local def) — Step 6 runs in a different split
-  // CPS function (runPaasDeployStep6) and cannot reliably read a cross-function local.
   env.PAAS_CRANE_PUSH_TIMEOUT_MIN = "240"
   try {
     def rawTp = (params.JENKINS_CRANE_PUSH_TIMEOUT_MIN?.trim() ?: env.JENKINS_CRANE_PUSH_TIMEOUT_MIN ?: "").trim()
@@ -2590,42 +2573,6 @@ def runPaasDeploy = {
     env.PAAS_CRANE_PUSH_TIMEOUT_MIN = "240"
   }
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
-  println "[paas-jenkinsfile] marker=crane-next16-202605-j48300-split (node{} built-in; Step 6a/6b/6c; foreground cmd JENKINS-48300)"
-  println "[paas-jenkinsfile] marker=crane-mutate-cmd-20260531 (start-paas.sh in layer; no nested quotes in --cmd)"
-  println "[paas-jenkinsfile] marker=security-warn-sca-sonar-20260531 (PAAS_STEP_WARN on failed SCA/Sonar; cyclonedx --package-lock-only)"
-  println "[paas-jenkinsfile] marker=monorepo-app-root-20260531 (Step 3/6 mutate use detectAppRoot e.g. server/)"
-  println "[paas-jenkinsfile] marker=next-config-build-env-20260531 (patch next.config env + force fresh .next when PROJECT_BUILD_ENV_B64 set)"
-  println "[paas-jenkinsfile] marker=env-decode-node-20260601 (materialize .env via Node — avoids Jenkins decodeBase64 sandbox)"
-  println "[paas-jenkinsfile] marker=env-safe-dotenv-loader-20260601 (Node loads .env — fixes EMAIL_PASS spaces; no . ./.env)"
-  println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
-  println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
-  println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
-  println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
-  println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
-  println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
-  println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
-  println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
-  println '[paas-jenkinsfile] marker=cosign-nipio-ip-fallback-20260615 (HTTP Harbor: sign IP + crane copy .sig to nip.io)'
-  println '[paas-jenkinsfile] marker=cosign-no-tlog-upload-flag-20260615 (new cosign rejects --tlog-upload=false with signing-config)'
-  println '[paas-jenkinsfile] marker=cosign-ip-first-timeout-20260615 (skip nip.io HTTPS + no crane image copy; timeout 120s)'
-  println '[paas-jenkinsfile] marker=paas-build-complete-cluster-pull-20260615 (PAAS_BUILD_COMPLETE image=IP for kubelet pull)'
-  println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
-  println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
-  println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'
-  println '[paas-jenkinsfile] marker=sca-npm-install-full-20260611 (full npm install before cyclonedx when no lockfile — not package-lock-only)'
-  println '[paas-jenkinsfile] marker=sca-sanitize-package-name-20260612 (cyclonedx rejects invalid npm names e.g. & in Warda/vite templates)'
-  println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
-  println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
-  println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
-  println '[paas-jenkinsfile] marker=harbor-crane-dual-auth-20260630 (IP+nip.io login; IP fallback on 401 push)'
-  println '[paas-jenkinsfile] marker=harbor-ensure-push-token-20260630 (API ensure paas project + JWT push scope before crane append)'
-  println '[paas-jenkinsfile] marker=harbor-rbac-jwt-push-20260701 (fail Step6 when token actions lack push — run fix-harbor-push-now.sh)'
-  println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
-  println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
-  println '[paas-jenkinsfile] marker=sca-python-portable-yarn-install-20260630 (ensurePythonTool; yarn install before cyclonedx; minimal BOM for *.py)'
-  println '[paas-jenkinsfile] marker=sca-python-node-first-20260630 (Node requirements.txt BOM — no python3 required on agent)'
 
   stage("Step 1 — Params validation") {
     println "*** BEGIN : Check Parameters ***"
@@ -3010,13 +2957,13 @@ def runPaasDeploy = {
               CDX_RC=\$?
               if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
                 if [ -f package-lock.json ]; then
-                  echo "[sca] cyclonedx-npm (yarn tree) failed rc=\${CDX_RC} — retry --package-lock-only against package-lock.json (avoids npm ls ELSPROBLEMS on yarn-installed tree)"
+                  echo "[sca] cyclonedx-npm (yarn tree) failed rc=\${CDX_RC} — retry --package-lock-only against package-lock.json"
                   npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-file sca/bom.json
                   CDX_RC=\$?
                 fi
               fi
               if [ "\${CDX_RC}" != "0" ] || [ ! -f sca/bom.json ]; then
-                echo "[sca] WARN: cyclonedx-npm still failing (rc=\${CDX_RC}) — writing minimal BOM from package.json dependencies (broken/inconsistent lockfile tree; does not block deploy)"
+                echo "[sca] WARN: cyclonedx-npm still failing (rc=\${CDX_RC}) — minimal BOM from package.json"
                 node -e '
                   const fs=require("fs");
                   const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));
@@ -3242,10 +3189,6 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
-      println "[paas-jenkinsfile] marker=sonar-foreground-heartbeat-20260702 (foreground npx+tee; no fragile nohup pid poll)"
-      println "[paas-jenkinsfile] marker=sonar-cluster-dns-first-20260702 (in-cluster URL before flaky NodePort :30900)"
-      println "[paas-jenkinsfile] marker=sonar-scanner-cli6-login-20260607 (sonar.login required — scanner-cli 6.x + SonarQube 9.9 reject sonar.token-only auth)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -3256,7 +3199,6 @@ exit 0
       }
       if (!commandExists("docker")) {
         println "[sonar] Docker CLI missing; using npm-based Sonar scanner when configured."
-        println "[paas-jenkinsfile] marker=sonar-ram-pause-wide-20260702b (scale frontend+harbor+dependency-track to 0 during scan on 8GB lab; auto-restore in finally)"
         ensureNodeTool()
         prependPath("/opt/java/openjdk/bin")
         try {
@@ -3352,7 +3294,7 @@ exit 0
                   _sonar_ready=1
                   break
                 fi
-                echo "[sonar] auto-rotate failed — run: bash paas/scripts/lab.sh sonar-bootstrap && bash paas/scripts/lab.sh pipeline-heal"
+                echo "[sonar] auto-rotate failed && bash paas/scripts/lab.sh pipeline-heal"
                 break
               fi
               if [ "${_sv}" -lt 5 ]; then
@@ -3364,7 +3306,7 @@ exit 0
             done
             if [ "${_sonar_ready}" != "1" ]; then
               if [ -z "${_last_valid}" ]; then
-                echo "[sonar] cannot reach Sonar — run: bash paas/scripts/lab.sh sonarqube"
+                echo "[sonar] cannot reach Sonar
               else
                 echo "[sonar] token not valid from Jenkins agent — rotate SONAR_TOKEN via pipeline-heal"
               fi
@@ -3436,7 +3378,6 @@ exit 0
             printf '%s\n' "${SONAR_HOST_URL}" > paas-artifacts/sonar-host-url.txt
             umask 077
             printf '%s\n' "${SONAR_TOKEN}" > paas-artifacts/.sonar-token.txt
-            echo "[sonar] marker=sonar-token-persist-across-sh-20260702 (rotated token written to file — sh() steps do not share env)"
             exit 0
           ''', returnStatus: true)
           if (sonarPrepRc != 0) {
@@ -3497,14 +3438,14 @@ exit 0
               fi
               if grep -qE 'SocketTimeoutException|Read timed out|ConnectException|Connection refused|Error 500 on|values\\.protobuf' "${LOG}" 2>/dev/null \
                 && [ "${_sonar_try}" -lt 3 ]; then
-                echo "[sonar] WARN: transient Sonar API error — retry in 45s (avoid parallel builds on 8GB lab)"
+                echo "[sonar] WARN: transient Sonar API error — retry in 45s (avoid parallel builds)"
                 sleep 45
                 SONAR_HOST_URL="$(pick_sonar_url)"
                 echo "[sonar] retry using ${SONAR_HOST_URL}"
                 continue
               fi
               if grep -qiE 'Killed|OutOfMemory|exit code 137|ENOMEM|java\\.lang\\.OutOfMemoryError' "${LOG}" 2>/dev/null; then
-                echo "[sonar] HINT: likely OOM on 8GB lab — before next build: bash paas/scripts/lab.sh sonar-scan-window"
+                echo "[sonar] HINT: likely OOM — before next build: bash paas/scripts/lab.sh sonar-scan-window"
                 break
               fi
               break
@@ -3525,7 +3466,7 @@ exit 0
           if (sonarPassed) {
             paasStepOk(5, 'sonar', "analysis submitted for projectKey=${sonarKey}")
           } else {
-            paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; on 8GB lab run: bash paas/scripts/lab.sh sonar-scan-window")
+            paasStepFail(5, 'sonar', "scanner did not complete — see paas-artifacts/sonar-scanner.log; run: bash paas/scripts/lab.sh sonar-scan-window")
           }
         }
         } finally {

@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Keep Postgres always reachable — never leave replicas=0 after maintenance/SSH drop.
-# Never run: kubectl scale deployment postgres --replicas=0 by hand.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -55,8 +52,6 @@ postgres_pod_ready() {
 }
 
 postgres_ready() {
-  # Deployment readyReplicas=1 means the in-pod readinessProbe (pg_isready) already passed.
-  # After k3s-unstick, kubectl exec often times out even when Postgres is fine — trust Ready first.
   if postgres_pod_ready; then
     return 0
   fi
@@ -74,7 +69,7 @@ wait_postgres_ready() {
     log "  waiting postgres… (${i}/36)"
     sleep 10
   done
-  warn "postgres not ready — run: bash paas/scripts/lab.sh db-repair"
+  warn "postgres not ready
   return 1
 }
 
@@ -82,7 +77,6 @@ restore_postgres() {
   local target="${1:-}"
   lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
   if [[ -z "${target}" ]] && state_active; then
-    # shellcheck/base disable=SC1090
     source "${STATE_FILE}" 2>/dev/null || true
     target="${prior_replicas:-${DEFAULT_REPLICAS}}"
   fi
@@ -96,7 +90,7 @@ restore_postgres() {
 
   log "restore postgres — replicas=${target}"
   kubectl_try scale deployment/postgres -n "${PAAS_NS}" --replicas="${target}" \
-    || warn "scale postgres failed — run: bash paas/scripts/lab.sh db-repair"
+    || warn "scale postgres failed
 
   wait_postgres_ready || true
 

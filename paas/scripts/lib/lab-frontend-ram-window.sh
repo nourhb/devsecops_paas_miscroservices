@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Pause PaaS frontend for RAM-heavy work (Sonar Step 5) — ALWAYS restore UI on exit.
-# Never run: kubectl scale deployment frontend --replicas=0 by hand.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 
 PAAS_NS="${PAAS_NS:-paas}"
@@ -69,7 +66,6 @@ restore_frontend() {
   local target="${1:-}"
   lab_sync_kubeconfig 2>/dev/null || lab_ensure_kubeconfig || true
   if [[ -z "${target}" ]] && state_active; then
-    # shellcheck disable=SC1090
     source "${STATE_FILE}" 2>/dev/null || true
     target="${prior_replicas:-${DEFAULT_REPLICAS}}"
   fi
@@ -79,7 +75,7 @@ restore_frontend() {
   log "restore UI — replicas=${target}"
   kubectl_try rollout resume deployment/frontend -n "${PAAS_NS}" 2>/dev/null || true
   kubectl_try scale deployment/frontend -n "${PAAS_NS}" --replicas="${target}" \
-    || warn "scale to ${target} failed — run: bash paas/scripts/lab.sh frontend-up"
+    || warn "scale to ${target} failed
 
   clear_state
 
@@ -96,7 +92,7 @@ restore_frontend() {
     fi
     sleep 10
   done
-  warn "UI not HTTP 200 yet — run: bash paas/scripts/lab.sh frontend-heal"
+  warn "UI not HTTP 200 yet
   return 0
 }
 

@@ -1,5 +1,3 @@
-// STAGES_BUNDLE_VERSION=helm-portable-20260620-cps-split
-// CPS_LOAD_METHOD_SYNTAX=20260626
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def branchName = params.BRANCH?.trim() ?: "main"
 def gitUrl = params.GIT_URL?.trim() ?: ""
@@ -88,38 +86,6 @@ def runPaasDeployEnvInit() {
     cranePushTimeoutMin = 240
   }
 
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-6-7-8-9-10-11-12-202602 (re-sync job from PaaS if console still shows [step1] merged checkout)."
-  println "[paas-jenkinsfile] marker=steps-1-2-3-4-5-202602"
-  println "[paas-jenkinsfile] marker=crane-next16-202605-j48300-split (node{} built-in; Step 6a/6b/6c; foreground cmd JENKINS-48300)"
-  println "[paas-jenkinsfile] marker=crane-mutate-cmd-20260531 (start-paas.sh in layer; no nested quotes in --cmd)"
-  println "[paas-jenkinsfile] marker=security-warn-sca-sonar-20260531 (PAAS_STEP_WARN on failed SCA/Sonar; cyclonedx --package-lock-only)"
-  println "[paas-jenkinsfile] marker=monorepo-app-root-20260531 (Step 3/6 mutate use detectAppRoot e.g. server/)"
-  println "[paas-jenkinsfile] marker=next-config-build-env-20260531 (patch next.config env + force fresh .next when PROJECT_BUILD_ENV_B64 set)"
-  println "[paas-jenkinsfile] marker=env-decode-node-20260601 (materialize .env via Node — avoids Jenkins decodeBase64 sandbox)"
-  println "[paas-jenkinsfile] marker=env-safe-dotenv-loader-20260601 (Node loads .env — fixes EMAIL_PASS spaces; no . ./.env)"
-  println "[paas-jenkinsfile] marker=cosign-sandbox-sh-20260531 standalone-patch-20260531 node-after-ensure-20260531"
-  println "[paas-jenkinsfile] marker=cosign-digest-crane-bin-20260602 (CRANE_BIN + PAAS_IMAGE_DIGEST; Harbor triangulate → @sha256:)"
-  println '[paas-jenkinsfile] marker=cosign-groovy-dollar-escape-20260603'
-  println '[paas-jenkinsfile] marker=crane-imageref-gstring-20260603 (no single-quoted \\${imageRef} in """ blocks)'
-  println '[paas-jenkinsfile] marker=harbor-nodeport-push-20260605 (no NGINX_CLUSTER fallback; HARBOR_FORCE_NODEPORT_PUSH default true)'
-  println '[paas-jenkinsfile] marker=multi-framework-20260611 (embed-sync; Node16 legacy Angular defer Step6; python/nginx crane; python base 3.12-slim)'
-  println '[paas-jenkinsfile] marker=web-spa-static-20260529 (all Angular + vite/spa → nginx:80; defer build to Step 6)'
-  println '[paas-jenkinsfile] marker=cosign-lenient-20260610 (409 rekor + Harbor blip → WARN not FAIL)'
-  println '[paas-jenkinsfile] marker=cosign-nipio-ip-fallback-20260615 (HTTP Harbor: sign IP + crane copy .sig to nip.io)'
-  println '[paas-jenkinsfile] marker=cosign-no-tlog-upload-flag-20260615 (new cosign rejects --tlog-upload=false with signing-config)'
-  println '[paas-jenkinsfile] marker=cosign-ip-first-timeout-20260615 (skip nip.io HTTPS + no crane image copy; timeout 120s)'
-  println '[paas-jenkinsfile] marker=paas-build-complete-cluster-pull-20260615 (PAAS_BUILD_COMPLETE image=IP for kubelet pull)'
-  println '[paas-jenkinsfile] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no $uri in GString sh)'
-  println '[paas-jenkinsfile] marker=verify-nextpublic-nextjs-only-20260611 (skip .next check for Express/API)'
-  println '[paas-jenkinsfile] marker=sca-cyclonedx-node20-20260611 (cyclonedx-npm needs Node 18+; SCA uses portable Node 20)'
-  println '[paas-jenkinsfile] marker=sca-npm-install-full-20260611 (full npm install before cyclonedx when no lockfile — not package-lock-only)'
-  println '[paas-jenkinsfile] marker=sca-sanitize-package-name-20260612 (cyclonedx rejects invalid npm names e.g. & in Warda/vite templates)'
-  println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Angular 9–12: Node16, ng build --progress=false, Step6 timeout 360min)'
-  println '[paas-jenkinsfile] marker=nm-snap-skip-resave-step6-20260615 (Step6 skip snapshot re-save when Step3 cache hit; pipefail on tar)'
-  println '[paas-jenkinsfile] marker=harbor-nipio-push-coerce-20260615 (always push via harbor.IP.nip.io; probe /v2/ before crane)'
-  println '[paas-jenkinsfile] marker=harbor-nipio-artifact-ref-20260615 (PAAS_ARTIFACT_IMAGE + cosign use nip.io push ref)'
-  println '[paas-jenkinsfile] marker=dt-nodeport-first-20260619 (DT/Sonar NodePort before cluster DNS on built-in agent)'
-  println '[paas-jenkinsfile] marker=helm-portable-20260619 (ensureHelmTool cached; stub chart Step 7; OCI push Step 11; ZAP kubectl fallback)'
 }
 def runPaasDeploySteps1_2() {
   stage("Step 1 — Params validation") {
@@ -712,7 +678,6 @@ exit 0
       println "[paas] Fast pipeline: skip Step 5 (SonarQube)."
     } else {
       securityMandatoryStage("4. SAST — SonarQube") {
-      println "[paas-jenkinsfile] marker=sonar-nodeport-first-20260619 (NodePort before cluster DNS; invalid token hints pipeline-heal)"
       def sonarKey = dtProjectNameForUpload(projectId, imageName)
       def sonarUrlParam = params.SONAR_HOST_URL?.trim() ?: env.SONAR_HOST_URL ?: ""
       def sonarToken = params.SONAR_TOKEN?.trim() ?: env.SONAR_TOKEN ?: ""
@@ -785,7 +750,7 @@ exit 0
             done
             if [ "${_sonar_ready}" != "1" ]; then
               if [ -z "${_last_valid}" ]; then
-                echo "[sonar] cannot reach Sonar — run: bash paas/scripts/lab.sh pipeline-heal (or lab-sonarqube-recover.sh)"
+                echo "[sonar] cannot reach Sonar (or lab-sonarqube-recover.sh)"
               else
                 echo "[sonar] token not valid from Jenkins agent — rotate SONAR_TOKEN via pipeline-heal"
               fi

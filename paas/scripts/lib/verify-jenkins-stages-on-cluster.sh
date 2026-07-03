@@ -4,7 +4,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 REMOTE="${JENKINS_STAGES_REMOTE_PATH:-/var/jenkins_home/paas/paas-deploy-stages.groovy}"
 DT_MARKER="${DT_STAGES_MARKER:-helm-portable-20260620-cps-split}"
-# June 17 rollback and older bundles use different markers — accept any known good marker.
 KNOWN_MARKERS=(
   "${DT_MARKER}"
   "helm-portable-20260620-cps-split"

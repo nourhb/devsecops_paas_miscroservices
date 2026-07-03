@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# One command after k3s is started: git sync → quick-up → Sonar → Jenkins CPS.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 cd "${REPO_ROOT}"
 
-# Line-buffered logs (avoid "silent for an hour" when stdout is not a TTY)
 log() { echo "[$(date +%H:%M:%S)] ==> $*"; }
 die() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; exit 1; }
 
@@ -40,7 +38,6 @@ for f in \
 done
 git pull
 
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
 lab_ensure_kubeconfig || true
 if lab_worker_notready worker2 2>/dev/null; then

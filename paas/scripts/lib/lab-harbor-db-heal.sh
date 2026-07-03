@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Heal Harbor PostgreSQL (harbor-database) — required before project/RBAC API or push tokens work.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -142,7 +141,6 @@ scale_harbor_db_replicas() {
 patch_db_node_selector() {
   local node="$1"
   echo "==> pin harbor-database StatefulSet to node ${node} (+ control-plane tolerations)"
-  # local-path PV is node-bound; master often has NoSchedule taint → Pending without tolerations.
   kubectl patch statefulset harbor-database -n "${HARBOR_NS}" --type=strategic -p \
     "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${node}\"},\"tolerations\":[{\"key\":\"node-role.kubernetes.io/control-plane\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"},{\"key\":\"node-role.kubernetes.io/master\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}}}}" \
     2>/dev/null || warn "could not patch harbor-database scheduling"

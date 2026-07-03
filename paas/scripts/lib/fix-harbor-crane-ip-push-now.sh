@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Patch LIVE jenkins-0 crane push to IP-first — no git pull, no python in pod.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -22,7 +21,6 @@ echo "=============================================="
 [[ -f "${PATCH_PY}" ]] || { echo "FAIL: missing ${PATCH_PY}" >&2; exit 1; }
 kubectl get pod -n "${JENKINS_NS}" "${JPOD}" >/dev/null
 
-# Patch repo Jenkinsfile too so future renders stay fixed
 if [[ -f "${JENKINSFILE}" ]]; then
   python3 "${PATCH_PY}" "${JENKINSFILE}" || true
 fi

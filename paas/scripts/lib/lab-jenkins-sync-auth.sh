@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Sync Jenkins admin credentials into paas/frontend/.env (source for env-quick) + rollout frontend.
-# env-quick runs flatten-env-for-compose.mjs which READS .env and WRITES docker-compose.env —
-# editing docker-compose.env alone is overwritten on every env-quick.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

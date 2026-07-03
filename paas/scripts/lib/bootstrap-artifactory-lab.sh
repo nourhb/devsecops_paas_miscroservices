@@ -159,7 +159,6 @@ main() {
   patch_both "NEXT_PUBLIC_ARTIFACTORY_URL" "${ARTI_URL}"
   if [[ "${SYNC_JENKINS}" == "true" ]] && [[ -f "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" ]]; then
     set -a
-    # shellcheck disable=SC1091
     source "${ENV_FILE}" 2>/dev/null || true
     set +a
     python3 "${REPO_ROOT}/paas/scripts/lib/create_jenkins_paas_deploy_job.py" --params-only --force

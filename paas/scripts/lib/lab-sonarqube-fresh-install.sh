@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Nuclear lab fix: wipe broken Sonar release and install a small 9.9 LTS on master.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=lab-kube-env.sh
 source "${SCRIPT_DIR}/lab-kube-env.sh"
-# shellcheck source=lab-sonarqube-helm-lab.sh
 source "${SCRIPT_DIR}/lab-sonarqube-helm-lab.sh"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 SONAR_PORT="${SONAR_NODEPORT:-30900}"
@@ -100,7 +97,7 @@ wait_up() {
         echo "  restarts=${restarts} (>=3 triggers auto-repair once)"
       fi
     fi
-    echo "  waiting… (${i}/48 — 8GB lab: 10–20 min; do not Ctrl+C; skip k3s-unstick while waiting)"
+    echo "  waiting… (${i}/48)"
     sleep 15
   done
   echo "==> last logs"
