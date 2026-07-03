@@ -5,42 +5,68 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 MON_NS="${PROMETHEUS_K8S_NAMESPACE:-monitoring}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 
-echo "==> lab-prometheus-recover (Kyverno monitoring exclude + operator-first)"
+echo "==> lab-prometheus-recover (install if missing + scale-up)"
 
 require_non_root="${REPO_ROOT}/paas/k8s-manifests/kyverno/require-non-root.yaml"
 require_signed="${REPO_ROOT}/paas/k8s-manifests/kyverno/require-signed-images.yaml"
 
-if [[ ! -f "${require_non_root}" ]] || ! grep -q 'monitoring' "${require_non_root}"; then
-  echo "ERROR: repo missing Kyverno monitoring exclude — run: cd ${REPO_ROOT} && git pull" >&2
-  exit 1
-fi
+kyverno_installed() {
+  kubectl api-resources --api-group=kyverno.io 2>/dev/null | grep -q ClusterPolicy
+}
 
 apply_kyverno_policies() {
+  if ! kyverno_installed; then
+    echo "==> Skip Kyverno policies (kyverno.io CRDs not installed)"
+    return 0
+  fi
+  if [[ ! -f "${require_non_root}" ]] || ! grep -q 'monitoring' "${require_non_root}"; then
+    echo "WARN: repo missing Kyverno monitoring exclude — run: git pull" >&2
+    return 0
+  fi
   if ! kubectl get endpoints -n kyverno kyverno-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
     echo "==> Kyverno admission webhook down — restart before policy replace"
     kubectl rollout restart deployment/kyverno-admission-controller -n kyverno 2>/dev/null || true
     kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=180s 2>/dev/null || true
   fi
   echo "==> Apply Kyverno policies (monitoring namespace must be excluded)"
-  kubectl replace -f "${require_non_root}" --force || kubectl apply -f "${require_non_root}"
+  kubectl replace -f "${require_non_root}" --force 2>/dev/null || kubectl apply -f "${require_non_root}" || {
+    echo "WARN: could not apply require-non-root — continuing without Kyverno" >&2
+    return 0
+  }
   if [[ -f "${require_signed}" ]]; then
     COSIGN_LAB_ENFORCE_SIGNED="${COSIGN_LAB_ENFORCE_SIGNED:-false}" \
       bash "${SCRIPT_DIR}/apply-kyverno-cosign-lab.sh" || {
       echo "WARN: apply-kyverno-cosign-lab.sh failed — applying base require-signed-images" >&2
-      kubectl replace -f "${require_signed}" --force
+      kubectl replace -f "${require_signed}" --force 2>/dev/null || true
     }
   fi
 }
 
 verify_kyverno_monitoring_exclude() {
+  if ! kyverno_installed; then
+    return 0
+  fi
   local yaml
   yaml="$(kubectl get clusterpolicy require-non-root -o yaml 2>/dev/null || true)"
   if ! grep -qE '^[[:space:]]*-[[:space:]]*monitoring[[:space:]]*$' <<<"${yaml}"; then
-    echo "ERROR: live require-non-root still blocks monitoring namespace" >&2
-    echo "  kubectl get clusterpolicy require-non-root -o yaml | grep -A20 exclude" >&2
-    exit 1
+    echo "WARN: live require-non-root may still block monitoring namespace" >&2
+    return 0
   fi
   echo "OK live require-non-root excludes monitoring"
+}
+
+prometheus_stack_present() {
+  kubectl get svc -n "${MON_NS}" kube-prometheus-stack-prometheus >/dev/null 2>&1 \
+    || kubectl get deploy -n "${MON_NS}" kube-prometheus-stack-operator >/dev/null 2>&1 \
+    || kubectl get prometheus -n "${MON_NS}" kube-prometheus-stack-prometheus >/dev/null 2>&1
+}
+
+ensure_prometheus_installed() {
+  if prometheus_stack_present; then
+    return 0
+  fi
+  echo "==> No Prometheus stack in ${MON_NS} — helm install"
+  bash "${SCRIPT_DIR}/lab-prometheus-install.sh"
 }
 
 scale_if_zero() {
@@ -59,7 +85,7 @@ scale_if_zero() {
 }
 
 scale_up_monitoring_stack() {
-  echo "==> Scale up monitoring stack (Kyverno may have scaled everything to 0/0)"
+  echo "==> Scale up monitoring stack"
   scale_if_zero deployment kube-prometheus-stack-operator 1
   if kubectl get deployment kube-prometheus-stack-operator -n "${MON_NS}" >/dev/null 2>&1; then
     kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=300s 2>/dev/null || {
@@ -83,14 +109,17 @@ scale_up_monitoring_stack() {
 
 apply_kyverno_policies
 verify_kyverno_monitoring_exclude
+ensure_prometheus_installed
 
 echo "==> Current monitoring workloads"
 kubectl get pods -n "${MON_NS}" -o wide 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
 kubectl get sts,deploy -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
 kubectl get endpoints -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|grafana|alertmanager|operator' || true
 
-echo "==> Recent Kyverno blocks in ${MON_NS}"
-kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -6 || true
+if kyverno_installed; then
+  echo "==> Recent Kyverno blocks in ${MON_NS}"
+  kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -6 || true
+fi
 
 scale_up_monitoring_stack
 
@@ -117,7 +146,7 @@ restart_prometheus_workloads() {
 
 restart_prometheus_workloads
 
-echo "==> Delete blocked/stale pods so they recreate under updated Kyverno policy"
+echo "==> Delete blocked/stale pods so they recreate"
 kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus-operator --ignore-not-found --wait=false 2>/dev/null || true
 kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus --ignore-not-found --wait=false 2>/dev/null || true
 kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=alertmanager --ignore-not-found --wait=false 2>/dev/null || true

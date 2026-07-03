@@ -40,7 +40,7 @@ const host=process.env.KUBERNETES_SERVICE_HOST;
 const port=process.env.KUBERNETES_SERVICE_PORT||443;
 const ns='${MON_NS}';
 const svc='kube-prometheus-stack-prometheus';
-const path='/api/v1/namespaces/'+ns+'/services/http:'+svc+':9090/proxy/-/ready';
+const path='/api/v1/namespaces/'+ns+'/services/'+svc+':9090/proxy/-/ready';
 if(!host){console.error('KUBERNETES_SERVICE_HOST missing');process.exit(2);}
 const token=fs.readFileSync('/var/run/secrets/kubernetes.io/serviceaccount/token','utf8').trim();
 const https=require('https');
