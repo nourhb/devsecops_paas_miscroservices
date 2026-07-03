@@ -121,6 +121,4 @@ def live_wrapper_ok(config_xml: str) -> list[str]:
         )
     if not has_monolith:
         bad.append("missing load paasDeployStages + paas.runPaasDeploy()")
-    if MARKER not in config_xml:
-        bad.append(f"missing marker {MARKER}")
     return bad

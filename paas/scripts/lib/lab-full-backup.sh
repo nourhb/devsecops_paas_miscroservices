@@ -109,7 +109,7 @@ echo ""
 log "=== 5. RAW persistent-volume data (Harbor images+DB, SonarQube DB, Dependency-Track DB, Postgres, Jenkins home volume) ==="
 if [[ -d "${LOCAL_PATH_DIR}" ]]; then
   SIZE_MB="$(du -sm "${LOCAL_PATH_DIR}" 2>/dev/null | awk '{print $1}')"
-  log "local-path storage size ~${SIZE_MB:-?}MB at ${LOCAL_PATH_DIR} — this can take a few minutes"
+  log "local-path storage ~${SIZE_MB:-?}MB at ${LOCAL_PATH_DIR} — tar in progress (5–30 min, do not interrupt)"
   SUDO=""
   command -v sudo >/dev/null 2>&1 && SUDO="sudo"
   if ${SUDO} tar czf "${DEST}/local-path-storage-pv-data.tgz" \

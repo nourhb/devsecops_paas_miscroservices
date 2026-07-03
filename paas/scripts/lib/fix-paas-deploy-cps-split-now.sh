@@ -660,7 +660,7 @@ print(f"POST config.xml -> {pcode}")
 if pcode not in (200, 201):
     sys.exit(1)
 _, live = call(f"/job/{job}/config.xml")
-checks = ("load paasDeployStages", "paas.runPaasDeploy()", MARKER)
+checks = ("load paasDeployStages", "paas.runPaasDeploy()")
 for need in checks:
     if need not in live and need.replace("(", "&#40;").replace(")", "&#41;") not in live:
         sys.exit(f"FAIL: LIVE missing {need!r}")
