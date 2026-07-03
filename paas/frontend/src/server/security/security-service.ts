@@ -7,7 +7,7 @@ import { normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
 import { getKyvernoPolicyStatus } from "@/server/integrations/kubernetes-client";
 import { cosignClient, dependencyTrackClient, jenkinsClient, opaClient, resolveLatestDeployArtifactImage, sonarQubeClient, trivyClient } from "@/server/integrations/devsecops-clients";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
-import { parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
+import { parsePipelineVerificationLogs, type PipelineStepCheck } from "@/server/jenkins/pipeline-step-verification";
 import { getProjectById } from "@/server/projects/project-service";
 
 function score(base: number, penalty: number): number {
@@ -19,14 +19,48 @@ function securityStepBlocksDeploy(level: string | undefined): boolean {
     return level === "FAIL" || level === "WARN" || level === "SKIP";
 }
 
+function dependencyTrackLinkRequiredForDeploy(
+    scaCheck: PipelineStepCheck | undefined,
+    dtCheck: PipelineStepCheck | undefined
+): boolean {
+    if (env.PAAS_DT_UPLOAD_OPTIONAL === "true") {
+        return false;
+    }
+    if (scaCheck?.level === "OK") {
+        return false;
+    }
+    if (dtCheck?.level === "OK") {
+        return false;
+    }
+    return true;
+}
+
+function scaStepBlocksDeploy(
+    scaCheck: PipelineStepCheck | undefined,
+    dtCheck: PipelineStepCheck | undefined
+): boolean {
+    if (scaCheck?.level === "FAIL" || scaCheck?.level === "SKIP") {
+        return true;
+    }
+    if (dtCheck?.level === "FAIL") {
+        return true;
+    }
+    if (env.PAAS_DT_UPLOAD_OPTIONAL !== "true" && dtCheck?.level === "WARN") {
+        return true;
+    }
+    if (scaCheck?.level === "WARN") {
+        return true;
+    }
+    return false;
+}
+
 function computeDeploymentAllowed(input: {
     cosignSigned: boolean;
     policyValidated: boolean;
     sonarStatus: string;
     dtProjectUuid: string | null;
-    scaFromLogs?: {
-        level: string;
-    } | null;
+    scaCheck?: PipelineStepCheck | null;
+    dtCheck?: PipelineStepCheck | null;
     sonarFromLogs?: {
         level: string;
     } | null;
@@ -37,13 +71,13 @@ function computeDeploymentAllowed(input: {
     if (env.PAAS_ENFORCE_SECURITY_GATE !== "true") {
         return true;
     }
-    if (securityStepBlocksDeploy(input.scaFromLogs?.level)) {
+    if (scaStepBlocksDeploy(input.scaCheck ?? undefined, input.dtCheck ?? undefined)) {
         return false;
     }
     if (securityStepBlocksDeploy(input.sonarFromLogs?.level)) {
         return false;
     }
-    if (!input.dtProjectUuid) {
+    if (dependencyTrackLinkRequiredForDeploy(input.scaCheck ?? undefined, input.dtCheck ?? undefined) && !input.dtProjectUuid) {
         return false;
     }
     if (input.sonarStatus !== "PASSED") {
@@ -582,8 +616,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
     ]);
     const parsedLogs = parsePipelineVerificationLogs(deploymentLogBundle.logs);
     const securitySteps = parsedLogs.jenkinsChecks.filter((c) => [4, 5, 9, 10].includes(c.step));
+    const step4Checks = securitySteps.filter((c) => c.step === 4);
+    const scaCheck = step4Checks.find((c) => c.id === "sca") ?? step4Checks[0];
+    const dtCheck = step4Checks.find((c) => c.id === "dependency-track");
     const sonarFromLogs = securitySteps.find((c) => c.step === 5);
-    const scaFromLogs = securitySteps.find((c) => c.step === 4);
+    const scaFromLogs = scaCheck;
     const cosignFromLogs = securitySteps.find((c) => c.step === 9);
 
     const partialErrors: string[] = [];
@@ -642,7 +679,8 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
         policyValidated,
         sonarStatus: qualityGateStatus,
         dtProjectUuid: dependencyTrackProject.projectUuid,
-        scaFromLogs: scaFromLogs ?? null,
+        scaCheck,
+        dtCheck,
         sonarFromLogs: sonarFromLogs ?? null
     });
     const enforcementSummary = !deploymentAllowed
@@ -653,9 +691,11 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
                     ? `${policyEngine} policy rejected this workload.`
                     : qualityGateStatus !== "PASSED"
                         ? "Deployment blocked: SonarQube quality gate must be PASSED (Step 5 required)."
-                        : !dependencyTrackProject.projectUuid
-                            ? "Deployment blocked: Dependency-Track project not linked (Step 4 SBOM upload required)."
-                            : "Deployment blocked: security step WARN/SKIP/FAIL in Jenkins logs."
+                        : scaStepBlocksDeploy(scaCheck, dtCheck)
+                            ? "Deployment blocked: security step WARN/SKIP/FAIL in Jenkins logs."
+                            : dependencyTrackLinkRequiredForDeploy(scaCheck, dtCheck) && !dependencyTrackProject.projectUuid
+                                ? "Deployment blocked: Dependency-Track project not linked (Step 4 SBOM upload required)."
+                                : "Deployment blocked: security gate did not pass."
             : !cosignSigned
                 ? "Deployment blocked: image is not signed with Cosign."
                 : !policyValidated
@@ -678,7 +718,13 @@ async function buildSecurityMetrics(project: Project): Promise<SecurityMetrics> 
     const integrationNotes = await buildIntegrationNotes(project, qualityGateStatus, dependencyTrackProject.projectUuid, scaFromLogs ?? null, sonarFromLogs ?? null);
     const logNotes: string[] = [];
     if (scaFromLogs?.level === "FAIL" || scaFromLogs?.level === "WARN") {
-        logNotes.push(`Jenkins Step 4: ${scaFromLogs.level} — ${scaFromLogs.message}`);
+        logNotes.push(`Jenkins Step 4 (SCA): ${scaFromLogs.level} — ${scaFromLogs.message}`);
+    }
+    if (dtCheck?.level === "WARN" && env.PAAS_DT_UPLOAD_OPTIONAL === "true") {
+        logNotes.push(`Jenkins Step 4 (Dependency-Track): WARN — ${dtCheck.message} (lab: deploy allowed when sca/bom.json OK).`);
+    }
+    else if (dtCheck?.level === "FAIL" || dtCheck?.level === "WARN") {
+        logNotes.push(`Jenkins Step 4 (Dependency-Track): ${dtCheck.level} — ${dtCheck.message}`);
     }
     if (sonarFromLogs?.level === "FAIL" || sonarFromLogs?.level === "WARN") {
         logNotes.push(`Jenkins Step 5: ${sonarFromLogs.level} — ${sonarFromLogs.message}`);

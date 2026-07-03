@@ -214,6 +214,8 @@ const envSchema = z.object({
     PAAS_STRICT_INTEGRATIONS: z.preprocess(preprocessStrictIntegrations, z.enum(["true", "false"]).default("false")),
 
     PAAS_ENFORCE_SECURITY_GATE: z.enum(["true", "false"]).default("true"),
+    /** Lab: Step 4 SBOM may stay local when Dependency-Track upload fails — do not block deploy on missing DT project link. */
+    PAAS_DT_UPLOAD_OPTIONAL: z.enum(["true", "false"]).default("true"),
     KEYCLOAK_ENABLED: z.enum(["true", "false"]).default("false"),
     KEYCLOAK_ISSUER: z.string().default(""),
     KEYCLOAK_CLIENT_ID: z.string().default(""),
@@ -474,6 +476,7 @@ const parsed = envSchema.safeParse({
     NOTIFY_PIPELINE_FAILURE_EMAILS: process.env.NOTIFY_PIPELINE_FAILURE_EMAILS,
     PAAS_STRICT_INTEGRATIONS: process.env.PAAS_STRICT_INTEGRATIONS,
     PAAS_ENFORCE_SECURITY_GATE: process.env.PAAS_ENFORCE_SECURITY_GATE,
+    PAAS_DT_UPLOAD_OPTIONAL: process.env.PAAS_DT_UPLOAD_OPTIONAL,
     KEYCLOAK_ENABLED: process.env.KEYCLOAK_ENABLED,
     KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
     KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,

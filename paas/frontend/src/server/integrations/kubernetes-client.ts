@@ -957,6 +957,86 @@ export async function listClusterDeployments(): Promise<{
         };
     }
 }
+export async function readFirstDeploymentImage(
+    namespace: string,
+    deploymentNames: string[]
+): Promise<{ deploymentName: string; image: string } | null> {
+    const api = getAppsV1Api();
+    if (!api) {
+        return null;
+    }
+    const names = [...new Set(deploymentNames.map((n) => n.trim()).filter(Boolean))];
+    for (const name of names) {
+        try {
+            const { body: deployment } = await api.readNamespacedDeployment(name, namespace);
+            const image = deployment.spec?.template?.spec?.containers?.[0]?.image?.trim();
+            if (image) {
+                return { deploymentName: name, image };
+            }
+        }
+        catch (e) {
+            const msg = kubernetesErrorMessage(e);
+            if (!/404|not found/i.test(msg)) {
+            }
+        }
+    }
+    return null;
+}
+
+export async function readReadyPodImageForDeployment(namespace: string, deploymentName: string): Promise<string | null> {
+    const apps = getAppsV1Api();
+    const core = getCoreV1Api();
+    if (!apps || !core) {
+        return null;
+    }
+    try {
+        const { body: deployment } = await apps.readNamespacedDeployment(deploymentName, namespace);
+        const matchLabels = deployment.spec?.selector?.matchLabels;
+        if (!matchLabels || Object.keys(matchLabels).length === 0) {
+            return null;
+        }
+        const labelSelector = Object.entries(matchLabels)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(",");
+        const { body: podList } = await core.listNamespacedPod(
+            namespace,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            labelSelector
+        );
+        for (const pod of podList.items ?? []) {
+            const ready = pod.status?.conditions?.some((c) => c.type === "Ready" && c.status === "True");
+            if (pod.status?.phase !== "Running" || !ready) {
+                continue;
+            }
+            const image = pod.spec?.containers?.[0]?.image?.trim();
+            if (image) {
+                return image;
+            }
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+
+export async function readFirstReadyPodImage(
+    namespace: string,
+    deploymentNames: string[]
+): Promise<{ deploymentName: string; image: string } | null> {
+    const names = [...new Set(deploymentNames.map((n) => n.trim()).filter(Boolean))];
+    for (const name of names) {
+        const image = await readReadyPodImageForDeployment(namespace, name);
+        if (image) {
+            return { deploymentName: name, image };
+        }
+    }
+    return null;
+}
+
 export async function waitForDeploymentReady(
     namespace: string,
     deploymentName: string,

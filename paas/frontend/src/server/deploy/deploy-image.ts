@@ -98,6 +98,35 @@ export function harborImageRepoPath(imageRef: string): string {
     return slash >= 0 ? repo.slice(slash + 1) : repo;
 }
 
+export function deployImageTagOrDigestFromRef(imageRef: string): string | null {
+    const ref = harborClusterPullImageRef(imageRef.trim()).toLowerCase();
+    const digestAt = ref.indexOf("@sha256:");
+    if (digestAt > 0) {
+        return ref.slice(digestAt);
+    }
+    const slash = ref.indexOf("/");
+    const lastColon = ref.lastIndexOf(":");
+    if (slash > 0 && lastColon > slash && lastColon < ref.length - 1) {
+        return ref.slice(lastColon + 1);
+    }
+    return null;
+}
+
+/** True when refs point at the same Harbor repo path and tag or digest (nip.io vs IP host OK). */
+export function deployImageRefsEquivalent(a: string, b: string): boolean {
+    const left = harborClusterPullImageRef(a.trim()).toLowerCase();
+    const right = harborClusterPullImageRef(b.trim()).toLowerCase();
+    if (left === right) {
+        return true;
+    }
+    if (harborImageRepoPath(left) !== harborImageRepoPath(right)) {
+        return false;
+    }
+    const leftMarker = deployImageTagOrDigestFromRef(left);
+    const rightMarker = deployImageTagOrDigestFromRef(right);
+    return leftMarker !== null && leftMarker === rightMarker;
+}
+
 export function deployImageRepositoryMatchesProject(imageRef: string, projectName: string): boolean {
     const expected = buildDeployImageRepository(projectName);
     const actual = imageRef;

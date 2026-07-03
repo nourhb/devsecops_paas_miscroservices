@@ -889,6 +889,15 @@ def resolveCraneRuntimeStack(String appRoot, String dockerfilePath) {
   def df = (dockerfilePath ?: 'Dockerfile').trim()
   if (fileExists(df)) {
     def text = readFile(df)
+    if (dockerfileHasProductionBuild(df)) {
+      if (text =~ /(?i)FROM\s+[^\n]*python/ || text =~ /(?i)(gunicorn|uvicorn|pip install)/) {
+        return 'python'
+      }
+      if (text =~ /(?i)FROM\s+[^\n]*nginx/ || fw in ['angular', 'vite-react', 'spa']) {
+        return 'nginx'
+      }
+      return 'node'
+    }
     if (text =~ /(?i)FROM\s+[^\n]*python/ || text =~ /(?i)(gunicorn|uvicorn|pip install)/) {
       return 'python'
     }

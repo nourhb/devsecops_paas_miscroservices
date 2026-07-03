@@ -36,7 +36,9 @@ export function blueGreenDeploymentNameCandidates(projectName: string, slot: Blu
 
 export function rollingDeploymentNameCandidates(projectName: string): string[] {
     const release = helmReleaseName(projectName);
-    return helmChartNameCandidates(projectName).map((chart) => `${release}-${chart}`);
+    const suffixed = helmChartNameCandidates(projectName).map((chart) => `${release}-${chart}`);
+    // Helm release name is the Deployment name (e.g. paas-sanhome), not paas-sanhome-sanhome.
+    return [...new Set([release, ...suffixed])];
 }
 
 function slotImageBlock(doc: Record<string, unknown>, slot: BlueGreenSlot): Record<string, unknown> {

@@ -8,7 +8,11 @@ import { buildMetadataLines, formatArtifactReference } from "@/server/build/buil
 import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
 import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
 import { probeAppUrlLiveQuick, probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
-import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
+import {
+    buildDeployImageRepository,
+    deployImageRefsEquivalent,
+    harborClusterPullImageRef
+} from "@/server/deploy/deploy-image";
 import {
     blueGreenDeploymentNameCandidates,
     resolveDeploymentStrategy,
@@ -17,6 +21,7 @@ import {
 import { commitHelmValuesGitHub } from "@/server/gitops/gitops-github-service";
 import {
     deleteStaleBlueGreenDeployments,
+    readFirstReadyPodImage,
     remediateRollingDeployments,
     waitForAnyDeploymentReady
 } from "@/server/integrations/kubernetes-client";
@@ -59,8 +64,31 @@ interface FastCompleteParams {
     sections: string[];
 }
 
+async function clusterRunsPromotedImage(
+    params: Pick<FastCompleteParams, "destNamespace" | "projectName" | "artifactRef" | "sections">,
+    label: string
+): Promise<boolean> {
+    const expected = harborClusterPullImageRef(params.artifactRef);
+    const candidates = rollingDeploymentNameCandidates(params.projectName);
+    const running = await readFirstReadyPodImage(params.destNamespace, candidates);
+    if (!running) {
+        params.sections.push(`[deploy] ${label}: no Ready pod in ${params.destNamespace} (promoted ${expected})`);
+        return false;
+    }
+    if (!deployImageRefsEquivalent(running.image, expected)) {
+        params.sections.push(
+            `[deploy] ${label}: pod ${running.deploymentName} image=${running.image} != promoted ${expected}`
+        );
+        return false;
+    }
+    return true;
+}
+
 async function tryFastCompleteDeployment(params: FastCompleteParams): Promise<boolean> {
     if (env.PAAS_STRICT_INTEGRATIONS === "true") {
+        return false;
+    }
+    if (!(await clusterRunsPromotedImage(params, "Fast complete skipped"))) {
         return false;
     }
     const appUrl = buildAppPublicUrl(params.projectName);
@@ -273,6 +301,7 @@ async function runRollingGitOpsPromote(
     sections.push(`[gitops] rolling committed ${git.ref}`);
     sections.push(`PAAS_DEPLOY_VERIFY step=gitops_rolling status=OK detail=${git.ref}`);
     sections.push(`[build-meta] paas_strict_integrations=${env.PAAS_STRICT_INTEGRATIONS}`);
+    await reconcileClusterWorkload(sections, destNamespace, projectName, artifactRef, containerPort);
     if (fastComplete && await tryFastCompleteDeployment(fastComplete)) {
         return { argoSyncOk: true, shouldAbort: false, workloadReady: true, fastCompleted: true };
     }
@@ -562,8 +591,16 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (env.PAAS_STRICT_INTEGRATIONS !== "true") {
-            sections.push(`[gitops] WARN: ${msg} — continuing deploy verification (PAAS_STRICT_INTEGRATIONS=false).`);
+            sections.push(`[gitops] WARN: ${msg} — continuing with direct cluster reconcile (PAAS_STRICT_INTEGRATIONS=false).`);
             sections.push(`PAAS_DEPLOY_VERIFY step=gitops status=WARN detail=${msg.slice(0, 400)}`);
+            await reconcileClusterWorkload(sections, destNamespace, projectName, artifactRef, deployProfile.containerPort);
+            const ready = await waitForRollingWorkload(
+                sections,
+                destNamespace,
+                projectName,
+                Math.max(60000, env.PAAS_BLUE_GREEN_WAIT_DEPLOY_MS)
+            );
+            workloadReady = ready.ready;
         }
         else {
             sections.push(`[gitops] FAILED: ${msg}`);
@@ -620,6 +657,18 @@ async function runPromoteDeploymentAfterBuildSuccess(deploymentId: string, proje
         }
         sections.push(`PAAS_DEPLOY_VERIFY step=url status=WARN detail=${appUrl} unreachable but workload ready — marking DEPLOYED`);
     }
+    const imageOk = await clusterRunsPromotedImage(
+        { destNamespace, projectName, artifactRef, sections },
+        "Deploy verify failed"
+    );
+    if (!imageOk) {
+        const msg = `Cluster is not running the promoted image ${harborClusterPullImageRef(artifactRef)}. GitOps or cluster reconcile did not roll out the new build.`;
+        sections.push(`[deploy] FAILED: ${msg}`);
+        sections.push(`PAAS_DEPLOY_VERIFY step=image status=FAIL detail=${msg.slice(0, 400)}`);
+        await persistFailure(deploymentId, projectId, sections.join("\n"), DeploymentFailureReason.ARGOCD, msg);
+        return;
+    }
+    sections.push(`PAAS_DEPLOY_VERIFY step=image status=OK detail=${harborClusterPullImageRef(artifactRef)}`);
     const okLog = tail(sections.join("\n"));
     await prismaDeploymentUpdate(deploymentId, {
         status: DeploymentJobStatus.DEPLOYED,
