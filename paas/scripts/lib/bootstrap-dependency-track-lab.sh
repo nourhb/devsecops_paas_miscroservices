@@ -12,6 +12,12 @@ DT_ADMIN_PASSWORD="${DT_ADMIN_PASSWORD:-admin}"
 DT_ADMIN_NEW_PASSWORD="${DT_ADMIN_NEW_PASSWORD:-DependencyTrack123!}"
 TEAM_NAME="${DT_API_TEAM:-Automation}"
 SYNC_JENKINS="${SYNC_JENKINS:-true}"
+API_POD=""
+API_BASE=""
+
+ok() { echo "OK: $*"; }
+warn() { echo "WARN: $*" >&2; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
 
 read_env_val() {
   local key="$1" file line
@@ -32,12 +38,6 @@ load_dt_admin_creds() {
   from_env="$(read_env_val DT_ADMIN_NEW_PASSWORD || true)"
   [[ -n "${from_env}" ]] && DT_ADMIN_NEW_PASSWORD="${from_env}"
 }
-
-load_dt_admin_creds
-
-ok() { echo "OK: $*"; }
-warn() { echo "WARN: $*" >&2; }
-fail() { echo "FAIL: $*" >&2; exit 1; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 required"
@@ -88,32 +88,64 @@ fix_frontend_api_base_url() {
   ok "UI port ${fe_port:-?} (optional) — CLI uses API ${api_base} directly"
 }
 
-dt_curl() {
+api_pod_name() {
+  kubectl get pods -n "${DT_NS}" -l app.kubernetes.io/component=api-server \
+    -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' 2>/dev/null | awk '{print $1}'
+}
+
+setup_api_pod() {
+  local pod
+  pod="$(api_pod_name)"
+  if [[ -z "${pod}" ]]; then
+    warn "no Running DT API pod in ${DT_NS}"
+    return 0
+  fi
+  if kubectl exec -n "${DT_NS}" "${pod}" --request-timeout=20s -- \
+    curl -fsS -m 5 "http://127.0.0.1:8080/api/version" >/dev/null 2>&1; then
+    API_POD="${pod}"
+    ok "using in-pod API (${pod}:8080)"
+  fi
+}
+
+dt_http() {
   local method="$1" path="$2"
   shift 2
+  if [[ -n "${API_POD}" ]]; then
+    kubectl exec -n "${DT_NS}" "${API_POD}" --request-timeout=45s -- \
+      curl -sS -m 30 -X "${method}" "http://127.0.0.1:8080${path}" "$@"
+    return $?
+  fi
   curl -sS -m 30 -X "${method}" "${API_BASE}${path}" "$@"
 }
 
 wait_api() {
   local n=0 pod
-  until curl -fsS -m 5 "${API_BASE}/api/version" >/dev/null 2>&1; do
+  until curl -fsS -m 5 "${API_BASE}/api/version" >/dev/null 2>&1 \
+    || { [[ -n "${API_POD}" ]] && dt_http GET "/api/version" >/dev/null 2>&1; }; do
     n=$((n + 1))
-    if [[ "${n}" -eq 6 ]]; then
-      pod="$(kubectl get pods -n "${DT_NS}" -l app.kubernetes.io/component=api-server \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [[ "${n}" -eq 3 ]]; then
+      setup_api_pod
+      if [[ -n "${API_POD}" ]] && dt_http GET "/api/version" >/dev/null 2>&1; then
+        ok "API ready via pod ${API_POD}"
+        return 0
+      fi
+    fi
+    if [[ "${n}" -eq 8 ]]; then
+      pod="$(api_pod_name)"
       if [[ -n "${pod}" ]]; then
-        echo "==> NodePort unreachable — port-forward pod/${pod} for bootstrap"
+        echo "==> NodePort unreachable — port-forward pod/${pod}"
         kubectl port-forward -n "${DT_NS}" "pod/${pod}" "127.0.0.1:32399:8080" >/tmp/dt-bootstrap-pf.log 2>&1 &
         DT_PF_PID=$!
         sleep 4
         API_BASE="http://127.0.0.1:32399"
+        API_POD=""
         if curl -fsS -m 5 "${API_BASE}/api/version" >/dev/null 2>&1; then
           ok "API ready via port-forward ${API_BASE}/api/version"
           return 0
         fi
       fi
     fi
-    [[ "${n}" -le 30 ]] || fail "API not ready at ${API_BASE}/api/version (pod Running? kubectl get pods -n ${DT_NS})"
+    [[ "${n}" -le 30 ]] || fail "API not ready at ${API_BASE}/api/version (kubectl get pods -n ${DT_NS})"
     sleep 5
   done
   ok "API ready ${API_BASE}/api/version"
@@ -127,8 +159,9 @@ trap cleanup_dt_pf EXIT
 
 dt_login_raw() {
   local user="$1" pass="$2"
-  curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X POST "${API_BASE}/api/v1/user/login" \
+  dt_http POST "/api/v1/user/login" \
     -H "Content-Type: application/x-www-form-urlencoded" \
+    -w $'\n__HTTP__%{http_code}' \
     --data-urlencode "username=${user}" \
     --data-urlencode "password=${pass}"
 }
@@ -139,9 +172,25 @@ parse_login() {
   LOGIN_BODY="${raw%$'\n__HTTP__'*}"
 }
 
+normalize_bearer_token() {
+  printf '%s' "${1}" | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(1)
+if raw.startswith("{"):
+    obj = json.loads(raw)
+    for k in ("token", "accessToken", "jwt"):
+        if obj.get(k):
+            print(obj[k])
+            raise SystemExit(0)
+print(raw)
+'
+}
+
 acquire_token() {
-  local raw pass tried=""
-  for pass in "${DT_ADMIN_PASSWORD}" "${DT_ADMIN_NEW_PASSWORD}" "DependencyTrack123!" "admin"; do
+  local raw pass tried="" token
+  for pass in "DependencyTrack123!" "admin" "${DT_ADMIN_NEW_PASSWORD}" "${DT_ADMIN_PASSWORD}"; do
     [[ -n "${pass}" ]] || continue
     case " ${tried} " in *" ${pass} "*) continue ;; esac
     tried="${tried} ${pass}"
@@ -149,11 +198,12 @@ acquire_token() {
     raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}")"
     parse_login "${raw}"
     if [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" && "${LOGIN_BODY}" != *"FORCE_PASSWORD_CHANGE"* ]]; then
+      token="$(normalize_bearer_token "${LOGIN_BODY}")"
       DT_ADMIN_PASSWORD="${pass}"
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${pass}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${pass}"
       ok "logged in as ${DT_ADMIN_USER}"
-      printf '%s' "${LOGIN_BODY}"
+      printf '%s' "${token}"
       return 0
     fi
     if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
@@ -162,23 +212,25 @@ acquire_token() {
       raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}")"
       parse_login "${raw}"
       [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
+      token="$(normalize_bearer_token "${LOGIN_BODY}")"
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
-      printf '%s' "${LOGIN_BODY}"
+      printf '%s' "${token}"
       return 0
     fi
     warn "login HTTP ${LOGIN_HTTP} with password len=${#pass} — next candidate"
-    if [[ "${LOGIN_HTTP}" != "200" && -n "${LOGIN_BODY}" ]]; then
+    if [[ -n "${LOGIN_BODY}" ]]; then
       warn "login body: ${LOGIN_BODY:0:180}"
     fi
   done
-  fail "login failed for user ${DT_ADMIN_USER} — set DT_ADMIN_PASSWORD (UI: http://${NODE_IP}:30212) then re-run dt-bootstrap"
+  fail "login failed for user ${DT_ADMIN_USER} — open http://${NODE_IP}:$(discover_frontend_port || echo 30212) or set DT_ADMIN_PASSWORD in .env"
 }
 
 force_change_password() {
   local user="$1" old="$2" new="$3" body http
-  body="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X POST "${API_BASE}/api/v1/user/forceChangePassword" \
+  body="$(dt_http POST "/api/v1/user/forceChangePassword" \
     -H "Content-Type: application/x-www-form-urlencoded" \
+    -w $'\n__HTTP__%{http_code}' \
     --data-urlencode "username=${user}" \
     --data-urlencode "password=${old}" \
     --data-urlencode "newPassword=${new}" \
@@ -192,7 +244,7 @@ force_change_password() {
 
 find_team_uuid() {
   local token="$1"
-  curl -sS -m 30 -H "Authorization: Bearer ${token}" "${API_BASE}/api/v1/team" \
+  dt_http GET "/api/v1/team" -H "Authorization: Bearer ${token}" \
     | python3 -c "
 import json, sys
 name = sys.argv[1]
@@ -214,15 +266,17 @@ else:
 
 create_api_key() {
   local token="$1" team_uuid="$2" resp key http
-  resp="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X PUT "${API_BASE}/api/v1/team/${team_uuid}/key" \
+  resp="$(dt_http PUT "/api/v1/team/${team_uuid}/key" \
     -H "Authorization: Bearer ${token}" \
-    -H "Content-Type: application/json")"
+    -H "Content-Type: application/json" \
+    -w $'\n__HTTP__%{http_code}')"
   http="${resp##*$'\n__HTTP__'}"
   resp="${resp%$'\n__HTTP__'*}"
   if [[ "${http}" != "200" ]]; then
-    resp="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X POST "${API_BASE}/api/v1/team/${team_uuid}/key" \
+    resp="$(dt_http POST "/api/v1/team/${team_uuid}/key" \
       -H "Authorization: Bearer ${token}" \
-      -H "Content-Type: application/json")"
+      -H "Content-Type: application/json" \
+      -w $'\n__HTTP__%{http_code}')"
     http="${resp##*$'\n__HTTP__'}"
     resp="${resp%$'\n__HTTP__'*}"
   fi
@@ -248,6 +302,7 @@ sync_env_and_jenkins() {
 }
 
 main() {
+  load_dt_admin_creds
   need_cmd kubectl
   need_cmd helm
   need_cmd curl
@@ -265,6 +320,7 @@ main() {
   api_base="http://${NODE_IP}:${api_port}"
   API_BASE="${api_base}"
 
+  setup_api_pod
   wait_api
 
   token="$(acquire_token)"
@@ -284,7 +340,7 @@ main() {
   echo "=============================================="
   echo "Done. Next on VM:"
   echo "  bash paas/scripts/lab.sh env"
-  echo "  Trigger Jenkins build #755+ (Build with Parameters, not Replay)"
+  echo "  Trigger a new paas-deploy build (not Replay)"
   echo "=============================================="
 }
 

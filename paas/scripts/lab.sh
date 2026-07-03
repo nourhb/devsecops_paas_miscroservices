@@ -267,7 +267,11 @@ case "$cmd" in
   dependency-track|dtrack)
     bash "$LIB/lab-dependency-track.sh" ;;
   dt-bootstrap|dependency-track-bootstrap)
-    bash "$LIB/bootstrap-dependency-track-lab.sh"
+    echo "==> Dependency-Track API key bootstrap"
+    bash "$LIB/bootstrap-dependency-track-lab.sh" || {
+      echo "FAIL: dt-bootstrap exited $?" >&2
+      exit 1
+    }
     bash "$LIB/compose-paas-frontend-env.sh"
     bash "$LIB/sync-paas-frontend-env-k8s.sh"
     ;;
