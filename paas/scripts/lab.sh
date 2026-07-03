@@ -89,6 +89,7 @@ usage() {
   echo "  argocd-bootstrap  Set ARGOCD_BASE_URL + admin password in env (no UI)"
   echo "  argocd-fix        Fix GitOps 403 — RBAC + admin password + frontend restart"
   echo "  prometheus-fix    Recover/install Prometheus + wire PROMETHEUS_* env for charts"
+  echo "  ui-fix            Rebuild frontend + Argo CD apps (GitOps, Harbor UI, Create Project)"
   echo "  prometheus-install  Helm install kube-prometheus-stack (when monitoring is empty)"
   echo "  integrations-bootstrap  Wire Grafana/Trivy/DT URLs + scale monitoring stack"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
@@ -300,6 +301,8 @@ case "$cmd" in
     bash "$LIB/lab-prometheus-fix.sh" ;;
   prometheus-install)
     bash "$LIB/lab-prometheus-install.sh" ;;
+  ui-fix|fix-ui)
+    bash "$LIB/lab-ui-fix.sh" ;;
   integrations-bootstrap|bootstrap-integrations)
     bash "$LIB/bootstrap-integrations-lab.sh" ;;
   frontend-heal)
