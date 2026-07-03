@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -E
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -20,13 +19,6 @@ ok() { echo "OK: $*"; }
 warn() { echo "WARN: $*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-_on_err() {
-  local ec=$?
-  echo "FAIL: bootstrap aborted (exit ${ec}) at line ${BASH_LINENO[0]}: ${BASH_COMMAND}" >&2
-  exit "${ec}"
-}
-trap _on_err ERR
-
 read_env_val() {
   local key="$1" file line
   for file in "${ENV_FILE}" "${DOT_ENV}"; do
@@ -40,11 +32,17 @@ read_env_val() {
 load_dt_admin_creds() {
   local from_env
   from_env="$(read_env_val DT_ADMIN_USER || true)"
-  [[ -n "${from_env}" ]] && DT_ADMIN_USER="${from_env}"
+  if [[ -n "${from_env}" ]]; then
+    DT_ADMIN_USER="${from_env}"
+  fi
   from_env="$(read_env_val DT_ADMIN_PASSWORD || true)"
-  [[ -n "${from_env}" ]] && DT_ADMIN_PASSWORD="${from_env}"
+  if [[ -n "${from_env}" ]]; then
+    DT_ADMIN_PASSWORD="${from_env}"
+  fi
   from_env="$(read_env_val DT_ADMIN_NEW_PASSWORD || true)"
-  [[ -n "${from_env}" ]] && DT_ADMIN_NEW_PASSWORD="${from_env}"
+  if [[ -n "${from_env}" ]]; then
+    DT_ADMIN_NEW_PASSWORD="${from_env}"
+  fi
 }
 
 need_cmd() {
