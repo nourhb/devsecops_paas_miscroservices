@@ -93,7 +93,30 @@ export function normalizeBuildEnvInput(raw: unknown): Record<string, string> | n
 
 export function encodeBuildEnvForJenkins(projectName: string, buildEnv: Record<string, string> | null | undefined): string {
     const merged = augmentBuildEnvForPipeline(projectName, buildEnv);
-    return Buffer.from(JSON.stringify(merged), "utf8").toString("base64");
+    // base64url avoids '+' corruption when Jenkins receives form-urlencoded parameters
+    return Buffer.from(JSON.stringify(merged), "utf8").toString("base64url");
+}
+
+export function decodeBuildEnvFromJenkinsParam(raw: string | null | undefined): Record<string, string> | null {
+    let s = String(raw ?? "").trim();
+    if (!s) {
+        return null;
+    }
+    s = s.replace(/ /g, "+");
+    if (s.includes("-") || s.includes("_")) {
+        s = s.replace(/-/g, "+").replace(/_/g, "/");
+    }
+    const pad = s.length % 4;
+    if (pad) {
+        s += "=".repeat(4 - pad);
+    }
+    try {
+        const parsed = JSON.parse(Buffer.from(s, "base64").toString("utf8")) as unknown;
+        return normalizeBuildEnvInput(parsed);
+    }
+    catch {
+        return null;
+    }
 }
 
 export function mergeBuildEnvIntoHelmValues(doc: Record<string, unknown>, buildEnv: Record<string, string> | null | undefined): void {

@@ -84,7 +84,9 @@ export function buildEnvJenkinsTriggerLog(stored: unknown, resolved?: Record<str
     }
     const keys = Object.keys(envMap);
     const publicCount = keys.filter((k) => k.startsWith("NEXT_PUBLIC_")).length;
-    return `[build-env] Forwarding ${keys.length} variable(s) as PROJECT_BUILD_ENV_B64 (${publicCount} NEXT_PUBLIC_* — baked at Jenkins build, not injected at K8s deploy).`;
+    const firebaseCount = keys.filter((k) => k.startsWith("NEXT_PUBLIC_FIREBASE_")).length;
+    const firebaseKeys = keys.filter((k) => k.startsWith("NEXT_PUBLIC_FIREBASE_")).join(", ");
+    return `[build-env] Forwarding ${keys.length} variable(s) as PROJECT_BUILD_ENV_B64 (${publicCount} NEXT_PUBLIC_*, ${firebaseCount} NEXT_PUBLIC_FIREBASE_*: ${firebaseKeys || "none"}).`;
 }
 
 export function hasBuildEnvStored(stored: unknown): boolean {

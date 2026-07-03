@@ -320,6 +320,30 @@ def snapshotRepoEnvAtCheckout(String appRoot = '.') {
   """
 }
 
+def normalizeProjectBuildEnvB64(String raw) {
+  def s = (raw ?: '').trim().replace(' ', '+')
+  if (s.contains('-') || s.contains('_')) {
+    s = s.replace('-', '+').replace('_', '/')
+  }
+  def pad = s.length() % 4
+  if (pad != 0) {
+    s = s + ('=' * (4 - pad))
+  }
+  return s
+}
+
+def decodeProjectBuildEnvMap(String b64) {
+  if (!b64?.trim()) {
+    return null
+  }
+  try {
+    def decoded = new groovy.json.JsonSlurper().parseText(new String(normalizeProjectBuildEnvB64(b64).decodeBase64()))
+    return decoded instanceof Map ? decoded : null
+  } catch (Exception ignored) {
+    return null
+  }
+}
+
 def persistAndLogProjectBuildEnvB64() {
   def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
   if (!b64) {
@@ -328,22 +352,18 @@ def persistAndLogProjectBuildEnvB64() {
   }
   sh 'mkdir -p paas-artifacts'
   writeFile file: 'paas-artifacts/project-build-env.b64', text: b64
-  try {
-    def decoded = new groovy.json.JsonSlurper().parseText(new String(b64.decodeBase64()))
-    if (!(decoded instanceof Map)) {
-      println '[env] WARN: PROJECT_BUILD_ENV_B64 decoded to non-object JSON'
-      return
-    }
-    def keys = decoded.keySet().collect { it.toString() }.sort()
-    def pub = keys.findAll { it.startsWith('NEXT_PUBLIC_') }
-    def firebase = keys.findAll { it.startsWith('NEXT_PUBLIC_FIREBASE_') }
-    println "[env] PaaS Application environment: ${keys.size()} key(s), ${pub.size()} NEXT_PUBLIC_*, ${firebase.size()} NEXT_PUBLIC_FIREBASE_*"
-    println "[env] PaaS env keys: ${keys.join(', ')}"
-    if (firebase.isEmpty()) {
-      println '[env] WARN: no NEXT_PUBLIC_FIREBASE_* in PaaS Application environment — add Firebase keys in Edit project or commit .env.production in Git'
-    }
-  } catch (Exception e) {
-    println "[env] WARN: could not decode PROJECT_BUILD_ENV_B64 for logging: ${e.message}"
+  def decoded = decodeProjectBuildEnvMap(b64)
+  if (!decoded) {
+    println "[env] ERROR: PROJECT_BUILD_ENV_B64 could not be decoded (length=${b64.length()}) — check PaaS→Jenkins param transport"
+    return
+  }
+  def keys = decoded.keySet().collect { it.toString() }.sort()
+  def pub = keys.findAll { it.startsWith('NEXT_PUBLIC_') }
+  def firebase = keys.findAll { it.startsWith('NEXT_PUBLIC_FIREBASE_') }
+  println "[env] PaaS Application environment: ${keys.size()} key(s), ${pub.size()} NEXT_PUBLIC_*, ${firebase.size()} NEXT_PUBLIC_FIREBASE_*"
+  println "[env] PaaS env keys: ${keys.join(', ')}"
+  if (firebase.isEmpty()) {
+    println '[env] WARN: no NEXT_PUBLIC_FIREBASE_* in PaaS Application environment — add Firebase keys in Edit project or commit .env.production in Git'
   }
 }
 
@@ -422,17 +442,31 @@ for (const name of envNames) {
 }
 
 let b64Map = {};
+function decodeBuildEnvB64(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return null;
+  s = s.replace(/ /g, '+');
+  if (s.includes('-') || s.includes('_')) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+  }
+  const pad = s.length % 4;
+  if (pad) s += '='.repeat(4 - pad);
+  try {
+    return JSON.parse(Buffer.from(s, 'base64').toString('utf8'));
+  } catch (e) {
+    return null;
+  }
+}
 for (const b64Path of ['paas-artifacts/project-build-env.b64', '.paas-build-env.b64']) {
   if (!fs.existsSync(b64Path)) continue;
   const b64Raw = fs.readFileSync(b64Path, 'utf8').trim();
   if (!b64Raw) continue;
-  try {
-    b64Map = JSON.parse(Buffer.from(b64Raw, 'base64').toString('utf8')) || {};
-    sources.push('PROJECT_BUILD_ENV_B64');
-  } catch (e) {
-    console.error('[env] ERROR: invalid PROJECT_BUILD_ENV_B64 JSON (' + b64Path + '):', e.message);
+  b64Map = decodeBuildEnvB64(b64Raw);
+  if (!b64Map || typeof b64Map !== 'object') {
+    console.error('[env] ERROR: invalid PROJECT_BUILD_ENV_B64 JSON (' + b64Path + ')');
     process.exit(1);
   }
+  sources.push('PROJECT_BUILD_ENV_B64');
   break;
 }
 
@@ -595,7 +629,7 @@ def patchNextBuildEnvIntoConfig(String appRoot = '.') {
   }
   ensureNodeTool()
   sh """
-      set +e
+      set -eu
       cd '${appRoot}'
       if ! command -v node >/dev/null 2>&1; then
         echo "[env] WARN: node unavailable — skip next.config env patch"
