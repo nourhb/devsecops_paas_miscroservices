@@ -13,8 +13,15 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 source "${SCRIPT_DIR}/lab-kube-env.sh" 2>/dev/null || true
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_ROOT="${PAAS_BACKUP_ROOT:-/var/backups/paas-lab}"
+# Default under $HOME (always writable by the invoking user, no sudo needed just to
+# create the folder) — /var/backups is root-owned on most distros and mkdir fails there.
+BACKUP_ROOT="${PAAS_BACKUP_ROOT:-${HOME:-/home/master}/paas-lab-backups}"
 DEST="${BACKUP_ROOT}/${STAMP}"
+mkdir -p "${BACKUP_ROOT}" 2>/dev/null || {
+  echo "[full-backup] cannot create ${BACKUP_ROOT} — falling back to /tmp/paas-lab-backups"
+  BACKUP_ROOT="/tmp/paas-lab-backups"
+  DEST="${BACKUP_ROOT}/${STAMP}"
+}
 LOCAL_PATH_DIR="${PAAS_LOCAL_PATH_STORAGE_DIR:-/var/lib/rancher/k3s/storage}"
 JENKINS_NS="${JENKINS_K8S_NAMESPACE:-cicd}"
 JPOD="${JENKINS_POD:-jenkins-0}"
