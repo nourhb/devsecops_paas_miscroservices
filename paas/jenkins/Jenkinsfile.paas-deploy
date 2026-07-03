@@ -468,7 +468,12 @@ if (!entries.length) {
 const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
 const usesFirebase = Boolean(deps.firebase || deps['@firebase/app']);
 if (usesFirebase) {
-  const fbKeys = entries.filter(([k, v]) => k.startsWith('NEXT_PUBLIC_FIREBASE_') && String(v).trim() && !/^(placeholder|your_|xxx|changeme|undefined|null)$/i.test(String(v).trim()));
+  const badFb = new Set(['placeholder', 'your_', 'xxx', 'changeme', 'undefined', 'null']);
+  const fbKeys = entries.filter(([k, v]) => {
+    if (!k.startsWith('NEXT_PUBLIC_FIREBASE_')) return false;
+    const s = String(v).trim();
+    return s.length > 0 && !badFb.has(s.toLowerCase());
+  });
   if (!fbKeys.length) {
     console.error('[env] ERROR: Firebase dependency but no NEXT_PUBLIC_FIREBASE_* in merged env');
     console.error('[env] Add Firebase keys to PaaS Edit project → Application environment, or commit .env.production in Git, then redeploy');
