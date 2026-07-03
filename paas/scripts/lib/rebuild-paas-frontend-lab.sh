@@ -27,10 +27,11 @@ resolve_image_repo() {
 
 IMAGE_REPO="$(resolve_image_repo "${CURRENT_IMAGE}")"
 TARGET_IMAGE="${IMAGE_REPO}:${TAG}"
+PAAS_BUILD_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 echo "==> Current deployment image: ${CURRENT_IMAGE}"
-echo "==> Building ${TARGET_IMAGE} from ${REPO_ROOT}/paas"
-BUILD_ARGS=()
+echo "==> Building ${TARGET_IMAGE} from ${REPO_ROOT}/paas (git ${PAAS_BUILD_SHA})"
+BUILD_ARGS=(--build-arg "PAAS_BUILD_SHA=${PAAS_BUILD_SHA}")
 if [[ "${FORCE_FRONTEND_REBUILD:-false}" == "true" ]] || [[ "${NO_CACHE:-false}" == "true" ]]; then
   BUILD_ARGS+=(--no-cache)
   echo "==> Force rebuild (no Docker cache)"
@@ -83,10 +84,19 @@ if [[ "${TARGET_IMAGE}" == docker.io/library/paas-frontend:* || "${TARGET_IMAGE}
   docker tag "${TARGET_IMAGE}" "docker.io/library/paas-frontend:recovery" 2>/dev/null || true
 fi
 
-echo "==> Load image into k3s containerd on master (lab UI runs on master — worker import optional)"
+echo "==> Load image into k3s containerd on master (replace stale paas-frontend tags)"
 if command -v docker >/dev/null 2>&1; then
-  docker save "${TARGET_IMAGE}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null \
-    || docker save "${TARGET_IMAGE}" | sudo ctr -n k8s.io images import - 2>/dev/null || true
+  if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+    purge_containerd_frontend_images "docker.io/library/paas-frontend:recovery"
+    purge_containerd_frontend_images "${TARGET_IMAGE}"
+    import_docker_image_to_k3s "${TARGET_IMAGE}" 0
+    import_docker_image_to_k3s "docker.io/library/paas-frontend:recovery" 0
+  else
+    docker save "${TARGET_IMAGE}" | sudo k3s ctr -n k8s.io images import - 2>/dev/null \
+      || docker save "${TARGET_IMAGE}" | sudo ctr -n k8s.io images import - 2>/dev/null || true
+  fi
   if [[ "${LAB_IMPORT_IMAGE_ALL_NODES:-false}" == "true" ]]; then
     bash "${SCRIPT_DIR}/lab-k3s-import-image-nodes.sh" "${TARGET_IMAGE}" || true
   else
@@ -112,7 +122,6 @@ echo "==> Updating deployment/frontend (Recreate + master pin + imagePullPolicy 
 DEPLOY_IMAGE="${TARGET_IMAGE}"
 if [[ "${TARGET_IMAGE}" == docker.io/library/paas-frontend:* ]]; then
   DEPLOY_IMAGE="docker.io/library/paas-frontend:recovery"
-  docker save "${DEPLOY_IMAGE}" 2>/dev/null | sudo k3s ctr -n k8s.io images import - 2>/dev/null || true
 fi
 if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
   apply_lab_frontend_safety "${DEPLOY_IMAGE}" 1
@@ -140,6 +149,10 @@ else
 }
 PATCH
 )"
+fi
+if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
+  source "${SCRIPT_DIR}/lab-frontend-lab-safety.sh"
+  force_rollout_frontend_pod
 fi
 if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s; then
   echo "WARN: rollout failed — applying recovery image on master" >&2

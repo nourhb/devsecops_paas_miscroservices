@@ -39,7 +39,7 @@ echo "==> 2/4 Register Argo CD Applications (paas-* from gitops/apps)"
 if bash "${SCRIPT_DIR}/lab-argocd-bootstrap-all-apps.sh"; then
   ok "Argo CD applications bootstrapped"
 else
-  warn "argocd-apps incomplete — sanhome may stay Unknown until gitops/apps/sanhome exists"
+  warn "argocd-apps incomplete"
 fi
 
 echo ""
@@ -54,11 +54,17 @@ else
 fi
 
 echo ""
-echo "==> 4/4 Verify deployment"
+echo "==> 4/4 Verify deployment (build id must match git HEAD)"
+WANT_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 IMAGE="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
-ok "frontend image: ${IMAGE:-unknown}"
-if [[ "${IMAGE}" == *":recovery" ]]; then
-  warn "still on :recovery tag — rebuild may not have updated deployment"
+GOT_SHA="$(kubectl exec -n "${PAAS_NS}" deploy/frontend -- cat /app/.paas-build-id 2>/dev/null | tr -d '\r\n' || true)"
+ok "deployment image: ${IMAGE:-unknown}"
+if [[ -n "${GOT_SHA}" && "${GOT_SHA}" == "${WANT_SHA}" ]]; then
+  ok "running frontend build ${GOT_SHA} (matches git HEAD)"
+else
+  warn "running build id '${GOT_SHA:-missing}' != git ${WANT_SHA} — browser may still show OLD UI"
+  warn "force: kubectl delete pod -n ${PAAS_NS} -l app=frontend --force --grace-period=0"
+  warn "then:  NO_CACHE=true bash paas/scripts/lab.sh frontend"
 fi
 if kubectl exec -n "${PAAS_NS}" deploy/frontend -- printenv KUBERNETES_ENABLED 2>/dev/null | grep -q true; then
   ok "pod KUBERNETES_ENABLED=true"
@@ -69,10 +75,7 @@ fi
 echo ""
 echo "=============================================="
 echo "Done. Hard-refresh the browser (Ctrl+Shift+R):"
-echo "  • GitOps — no HTTP 403; shows app health or 'not found' hint"
-echo "  • Docker page — Harbor label (not Docker Hub-only message)"
+echo "  • GitOps — K8s API status (not 'Configure ARGOCD_*')"
+echo "  • Docker page — Harbor registry label"
 echo "  • Create Project — no webhook / build-template boxes"
-echo ""
-echo "If Harbor still shows 'Not configured':"
-echo "  bash paas/scripts/lab.sh harbor && bash paas/scripts/lab.sh env"
 echo "=============================================="

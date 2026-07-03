@@ -45,8 +45,23 @@ image_in_containerd() {
 
 import_docker_image_to_k3s() {
   local img="$1"
+  local force="${2:-0}"
   docker image inspect "${img}" >/dev/null 2>&1 || return 1
+  if [[ "${force}" == "1" ]]; then
+    purge_containerd_frontend_images "${img}"
+  fi
   docker save "${img}" | sudo k3s ctr -n k8s.io images import - >/dev/null 2>&1
+}
+
+purge_containerd_frontend_images() {
+  local img="${1:-}"
+  [[ -n "${img}" ]] && sudo k3s ctr -n k8s.io images rm "${img}" 2>/dev/null || true
+}
+
+force_rollout_frontend_pod() {
+  kubectl delete pods -n "${PAAS_NS}" -l app=frontend --force --grace-period=0 --wait=true \
+    --request-timeout=120s 2>/dev/null || true
+  kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s 2>/dev/null || true
 }
 
 resolve_lab_frontend_image() {
@@ -119,7 +134,10 @@ apply_lab_frontend_safety() {
   img="$(resolve_lab_frontend_image "${img}")"
   img="${img//$'\n'/}"
   img="${img%%[[:space:]]*}"
-  [[ "${img}" == docker.io/library/paas-frontend:* ]] || img="docker.io/library/paas-frontend:recovery"
+  case "${img}" in
+    docker.io/library/paas-frontend:*|paas-frontend:*|*paas-frontend:local-*|*paas-frontend:recovery*) ;;
+    *) img="docker.io/library/paas-frontend:recovery" ;;
+  esac
 
   local pull_policy
   pull_policy="$(resolve_lab_image_pull_policy "${img}")"
