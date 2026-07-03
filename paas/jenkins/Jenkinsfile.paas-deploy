@@ -296,6 +296,57 @@ def projectRepoEnvFilesPresent(String appRoot = '.') {
   return ['.env', '.env.local', '.env.production', '.env.production.local', '.env.example'].any { fileExists("${prefix}${it}") }
 }
 
+def snapshotRepoEnvAtCheckout(String appRoot = '.') {
+  sh """
+    set +e
+    cd '${appRoot}'
+    mkdir -p paas-artifacts/repo-env
+    for f in .env .env.local .env.production .env.production.local .env.example; do
+      base=\$(basename "\$f")
+      if [ -f "\$f" ]; then
+        cp "\$f" "paas-artifacts/repo-env/\$base"
+        echo "[env] snapshotted workspace env: \$f"
+      elif git show "HEAD:\$f" >/dev/null 2>&1; then
+        git show "HEAD:\$f" > "paas-artifacts/repo-env/\$base"
+        echo "[env] snapshotted from git HEAD: \$f"
+      fi
+    done
+    if [ -n "\$(ls -A paas-artifacts/repo-env 2>/dev/null)" ]; then
+      echo "[env] repo-env snapshot:"
+      ls -la paas-artifacts/repo-env
+    else
+      echo "[env] no repo .env files in workspace or git HEAD — relying on PaaS Application environment"
+    fi
+  """
+}
+
+def persistAndLogProjectBuildEnvB64() {
+  def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
+  if (!b64) {
+    println '[env] PROJECT_BUILD_ENV_B64 empty — build will rely on repo .env snapshot only'
+    return
+  }
+  sh 'mkdir -p paas-artifacts'
+  writeFile file: 'paas-artifacts/project-build-env.b64', text: b64
+  try {
+    def decoded = new groovy.json.JsonSlurper().parseText(new String(b64.decodeBase64()))
+    if (!(decoded instanceof Map)) {
+      println '[env] WARN: PROJECT_BUILD_ENV_B64 decoded to non-object JSON'
+      return
+    }
+    def keys = decoded.keySet().collect { it.toString() }.sort()
+    def pub = keys.findAll { it.startsWith('NEXT_PUBLIC_') }
+    def firebase = keys.findAll { it.startsWith('NEXT_PUBLIC_FIREBASE_') }
+    println "[env] PaaS Application environment: ${keys.size()} key(s), ${pub.size()} NEXT_PUBLIC_*, ${firebase.size()} NEXT_PUBLIC_FIREBASE_*"
+    println "[env] PaaS env keys: ${keys.join(', ')}"
+    if (firebase.isEmpty()) {
+      println '[env] WARN: no NEXT_PUBLIC_FIREBASE_* in PaaS Application environment — add Firebase keys in Edit project or commit .env.production in Git'
+    }
+  } catch (Exception e) {
+    println "[env] WARN: could not decode PROJECT_BUILD_ENV_B64 for logging: ${e.message}"
+  }
+}
+
 def materializeProjectBuildEnv(String appRoot) {
   def b64 = (params.PROJECT_BUILD_ENV_B64 ?: env.PROJECT_BUILD_ENV_B64 ?: '').trim()
   def prefix = appRoot == '.' ? '' : "${appRoot}/"
@@ -358,28 +409,38 @@ function dotenvLine(key, value) {
 const secretKey = (k) => /pass|secret|token|private|credential/i.test(k) && !/^NEXT_PUBLIC_/i.test(k);
 const sources = [];
 let merged = {};
-for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
-  if (fs.existsSync(name)) {
+const envNames = ['.env', '.env.local', '.env.production', '.env.production.local'];
+for (const name of envNames) {
+  const snapPath = 'paas-artifacts/repo-env/' + name.replace(/^\\.\\//, '');
+  if (fs.existsSync(snapPath)) {
+    Object.assign(merged, loadDotenvFile(snapPath));
+    sources.push('repo-snapshot:' + name);
+  } else if (fs.existsSync(name)) {
     Object.assign(merged, loadDotenvFile(name));
     sources.push(name);
   }
 }
 
 let b64Map = {};
-if (fs.existsSync('.paas-build-env.b64')) {
-  const b64Raw = fs.readFileSync('.paas-build-env.b64', 'utf8').trim();
-  if (b64Raw) {
-    try {
-      b64Map = JSON.parse(Buffer.from(b64Raw, 'base64').toString('utf8')) || {};
-      sources.push('PROJECT_BUILD_ENV_B64');
-    } catch (e) {
-      console.error('[env] ERROR: invalid PROJECT_BUILD_ENV_B64 JSON:', e.message);
-      process.exit(1);
-    }
+for (const b64Path of ['paas-artifacts/project-build-env.b64', '.paas-build-env.b64']) {
+  if (!fs.existsSync(b64Path)) continue;
+  const b64Raw = fs.readFileSync(b64Path, 'utf8').trim();
+  if (!b64Raw) continue;
+  try {
+    b64Map = JSON.parse(Buffer.from(b64Raw, 'base64').toString('utf8')) || {};
+    sources.push('PROJECT_BUILD_ENV_B64');
+  } catch (e) {
+    console.error('[env] ERROR: invalid PROJECT_BUILD_ENV_B64 JSON (' + b64Path + '):', e.message);
+    process.exit(1);
   }
+  break;
 }
 
-if (Object.keys(merged).length === 0 && fs.existsSync('.env.example')) {
+if (Object.keys(merged).length === 0 && fs.existsSync('paas-artifacts/repo-env/.env.example')) {
+  merged = loadDotenvFile('paas-artifacts/repo-env/.env.example');
+  sources.push('repo-snapshot:.env.example');
+  console.log('[env] No .env in repo — using snapshotted .env.example as build-time template');
+} else if (Object.keys(merged).length === 0 && fs.existsSync('.env.example')) {
   merged = loadDotenvFile('.env.example');
   sources.push('.env.example');
   console.log('[env] No .env in repo — using .env.example as build-time template');
@@ -402,6 +463,17 @@ const entries = Object.entries(merged).filter(([k, v]) => k && v != null && Stri
 if (!entries.length) {
   console.log('[env] No build env keys after merge — skip writing .env files');
   process.exit(0);
+}
+
+const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
+const usesFirebase = Boolean(deps.firebase || deps['@firebase/app']);
+if (usesFirebase) {
+  const fbKeys = entries.filter(([k, v]) => k.startsWith('NEXT_PUBLIC_FIREBASE_') && String(v).trim() && !/^(placeholder|your_|xxx|changeme|undefined|null)$/i.test(String(v).trim()));
+  if (!fbKeys.length) {
+    console.error('[env] ERROR: Firebase dependency but no NEXT_PUBLIC_FIREBASE_* in merged env');
+    console.error('[env] Add Firebase keys to PaaS Edit project → Application environment, or commit .env.production in Git, then redeploy');
+    process.exit(1);
+  }
 }
 
 const content = entries.map(([k, v]) => dotenvLine(k, v)).join('\\n');
@@ -651,8 +723,8 @@ def verifyNextPublicEnvInBuild(String appRoot = '.') {
       exit 0
     fi
     if grep -qE 'NEXT_PUBLIC_|env:\\s*\\{' next.config.ts next.config.js next.config.mjs 2>/dev/null; then
-      if [ "\$IS_FIREBASE" = "1" ] && [ "\$HAS_FIREBASE_ENV" != "1" ]; then
-        echo "[env] ERROR: next.config env patch present but NEXT_PUBLIC_FIREBASE_* missing from merged .env"
+      if [ "\$IS_FIREBASE" = "1" ]; then
+        echo "[env] ERROR: Firebase app — next.config env patch is not enough; NEXT_PUBLIC_FIREBASE_* must be in merged .env and baked into .next"
         exit 1
       fi
       echo "[env] verify OK: next.config env patch present (NEXT_PUBLIC_* may be unused in client bundle — OK for simple Next apps)"
@@ -2071,7 +2143,7 @@ ${paasShellKeepaliveHelper()}
 ${paasOpensslLegacyShellSnippet()}
 ${paasForceFreshNextBuildShellSnippet()}
     if [ -f package.json ] && command -v npm >/dev/null 2>&1 && node -e "const p=require('./package.json');const d={...p.dependencies||{},...p.devDependencies||{}};process.exit(d.next?0:1)" 2>/dev/null; then
-      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ]; then
+      if [ ! -f .next/BUILD_ID ] && [ ! -f .next/standalone/server.js ] || [ -n "\${PROJECT_BUILD_ENV_B64:-}" ] || [ -f paas-artifacts/.env-materialized ]; then
         echo "[image] crane-next16-202605-j48300: npx next build"
         NB_FLAGS=""
         if node -e "const v=require('next/package.json').version.split('.').map(Number);process.exit((v[0]||0)>=16?0:1)" 2>/dev/null; then
@@ -2721,8 +2793,10 @@ def runPaasDeploy = {
       ls -la | head -25
     '''
     def checkoutAppRoot = detectAppRoot()
+    snapshotRepoEnvAtCheckout(checkoutAppRoot)
+    persistAndLogProjectBuildEnvB64()
     def envFiles = ['.env', '.env.local', '.env.production', '.env.production.local', '.env.example'].findAll { f ->
-      fileExists(checkoutAppRoot == '.' ? f : "${checkoutAppRoot}/${f}")
+      fileExists(checkoutAppRoot == '.' ? f : "${checkoutAppRoot}/${f}") || fileExists("paas-artifacts/repo-env/${f.replaceFirst(/^\\./, '')}")
     }
     if (envFiles) {
       println "[env] Repo env file(s) detected under ${checkoutAppRoot}: ${envFiles.join(', ')} — will merge with PaaS Application environment at build"
