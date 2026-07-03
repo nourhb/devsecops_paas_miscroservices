@@ -1,0 +1,5 @@
+#!/bin/sh
+MSG_FILE="${1:?commit-msg hook requires path to commit message file}"
+TMP="${MSG_FILE}.paas-strip"
+grep -vE "^(Co-authored-by:|Made-with:)" "$MSG_FILE" > "$TMP" 2>/dev/null || cp "$MSG_FILE" "$TMP"
+mv "$TMP" "$MSG_FILE"

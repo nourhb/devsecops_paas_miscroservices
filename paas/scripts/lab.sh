@@ -6,6 +6,15 @@ REPO_ROOT="$(cd "${DIR}/../.." && pwd)"
 cmd="${1:-}"
 cmd="${cmd//$'\r'/}"
 
+_install_repo_githooks() {
+  local hooks_path
+  hooks_path="$(git -C "${REPO_ROOT}" config --get core.hooksPath 2>/dev/null || true)"
+  if [[ "${hooks_path}" != ".githooks" ]] && [[ -f "${REPO_ROOT}/scripts/install-githooks.sh" ]]; then
+    bash "${REPO_ROOT}/scripts/install-githooks.sh" || true
+  fi
+}
+_install_repo_githooks
+
 _run_boot_script() {
   local action="$1"
   local lab_user="${SUDO_USER:-${USER:-master}}"
@@ -34,6 +43,7 @@ usage() {
   echo "  pin-pg15  Force postgres:15-alpine (lab PVC is PG15 — fixes PG16 crash loop)"
   echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
+  echo "  githooks  Install repo git hooks (strip injected co-author from commits)"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
   echo "  probe-k8s     Diagnose Kubernetes API from frontend pod (UI cluster pages)"
@@ -152,6 +162,8 @@ case "$cmd" in
     bash "$LIB/pin-postgres-pg15-now.sh" ;;
   postgres)
     bash "$LIB/lab-postgres.sh" "${2:-all}" ;;
+  githooks|install-githooks)
+    bash "${REPO_ROOT}/scripts/install-githooks.sh" ;;
   health|check)
     bash "$LIB/check-paas-lab-health.sh" ;;
   prometheus|prom)
