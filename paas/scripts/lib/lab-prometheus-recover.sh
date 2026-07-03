@@ -5,13 +5,35 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 MON_NS="${PROMETHEUS_K8S_NAMESPACE:-monitoring}"
 NODE_IP="${NODE_IP:-192.168.56.129}"
 
-echo "==> lab-prometheus-recover (install if missing + scale-up)"
+echo "==> lab-prometheus-recover (install if missing; never tear down a healthy stack)"
 
 require_non_root="${REPO_ROOT}/paas/k8s-manifests/kyverno/require-non-root.yaml"
 require_signed="${REPO_ROOT}/paas/k8s-manifests/kyverno/require-signed-images.yaml"
 
 kyverno_installed() {
   kubectl api-resources --api-group=kyverno.io 2>/dev/null | grep -q ClusterPolicy
+}
+
+prometheus_pod_ready() {
+  kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q True
+}
+
+prometheus_endpoint_ip() {
+  kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus \
+    -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true
+}
+
+prometheus_http_ready() {
+  local ip="${1:-}"
+  [[ -n "${ip}" ]] || return 1
+  curl -fsS --connect-timeout 5 "http://${ip}:9090/-/ready" 2>/dev/null | grep -qi ready
+}
+
+prometheus_healthy() {
+  local ip
+  ip="$(prometheus_endpoint_ip)"
+  prometheus_pod_ready && [[ -n "${ip}" ]] && prometheus_http_ready "${ip}"
 }
 
 apply_kyverno_policies() {
@@ -94,98 +116,75 @@ scale_if_zero() {
 }
 
 scale_up_monitoring_stack() {
-  echo "==> Scale up monitoring stack"
+  echo "==> Scale up monitoring stack (only zero-replica workloads)"
   scale_if_zero deployment kube-prometheus-stack-operator 1
-  if kubectl get deployment kube-prometheus-stack-operator -n "${MON_NS}" >/dev/null 2>&1; then
-    kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=300s 2>/dev/null || {
-      echo "WARN: operator deployment not ready yet"
-      kubectl get pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus-operator 2>/dev/null || true
-    }
-  fi
   scale_if_zero statefulset prometheus-kube-prometheus-stack-prometheus 1
-  scale_if_zero statefulset alertmanager-kube-prometheus-stack-alertmanager 1
-  if [[ "${PROMETHEUS_RECOVER_SKIP_GRAFANA:-}" != "1" ]]; then
+  if [[ "${PROMETHEUS_RECOVER_SKIP_GRAFANA:-1}" != "1" ]]; then
     scale_if_zero deployment kube-prometheus-stack-grafana "${PROMETHEUS_RECOVER_GRAFANA_REPLICAS:-1}"
   else
     echo "==> Skip grafana scale (PROMETHEUS_RECOVER_SKIP_GRAFANA=1)"
   fi
-  scale_if_zero deployment kube-prometheus-stack-kube-state-metrics 1
-  if kubectl get prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" >/dev/null 2>&1; then
-    kubectl annotate prometheus kube-prometheus-stack-prometheus -n "${MON_NS}" \
-      paas-lab-recover="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+  if [[ "${PROMETHEUS_LAB_FULL_STACK:-}" == "1" ]]; then
+    scale_if_zero statefulset alertmanager-kube-prometheus-stack-alertmanager 1
+    scale_if_zero deployment kube-prometheus-stack-kube-state-metrics 1
   fi
+}
+
+wait_for_prometheus() {
+  echo "==> Wait up to 8 min for prometheus pod Ready + endpoint"
+  for i in $(seq 1 48); do
+    local prom_phase prom_ip pod_ip
+    prom_phase="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    prom_ip="$(prometheus_endpoint_ip)"
+    pod_ip="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
+    if [[ "${prom_phase}" == "True" ]]; then
+      if [[ -n "${prom_ip}" ]] || prometheus_http_ready "${pod_ip}"; then
+        echo "OK prometheus-kube-prometheus-stack-prometheus-0 Ready; endpoint=${prom_ip:-$pod_ip}"
+        if curl -fsS --connect-timeout 5 "http://${NODE_IP}:30536/-/ready" 2>/dev/null | grep -qi ready; then
+          echo "OK NodePort :30536 ready"
+        fi
+        return 0
+      fi
+    fi
+    if (( i % 6 == 0 )); then
+      echo "... still waiting (${i}0s) ready=${prom_phase:-False} endpoint=${prom_ip:-none} pod=${pod_ip:-none}"
+      kubectl get pods -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 2>/dev/null || true
+      local pull_reason
+      pull_reason="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 \
+        -o jsonpath='{.status.initContainerStatuses[0].state.waiting.reason}{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
+      if [[ "${pull_reason}" == *ImagePull* || "${pull_reason}" == *BackOff* ]]; then
+        echo "WARN: image pull failing — fix VM DNS/network before re-running recover:" >&2
+        echo "  kubectl describe pod -n ${MON_NS} prometheus-kube-prometheus-stack-prometheus-0 | tail -15" >&2
+        echo "  getent hosts quay.io || ping -c1 8.8.8.8" >&2
+      fi
+    fi
+    sleep 10
+  done
+  return 1
 }
 
 apply_kyverno_policies
 verify_kyverno_monitoring_exclude
+
+if prometheus_healthy && [[ "${PROMETHEUS_FORCE_RECOVER:-}" != "1" ]]; then
+  echo "OK Prometheus already healthy — skip restarts/deletes (PROMETHEUS_FORCE_RECOVER=1 to force)"
+  exit 0
+fi
+
 ensure_prometheus_installed
 
 echo "==> Current monitoring workloads"
-kubectl get pods -n "${MON_NS}" -o wide 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
-kubectl get sts,deploy -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|operator|alertmanager|grafana|kube-state' || true
-kubectl get endpoints -n "${MON_NS}" 2>/dev/null | grep -iE 'prometheus|grafana|alertmanager|operator' || true
-
-if kyverno_installed; then
-  echo "==> Recent Kyverno blocks in ${MON_NS}"
-  kubectl get events -n "${MON_NS}" --field-selector reason=PolicyViolation --sort-by='.lastTimestamp' 2>/dev/null | tail -6 || true
-fi
+kubectl get pods -n "${MON_NS}" -o wide 2>/dev/null | grep -iE 'prometheus|operator|node-exporter' || true
+kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus 2>/dev/null || true
 
 scale_up_monitoring_stack
 
-echo "==> Operator rollout (after scale-up)"
-kubectl rollout restart deployment/kube-prometheus-stack-operator -n "${MON_NS}" 2>/dev/null || true
-kubectl rollout status deployment/kube-prometheus-stack-operator -n "${MON_NS}" --timeout=300s 2>/dev/null || {
-  echo "WARN: operator not ready — describe:"
-  kubectl describe deployment/kube-prometheus-stack-operator -n "${MON_NS}" 2>/dev/null | tail -25 || true
-}
+if wait_for_prometheus; then
+  exit 0
+fi
 
-restart_prometheus_workloads() {
-  local line kind name
-  while IFS= read -r line; do
-    kind="${line%%/*}"
-    name="${line#*/}"
-    [[ -z "${name}" ]] && continue
-    [[ "${name}" == "kube-prometheus-stack-operator" ]] && continue
-    echo "==> rollout restart ${kind}/${name}"
-    kubectl rollout restart -n "${MON_NS}" "${kind}/${name}" 2>/dev/null || true
-  done < <(
-    kubectl get sts,deploy -n "${MON_NS}" -o name 2>/dev/null | grep -iE 'prometheus|alertmanager|grafana|kube-state-metrics' || true
-  )
-}
-
-restart_prometheus_workloads
-
-echo "==> Delete blocked/stale pods so they recreate"
-kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus-operator --ignore-not-found --wait=false 2>/dev/null || true
-kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=prometheus --ignore-not-found --wait=false 2>/dev/null || true
-kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=alertmanager --ignore-not-found --wait=false 2>/dev/null || true
-kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=grafana --ignore-not-found --wait=false 2>/dev/null || true
-kubectl delete pods -n "${MON_NS}" -l app.kubernetes.io/name=kube-state-metrics --ignore-not-found --wait=false 2>/dev/null || true
-
-echo "==> Wait up to 8 min for prometheus pod 2/2 + service endpoint"
-for i in $(seq 1 48); do
-  prom_phase="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
-  prom_ip="$(kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-  pod_ip="$(kubectl get pod -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
-  if [[ "${prom_phase}" == "True" ]]; then
-    if [[ -n "${prom_ip}" ]] || { [[ -n "${pod_ip}" ]] && curl -fsS --connect-timeout 5 "http://${pod_ip}:9090/-/ready" 2>/dev/null | grep -qi ready; }; then
-      echo "OK prometheus-kube-prometheus-stack-prometheus-0 Ready; endpoint=${prom_ip:-$pod_ip}"
-      if curl -fsS --connect-timeout 5 "http://${NODE_IP}:30536/-/ready" 2>/dev/null | grep -qi ready; then
-        echo "OK NodePort :30536 ready"
-      fi
-      exit 0
-    fi
-  fi
-  if (( i % 6 == 0 )); then
-    echo "... still waiting (${i}0s) ready=${prom_phase:-False} endpoint=${prom_ip:-none} pod=${pod_ip:-none}"
-    kubectl get pods -n "${MON_NS}" prometheus-kube-prometheus-stack-prometheus-0 2>/dev/null || true
-    kubectl get endpoints -n "${MON_NS}" kube-prometheus-stack-prometheus 2>/dev/null || true
-  fi
-  sleep 10
-done
-
-echo "ERROR: Prometheus still has no endpoints in ${MON_NS}" >&2
+echo "ERROR: Prometheus still not ready in ${MON_NS}" >&2
+echo "  Do NOT helm uninstall if pods were ever Ready — fix DNS then wait for ImagePullBackOff to retry." >&2
 echo "  kubectl get pods -n ${MON_NS} -o wide" >&2
-echo "  kubectl describe deployment/kube-prometheus-stack-operator -n ${MON_NS}" >&2
-echo "  kubectl describe sts prometheus-kube-prometheus-stack-prometheus -n ${MON_NS}" >&2
+echo "  kubectl describe pod -n ${MON_NS} prometheus-kube-prometheus-stack-prometheus-0 | tail -20" >&2
 exit 1

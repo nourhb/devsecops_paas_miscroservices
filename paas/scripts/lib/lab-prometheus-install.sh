@@ -41,7 +41,9 @@ kubectl create namespace "${MON_NS}" --dry-run=client -o yaml | kubectl apply -f
 clear_stuck_helm_release
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
-helm repo update prometheus-community
+if ! helm repo update prometheus-community 2>/dev/null; then
+  warn "helm repo update failed (offline?) — using cached chart index"
+fi
 
 helm_args=(
   upgrade --install "${RELEASE}" prometheus-community/kube-prometheus-stack

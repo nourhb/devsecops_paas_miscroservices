@@ -14,7 +14,11 @@ echo "=============================================="
 
 export PROMETHEUS_RECOVER_SKIP_GRAFANA="${PROMETHEUS_RECOVER_SKIP_GRAFANA:-1}"
 
-bash "${SCRIPT_DIR}/lab-prometheus-recover.sh" || warn "prometheus recover incomplete — continuing"
+if bash "${SCRIPT_DIR}/probe-prometheus-lab.sh" 2>/dev/null; then
+  ok "Prometheus already reachable — skip recover (no pod restarts)"
+else
+  bash "${SCRIPT_DIR}/lab-prometheus-recover.sh" || warn "prometheus recover incomplete — continuing"
+fi
 
 bash "${SCRIPT_DIR}/bootstrap-integrations-lab.sh" || true
 
@@ -26,7 +30,8 @@ kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=300s
 if bash "${SCRIPT_DIR}/probe-prometheus-lab.sh"; then
   ok "Prometheus reachable from lab"
 else
-  warn "Prometheus probe still failing — check monitoring namespace pods"
+  warn "Prometheus probe still failing — check: kubectl get pods -n ${MON_NS}"
+  warn "If ImagePullBackOff: fix VM DNS (getent hosts quay.io) then wait — do not helm uninstall"
 fi
 
 echo "=============================================="
