@@ -63,6 +63,11 @@ patch_env_key() {
   fi
 }
 
+ensure_helm_repo() {
+  helm repo add dependency-track https://dependencytrack.github.io/helm-charts 2>/dev/null || true
+  helm repo update dependency-track 2>/dev/null || helm repo update 2>/dev/null || true
+}
+
 fix_frontend_api_base_url() {
   local api_port fe_port api_base current
   api_port="$(discover_api_port)"
@@ -162,7 +167,10 @@ acquire_token() {
       printf '%s' "${LOGIN_BODY}"
       return 0
     fi
-    warn "login HTTP ${LOGIN_HTTP} with tried password — next candidate"
+    warn "login HTTP ${LOGIN_HTTP} with password len=${#pass} — next candidate"
+    if [[ "${LOGIN_HTTP}" != "200" && -n "${LOGIN_BODY}" ]]; then
+      warn "login body: ${LOGIN_BODY:0:180}"
+    fi
   done
   fail "login failed for user ${DT_ADMIN_USER} — set DT_ADMIN_PASSWORD (UI: http://${NODE_IP}:30212) then re-run dt-bootstrap"
 }
@@ -205,12 +213,21 @@ else:
 }
 
 create_api_key() {
-  local token="$1" team_uuid="$2" resp key
-  resp="$(curl -sS -m 30 -X PUT "${API_BASE}/api/v1/team/${team_uuid}/key" \
+  local token="$1" team_uuid="$2" resp key http
+  resp="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X PUT "${API_BASE}/api/v1/team/${team_uuid}/key" \
     -H "Authorization: Bearer ${token}" \
     -H "Content-Type: application/json")"
+  http="${resp##*$'\n__HTTP__'}"
+  resp="${resp%$'\n__HTTP__'*}"
+  if [[ "${http}" != "200" ]]; then
+    resp="$(curl -sS -m 30 -w $'\n__HTTP__%{http_code}' -X POST "${API_BASE}/api/v1/team/${team_uuid}/key" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Content-Type: application/json")"
+    http="${resp##*$'\n__HTTP__'}"
+    resp="${resp%$'\n__HTTP__'*}"
+  fi
   key="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("key",""))' <<<"${resp}")"
-  [[ -n "${key}" ]] || fail "API key creation failed: ${resp}"
+  [[ -n "${key}" ]] || fail "API key creation failed (HTTP ${http}): ${resp}"
   printf '%s' "${key}"
 }
 
@@ -240,6 +257,7 @@ main() {
   echo " bootstrap-dependency-track-lab (CLI only)"
   echo "=============================================="
 
+  ensure_helm_repo
   fix_frontend_api_base_url
 
   local api_port api_base token team_uuid api_key verify_http

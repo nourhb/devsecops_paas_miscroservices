@@ -267,7 +267,10 @@ case "$cmd" in
   dependency-track|dtrack)
     bash "$LIB/lab-dependency-track.sh" ;;
   dt-bootstrap|dependency-track-bootstrap)
-    bash "$LIB/bootstrap-dependency-track-lab.sh" ;;
+    bash "$LIB/bootstrap-dependency-track-lab.sh"
+    bash "$LIB/compose-paas-frontend-env.sh"
+    bash "$LIB/sync-paas-frontend-env-k8s.sh"
+    ;;
   argocd-bootstrap|bootstrap-argocd)
     bash "$LIB/bootstrap-argocd-lab.sh" ;;
   integrations-bootstrap|bootstrap-integrations)
