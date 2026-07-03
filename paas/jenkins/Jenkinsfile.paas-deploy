@@ -2035,6 +2035,8 @@ ${paasSourceBuildEnvShellSnippet()}
 
 def dockerlessImagePushCraneNode6c(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot) {
   def imageRefIp = imageRefHarborIp(imageRef)
+  def regHost = imageRef.tokenize('/')[0]
+  def ipHost = imageRefIp.tokenize('/')[0]
   println "[image] Step 6c — layer tar + crane append"
   sh """
     set -eu
