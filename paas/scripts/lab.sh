@@ -115,6 +115,7 @@ usage() {
   echo "  restore   Jenkins + frontend env + pipeline (get deploy working again)"
   echo "  rollback-june17  Restore Jenkins pipeline to 17 Jun build #756 layout (bb1fef3)"
   echo "  pipeline-heal  Full 12-step pipeline: Sonar token + env + Jenkins + Harbor"
+  echo "  backup|full-backup  FULL disaster-recovery backup: git bundle + all k8s/helm + Jenkins + raw PV data (Harbor/Sonar/DT/Postgres)"
 }
 case "$cmd" in
   start|recover)
@@ -325,6 +326,8 @@ case "$cmd" in
     bash "$LIB/lab-rollback-june17.sh" ;;
   pipeline-heal|pipeline|12steps|full-pipeline)
     bash "$LIB/lab-pipeline-full-heal.sh" ;;
+  backup|full-backup|backup-everything)
+    bash "$LIB/lab-full-backup.sh" ;;
   break-loop|stop-loop|break)
     bash "$LIB/lab-break-loop.sh" ;;
   worker1|worker1-heal)
