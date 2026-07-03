@@ -13,6 +13,7 @@ echo " lab-prometheus-fix — monitoring charts"
 echo "=============================================="
 
 export PROMETHEUS_RECOVER_SKIP_GRAFANA="${PROMETHEUS_RECOVER_SKIP_GRAFANA:-1}"
+export SKIP_HARBOR_HEAL="${SKIP_HARBOR_HEAL:-1}"
 
 if bash "${SCRIPT_DIR}/probe-prometheus-lab.sh" 2>/dev/null; then
   ok "Prometheus already reachable — skip recover (no pod restarts)"

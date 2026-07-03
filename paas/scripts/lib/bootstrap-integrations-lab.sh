@@ -224,7 +224,9 @@ main() {
   fi
 
   local harbor_ping="000"
-  if [[ -n "$(grep -E '^HARBOR_PROBE_URL=' "${ENV_FILE}" 2>/dev/null | tail -1 | cut -d= -f2- || true)" ]]; then
+  if [[ "${SKIP_HARBOR_HEAL:-}" == "1" ]]; then
+    warn "SKIP_HARBOR_HEAL=1 — skip harbor DB heal (run: bash paas/scripts/lab.sh harbor)"
+  elif [[ -n "$(grep -E '^HARBOR_PROBE_URL=' "${ENV_FILE}" 2>/dev/null | tail -1 | cut -d= -f2- || true)" ]]; then
     harbor_ping="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
       -u "${HARBOR_USER:-admin}:${HARBOR_PASS:-Harbor12345}" \
       "$(grep -E '^HARBOR_PROBE_URL=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '"')/api/v2.0/ping" 2>/dev/null || echo 000)"
