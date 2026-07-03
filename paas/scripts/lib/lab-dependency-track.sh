@@ -338,6 +338,10 @@ if [[ "${LAB_DT_ENV_ONLY:-false}" == "true" ]]; then
   fi
   sync_dt_env_urls || exit 1
   if ! verify_dt_api_key; then
+    if [[ "${LAB_DT_NO_AUTO_BOOTSTRAP:-false}" == "true" ]]; then
+      warn "DEPENDENCY_TRACK_API_KEY invalid — skip auto bootstrap (LAB_DT_NO_AUTO_BOOTSTRAP)"
+      exit 1
+    fi
     warn "DEPENDENCY_TRACK_API_KEY invalid — running dt-bootstrap"
     if ! bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh"; then
       fail "dt-bootstrap failed — fix admin login then re-run: bash paas/scripts/lab.sh dt-bootstrap"
@@ -416,11 +420,16 @@ fi
 
 sync_dt_env_urls || FAIL=1
 if ! verify_dt_api_key; then
+  if [[ "${LAB_DT_NO_AUTO_BOOTSTRAP:-false}" == "true" ]]; then
+    warn "DEPENDENCY_TRACK_API_KEY invalid — skip auto bootstrap (LAB_DT_NO_AUTO_BOOTSTRAP)"
+    FAIL=1
+  else
   warn "DEPENDENCY_TRACK_API_KEY invalid or NodePort down — auto dt-bootstrap"
   if bash "${SCRIPT_DIR}/bootstrap-dependency-track-lab.sh"; then
     verify_dt_api_key || FAIL=1
   else
     FAIL=1
+  fi
   fi
 fi
 

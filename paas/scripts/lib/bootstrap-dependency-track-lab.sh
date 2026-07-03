@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -E
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 NODE_IP="${NODE_IP:-192.168.56.129}"
@@ -18,6 +19,13 @@ API_BASE=""
 ok() { echo "OK: $*"; }
 warn() { echo "WARN: $*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+_on_err() {
+  local ec=$?
+  echo "FAIL: bootstrap aborted (exit ${ec}) at line ${BASH_LINENO[0]}: ${BASH_COMMAND}" >&2
+  exit "${ec}"
+}
+trap _on_err ERR
 
 read_env_val() {
   local key="$1" file line
@@ -44,6 +52,13 @@ need_cmd() {
 }
 
 discover_api_port() {
+  local np
+  np="$(kubectl get svc -n "${DT_NS}" -l app.kubernetes.io/component=api-server \
+    -o jsonpath='{.items[0].spec.ports[0].nodePort}' 2>/dev/null || true)"
+  if [[ -n "${np}" && "${np}" != "null" ]]; then
+    printf '%s' "${np}"
+    return 0
+  fi
   kubectl get svc -n "${DT_NS}" "${RELEASE}-dependency-track-api-server" \
     -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true
 }
@@ -68,6 +83,27 @@ ensure_helm_repo() {
   helm repo update dependency-track 2>/dev/null || helm repo update 2>/dev/null || true
 }
 
+ensure_dt_installed() {
+  local api_port
+  if kubectl get ns "${DT_NS}" >/dev/null 2>&1 && helm status "${RELEASE}" -n "${DT_NS}" >/dev/null 2>&1; then
+    api_port="$(discover_api_port)"
+    [[ -n "${api_port}" && "${api_port}" != "null" ]] && return 0
+    warn "Dependency-Track release exists but API NodePort missing — healing"
+  else
+    warn "Dependency-Track missing — install/heal via lab-dependency-track"
+  fi
+  LAB_DT_NO_AUTO_BOOTSTRAP=1 bash "${SCRIPT_DIR}/lab-dependency-track.sh" || {
+    api_port="$(discover_api_port)"
+    if [[ -n "${api_port}" && "${api_port}" != "null" ]]; then
+      warn "dependency-track heal exited non-zero (likely stale API key) — continuing bootstrap"
+    else
+      fail "Dependency-Track install/heal failed"
+    fi
+  }
+  api_port="$(discover_api_port)"
+  [[ -n "${api_port}" && "${api_port}" != "null" ]] || fail "API NodePort still missing after install (kubectl get svc -n ${DT_NS})"
+}
+
 fix_frontend_api_base_url() {
   local api_port fe_port api_base current
   api_port="$(discover_api_port)"
@@ -78,11 +114,15 @@ fix_frontend_api_base_url() {
     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="API_BASE_URL")].value}' 2>/dev/null || true)"
   if [[ "${current}" != "${api_base}" ]]; then
     echo "==> helm upgrade frontend.apiBaseUrl=${api_base}"
-    helm upgrade "${RELEASE}" dependency-track/dependency-track -n "${DT_NS}" \
+    if ! helm upgrade "${RELEASE}" dependency-track/dependency-track -n "${DT_NS}" \
       --reuse-values \
       --set "frontend.apiBaseUrl=${api_base}" \
-      --wait --timeout 8m
-    kubectl rollout status -n "${DT_NS}" "deployment/${RELEASE}-dependency-track-frontend" --timeout=5m
+      --wait --timeout 8m; then
+      fail "helm upgrade frontend.apiBaseUrl failed (run: bash paas/scripts/lab.sh dependency-track)"
+    fi
+    if ! kubectl rollout status -n "${DT_NS}" "deployment/${RELEASE}-dependency-track-frontend" --timeout=5m; then
+      fail "frontend rollout did not become ready"
+    fi
   fi
   ok "frontend API_BASE_URL=${api_base}"
   ok "UI port ${fe_port:-?} (optional) — CLI uses API ${api_base} directly"
@@ -94,17 +134,7 @@ api_pod_name() {
 }
 
 setup_api_pod() {
-  local pod
-  pod="$(api_pod_name)"
-  if [[ -z "${pod}" ]]; then
-    warn "no Running DT API pod in ${DT_NS}"
-    return 0
-  fi
-  if kubectl exec -n "${DT_NS}" "${pod}" --request-timeout=20s -- \
-    curl -fsS -m 5 "http://127.0.0.1:8080/api/version" >/dev/null 2>&1; then
-    API_POD="${pod}"
-    ok "using in-pod API (${pod}:8080)"
-  fi
+  API_POD=""
 }
 
 dt_http() {
@@ -188,31 +218,51 @@ print(raw)
 '
 }
 
+parse_login_token() {
+  local body="$1"
+  local token=""
+  token="$(normalize_bearer_token "${body}" 2>/dev/null)" || true
+  [[ -n "${token}" ]] || fail "could not parse login token from: ${body:0:200}"
+  printf '%s' "${token}"
+}
+
 acquire_token() {
-  local raw pass tried="" token
+  local raw pass tried="" token rc
+  set +e
   for pass in "DependencyTrack123!" "admin" "${DT_ADMIN_NEW_PASSWORD}" "${DT_ADMIN_PASSWORD}"; do
     [[ -n "${pass}" ]] || continue
     case " ${tried} " in *" ${pass} "*) continue ;; esac
     tried="${tried} ${pass}"
     echo "==> DT login user=${DT_ADMIN_USER} (trying password len=${#pass})"
-    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}")"
+    raw="$(dt_login_raw "${DT_ADMIN_USER}" "${pass}" 2>&1)"
+    rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
+      warn "login transport failed (rc=${rc}): ${raw:0:200}"
+      continue
+    fi
     parse_login "${raw}"
     if [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" && "${LOGIN_BODY}" != *"FORCE_PASSWORD_CHANGE"* ]]; then
-      token="$(normalize_bearer_token "${LOGIN_BODY}")"
+      token="$(parse_login_token "${LOGIN_BODY}")"
       DT_ADMIN_PASSWORD="${pass}"
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${pass}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${pass}"
       ok "logged in as ${DT_ADMIN_USER}"
+      set -e
       printf '%s' "${token}"
       return 0
     fi
     if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
+      set -e
       ok "first login — forcing password change to ${DT_ADMIN_NEW_PASSWORD}"
       force_change_password "${DT_ADMIN_USER}" "${pass}" "${DT_ADMIN_NEW_PASSWORD}"
-      raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}")"
+      set +e
+      raw="$(dt_login_raw "${DT_ADMIN_USER}" "${DT_ADMIN_PASSWORD}" 2>&1)"
+      rc=$?
+      set -e
+      [[ "${rc}" -eq 0 ]] || fail "login after password change transport failed (rc=${rc})"
       parse_login "${raw}"
       [[ "${LOGIN_HTTP}" == "200" && -n "${LOGIN_BODY}" ]] || fail "login after password change HTTP ${LOGIN_HTTP}: ${LOGIN_BODY}"
-      token="$(normalize_bearer_token "${LOGIN_BODY}")"
+      token="$(parse_login_token "${LOGIN_BODY}")"
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       printf '%s' "${token}"
@@ -223,6 +273,7 @@ acquire_token() {
       warn "login body: ${LOGIN_BODY:0:180}"
     fi
   done
+  set -e
   fail "login failed for user ${DT_ADMIN_USER} — open http://${NODE_IP}:$(discover_frontend_port || echo 30212) or set DT_ADMIN_PASSWORD in .env"
 }
 
@@ -243,9 +294,9 @@ force_change_password() {
 }
 
 find_team_uuid() {
-  local token="$1"
-  dt_http GET "/api/v1/team" -H "Authorization: Bearer ${token}" \
-    | python3 -c "
+  local token="$1" teams_json
+  teams_json="$(dt_http GET "/api/v1/team" -H "Authorization: Bearer ${token}" 2>&1)" || fail "list teams failed: ${teams_json:0:200}"
+  printf '%s' "${teams_json}" | python3 -c "
 import json, sys
 name = sys.argv[1]
 teams = json.load(sys.stdin)
@@ -302,6 +353,7 @@ sync_env_and_jenkins() {
 }
 
 main() {
+  echo "==> bootstrap-dependency-track-lab starting (repo=${REPO_ROOT})"
   load_dt_admin_creds
   need_cmd kubectl
   need_cmd helm
@@ -313,6 +365,7 @@ main() {
   echo "=============================================="
 
   ensure_helm_repo
+  ensure_dt_installed
   fix_frontend_api_base_url
 
   local api_port api_base token team_uuid api_key verify_http
@@ -323,12 +376,12 @@ main() {
   setup_api_pod
   wait_api
 
-  token="$(acquire_token)"
+  token="$(acquire_token)" || fail "acquire_token failed"
 
-  team_uuid="$(find_team_uuid "${token}")"
+  team_uuid="$(find_team_uuid "${token}")" || fail "find_team_uuid failed"
   ok "team ${TEAM_NAME} uuid=${team_uuid}"
 
-  api_key="$(create_api_key "${token}" "${team_uuid}")"
+  api_key="$(create_api_key "${token}" "${team_uuid}")" || fail "create_api_key failed"
   ok "API key created (${#api_key} chars, starts with ${api_key:0:4}...)"
 
   verify_http="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 \
