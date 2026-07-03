@@ -30,6 +30,23 @@ ensure_lab_env_defaults() {
   echo "OK: lab defaults (PAAS_DT_UPLOAD_OPTIONAL=true, JENKINS_NEXT_BUILD_WEBPACK=true, inline sync off)"
 }
 
+frontend_needs_rebuild() {
+  local head marker
+  head="$(git rev-parse HEAD 2>/dev/null || echo "")"
+  marker="${REPO_ROOT}/paas/frontend/.paas-frontend-image-head"
+  if [[ -z "${head}" ]]; then
+    return 0
+  fi
+  if [[ ! -f "${marker}" ]] || [[ "$(cat "${marker}" 2>/dev/null || true)" != "${head}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+record_frontend_image_head() {
+  git rev-parse HEAD > "${REPO_ROOT}/paas/frontend/.paas-frontend-image-head" 2>/dev/null || true
+}
+
 preflight() {
   local fail=0 dt_http sonar_ok kctl_ok marker_ok
   set -a
@@ -76,6 +93,28 @@ preflight() {
     echo "WARN: Jenkins pod missing Step 4/5 in monolith — CPS bundle stale"
     fail=1
   fi
+  if git merge-base --is-ancestor 471942b HEAD 2>/dev/null; then
+    echo "OK: git HEAD includes auto-deploy + security-gate fixes (471942b+)"
+  else
+    echo "WARN: git HEAD missing 471942b — run: git fetch origin main && git reset --hard origin/main"
+    fail=1
+  fi
+  if command -v kubectl >/dev/null 2>&1 && kubectl get deploy frontend -n paas >/dev/null 2>&1; then
+    local dt_opt
+    dt_opt="$(kubectl exec -n paas deploy/frontend --request-timeout=20s -- printenv PAAS_DT_UPLOAD_OPTIONAL 2>/dev/null | tr -d '\r\n' || true)"
+    if [[ "${dt_opt}" == "true" ]]; then
+      echo "OK: frontend pod PAAS_DT_UPLOAD_OPTIONAL=true"
+    else
+      echo "WARN: frontend pod PAAS_DT_UPLOAD_OPTIONAL=${dt_opt:-MISSING} — run lab.sh frontend after deploy-now"
+      fail=1
+    fi
+  fi
+  if frontend_needs_rebuild; then
+    echo "WARN: PaaS frontend Docker image stale vs git HEAD — promote/security fixes need: bash paas/scripts/lab.sh frontend"
+    fail=1
+  else
+    echo "OK: PaaS frontend image matches current git HEAD"
+  fi
   return "${fail}"
 }
 
@@ -106,12 +145,24 @@ export JENKINS_NEXT_BUILD_WEBPACK=true
 python3 "${SCRIPT_DIR}/create_jenkins_paas_deploy_job.py" --params-only --force
 
 if command -v kubectl >/dev/null 2>&1 && kubectl get secret paas-frontend-env -n paas >/dev/null 2>&1; then
-  echo "==> 5b/6 sync frontend env secret"
+  echo "==> 5b/7 sync frontend env secret"
   PAAS_SKIP_ROLLOUT=0 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" \
     || echo "WARN: frontend env sync failed"
 fi
 
-echo "==> 6/6 preflight"
+if [[ "${PAAS_SKIP_FRONTEND_REBUILD:-false}" != "true" ]] && frontend_needs_rebuild; then
+  echo "==> 5c/7 rebuild PaaS frontend image (promote + security-gate fixes are TypeScript — env sync alone is not enough)"
+  bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh"
+  record_frontend_image_head
+  PAAS_SKIP_ROLLOUT=0 ENV_FILE="${ENV_FILE}" bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" \
+    || echo "WARN: frontend env sync after rebuild failed"
+elif [[ "${PAAS_SKIP_FRONTEND_REBUILD:-false}" == "true" ]]; then
+  echo "==> 5c/7 skip frontend rebuild (PAAS_SKIP_FRONTEND_REBUILD=true)"
+else
+  echo "==> 5c/7 skip frontend rebuild (image already matches git HEAD)"
+fi
+
+echo "==> 6/7 preflight"
 if preflight; then
   echo ""
   echo "=============================================="

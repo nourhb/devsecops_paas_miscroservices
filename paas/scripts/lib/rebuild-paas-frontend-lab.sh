@@ -148,4 +148,5 @@ if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s; 
   bash "${SCRIPT_DIR}/lab-frontend-force-recover.sh" || exit 1
 fi
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
+git rev-parse HEAD > "${REPO_ROOT}/paas/frontend/.paas-frontend-image-head" 2>/dev/null || true
 echo "OK: frontend rolled out with ${TARGET_IMAGE}"
