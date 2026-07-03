@@ -19,7 +19,7 @@ def pauseFrontendForSonar() {
     export PATH="${JENKINS_HOME:-/var/jenkins_home}/bin:${PATH}"
     KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
     command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM) exit 0; }
+    command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sonar-ram] kubectl unavailable — skip RAM pause (Sonar may OOM)"; exit 0; }
 
     pause_ns_deployments() {
       local ns="$1" statefile="$2"
@@ -83,7 +83,7 @@ def restoreFrontendAfterSonar() {
     TARGET="$(printf "%s" "${TARGET}" | grep -oE "^[0-9]+$")"
     [ -n "${TARGET}" ] && [ "${TARGET}" -gt 0 ] 2>/dev/null || TARGET=1
     echo "[sonar-ram] restoring frontend replicas=${TARGET}"
-    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed
+    "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed (non-fatal)"
 
     # Restore Harbor first (Step 6 needs it next) then Dependency-Track.
     restore_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
@@ -1700,7 +1700,7 @@ PAAS_PY
       fi
     done
     if [ "\${_crane_ok}" != 1 ]; then
-      echo "[image] ERROR: python crane append failed
+      echo "[image] ERROR: python crane append failed"
       exit 1
     fi
     if [ "${imageRefIp}" != "${imageRef}" ]; then
@@ -3294,7 +3294,7 @@ exit 0
                   _sonar_ready=1
                   break
                 fi
-                echo "[sonar] auto-rotate failed && bash paas/scripts/lab.sh pipeline-heal"
+                echo "[sonar] auto-rotate failed — run: bash paas/scripts/lab.sh pipeline-heal"
                 break
               fi
               if [ "${_sv}" -lt 5 ]; then
@@ -3306,7 +3306,7 @@ exit 0
             done
             if [ "${_sonar_ready}" != "1" ]; then
               if [ -z "${_last_valid}" ]; then
-                echo "[sonar] cannot reach Sonar
+                echo "[sonar] cannot reach Sonar at ${SONAR_HOST_URL} — run: bash paas/scripts/lab.sh sonar-bootstrap"
               else
                 echo "[sonar] token not valid from Jenkins agent — rotate SONAR_TOKEN via pipeline-heal"
               fi
