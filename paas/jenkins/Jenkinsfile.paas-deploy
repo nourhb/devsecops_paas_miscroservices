@@ -612,6 +612,12 @@ def resolveNodeVersion(String appRoot = '.') {
         }
         return '16.20.2'
       }
+      def cra = (pkg =~ /"react-scripts"\s*:\s*"\^?(\d+)/)
+      if (cra.find()) {
+        def craMajor = (cra.group(1) as Integer)
+        if (craMajor < 5) { return '16.20.2' }
+        if (craMajor == 5) { return '18.20.4' }
+      }
     } catch (Exception ignored) {}
   }
   return '20.19.5'
@@ -635,6 +641,24 @@ def isLegacyAngularProject(String appRoot = '.') {
     return true
   } catch (Exception ignored) {
     return true
+  }
+}
+
+def isLegacyCraProject(String appRoot = '.') {
+  def root = (appRoot ?: '.').trim() ?: '.'
+  def pkgPath = root == '.' ? 'package.json' : "${root}/package.json"
+  if (!fileExists(pkgPath)) {
+    return false
+  }
+  try {
+    def pkg = readFile(pkgPath)
+    def m = (pkg =~ /"react-scripts"\s*:\s*"\^?(\d+)/)
+    if (m.find()) {
+      return (m.group(1) as Integer) < 5
+    }
+    return false
+  } catch (Exception ignored) {
+    return false
   }
 }
 
@@ -1718,14 +1742,18 @@ PAAS_PY
 def dockerlessNginxCranePush(String craneBin, String imageRef, String artifactImageRef, String craneInsecure, String appRoot, String framework) {
   println '[image] marker=nginx-conf-writefile-20260611 (writeFile default.conf — no Groovy $uri in sh """)'
   def legacyAngular = isLegacyAngularProject(appRoot)
+  def legacyCra = isLegacyCraProject(appRoot)
   if (legacyAngular) {
     println '[paas-jenkinsfile] marker=angular-legacy-ng-build-20260613 (Node16 + ng build --progress=false; 4G heap; Step6 timeout bump)'
+  }
+  if (legacyCra) {
+    println '[paas-jenkinsfile] marker=cra-legacy-react-scripts-20260703 (react-scripts<5 → Node16 + clean install before nginx build)'
   }
   def nodeVer = resolveNodeVersion(appRoot)
   println "[image] Step 6 — nginx static crane path (angular/spa dist → port 80; Node ${nodeVer})"
   ensureNodeTool(nodeVer)
   def heapMb = legacyAngular ? '4096' : '2048'
-  withEnv(["PAAS_FRAMEWORK=${framework}", "PAAS_LEGACY_ANGULAR=${legacyAngular ? 'true' : 'false'}"]) {
+  withEnv(["PAAS_FRAMEWORK=${framework}", "PAAS_LEGACY_ANGULAR=${legacyAngular ? 'true' : 'false'}", "PAAS_LEGACY_CRA=${legacyCra ? 'true' : 'false'}"]) {
     sh """
       set -eu
       cd '${appRoot}'
@@ -1733,24 +1761,33 @@ def dockerlessNginxCranePush(String craneBin, String imageRef, String artifactIm
 ${paasShellKeepaliveHelper()}
 ${paasOpensslLegacyShellSnippet()}
       echo "[image] nginx build using node \$(node -v 2>/dev/null || echo missing)"
-      if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
+      _needs_clean=0
+      if [ "\${PAAS_LEGACY_CRA:-false}" = "true" ]; then _needs_clean=1; fi
+      if [ -f yarn.lock ]; then _needs_clean=1; fi
+      if [ "\${_needs_clean}" = "1" ]; then
+        echo "[image] legacy CRA or yarn.lock — rm -rf node_modules before nginx build (committed/mixed trees break postcss on Node 20)"
+        rm -rf node_modules
+      fi
+      if [ -f package.json ] && { command -v npm >/dev/null 2>&1 || command -v yarn >/dev/null 2>&1; }; then
         if [ ! -d node_modules ] || { [ -f package.json ] && grep -q '@angular/core' package.json 2>/dev/null && [ ! -d node_modules/@angular ]; }; then
-          echo "[image] nginx path — npm install before ng build"
-          if [ -f package-lock.json ]; then
+          echo "[image] nginx path — install deps before static build"
+          if [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then
+            yarn install --frozen-lockfile 2>/dev/null || yarn install --non-interactive 2>/dev/null || yarn install
+          elif [ -f package-lock.json ]; then
             run_with_keepalive npm ci --no-audit --no-fund --prefer-offline || run_with_keepalive npm install --no-audit --no-fund
           else
             run_with_keepalive npm install --no-audit --no-fund
           fi
         fi
         if [ ! -d dist ] && [ ! -d build ]; then
-          echo "[image] nginx path — npm build before static layer"
+          echo "[image] nginx path — build before static layer"
           if [ -f package.json ] && grep -q '@angular/core' package.json 2>/dev/null && [ -x node_modules/.bin/ng ]; then
             echo "[image] legacy/modern Angular — ng build --progress=false (ivy compile may take several minutes)"
             run_with_keepalive ./node_modules/.bin/ng build --progress=false
           elif node -e "const s=require('./package.json').scripts||{};process.exit(s['build:ci']?0:1)" 2>/dev/null; then
-            run_with_keepalive npm run build:ci
+            if [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then run_with_keepalive yarn run build:ci; else run_with_keepalive npm run build:ci; fi
           elif node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.build?0:1)" 2>/dev/null; then
-            run_with_keepalive npm run build
+            if [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then run_with_keepalive yarn run build; else run_with_keepalive npm run build; fi
           fi
         fi
       fi
