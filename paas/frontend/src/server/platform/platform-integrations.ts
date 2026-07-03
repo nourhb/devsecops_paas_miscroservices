@@ -245,7 +245,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Time-series metrics and PromQL.",
                     kind: "external",
                     href: firstNonEmpty(realValueOrEmpty(env.PROMETHEUS_BASE_URL), publicEnv("NEXT_PUBLIC_PROMETHEUS_URL")),
-                    configured: Boolean(firstNonEmpty(realValueOrEmpty(env.PROMETHEUS_BASE_URL), publicEnv("NEXT_PUBLIC_PROMETHEUS_URL")))
+                    configured: Boolean(firstNonEmpty(realValueOrEmpty(env.PROMETHEUS_BASE_URL), publicEnv("NEXT_PUBLIC_PROMETHEUS_URL"))),
+                    optional: true
                 },
                 {
                     id: "grafana",
@@ -261,7 +262,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Alert routing, silences, and receivers.",
                     kind: "external",
                     href: integrationUrl("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL) || null,
-                    configured: integrationConfigured("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL)
+                    configured: integrationConfigured("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL),
+                    optional: true
                 },
                 {
                     id: "pushgateway",
@@ -269,7 +271,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Accept metrics pushed from batch jobs for Prometheus.",
                     kind: "external",
                     href: firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))) || null,
-                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))))
+                    configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL)))),
+                    optional: true
                 },
                 {
                     id: "kube-state-metrics",
@@ -382,7 +385,8 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     description: "Docker Hub namespace used by deploy pipelines.",
                     kind: "external",
                     href: dockerHubProfileUrl(env.DOCKERHUB_USERNAME) || null,
-                    configured: Boolean(dockerHubProfileUrl(env.DOCKERHUB_USERNAME))
+                    configured: Boolean(dockerHubProfileUrl(env.DOCKERHUB_USERNAME)),
+                    optional: true
                 },
                 {
                     id: "nexus",

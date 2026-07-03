@@ -2037,6 +2037,69 @@ export class OpaClient {
 }
 export class HarborClient {
     private enabled = Boolean(env.HARBOR_BASE_URL);
+    private authHeader(): string | null {
+        if (!env.HARBOR_USERNAME.trim() || !env.HARBOR_PASSWORD.trim()) {
+            return null;
+        }
+        return `Basic ${Buffer.from(`${env.HARBOR_USERNAME}:${env.HARBOR_PASSWORD}`).toString("base64")}`;
+    }
+    async verifyCredentials(): Promise<{
+        ok: boolean;
+        message: string;
+    }> {
+        if (!env.HARBOR_BASE_URL.trim()) {
+            return { ok: false, message: "Harbor not configured (set HARBOR_BASE_URL)." };
+        }
+        const auth = this.authHeader();
+        if (!auth) {
+            return { ok: false, message: "Harbor credentials not set (HARBOR_USERNAME / HARBOR_PASSWORD)." };
+        }
+        try {
+            const base = env.HARBOR_BASE_URL.trim().replace(/\/+$/, "");
+            const response = await fetch(`${base}/api/v2.0/ping`, {
+                headers: { Authorization: auth }
+            });
+            if (!response.ok) {
+                return { ok: false, message: `Harbor authentication failed (HTTP ${response.status}).` };
+            }
+            return { ok: true, message: `Harbor credentials verified (${base}).` };
+        }
+        catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            return { ok: false, message: `Harbor unreachable: ${detail}` };
+        }
+    }
+    async listRepositoryArtifacts(projectName: string): Promise<string[]> {
+        const auth = this.authHeader();
+        if (!auth || !env.HARBOR_BASE_URL.trim()) {
+            return [];
+        }
+        const repo = encodeURIComponent(projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "-"));
+        const url = `${env.HARBOR_BASE_URL.replace(/\/+$/, "")}/api/v2.0/projects/${encodeURIComponent(env.HARBOR_PROJECT)}/repositories/${repo}/artifacts?page_size=10`;
+        try {
+            const response = await fetch(url, { headers: { Authorization: auth } });
+            if (!response.ok) {
+                return [];
+            }
+            const data = (await response.json()) as {
+                tags?: {
+                    name?: string;
+                }[];
+            }[];
+            const tags: string[] = [];
+            for (const artifact of data) {
+                for (const tag of artifact.tags ?? []) {
+                    if (tag.name) {
+                        tags.push(tag.name);
+                    }
+                }
+            }
+            return tags.slice(0, 15);
+        }
+        catch {
+            return [];
+        }
+    }
     async pushImage(imageRef: string): Promise<{
         pushed: boolean;
         imageRef: string;
@@ -2044,7 +2107,7 @@ export class HarborClient {
         return fetchOrFallback("Harbor", this.enabled, `${env.HARBOR_BASE_URL}/api/v2.0/projects/${encodeURIComponent(env.HARBOR_PROJECT)}/repositories`, {
             method: "GET",
             headers: {
-                Authorization: `Basic ${Buffer.from(`${env.HARBOR_USERNAME}:${env.HARBOR_PASSWORD}`).toString("base64")}`
+                Authorization: this.authHeader() ?? ""
             }
         }, { pushed: true, imageRef }, async () => ({ pushed: true, imageRef }));
     }
@@ -2130,7 +2193,7 @@ export class DockerHubClient {
         message: string;
     }> {
         if (!this.enabled) {
-            return { ok: true, message: "Docker Hub credentials not set \u2014 registry calls are skipped." };
+            return { ok: false, message: "Docker Hub credentials not set." };
         }
         const token = await this.getJwt();
         if (!token) {
@@ -2211,20 +2274,22 @@ function prometheusBaseUrls(): string[] {
     const inCluster = [
         "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
         "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+        "http://prometheus-kube-prometheus-stack-prometheus.monitoring.svc:9090",
         "http://prometheus-service.monitoring.svc.cluster.local:9090",
         "http://prometheus-operated.monitoring.svc.cluster.local:9090"
     ];
     const nodePortUrls = nodeIp
         ? [`http://${nodeIp}:30536`, `http://${nodeIp}:30083`]
         : [];
-    const candidates = [...k8sProxy];
+    const candidates: string[] = [];
     if (probeUrl) {
         candidates.push(probeUrl);
     }
-    candidates.push(...inCluster);
-    if (baseUrl) {
+    if (baseUrl && baseUrl !== probeUrl) {
         candidates.push(baseUrl);
     }
+    candidates.push(...inCluster);
+    candidates.push(...k8sProxy);
     candidates.push(...nodePortUrls);
     return [...new Set(candidates.map((value) => value.replace(/\/$/, "")))];
 }

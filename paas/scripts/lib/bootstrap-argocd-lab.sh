@@ -97,6 +97,8 @@ sync_env_files() {
     patch_env_key "${f}" "ARGOCD_BASE_URL" "${api_base}"
     patch_env_key "${f}" "ARGOCD_USERNAME" "${ARGOCD_USERNAME}"
     patch_env_key "${f}" "ARGOCD_PASSWORD" "${password}"
+    patch_env_key "${f}" "ARGOCD_AUTH_TOKEN" ""
+    patch_env_key "${f}" "ARGOCD_TOKEN" ""
     patch_env_key "${f}" "ARGOCD_TLS_SKIP_VERIFY" "true"
     ok "updated ${f}"
   done
@@ -118,6 +120,12 @@ main() {
   kubectl get svc "${ARGOCD_SVC}" -n "${ARGOCD_NS}" >/dev/null 2>&1 \
     || fail "${ARGOCD_SVC} not found in namespace ${ARGOCD_NS}"
 
+  local rbac_manifest="${REPO_ROOT}/paas/k8s-manifests/lab/paas-frontend-argocd-rbac.yaml"
+  if [[ -f "${rbac_manifest}" ]]; then
+    kubectl apply --validate=false -f "${rbac_manifest}" >/dev/null
+    ok "applied paas-frontend-argocd-rbac (frontend can read/sync Applications via Kubernetes API)"
+  fi
+
   local in_cluster probe_base password
   in_cluster="$(discover_in_cluster_url)"
   probe_base="$(discover_nodeport_url || echo "${in_cluster}")"
@@ -132,6 +140,7 @@ main() {
   echo "=============================================="
   echo "Done. Next on VM:"
   echo "  bash paas/scripts/lab.sh env"
+  echo "  bash paas/scripts/lab.sh frontend   # reload Argo CD auth in PaaS pod"
   echo "  Refresh Integrations → Delivery checklist (Argo CD should be Ready)"
   echo "Optional UI URL (browser): ${probe_base}"
   echo "=============================================="

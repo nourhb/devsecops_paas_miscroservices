@@ -113,6 +113,17 @@ function integrationProbeErrorMessage(error: unknown): string {
     }
     return error.message;
 }
+function finalizeReachability(item: PlatformIntegrationItem, result: PlatformIntegrationReachability): PlatformIntegrationReachability {
+    if (item.optional && result.state === "unreachable") {
+        return {
+            state: "skipped",
+            message: result.message
+                ? `Optional in lab — ${result.message}`
+                : "Optional in lab — not reachable"
+        };
+    }
+    return result;
+}
 async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformIntegrationReachability> {
     if (item.kind === "external" && item.href && isPlaceholderValue(item.href)) {
         return {
@@ -199,7 +210,7 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
                 message: "POLICY_ENGINE=gatekeeper — Gatekeeper admission (optional dashboard URL)."
             };
         }
-        if (item.id === "cert-manager" && process.env.CERT_MANAGER_INSTALLED === "true") {
+        if (item.id === "cert-manager") {
             if (await hasRunningPodMatching("cert-manager", /cert-manager/)) {
                 return {
                     state: "reachable",
@@ -368,18 +379,45 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             const promBase = realValueOrEmpty(env.PROMETHEUS_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
             const bypass = Boolean(realValueOrEmpty(env.PROMETHEUS_PROBE_URL)) ||
                 probeHostIsRemapSource(promBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            return httpProbe(joinUrl(promBase, "/-/ready"), {}, { itemId: item.id, bypassHostRemap: bypass });
+            const node = labNodeBase();
+            const http = await probeMany([
+                "http://kube-prometheus-stack-prometheus.monitoring.svc:9090",
+                promBase,
+                node ? `${node}:30900` : ""
+            ], "/-/ready", { itemId: item.id, bypassHostRemap: bypass });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (await hasRunningPodMatching("monitoring", /prometheus/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Prometheus pod running (HTTP probe failed — use NodePort or port-forward)"
+                };
+            }
+            return http;
         }
         case "alertmanager": {
             const node = labNodeBase();
             const amPublic = realValueOrEmpty(env.ALERTMANAGER_PROBE_URL).replace(/\/+$/, "") ||
                 realValueOrEmpty(process.env.NEXT_PUBLIC_ALERTMANAGER_URL).replace(/\/+$/, "");
-            return probeMany([
+            const http = await probeMany([
                 "http://kube-prometheus-stack-alertmanager.monitoring.svc:9093",
                 "http://alertmanager-operated.monitoring.svc:9093",
                 amPublic,
                 node ? `${node}:30772` : ""
             ], "/-/healthy", { itemId: item.id, bypassHostRemap: true });
+            if (http.state === "reachable") {
+                return http;
+            }
+            if (await hasRunningPodMatching("monitoring", /alertmanager/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Alertmanager pod running (HTTP probe failed — optional in lab)"
+                };
+            }
+            return http;
         }
         case "pushgateway": {
             const node = labNodeBase();
@@ -579,17 +617,43 @@ async function probeByItemId(item: PlatformIntegrationItem): Promise<PlatformInt
             if (hb) {
                 headers.Authorization = hb;
             }
-            const harborBase = realValueOrEmpty(env.HARBOR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
+            const node = labNodeBase();
+            const harborPublic = realValueOrEmpty(env.HARBOR_PROBE_URL).replace(/\/+$/, "") || href.replace(/\/+$/, "");
             const bypassHarbor = Boolean(realValueOrEmpty(env.HARBOR_PROBE_URL)) ||
-                probeHostIsRemapSource(harborBase, env.INTEGRATIONS_PROBE_HOST_REMAP);
-            const ping = await httpProbe(joinUrl(harborBase, "/api/v2.0/ping"), { headers }, {
-                itemId: item.id,
-                bypassHostRemap: bypassHarbor
-            });
-            if (ping.state === "reachable") {
-                return ping;
+                probeHostIsRemapSource(harborPublic, env.INTEGRATIONS_PROBE_HOST_REMAP);
+            const candidates = [
+                harborPublic,
+                "http://harbor-core.harbor.svc.cluster.local:80",
+                "http://harbor-core.harbor.svc:80",
+                "http://harbor.harbor.svc.cluster.local:80",
+                "http://harbor-nginx.harbor.svc.cluster.local:80",
+                node ? `${node}:30002` : ""
+            ].filter(Boolean);
+            const seen = new Set<string>();
+            for (const base of candidates) {
+                if (seen.has(base)) {
+                    continue;
+                }
+                seen.add(base);
+                const ping = await httpProbe(joinUrl(base, "/api/v2.0/ping"), { headers }, {
+                    itemId: item.id,
+                    bypassHostRemap: bypassHarbor
+                });
+                if (ping.state === "reachable") {
+                    return ping;
+                }
             }
-            return httpProbe(harborBase, { headers }, { itemId: item.id, bypassHostRemap: bypassHarbor });
+            if (await hasRunningPodMatching("harbor", /harbor-core|harbor-nginx/)) {
+                return {
+                    state: "reachable",
+                    latencyMs: 0,
+                    message: "Harbor pods running (API probe failed — run: bash paas/scripts/lib/lab-harbor-db-heal.sh)"
+                };
+            }
+            return {
+                state: "unreachable",
+                message: "Harbor API not reachable — check harbor namespace and HARBOR_* credentials"
+            };
         }
         case "cert-manager": {
             const cmProbe = realValueOrEmpty(env.CERT_MANAGER_PROBE_URL).replace(/\/+$/, "");
@@ -786,7 +850,7 @@ export async function attachIntegrationHealth(payload: PlatformIntegrationsRespo
             flat.push({ item });
         }
     }
-    const outcomes = await runPool(flat, CONCURRENCY, async ({ item }) => probeByItemId(item));
+    const outcomes = await runPool(flat, CONCURRENCY, async ({ item }) => finalizeReachability(item, await probeByItemId(item)));
     outcomes.forEach((reachability, idx) => {
         flat[idx]!.item.reachability = reachability;
     });

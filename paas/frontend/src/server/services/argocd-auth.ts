@@ -51,6 +51,15 @@ async function loginForSessionToken(): Promise<string | null> {
 }
 
 export async function resolveArgoCdAuthToken(): Promise<string | null> {
+    if (configuredPassword()) {
+        if (cachedSessionToken && Date.now() < cachedSessionExpiresAt) {
+            return cachedSessionToken;
+        }
+        const sessionToken = await loginForSessionToken();
+        if (sessionToken) {
+            return sessionToken;
+        }
+    }
     const staticToken = env.ARGOCD_AUTH_TOKEN.trim();
     if (staticToken) {
         return staticToken;

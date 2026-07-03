@@ -354,6 +354,18 @@ export const kubernetesApi = {
     }
 };
 export const dockerApi = {
+    registryStatus: async () => {
+        const { data } = await apiClient.get<{
+            kind: "harbor" | "dockerhub" | "none";
+            configured: boolean;
+            verified: boolean;
+            message: string;
+            registryLabel: string;
+            pushButtonLabel: string;
+            configHint: string;
+        }>("/api/docker/registry-status");
+        return data;
+    },
     build: async (projectId: string) => {
         const { data } = await apiClient.post<{
             imageRef: string;

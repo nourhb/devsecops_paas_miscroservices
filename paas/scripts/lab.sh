@@ -87,6 +87,8 @@ usage() {
   echo "  dependency-track  Heal DT API server + sync NodePort URL in env"
   echo "  dt-bootstrap      Fix DT login 405 + create API key via CLI (no UI)"
   echo "  argocd-bootstrap  Set ARGOCD_BASE_URL + admin password in env (no UI)"
+  echo "  argocd-fix        Fix GitOps 403 — RBAC + admin password + frontend restart"
+  echo "  prometheus-fix    Recover Prometheus + wire PROMETHEUS_* env for charts"
   echo "  integrations-bootstrap  Wire Grafana/Trivy/DT URLs + scale monitoring stack"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
   echo "  frontend-up       Restore UI after Sonar RAM window / orphaned scale-to-0"
@@ -291,6 +293,10 @@ case "$cmd" in
     ;;
   argocd-bootstrap|bootstrap-argocd)
     bash "$LIB/bootstrap-argocd-lab.sh" ;;
+  argocd-fix|fix-argocd)
+    bash "$LIB/lab-argocd-fix.sh" ;;
+  prometheus-fix|fix-prometheus)
+    bash "$LIB/lab-prometheus-fix.sh" ;;
   integrations-bootstrap|bootstrap-integrations)
     bash "$LIB/bootstrap-integrations-lab.sh" ;;
   frontend-heal)

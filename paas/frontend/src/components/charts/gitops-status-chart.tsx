@@ -34,7 +34,7 @@ export function GitOpsStatusChart({ health, syncStatus, appName, unreachableReas
           {unreachableReason}
         </ChartCaption>) : (<ChartCaption>
           {healthLabel === "Unknown" && syncLabel === "Unknown"
-              ? "Configure ARGOCD_BASE_URL and ARGOCD_AUTH_TOKEN (or password) for live GitOps status."
+              ? "GitOps status unavailable — run argocd-bootstrap on the lab VM if this persists."
               : "GitOps health and sync state for this application."}
         </ChartCaption>)}
     </div>);

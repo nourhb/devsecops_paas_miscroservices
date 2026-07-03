@@ -191,10 +191,22 @@ export function prometheusKubernetesProxyBases(): string[] {
     const namespace = (process.env.PROMETHEUS_K8S_NAMESPACE || "monitoring").trim();
     const serviceNames = [
         process.env.PROMETHEUS_K8S_SERVICE || "kube-prometheus-stack-prometheus",
+        "kube-prometheus-stack-prometheus",
         "prometheus-service",
         "prometheus-operated"
     ].map((value) => value.trim()).filter(Boolean);
-    return [...new Set(serviceNames)].map((serviceName) => `https://${apiHost}:${apiPort}/api/v1/namespaces/${namespace}/services/http:${serviceName}:9090/proxy`);
+    const portTokens = [
+        (process.env.PROMETHEUS_K8S_PORT || "9090").trim(),
+        "9090",
+        "http-web"
+    ].filter(Boolean);
+    const bases: string[] = [];
+    for (const serviceName of [...new Set(serviceNames)]) {
+        for (const port of [...new Set(portTokens)]) {
+            bases.push(`https://${apiHost}:${apiPort}/api/v1/namespaces/${namespace}/services/${serviceName}:${port}/proxy`);
+        }
+    }
+    return bases;
 }
 export async function kubernetesAuthenticatedFetch(url: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<Response> {
     const headers = new Headers(init.headers as HeadersInit);

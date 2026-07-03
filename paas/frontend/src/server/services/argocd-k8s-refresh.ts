@@ -64,6 +64,35 @@ async function patchArgoApplication(appName: string, body: Record<string, unknow
     );
 }
 
+async function readArgoApplicationFromK8s(api: NonNullable<ReturnType<typeof getCustomObjectsApi>>, appName: string, namespace: string): Promise<{
+    status?: {
+        health?: { status?: string; message?: string };
+        sync?: { status?: string };
+        resources?: Array<{ health?: { status?: string } }>;
+    };
+} | null> {
+    const response = await (api as unknown as {
+        getNamespacedCustomObject: (
+            group: string,
+            version: string,
+            ns: string,
+            plural: string,
+            name: string
+        ) => Promise<{ body?: unknown } | unknown>;
+    }).getNamespacedCustomObject("argoproj.io", "v1alpha1", namespace, "applications", appName);
+    const body = (response as { body?: unknown }).body ?? response;
+    if (!body || typeof body !== "object") {
+        return null;
+    }
+    return body as {
+        status?: {
+            health?: { status?: string; message?: string };
+            sync?: { status?: string };
+            resources?: Array<{ health?: { status?: string } }>;
+        };
+    };
+}
+
 export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
     ok: boolean;
     health: string;
@@ -79,21 +108,15 @@ export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
     }
     const namespace = argocdNamespace();
     try {
-        const body = (await (api as unknown as {
-            getNamespacedCustomObject: (
-                group: string,
-                version: string,
-                ns: string,
-                plural: string,
-                name: string
-            ) => Promise<unknown>;
-        }).getNamespacedCustomObject("argoproj.io", "v1alpha1", namespace, "applications", appName)) as {
-            status?: {
-                health?: { status?: string; message?: string };
-                sync?: { status?: string };
-                resources?: Array<{ health?: { status?: string } }>;
+        const body = await readArgoApplicationFromK8s(api, appName, namespace);
+        if (!body) {
+            return {
+                ok: false,
+                health: "Unknown",
+                syncStatus: "Unknown",
+                logs: `[argocd-k8s] Application "${appName}" returned empty body from namespace ${namespace}.`
             };
-        };
+        }
         return {
             ok: true,
             health: inferArgoHealth(body.status),
@@ -103,7 +126,15 @@ export async function getArgoApplicationStatusViaK8s(appName: string): Promise<{
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        return { ok: false, health: "Unknown", syncStatus: "Unknown", logs: `[argocd-k8s] Could not read Application "${appName}": ${msg}` };
+        const missing = /404|not found/i.test(msg);
+        return {
+            ok: false,
+            health: "Unknown",
+            syncStatus: "Unknown",
+            logs: missing
+                ? `[argocd-k8s] Application "${appName}" not found in namespace ${namespace}.`
+                : `[argocd-k8s] Could not read Application "${appName}": ${msg}`
+        };
     }
 }
 

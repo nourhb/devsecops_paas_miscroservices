@@ -145,6 +145,15 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
                 appName
             };
         }
+        const hint = k8s.logs.includes("not found")
+            ? `Run: bash paas/scripts/lab.sh argocd-apps`
+            : `Run: bash paas/scripts/lab.sh argocd-bootstrap`;
+        return {
+            health: "Unknown",
+            syncStatus: "Unknown",
+            appName,
+            unreachableReason: `${k8s.logs} ${hint}`
+        };
     }
     const base = getArgoCdApiBase();
     if (!base || !(await argoAuthConfigured())) {
@@ -169,8 +178,9 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
         if (!response.ok) {
             const errText = (await response.text()).trim().slice(0, 600);
             const lenient = env.PAAS_STRICT_INTEGRATIONS !== "true";
-            if ((response.status === 401 || response.status === 403) && lenient) {
-                const k8s = env.KUBERNETES_ENABLED === "true"
+            let k8s: Awaited<ReturnType<typeof getArgoApplicationStatusViaK8s>> | null = null;
+            if (response.status === 401 || response.status === 403) {
+                k8s = env.KUBERNETES_ENABLED === "true"
                     ? await getArgoApplicationStatusViaK8s(appName)
                     : null;
                 if (k8s?.ok) {
@@ -180,12 +190,16 @@ export async function getArgoApplicationStatus(projectName: string): Promise<Arg
                         appName
                     };
                 }
+            }
+            if ((response.status === 401 || response.status === 403) && lenient) {
                 return {
                     health: "Unknown",
                     syncStatus: "Unknown",
                     appName,
-                    unreachableReason: `Argo CD returned HTTP ${response.status} for GET ${url}. ` +
-                        `Set ARGOCD_AUTH_TOKEN or ARGOCD_PASSWORD (admin login) with sync/get permissions on the AppProject. ${errText}`
+                    unreachableReason: k8s?.logs
+                        ? `${k8s.logs} Run: bash paas/scripts/lab.sh argocd-bootstrap`
+                        : `Argo CD returned HTTP ${response.status} for GET ${url}. ` +
+                            `Run: bash paas/scripts/lab.sh argocd-bootstrap (sets ARGOCD_PASSWORD and RBAC). ${errText}`
                 };
             }
             if (allowSimulation()) {

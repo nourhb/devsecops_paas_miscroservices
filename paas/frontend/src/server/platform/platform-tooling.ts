@@ -84,6 +84,16 @@ async function namespacePods(namespace: string): Promise<{
         return { total: 0, running: 0 };
     }
 }
+async function namespacePodsAny(namespaces: string[]): Promise<{
+    total: number;
+    running: number;
+}> {
+    const counts = await Promise.all(namespaces.map((ns) => namespacePods(ns)));
+    return counts.reduce((acc, cur) => ({
+        total: acc.total + cur.total,
+        running: acc.running + cur.running
+    }), { total: 0, running: 0 });
+}
 async function namespacePodsMatchingName(namespace: string, pattern: RegExp): Promise<{
     total: number;
     running: number;
@@ -179,8 +189,8 @@ async function loadPlatformTooling(): Promise<{
         namespacePods("cert-manager"),
         namespacePodsMatchingName("kube-system", calicoAgentPattern),
         namespacePods("monitoring"),
-        namespacePods("jenkins"),
-        namespacePods("argocd"),
+        namespacePodsAny(["cicd", "jenkins"]),
+        namespacePodsAny(["argocd"]),
         namespacePods("dependency-track"),
         namespacePods("sonarqube"),
         namespacePods("nexus"),
@@ -238,8 +248,24 @@ async function loadPlatformTooling(): Promise<{
                         : env.KUBERNETES_ENABLED === "true"
                             ? "KUBERNETES_ENABLED but kubeconfig missing or invalid — fix KUBE_CONFIG_PATH / API access."
                             : "Enable KUBERNETES_ENABLED and mount kubeconfig for live API telemetry.", k8sClientReady ? "success" : "outline"),
-                    tool("Ingress (Traefik / NGINX)", `${ingress.running}/${ingress.total} pods running`, toneFromPods(ingress.running, ingress.total)),
-                    tool("cert-manager", `${certManager.running}/${certManager.total} pods running · ${certs} certificates`, toneFromPods(certManager.running, certManager.total)),
+                    tool("Ingress (Traefik / NGINX)", ingress.total > 0
+                        ? `${ingress.running}/${ingress.total} pods running`
+                        : configuredUrl(env.INGRESS_NGINX_PROBE_URL) || configuredUrl(process.env.NEXT_PUBLIC_INGRESS_NGINX_URL)
+                            ? "Ingress probe URL configured"
+                            : "No ingress controller pods detected", ingress.total > 0
+                        ? toneFromPods(ingress.running, ingress.total)
+                        : configuredUrl(env.INGRESS_NGINX_PROBE_URL) || configuredUrl(process.env.NEXT_PUBLIC_INGRESS_NGINX_URL)
+                            ? "success"
+                            : "outline"),
+                    tool("cert-manager", certManager.total > 0
+                        ? `${certManager.running}/${certManager.total} pods running · ${certs} certificates`
+                        : `${certs} certificates · cert-manager not deployed`, certManager.total === 0
+                        ? "outline"
+                        : certManager.running === certManager.total
+                            ? "success"
+                            : certManager.running > 0
+                                ? "warning"
+                                : "outline"),
                     tool("Calico (CNI)", calicoWorkload.total > 0
                         ? `${calicoWorkload.running}/${calicoWorkload.total} networking pods · ${calicoPolicies} Calico NetworkPolicies`
                         : calicoPolicies > 0
@@ -284,7 +310,7 @@ async function loadPlatformTooling(): Promise<{
                         : "No Grafana URL configured", configuredUrl(process.env.NEXT_PUBLIC_GRAFANA_URL) || configuredUrl(env.GRAFANA_PROBE_URL) ? "success" : "outline"),
                     tool("Alertmanager", configuredUrl(process.env.NEXT_PUBLIC_ALERTMANAGER_URL) || configuredUrl(env.ALERTMANAGER_PROBE_URL)
                         ? "Alertmanager link configured."
-                        : "No Alertmanager URL configured", configuredUrl(process.env.NEXT_PUBLIC_ALERTMANAGER_URL) || configuredUrl(env.ALERTMANAGER_PROBE_URL) ? "success" : "outline"),
+                        : "No Alertmanager URL configured (optional in lab)", configuredUrl(process.env.NEXT_PUBLIC_ALERTMANAGER_URL) || configuredUrl(env.ALERTMANAGER_PROBE_URL) ? "success" : "outline"),
                     tool("Kube-state-metrics", kubeStateMetrics.total > 0
                         ? `${kubeStateMetrics.running}/${kubeStateMetrics.total} pods matching kube-state-metrics in monitoring`
                         : configuredUrl(process.env.NEXT_PUBLIC_KUBE_STATE_METRICS_URL)

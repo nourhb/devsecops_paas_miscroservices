@@ -158,9 +158,16 @@ main() {
     kube-prometheus-stack-prometheus prometheus-kube-prometheus-stack-prometheus 2>/dev/null || true)"
   if [[ -n "${svc}" ]]; then
     np="$(svc_nodeport "${MON_NS}" "${svc}" "http-web" || svc_nodeport "${MON_NS}" "${svc}")"
+    prom_in_cluster="http://${svc}.${MON_NS}.svc:9090"
+    patch_both "PROMETHEUS_PROBE_URL" "${prom_in_cluster}"
+    patch_both "PROMETHEUS_BASE_URL" "${prom_in_cluster}"
+    patch_both "PROMETHEUS_K8S_SERVICE" "${svc}"
+    ok "PROMETHEUS_PROBE_URL=${prom_in_cluster}"
     if [[ -n "${np}" && "${np}" != "null" ]]; then
       patch_both "NEXT_PUBLIC_PROMETHEUS_URL" "http://${NODE_IP}:${np}"
     fi
+  else
+    warn "Prometheus service not found in ${MON_NS} — run: bash paas/scripts/lib/lab-prometheus-recover.sh"
   fi
 
   svc="$(first_running_svc monitoring \
@@ -199,7 +206,34 @@ main() {
   patch_both "INGRESS_NGINX_PROBE_URL" "http://${NODE_IP}:${ingress_port}"
 
   if kubectl get ns cert-manager >/dev/null 2>&1; then
-    patch_both "CERT_MANAGER_INSTALLED" "true"
+    local cm_running
+    cm_running="$(kubectl get pods -n cert-manager --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "${cm_running:-0}" -gt 0 ]]; then
+      patch_both "CERT_MANAGER_INSTALLED" "true"
+    else
+      warn "cert-manager namespace exists but no Running pods — skipping CERT_MANAGER_INSTALLED"
+    fi
+  fi
+
+  if kubectl get svc harbor-core -n harbor >/dev/null 2>&1; then
+    patch_both "HARBOR_PROBE_URL" "http://harbor-core.harbor.svc.cluster.local:80"
+    ok "HARBOR_PROBE_URL=http://harbor-core.harbor.svc.cluster.local:80"
+  elif kubectl get svc harbor -n harbor >/dev/null 2>&1; then
+    patch_both "HARBOR_PROBE_URL" "http://harbor.harbor.svc.cluster.local:80"
+    ok "HARBOR_PROBE_URL=http://harbor.harbor.svc.cluster.local:80"
+  fi
+
+  local harbor_ping="000"
+  if [[ -n "$(grep -E '^HARBOR_PROBE_URL=' "${ENV_FILE}" 2>/dev/null | tail -1 | cut -d= -f2- || true)" ]]; then
+    harbor_ping="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
+      -u "${HARBOR_USER:-admin}:${HARBOR_PASS:-Harbor12345}" \
+      "$(grep -E '^HARBOR_PROBE_URL=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '"')/api/v2.0/ping" 2>/dev/null || echo 000)"
+    if [[ "${harbor_ping}" != "200" ]]; then
+      warn "Harbor ping HTTP ${harbor_ping} — attempting harbor DB heal"
+      bash "${SCRIPT_DIR}/lab-harbor-db-heal.sh" || warn "harbor heal failed — Harbor may show unreachable until fixed"
+    else
+      ok "Harbor API ping OK"
+    fi
   fi
 
   if kubectl get ns kyverno >/dev/null 2>&1; then

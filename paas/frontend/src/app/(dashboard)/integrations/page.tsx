@@ -118,7 +118,7 @@ function IntegrationItemRow({ item }: {
         {item.reachability?.state === "unreachable" && item.reachability.message ? (<p className="text-xs text-danger">
             {item.reachability.message}
           </p>) : null}
-        {item.reachability?.state === "skipped" && item.reachability.message ? (<p className="text-xs text-danger/80">{item.reachability.message}</p>) : null}
+        {item.reachability?.state === "skipped" && item.reachability.message ? (<p className="text-xs text-muted">{item.reachability.message}</p>) : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
         {item.internalPath ? (<Button variant="default" size="sm" asChild>

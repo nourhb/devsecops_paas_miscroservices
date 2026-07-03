@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dockerApi, projectApi } from "@/lib/api";
 import type { ContainerImageRecord } from "@/types";
+
 export default function DockerPage() {
     const params = useParams<{
         id: string;
@@ -18,6 +19,11 @@ export default function DockerPage() {
     const projectQuery = useQuery({
         queryKey: ["project", projectId],
         queryFn: () => projectApi.getProject(projectId)
+    });
+    const registryQuery = useQuery({
+        queryKey: ["docker-registry-status"],
+        queryFn: () => dockerApi.registryStatus(),
+        staleTime: 60000
     });
     const historyQuery = useQuery({
         queryKey: ["docker-history", projectId],
@@ -41,6 +47,7 @@ export default function DockerPage() {
         },
         onError: () => toast.error("Docker push failed")
     });
+    const registry = registryQuery.data;
     return (<div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
@@ -51,13 +58,20 @@ export default function DockerPage() {
               Current tag:{" "}
               <span className="font-mono text-xs">{projectQuery.data.imageTag || "not set"}</span>
             </p>) : projectQuery.isLoading ? (<Skeleton className="mt-2 h-4 w-48"/>) : null}
+          {registry ? (<p className="text-sm text-muted">
+              Registry:{" "}
+              <span className={registry.verified ? "text-emerald-600" : registry.configured ? "text-amber-600" : "text-muted"}>
+                {registry.registryLabel}
+                {registry.configured ? (registry.verified ? " (verified)" : " (auth failed)") : ""}
+              </span>
+            </p>) : registryQuery.isLoading ? (<Skeleton className="mt-2 h-4 w-64"/>) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}>
             {buildMutation.isPending ? "Building\u2026" : "Build image"}
           </Button>
           <Button onClick={() => pushMutation.mutate()} disabled={pushMutation.isPending} variant="outline">
-            {pushMutation.isPending ? "Pushing\u2026" : "Push to Docker Hub"}
+            {pushMutation.isPending ? "Pushing\u2026" : (registry?.pushButtonLabel ?? "Push to registry")}
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link href={`/pipeline/${projectId}`}>Pipeline</Link>
@@ -98,11 +112,10 @@ export default function DockerPage() {
         </CardContent>
       </Card>
 
-      <p className="text-xs text-muted">
-        Set <code className="inline-code">DOCKERHUB_USERNAME</code>,{" "}
-        <code className="inline-code">DOCKERHUB_TOKEN</code>, and{" "}
-        <code className="inline-code">DOCKERHUB_NAMESPACE</code> to verify registry credentials. Without
-        them, pushes are simulated and still written to history for auditing.
-      </p>
+      {registryQuery.isLoading ? (<Skeleton className="h-12 w-full"/>) : registry ? (<p className="text-xs text-muted">
+          {registry.configured && registry.verified
+            ? `${registry.message} Image references use the configured registry.`
+            : registry.configHint}
+        </p>) : null}
     </div>);
 }

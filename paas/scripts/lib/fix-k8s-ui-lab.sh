@@ -35,6 +35,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 kubectl apply --validate=false -f "${REPO_ROOT}/paas/k8s-manifests/lab/paas-frontend-k8s-rbac.yaml"
+kubectl apply --validate=false -f "${REPO_ROOT}/paas/k8s-manifests/lab/paas-frontend-argocd-rbac.yaml"
 bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh"
 
 if [[ "${REBUILD}" == "1" ]]; then
