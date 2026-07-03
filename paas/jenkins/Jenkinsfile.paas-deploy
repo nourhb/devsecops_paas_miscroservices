@@ -50,8 +50,10 @@ def pauseFrontendForSonar() {
     echo "[sonar-ram] pausing frontend (prior replicas=${PRIOR}) to free RAM for SonarQube scan"
     "${KCTL}" scale deployment/frontend -n "${NS}" --replicas=0 2>/dev/null || echo "[sonar-ram] frontend scale-down failed (non-fatal)"
 
-    pause_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
-    pause_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
+    # Do NOT scale Harbor — Step 6 crane push runs immediately after Sonar.
+    if [ "${JENKINS_SONAR_RAM_PAUSE_DT:-true}" = "true" ]; then
+      pause_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
+    fi
 
     echo "[sonar-ram] node memory after pause:"
     "${KCTL}" top node 2>/dev/null || free -h 2>/dev/null || true
@@ -85,9 +87,9 @@ def restoreFrontendAfterSonar() {
     echo "[sonar-ram] restoring frontend replicas=${TARGET}"
     "${KCTL}" scale deployment/frontend -n "${NS}" --replicas="${TARGET}" 2>/dev/null || echo "[sonar-ram] scale-up failed (non-fatal)"
 
-    # Restore Harbor first (Step 6 needs it next) then Dependency-Track.
-    restore_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
     restore_ns_deployments "dependency-track" "paas-artifacts/.dt-prior-replicas"
+    # Legacy: restore Harbor if an older build paused it (we no longer scale Harbor down for Sonar).
+    restore_ns_deployments "harbor" "paas-artifacts/.harbor-prior-replicas"
     exit 0
   ''', returnStatus: true)
 }
@@ -1423,6 +1425,22 @@ def paasHarborCranePushShellHelpers(String craneBin, String imageRef, String ima
         printf '%s' "\${_p}" | "${craneBin}" ${craneInsecure} auth login "\${_r}" -u "\${_u}" --password-stdin --insecure
       done
     }
+    paas_harbor_wait_v2() {
+      local _ip="\$1" _nip="\$2" _try _hc _host
+      for _try in 1 2 3 5 8 10 15 20 30; do
+        for _host in "\${_ip}" "\${_nip}"; do
+          [ -z "\${_host}" ] && continue
+          _hc="\$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 25 "http://\${_host}/v2/" 2>/dev/null || echo 000)"
+          if [ "\${_hc}" = "401" ] || [ "\${_hc}" = "200" ]; then
+            echo "[image] Harbor /v2/ ready on \${_host} (HTTP \${_hc})"
+            return 0
+          fi
+        done
+        echo "[image] Harbor /v2/ not ready (HTTP \${_hc:-000}) — wait \${_try}s"
+        sleep "\${_try}"
+      done
+      return 1
+    }
     paas_harbor_ensure_project_and_token() {
       local _user="\${HARBOR_USERNAME:-admin}"
       local _pass="\${HARBOR_PASSWORD:-}"
@@ -2135,6 +2153,10 @@ PAAS_START
       sleep 60
     done
     echo "[image] crane append finished; running crane mutate (same shell as append — monorepo-safe)"
+    _mutate_ref="\${_push_ref_ip}"
+    _harbor_ip="\$(harbor_nipio_to_ip_ref "\${HARBOR_REGISTRY:-${regHost}}/x" 2>/dev/null | cut -d/ -f1 || true)"
+    [ -n "\${_harbor_ip}" ] || _harbor_ip="${ipHost}"
+    paas_harbor_wait_v2 "\${_harbor_ip}" "\${HARBOR_REGISTRY:-${regHost}}" || echo "[image] WARN: Harbor /v2/ slow after Sonar — mutate retries will wait"
     USE_STANDALONE=0
     if [ -f paas-artifacts/_crane_use_standalone ]; then
       USE_STANDALONE=\$(cat paas-artifacts/_crane_use_standalone)
@@ -2145,25 +2167,31 @@ PAAS_START
     _mutate_attempt=1
     _mutate_rc=1
     while [ "\${_mutate_attempt}" -le "\${_mutate_max}" ]; do
-      echo "[image] crane mutate attempt \${_mutate_attempt}/\${_mutate_max} → ${imageRef}"
+      echo "[image] crane mutate attempt \${_mutate_attempt}/\${_mutate_max} → \${_mutate_ref}"
       if [ "\$USE_STANDALONE" = "1" ]; then
-        "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
-          -t "${imageRef}" \\
+        "${craneBin}" ${craneInsecure} mutate "\${_mutate_ref}" \\
+          -t "\${_mutate_ref}" \\
           --workdir=/app \\
           --entrypoint=/usr/local/bin/node \\
           --cmd=server.js \\
           --exposed-ports=3000/tcp && _mutate_rc=0 || _mutate_rc=\$?
       else
-        "${craneBin}" ${craneInsecure} mutate "${imageRef}" \\
-          -t "${imageRef}" \\
+        "${craneBin}" ${craneInsecure} mutate "\${_mutate_ref}" \\
+          -t "\${_mutate_ref}" \\
           --workdir=/app \\
           --entrypoint=/app/start-paas.sh \\
           --exposed-ports=3000/tcp && _mutate_rc=0 || _mutate_rc=\$?
       fi
       if [ "\${_mutate_rc}" = "0" ]; then
+        if [ "\${_mutate_ref}" != "${imageRef}" ]; then
+          paas_harbor_wait_v2 "\${_harbor_ip}" "\${HARBOR_REGISTRY:-${regHost}}" && \\
+            "${craneBin}" ${craneInsecure} tag "\${_mutate_ref}" "${imageRef}" || \\
+            echo "[image] WARN: nip.io tag skipped (Harbor alias optional; IP ref \${_mutate_ref} is canonical)"
+        fi
         break
       fi
-      echo "[image] WARN: crane mutate failed (rc=\${_mutate_rc}); Harbor blob 502? wait and retry"
+      echo "[image] WARN: crane mutate failed (rc=\${_mutate_rc}); Harbor recovering? wait and retry"
+      paas_harbor_wait_v2 "\${_harbor_ip}" "\${HARBOR_REGISTRY:-${regHost}}" || true
       if [ "\${_mutate_attempt}" -ge "\${_mutate_max}" ]; then
         exit "\${_mutate_rc}"
       fi
@@ -2172,12 +2200,13 @@ PAAS_START
     done
     echo "[image] crane mutate OK"
     ARTIFACT_REF="${artifactImageRef}"
-    if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
+    if [ -n "\${ARTIFACT_REF}" ] && [ "\${ARTIFACT_REF}" != "\${_mutate_ref}" ] && [ "\${ARTIFACT_REF}" != "${imageRef}" ]; then
       echo "[image] crane copy → GitOps/cosign ref \${ARTIFACT_REF}"
-      "${craneBin}" ${craneInsecure} copy "${imageRef}" "\${ARTIFACT_REF}" || echo "[image] WARN: crane copy to external Harbor ref failed (pull may still work via in-cluster push)"
+      "${craneBin}" ${craneInsecure} copy "\${_mutate_ref}" "\${ARTIFACT_REF}" || echo "[image] WARN: crane copy to external Harbor ref failed (pull may still work via in-cluster push)"
     fi
     mkdir -p paas-artifacts
-    REF="\${ARTIFACT_REF:-${artifactImageRef}}"
+    REF="\${ARTIFACT_REF:-\${_mutate_ref}}"
+    REF="\${REF:-\${_push_ref_ip}}"
     DIGEST_REF="\$(${craneBin} ${craneInsecure} digest \${REF} 2>/dev/null | tr -d '\\r\\n' || true)"
     if [ -n "\${DIGEST_REF}" ]; then
       case "\${DIGEST_REF}" in
