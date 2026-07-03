@@ -164,7 +164,7 @@ jenkins_recover() {
     local in_cluster="http://${svc}.${ns}.svc.cluster.local:${JENKINS_PORT}"
     kubectl exec -n "${PAAS_NS}" deploy/frontend -- wget -q -O /dev/null --timeout=10 "${in_cluster}/login" 2>/dev/null \
       && echo "OK: frontend pod reaches ${in_cluster}" \
-      || echo "WARN: frontend pod cannot reach ${in_cluster}
+      || echo "WARN: frontend pod cannot reach ${in_cluster}"
   fi
 
   echo "=============================================="

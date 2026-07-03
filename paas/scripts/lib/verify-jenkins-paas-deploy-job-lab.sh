@@ -246,7 +246,7 @@ echo "==> Local Jenkinsfile contains Sonar Step 5 fix (java + scanner log)?"
 if grep -qF "${SONAR_STEP5_MARKER}" "${JENKINSFILE}"; then
   echo "OK: repo Jenkinsfile has ${SONAR_STEP5_MARKER}"
 else
-  echo "FAIL: missing ${SONAR_STEP5_MARKER}
+  echo "FAIL: missing ${SONAR_STEP5_MARKER}"
   exit 1
 fi
 echo ""
@@ -273,20 +273,20 @@ if echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260620-cps-split' \
     echo "WARN: could not read CPS bundle from Jenkins pod — marker checks may be incomplete"
   fi
 elif echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && echo "${CFG}" | grep -qF 'paasRequireFreshStages()'; then
-  echo "FAIL: Jenkins job uses obsolete single-load layout (20260617)
+  echo "FAIL: Jenkins job uses obsolete single-load layout (20260617)"
   exit 1
 elif echo "${CFG}" | grep -qF 'paas.paasDeployInit()' || echo "${CFG}" | grep -qF 'paas.runPaasStep12()'; then
-  echo "FAIL: Jenkins job uses broken split/closure layout
+  echo "FAIL: Jenkins job uses broken split/closure layout"
   exit 1
 elif echo "${CFG}" | grep -qF 'paas.runPaasDeploy()' && echo "${CFG}" | grep -qF 'paas-monolithic-runPaasDeploy-20260618'; then
   echo "OK: Jenkins job uses monolithic runPaasDeploy() layout"
   REMOTE_CHECK_TEXT="$(jenkinsfile_bundle)"
 elif echo "${CFG}" | grep -qF 'runPaasStep12()' || echo "${CFG}" | grep -qF 'paasDeployInit()'; then
-  echo "FAIL: Jenkins job still uses broken Blue Ocean split layout
+  echo "FAIL: Jenkins job still uses broken Blue Ocean split layout"
   exit 1
 elif echo "${CFG}" | grep -qF 'paas-deploy-stages-load-20260617' \
   || (echo "${CFG}" | grep -qF 'load paasDeployStagesPath' && ! echo "${CFG}" | grep -qF 'load paasStagesP3'); then
-  echo "FAIL: Jenkins job uses obsolete single-load layout
+  echo "FAIL: Jenkins job uses obsolete single-load layout"
   exit 1
 fi
 if jenkins_job_has_stale_step6 "${CFG}"; then
@@ -346,7 +346,7 @@ if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${SONAR_STEP5_MARKER}" \
   || echo "${REMOTE_CHECK_TEXT}" | grep -qF 'pick_sonar_url'; then
   echo "OK: Jenkins job has Sonar Step 5 fix (${SONAR_STEP5_MARKER})"
 else
-  echo "FAIL: Jenkins job missing Sonar Step 5 fix
+  echo "FAIL: Jenkins job missing Sonar Step 5 fix"
   exit 1
 fi
 SONAR_LOGIN_MARKERS=( 'sonar-resilience-20260619' 'sonar-nodeport-first-20260619' 'sonar-scanner-cli6-login-20260607' "printf 'sonar.token" 'sonar.token=' )
@@ -360,7 +360,7 @@ done
 if [[ "${sonar_login_ok}" -eq 1 ]]; then
   echo "OK: Jenkins job has Sonar Step 5 (token auth + NodePort-first URL pick)"
 else
-  echo "FAIL: Jenkins job missing Sonar Step 5 fix
+  echo "FAIL: Jenkins job missing Sonar Step 5 fix"
   exit 1
 fi
 if echo "${REMOTE_CHECK_TEXT}" | grep -qF "${NGINX_CONF_MARKER}" \

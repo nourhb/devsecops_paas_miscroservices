@@ -58,22 +58,22 @@ preflight() {
     sh -c '/var/jenkins_home/bin/kubectl version --client >/dev/null 2>&1' 2>/dev/null; then
     echo "OK: kubectl in Jenkins pod (working)"
   else
-    echo "WARN: kubectl missing/broken in Jenkins pod
+    echo "WARN: kubectl missing/broken in Jenkins pod"
     fail=1
   fi
   if kubectl get clusterrolebinding jenkins-lab-ram-pause >/dev/null 2>&1; then
     echo "OK: RAM-pause RBAC present (frontend/harbor/dependency-track scale during Sonar)"
   else
-    echo "WARN: RAM-pause RBAC missing
+    echo "WARN: RAM-pause RBAC missing"
     fail=1
   fi
   marker_ok="$(kubectl exec -n "${JENKINS_NS}" "${JPOD}" -c jenkins --request-timeout=45s -- \
-    grep -c 'dt-nodeport-first-lab-20260702' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
+    grep -c 'runPaasDeploySteps4_5' /var/jenkins_home/paas/paas-deploy-stages.groovy 2>/dev/null \
     | tr -d '\r\n' | tail -1)" || marker_ok=0
   if [[ "${marker_ok}" -ge 1 ]]; then
-    echo "OK: dt-nodeport-first-lab marker on Jenkins pod"
+    echo "OK: CPS monolith on Jenkins pod (Step 4/5 present)"
   else
-    echo "WARN: Jenkins pod missing dt-nodeport-first-lab marker — CPS bundle stale"
+    echo "WARN: Jenkins pod missing Step 4/5 in monolith — CPS bundle stale"
     fail=1
   fi
   return "${fail}"

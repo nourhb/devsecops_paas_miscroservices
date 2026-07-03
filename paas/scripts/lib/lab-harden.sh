@@ -67,6 +67,6 @@ if bash "${SCRIPT_DIR}/check-paas-lab-health.sh"; then
 fi
 
 echo ""
-echo "WARN: health check still failing
+echo "WARN: health check still failing"
 echo "      then: bash paas/scripts/lab.sh health"
 exit 1

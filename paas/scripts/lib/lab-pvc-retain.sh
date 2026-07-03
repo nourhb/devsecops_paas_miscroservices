@@ -50,7 +50,7 @@ status_all() {
   echo ""
   echo "==> Ephemeral risk check"
   if kubectl_try get pod -n sonarqube -l app=sonarqube -o yaml 2>/dev/null | grep -q 'emptyDir: {}'; then
-    echo "  WARN: SonarQube still uses emptyDir
+    echo "  WARN: SonarQube still uses emptyDir"
   else
     echo "  OK: SonarQube pod uses PVC (or not installed)"
   fi

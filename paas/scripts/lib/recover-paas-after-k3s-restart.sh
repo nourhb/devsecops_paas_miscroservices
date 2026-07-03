@@ -143,10 +143,10 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 echo "==> Lab guard (images, Prometheus, stale pods)"
-bash "${SCRIPT_DIR}/lab-guard.sh" || echo "WARN: lab-guard reported issues
+bash "${SCRIPT_DIR}/lab-guard.sh" || echo "WARN: lab-guard reported issues"
 
 echo "==> Install auto-heal cron (watchdog + guard)"
-bash "${SCRIPT_DIR}/lab-guard-cron.sh" install || echo "WARN: could not install cron
+bash "${SCRIPT_DIR}/lab-guard-cron.sh" install || echo "WARN: could not install cron"
 
 echo ""
 echo "OK — PaaS login: http://${NODE_IP}:30100/login"
