@@ -219,7 +219,7 @@ def uploadBomToDependencyTrack(String projId, String dtProjectName, String branc
       dt_kubectl_portforward_upload() {
         KCTL="${JENKINS_HOME:-/var/jenkins_home}/bin/kubectl"
         command -v "${KCTL}" >/dev/null 2>&1 || KCTL=kubectl
-        command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sca] kubectl missing at ${KCTL} return 1; }
+        command -v "${KCTL}" >/dev/null 2>&1 || { echo "[sca] kubectl missing at ${KCTL}"; return 1; }
         DT_PF_PORT="${DT_PF_PORT:-18080}"
         for DT_SVC in dtrack-dependency-track-api-server dependency-track-api-server; do
           "${KCTL}" get svc -n dependency-track "${DT_SVC}" >/dev/null 2>&1 || continue
