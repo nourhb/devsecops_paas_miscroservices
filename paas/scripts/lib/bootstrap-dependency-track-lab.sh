@@ -317,7 +317,7 @@ reset_dt_admin_data_lab() {
 }
 
 acquire_token() {
-  local pass tried="" token body
+  local pass tried="" token
   for pass in "admin" "DependencyTrack123!" "${DT_ADMIN_NEW_PASSWORD}" "${DT_ADMIN_PASSWORD}"; do
     [[ -n "${pass}" ]] || continue
     case " ${tried} " in *" ${pass} "*) continue ;; esac
@@ -327,10 +327,6 @@ acquire_token() {
     fi
     token="$(parse_login_token "${LOGIN_BODY}")"
     if verify_bearer_token "${token}"; then
-      DT_ADMIN_PASSWORD="${pass}"
-      if [[ "${LOGIN_BODY}" == *"FORCE_PASSWORD_CHANGE"* ]]; then
-        DT_ADMIN_PASSWORD="${DT_ADMIN_NEW_PASSWORD}"
-      fi
       patch_env_key "${ENV_FILE}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       patch_env_key "${DOT_ENV}" "DT_ADMIN_PASSWORD" "${DT_ADMIN_PASSWORD}"
       ok "logged in as ${DT_ADMIN_USER}"
@@ -401,24 +397,40 @@ else:
 " "${TEAM_NAME}"
 }
 
+http_ok() {
+  case "$1" in 200|201|204) return 0 ;; *) return 1 ;; esac
+}
+
+extract_api_key() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(1)
+obj = json.loads(raw)
+if isinstance(obj, dict):
+    for k in ("key", "apiKey", "token"):
+        if obj.get(k):
+            print(obj[k])
+            raise SystemExit(0)
+print("")
+'
+}
+
 create_api_key() {
   local token="$1" team_uuid="$2" resp key http
+  token="$(printf '%s' "${token}" | tr -d '\r\n')"
   resp="$(dt_http PUT "/api/v1/team/${team_uuid}/key" \
     -H "Authorization: Bearer ${token}" \
     -H "Content-Type: application/json" \
     -w $'\n__HTTP__%{http_code}')"
   http="${resp##*$'\n__HTTP__'}"
   resp="${resp%$'\n__HTTP__'*}"
-  if [[ "${http}" != "200" ]]; then
-    resp="$(dt_http POST "/api/v1/team/${team_uuid}/key" \
-      -H "Authorization: Bearer ${token}" \
-      -H "Content-Type: application/json" \
-      -w $'\n__HTTP__%{http_code}')"
-    http="${resp##*$'\n__HTTP__'}"
-    resp="${resp%$'\n__HTTP__'*}"
+  if ! http_ok "${http}"; then
+    fail "API key PUT failed (HTTP ${http}): ${resp:0:200}"
   fi
-  key="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("key",""))' <<<"${resp}")"
-  [[ -n "${key}" ]] || fail "API key creation failed (HTTP ${http}): ${resp}"
+  key="$(extract_api_key <<<"${resp}" 2>/dev/null || true)"
+  [[ -n "${key}" ]] || fail "API key creation failed (HTTP ${http}): ${resp:0:200}"
   printf '%s' "${key}"
 }
 
