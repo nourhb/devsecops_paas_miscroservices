@@ -1,5 +1,6 @@
 import { env } from "@/server/config/env";
 import { isRealConfigured, realValueOrEmpty } from "@/server/config/real-values";
+import { browserToolHref } from "@/server/platform/platform-browser-url";
 import { getDeployPipelineReadiness } from "@/server/services/deploy-pipeline-readiness";
 import type { PlatformIntegrationCategory, PlatformIntegrationsResponse } from "@/types";
 function trimUrl(v: string | undefined): string {
@@ -65,6 +66,12 @@ function integrationUrl(publicKey: string, ...serverUrls: (string | undefined)[]
 function integrationConfigured(publicKey: string, ...serverUrls: (string | undefined)[]): boolean {
     return Boolean(integrationUrl(publicKey, ...serverUrls));
 }
+function browserIntegrationHref(publicKey: string, ...serverUrls: (string | undefined)[]): string | null {
+    return browserToolHref(publicEnv(publicKey), ...serverUrls.map((u) => trimUrl(realValueOrEmpty(u))));
+}
+function browserServerHref(...serverUrls: (string | undefined)[]): string | null {
+    return browserToolHref(...serverUrls.map((u) => trimUrl(realValueOrEmpty(u))));
+}
 function labInstalled(flag: string): boolean {
     return process.env[flag] === "true";
 }
@@ -110,7 +117,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Kubernetes API & scheduler",
                     description: "Cluster control plane (API server, etcd, scheduler, controller manager).",
                     kind: "external",
-                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer),
+                    href: browserToolHref(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_KUBERNETES_DASHBOARD_URL"), publicEnv("NEXT_PUBLIC_K8S_DASHBOARD_URL"), kubeApiServer)),
                     optional: true,
                     notes: kubeApiServer
@@ -142,7 +149,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Ingress (Traefik / NGINX)",
                     description: "HTTP/S ingress controller (Traefik on k3s, or NGINX Ingress).",
                     kind: "external",
-                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL))) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_INGRESS_NGINX_URL", env.INGRESS_NGINX_PROBE_URL),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_INGRESS_NGINX_URL"), trimUrl(realValueOrEmpty(env.INGRESS_NGINX_PROBE_URL)))),
                     optional: true,
                     notes: "Set NEXT_PUBLIC_INGRESS_NGINX_URL to your entrypoint. INTEGRATIONS_PROBE_HOST_REMAP supports comma-separated host remap rules in docker-compose.env."
@@ -152,7 +159,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "cert-manager",
                     description: "TLS certificates via ACME / CA issuers.",
                     kind: "external",
-                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL))) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_CERT_MANAGER_UI_URL", env.CERT_MANAGER_PROBE_URL),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_CERT_MANAGER_UI_URL"), trimUrl(realValueOrEmpty(env.CERT_MANAGER_PROBE_URL)))) || labInstalled("CERT_MANAGER_INSTALLED"),
                     optional: true,
                     notes: "Often observed via kubectl or Argo CD; set a URL if you expose a UI or doc portal."
@@ -189,7 +196,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "OPA (Rego evaluation)",
                     description: "Open Policy Agent REST evaluation used by deploy gates.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.OPA_EVAL_URL)) || null,
+                    href: browserToolHref(trimUrl(realValueOrEmpty(env.OPA_EVAL_URL))),
                     configured: isRealConfigured(env.OPA_EVAL_URL),
                     optional: !policyOpa,
                     notes: env.POLICY_ENGINE === "opa" ? "POLICY_ENGINE is set to opa." : undefined
@@ -228,7 +235,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Trivy (CI & registry)",
                     description: "Vulnerability and misconfiguration scanning.",
                     kind: "external",
-                    href: firstNonEmpty(trimUrl(realValueOrEmpty(env.TRIVY_BASE_URL)), trimUrl(realValueOrEmpty(env.TRIVY_PROBE_URL))) || null,
+                    href: browserToolHref(trimUrl(realValueOrEmpty(env.TRIVY_BASE_URL)), trimUrl(realValueOrEmpty(env.TRIVY_PROBE_URL))),
                     configured: isRealConfigured(env.TRIVY_BASE_URL) || isRealConfigured(env.TRIVY_PROBE_URL) ||
                         (harborConfigured && labInstalled("HARBOR_TRIVY_INSTALLED"))
                 }
@@ -244,7 +251,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Prometheus",
                     description: "Time-series metrics and PromQL.",
                     kind: "external",
-                    href: firstNonEmpty(realValueOrEmpty(env.PROMETHEUS_BASE_URL), publicEnv("NEXT_PUBLIC_PROMETHEUS_URL")),
+                    href: browserIntegrationHref("NEXT_PUBLIC_PROMETHEUS_URL", env.PROMETHEUS_BASE_URL),
                     configured: Boolean(firstNonEmpty(realValueOrEmpty(env.PROMETHEUS_BASE_URL), publicEnv("NEXT_PUBLIC_PROMETHEUS_URL"))),
                     optional: true
                 },
@@ -253,7 +260,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Grafana",
                     description: "Dashboards on Prometheus and other data sources.",
                     kind: "external",
-                    href: firstNonEmpty(trimUrl(realValueOrEmpty(env.GRAFANA_PROBE_URL)), integrationUrl("NEXT_PUBLIC_GRAFANA_URL")) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL),
                     configured: integrationConfigured("NEXT_PUBLIC_GRAFANA_URL", env.GRAFANA_PROBE_URL)
                 },
                 {
@@ -261,7 +268,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Alertmanager",
                     description: "Alert routing, silences, and receivers.",
                     kind: "external",
-                    href: integrationUrl("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL),
                     configured: integrationConfigured("NEXT_PUBLIC_ALERTMANAGER_URL", env.ALERTMANAGER_PROBE_URL),
                     optional: true
                 },
@@ -270,7 +277,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Pushgateway",
                     description: "Accept metrics pushed from batch jobs for Prometheus.",
                     kind: "external",
-                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))) || null,
+                    href: browserToolHref(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL))),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_PUSHGATEWAY_URL"), trimUrl(realValueOrEmpty(env.PUSHGATEWAY_PROBE_URL)))),
                     optional: true
                 },
@@ -308,7 +315,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Elasticsearch",
                     description: "Search and analytics engine (logs, APM, security).",
                     kind: "external",
-                    href: integrationUrl("NEXT_PUBLIC_ELASTICSEARCH_URL", process.env.ELASTICSEARCH_PROBE_URL) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_ELASTICSEARCH_URL", process.env.ELASTICSEARCH_PROBE_URL),
                     configured: integrationConfigured("NEXT_PUBLIC_ELASTICSEARCH_URL", process.env.ELASTICSEARCH_PROBE_URL),
                     optional: true
                 }
@@ -324,7 +331,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Jenkins",
                     description: "Pipeline runs triggered from projects in this app.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.JENKINS_BASE_URL)) || null,
+                    href: browserToolHref(publicEnv("NEXT_PUBLIC_JENKINS_URL"), publicEnv("NEXT_PUBLIC_JENKINS_PROBE_URL"), trimUrl(realValueOrEmpty(env.JENKINS_BASE_URL)), trimUrl(realValueOrEmpty(process.env.JENKINS_URL))),
                     configured: isRealConfigured(env.JENKINS_BASE_URL)
                 },
                 {
@@ -342,7 +349,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Argo CD",
                     description: "Continuous delivery and GitOps sync status per project.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.ARGOCD_BASE_URL)) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_ARGOCD_URL", env.ARGOCD_BASE_URL),
                     configured: isRealConfigured(env.ARGOCD_BASE_URL) &&
                         Boolean(realValueOrEmpty(env.ARGOCD_AUTH_TOKEN) || realValueOrEmpty(env.ARGOCD_PASSWORD))
                 },
@@ -376,7 +383,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Harbor (primary OCI registry)",
                     description: "Harbor, or Docker Hub when HARBOR_BASE_URL targets docker.io / hub.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.HARBOR_BASE_URL)) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_HARBOR_URL", env.HARBOR_BASE_URL),
                     configured: harborConfigured
                 },
                 {
@@ -402,7 +409,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "JFrog Artifactory",
                     description: "Universal artifact repository.",
                     kind: "external",
-                    href: artifactoryPublicOrServer() || null,
+                    href: browserToolHref(artifactoryPublicOrServer()),
                     configured: Boolean(artifactoryPublicOrServer()),
                     optional: true
                 },
@@ -429,7 +436,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "SonarQube",
                     description: "Static analysis and quality gates.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.SONAR_BASE_URL)) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_SONAR_URL", env.SONAR_BASE_URL, process.env.SONAR_HOST_URL),
                     configured: isRealConfigured(env.SONAR_BASE_URL)
                 },
                 {
@@ -470,7 +477,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "Dependency-Track",
                     description: "Component analysis and vulnerability tracking.",
                     kind: "external",
-                    href: trimUrl(realValueOrEmpty(env.DEPENDENCY_TRACK_BASE_URL)) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_DEPENDENCY_TRACK_URL", env.DEPENDENCY_TRACK_BASE_URL),
                     configured: isRealConfigured(env.DEPENDENCY_TRACK_BASE_URL, env.DEPENDENCY_TRACK_API_KEY),
                     optional: true
                 },
@@ -506,7 +513,7 @@ export function buildPlatformIntegrations(): PlatformIntegrationsResponse {
                     name: "HashiCorp Vault",
                     description: "Secrets, PKI, and dynamic credentials.",
                     kind: "external",
-                    href: firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR))) || null,
+                    href: browserIntegrationHref("NEXT_PUBLIC_VAULT_UI_URL", env.VAULT_ADDR),
                     configured: Boolean(firstNonEmpty(publicEnv("NEXT_PUBLIC_VAULT_UI_URL"), trimUrl(realValueOrEmpty(env.VAULT_ADDR)))),
                     optional: true
                 },

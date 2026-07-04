@@ -148,6 +148,7 @@ sync_env_and_jenkins() {
   for f in "${ENV_FILE}" "${DOT_ENV}"; do
     patch_env_key "${f}" "SONAR_BASE_URL" "${SONAR_URL}"
     patch_env_key "${f}" "SONAR_HOST_URL" "${SONAR_URL}"
+    patch_env_key "${f}" "NEXT_PUBLIC_SONAR_URL" "${SONAR_URL}"
     patch_env_key "${f}" "SONAR_TOKEN" "${token}"
     patch_env_key "${f}" "SONAR_ADMIN_USER" "${SONAR_ADMIN_USER}"
     patch_env_key "${f}" "SONAR_ADMIN_NEW_PASSWORD" "${SONAR_ADMIN_NEW_PASSWORD}"

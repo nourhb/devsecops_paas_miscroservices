@@ -31,11 +31,24 @@ patch_env_key "KUBERNETES_ENABLED" "true"
 ok "KUBERNETES_ENABLED=true (Argo CD uses Kubernetes API — no HTTP 403 in UI)"
 
 echo ""
-echo "==> 1/4 Argo CD RBAC + env"
+echo "==> 1/6 Argo CD RBAC + env"
 bash "${SCRIPT_DIR}/lab-argocd-fix.sh" || warn "argocd-fix had warnings"
 
 echo ""
-echo "==> 2/4 Register Argo CD Applications (paas-* from gitops/apps)"
+echo "==> 2/6 Patch browser Open tool URLs (NEXT_PUBLIC_* — never .svc)"
+bash "${SCRIPT_DIR}/lab-patch-browser-urls.sh" || warn "lab-patch-browser-urls had warnings"
+
+echo ""
+echo "==> 3/6 Wire integration NodePorts (Grafana, Prometheus, Harbor, …)"
+if bash "${SCRIPT_DIR}/bootstrap-integrations-lab.sh"; then
+  ok "integrations-bootstrap complete"
+else
+  warn "integrations-bootstrap had warnings"
+fi
+bash "${SCRIPT_DIR}/sync-paas-frontend-env-k8s.sh" || warn "env sync to k8s failed"
+
+echo ""
+echo "==> 4/6 Register Argo CD Applications (paas-* from gitops/apps)"
 if bash "${SCRIPT_DIR}/lab-argocd-bootstrap-all-apps.sh"; then
   ok "Argo CD applications bootstrapped"
 else
@@ -43,7 +56,7 @@ else
 fi
 
 echo ""
-echo "==> 3/4 Rebuild PaaS frontend image (loads UI fixes from git)"
+echo "==> 5/6 Rebuild PaaS frontend image (loads UI fixes from git)"
 export NO_CACHE="${NO_CACHE:-true}"
 export FORCE_FRONTEND_REBUILD="${FORCE_FRONTEND_REBUILD:-true}"
 if bash "${SCRIPT_DIR}/rebuild-paas-frontend-lab.sh"; then
@@ -54,7 +67,7 @@ else
 fi
 
 echo ""
-echo "==> 4/4 Verify deployment (build id must match git HEAD)"
+echo "==> 6/6 Verify deployment (build id must match git HEAD)"
 WANT_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 IMAGE="$(kubectl get deployment frontend -n "${PAAS_NS}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
 GOT_SHA="$(kubectl exec -n "${PAAS_NS}" deploy/frontend -- cat /app/.paas-build-id 2>/dev/null | tr -d '\r\n' || true)"
@@ -77,5 +90,5 @@ echo "=============================================="
 echo "Done. Hard-refresh the browser (Ctrl+Shift+R):"
 echo "  • GitOps — K8s API status (not 'Configure ARGOCD_*')"
 echo "  • Docker page — Harbor registry label"
-echo "  • Create Project — no webhook / build-template boxes"
+echo "  • Integrations — Open tool links use NodePort URLs (not .svc.cluster.local)"
 echo "=============================================="

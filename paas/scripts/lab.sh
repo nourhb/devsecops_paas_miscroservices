@@ -92,6 +92,7 @@ usage() {
   echo "  ui-fix            Rebuild frontend + Argo CD apps (GitOps, Harbor UI, Create Project)"
   echo "  prometheus-install  Helm install kube-prometheus-stack (when monitoring is empty)"
   echo "  integrations-bootstrap  Wire Grafana/Trivy/DT URLs + scale monitoring stack"
+  echo "  patch-browser-urls    Set NEXT_PUBLIC_* Open tool links (NodePort, never .svc)"
   echo "  frontend-heal     Restore UI :30100 (pins master for recovery image)"
   echo "  frontend-up       Restore UI after Sonar RAM window / orphaned scale-to-0"
   echo "  frontend-force    RS cleanup + pin recovery image when rollout hangs"
@@ -305,6 +306,8 @@ case "$cmd" in
     bash "$LIB/lab-ui-fix.sh" ;;
   integrations-bootstrap|bootstrap-integrations)
     bash "$LIB/bootstrap-integrations-lab.sh" ;;
+  patch-browser-urls|browser-urls)
+    bash "$LIB/lab-patch-browser-urls.sh" ;;
   frontend-heal)
     bash "$LIB/lab-frontend-schedule-heal.sh" ;;
   frontend-up|ui-up|restore-ui)

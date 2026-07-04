@@ -205,6 +205,13 @@ kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
     if [ -n "$val" ]; then echo "$v=set"; else echo "$v=MISSING"; fi
   done
 ' 2>/dev/null || { echo "WARN: could not exec into pod yet"; SECURITY_OK=0; }
+echo "==> Browser Open tool URLs in pod"
+kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
+  for v in NEXT_PUBLIC_GRAFANA_URL NEXT_PUBLIC_PROMETHEUS_URL NEXT_PUBLIC_ARGOCD_URL NEXT_PUBLIC_JENKINS_URL NEXT_PUBLIC_HARBOR_URL; do
+    eval "val=\$$v"
+    if [ -n "$val" ]; then echo "$v=$val"; else echo "$v=MISSING"; fi
+  done
+' 2>/dev/null || echo "WARN: could not exec into pod yet"
 echo "==> Prometheus / Kubernetes in pod"
 kubectl exec -n "${PAAS_NS}" "deploy/${DEPLOY_NAME}" -- sh -c '
   for v in KUBERNETES_ENABLED KUBE_CONFIG_PATH PROMETHEUS_BASE_URL PROMETHEUS_PROBE_URL; do

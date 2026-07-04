@@ -92,9 +92,10 @@ argocd_login_verify() {
 }
 
 sync_env_files() {
-  local api_base="$1" password="$2"
+  local api_base="$1" password="$2" browser_base="$3"
   for f in "${ENV_FILE}" "${DOT_ENV}"; do
     patch_env_key "${f}" "ARGOCD_BASE_URL" "${api_base}"
+    patch_env_key "${f}" "NEXT_PUBLIC_ARGOCD_URL" "${browser_base}"
     patch_env_key "${f}" "ARGOCD_USERNAME" "${ARGOCD_USERNAME}"
     patch_env_key "${f}" "ARGOCD_PASSWORD" "${password}"
     patch_env_key "${f}" "ARGOCD_AUTH_TOKEN" ""
@@ -135,7 +136,7 @@ main() {
   argocd_login_verify "${probe_base}" "${ARGOCD_USERNAME}" "${password}"
   ok "PaaS frontend will use in-cluster API ${in_cluster}"
 
-  sync_env_files "${in_cluster}" "${password}"
+  sync_env_files "${in_cluster}" "${password}" "${probe_base}"
 
   echo "=============================================="
   echo "Done. Next on VM:"

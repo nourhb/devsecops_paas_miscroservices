@@ -127,6 +127,8 @@ main() {
   echo " bootstrap-integrations-lab"
   echo "=============================================="
 
+  bash "${SCRIPT_DIR}/lab-patch-browser-urls.sh" || warn "lab-patch-browser-urls had warnings"
+
   scale_monitoring_if_needed
 
   patch_both "NODE_IP" "${NODE_IP}"
@@ -221,6 +223,57 @@ main() {
   elif kubectl get svc harbor -n harbor >/dev/null 2>&1; then
     patch_both "HARBOR_PROBE_URL" "http://harbor.harbor.svc.cluster.local:80"
     ok "HARBOR_PROBE_URL=http://harbor.harbor.svc.cluster.local:80"
+  fi
+
+  local harbor_np="${HARBOR_NODEPORT:-30002}"
+  if kubectl get svc harbor -n harbor >/dev/null 2>&1; then
+    np="$(svc_nodeport harbor harbor "http" || svc_nodeport harbor harbor || true)"
+    if [[ -n "${np}" && "${np}" != "null" ]]; then
+      harbor_np="${np}"
+    fi
+    patch_both "NEXT_PUBLIC_HARBOR_URL" "http://${NODE_IP}:${harbor_np}"
+  fi
+
+  if kubectl get svc jenkins -n cicd >/dev/null 2>&1; then
+    np="$(svc_nodeport cicd jenkins || true)"
+    if [[ -n "${np}" && "${np}" != "null" ]]; then
+      patch_both "NEXT_PUBLIC_JENKINS_URL" "http://${NODE_IP}:${np}"
+      patch_both "NEXT_PUBLIC_JENKINS_PROBE_URL" "http://${NODE_IP}:${np}"
+    fi
+  elif grep -qE '^JENKINS_BASE_URL=http' "${ENV_FILE}" 2>/dev/null; then
+    url="$(grep -E '^JENKINS_BASE_URL=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '"')"
+    patch_both "NEXT_PUBLIC_JENKINS_URL" "${url}"
+    patch_both "NEXT_PUBLIC_JENKINS_PROBE_URL" "${url}"
+  fi
+
+  if kubectl get svc sonarqube-sonarqube -n sonarqube >/dev/null 2>&1; then
+    np="$(svc_nodeport sonarqube sonarqube-sonarqube || true)"
+  elif kubectl get svc sonarqube -n sonarqube >/dev/null 2>&1; then
+    np="$(svc_nodeport sonarqube sonarqube || true)"
+  else
+    np=""
+  fi
+  if [[ -n "${np}" && "${np}" != "null" ]]; then
+    patch_both "NEXT_PUBLIC_SONAR_URL" "http://${NODE_IP}:${np}"
+  elif grep -qE '^SONAR_BASE_URL=http' "${ENV_FILE}" 2>/dev/null; then
+    url="$(grep -E '^SONAR_BASE_URL=' "${ENV_FILE}" | tail -1 | cut -d= -f2- | tr -d '"')"
+    patch_both "NEXT_PUBLIC_SONAR_URL" "${url}"
+  fi
+
+  if kubectl get svc argocd-server -n argocd >/dev/null 2>&1; then
+    local argo_https_np argo_http_np argo_browser
+    argo_https_np="$(kubectl get svc argocd-server -n argocd \
+      -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+    argo_http_np="$(kubectl get svc argocd-server -n argocd \
+      -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null || true)"
+    if [[ -n "${argo_https_np}" && "${argo_https_np}" != "null" ]]; then
+      argo_browser="https://${NODE_IP}:${argo_https_np}"
+    elif [[ -n "${argo_http_np}" && "${argo_http_np}" != "null" ]]; then
+      argo_browser="http://${NODE_IP}:${argo_http_np}"
+    fi
+    if [[ -n "${argo_browser:-}" ]]; then
+      patch_both "NEXT_PUBLIC_ARGOCD_URL" "${argo_browser}"
+    fi
   fi
 
   local harbor_ping="000"

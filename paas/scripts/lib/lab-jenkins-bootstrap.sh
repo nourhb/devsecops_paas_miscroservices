@@ -148,6 +148,8 @@ sync_env() {
     patch_env_key "${f}" "JENKINS_BASE_URL" "${JENKINS_URL}"
     patch_env_key "${f}" "JENKINS_PROBE_URL" "${JENKINS_URL}"
     patch_env_key "${f}" "JENKINS_URL" "${JENKINS_URL}"
+    patch_env_key "${f}" "NEXT_PUBLIC_JENKINS_URL" "${JENKINS_URL}"
+    patch_env_key "${f}" "NEXT_PUBLIC_JENKINS_PROBE_URL" "${JENKINS_URL}"
     patch_env_key "${f}" "JENKINS_USERNAME" "${JENKINS_USER}"
     patch_env_key "${f}" "JENKINS_API_TOKEN" "${token}"
     ok "updated ${f}"
