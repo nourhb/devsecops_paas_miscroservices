@@ -29,6 +29,26 @@ IMAGE_REPO="$(resolve_image_repo "${CURRENT_IMAGE}")"
 TARGET_IMAGE="${IMAGE_REPO}:${TAG}"
 PAAS_BUILD_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
+ensure_disk_headroom() {
+  local max_pct="${PAAS_FRONTEND_DISK_MAX_PCT:-87}"
+  local disk_pct
+  disk_pct="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+  if [[ -n "${disk_pct}" && "${disk_pct}" -ge "${max_pct}" ]]; then
+    echo "WARN: disk at ${disk_pct}% — running emergency cleanup before frontend build/rollout"
+    if [[ -f "${SCRIPT_DIR}/lab-disk-emergency-free.sh" ]]; then
+      bash "${SCRIPT_DIR}/lab-disk-emergency-free.sh" || true
+    fi
+    disk_pct="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+    echo "==> Disk after cleanup: ${disk_pct:-?}%"
+  fi
+  if [[ -n "${disk_pct}" && "${disk_pct}" -ge 92 && "${PAAS_IGNORE_DISK_CHECK:-}" != "1" ]]; then
+    echo "ERROR: disk still at ${disk_pct}% — free space first: bash paas/scripts/lab.sh disk-emergency" >&2
+    exit 1
+  fi
+}
+
+ensure_disk_headroom
+
 echo "==> Current deployment image: ${CURRENT_IMAGE}"
 echo "==> Building ${TARGET_IMAGE} from ${REPO_ROOT}/paas (git ${PAAS_BUILD_SHA})"
 BUILD_ARGS=(--build-arg "PAAS_BUILD_SHA=${PAAS_BUILD_SHA}")
@@ -109,11 +129,7 @@ if [[ -f "${SCRIPT_DIR}/lab-frontend-lab-safety.sh" ]]; then
   stop_frontend_storm_if_needed 3
 fi
 
-DISK_PCT="$(df / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-if [[ -n "${DISK_PCT}" && "${DISK_PCT}" -ge 88 ]]; then
-  echo "ERROR: disk at ${DISK_PCT}% — free space before frontend rollout (run: bash paas/scripts/lab.sh disk-emergency)" >&2
-  exit 1
-fi
+ensure_disk_headroom
 
 echo "==> Kyverno fail-open so deployment patch is not blocked"
 bash "${SCRIPT_DIR}/lab-kyverno-webhook-guard.sh" guard 2>/dev/null || true
@@ -162,4 +178,12 @@ if ! kubectl rollout status deployment/frontend -n "${PAAS_NS}" --timeout=600s; 
 fi
 bash "${SCRIPT_DIR}/check-paas-lab-health.sh"
 git rev-parse HEAD > "${REPO_ROOT}/paas/frontend/.paas-frontend-image-head" 2>/dev/null || true
-echo "OK: frontend rolled out with ${TARGET_IMAGE}"
+GOT_BUILD_ID="$(kubectl exec -n "${PAAS_NS}" deploy/frontend -- cat /app/.paas-build-id 2>/dev/null | tr -d '\r\n' || true)"
+WANT_BUILD_ID="${PAAS_BUILD_SHA}"
+if [[ -n "${GOT_BUILD_ID}" && "${GOT_BUILD_ID}" == "${WANT_BUILD_ID}" ]]; then
+  echo "OK: frontend rolled out with ${TARGET_IMAGE} (build id ${GOT_BUILD_ID})"
+else
+  echo "WARN: pod build id '${GOT_BUILD_ID:-missing}' != git ${WANT_BUILD_ID} — UI may be stale" >&2
+  echo "  finish: bash paas/scripts/lab.sh frontend-rollout" >&2
+  echo "OK: frontend rolled out with ${TARGET_IMAGE}"
+fi

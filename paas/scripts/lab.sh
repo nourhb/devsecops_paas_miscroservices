@@ -114,7 +114,8 @@ usage() {
   echo "  master-heal     Heal master NotReady (PaaS UI runs on master)"
   echo "  k3s-stabilize   Wait for API + clear taints (never restarts k3s by default)"
   echo "  frontend  Rebuild and roll out PaaS frontend image only"
-  echo "  frontend-rollout  Roll out existing local/recovery image (no rebuild)"
+  echo "  frontend-rollout  Roll out latest local/recovery image (no rebuild)"
+  echo "  frontend-finish     After disk-blocked build — rollout local-* image with link fix"
   echo "  repair-frontend-ui  Fix UI 500 after rollout (restore envFrom + probes)"
   echo "  repair    Rebuild GitOps Helm chart (fix invalid K8s names)"
   echo "  fix-gitops  Abort rebase and reset ~/gitops to origin/main"
@@ -378,6 +379,8 @@ case "$cmd" in
     bash "$LIB/rebuild-paas-frontend-lab.sh" ;;
   frontend-rollout|rollout-frontend)
     bash "$LIB/rollout-paas-frontend-recovery.sh" ;;
+  frontend-finish|finish-frontend)
+    bash "$LIB/lab-frontend-finish-rollout.sh" ;;
   repair-frontend-ui|fix-ui-500)
     bash "$LIB/repair-frontend-ui-500.sh" ;;
   repair)
