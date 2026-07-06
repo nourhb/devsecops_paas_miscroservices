@@ -43,7 +43,7 @@ usage() {
   echo "  pin-pg15  Force postgres:15-alpine (lab PVC is PG15 — fixes PG16 crash loop)"
   echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
-  echo "  githooks  Install repo git hooks (strip injected co-author from commits)"
+  echo "  githooks  Install repo git hooks (sanitize commit messages)"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
   echo "  probe-k8s     Diagnose Kubernetes API from frontend pod (UI cluster pages)"
@@ -129,7 +129,6 @@ usage() {
   echo "  deploy    git pull + Kyverno Audit + cosign try + heal (one-shot)"
   echo "  ultimate  Full fix: Kyverno HTTP Harbor + GitOps + deploy (one command)"
   echo "  restore   Jenkins + frontend env + pipeline (get deploy working again)"
-  echo "  rollback-june17  Restore Jenkins pipeline to 17 Jun build #756 layout (bb1fef3)"
   echo "  pipeline-heal  Full 12-step pipeline: Sonar token + env + Jenkins + Harbor"
   echo "  backup|full-backup  FULL disaster-recovery backup: git bundle + all k8s/helm + Jenkins + raw PV data (Harbor/Sonar/DT/Postgres)"
 }
@@ -359,8 +358,6 @@ case "$cmd" in
     bash "$LIB/lab-k3s-ensure.sh" ;;
   restore|fix-app|back)
     bash "$LIB/lab-restore-app.sh" ;;
-  rollback-june17|june17|rollback-756)
-    bash "$LIB/lab-rollback-june17.sh" ;;
   pipeline-heal|pipeline|12steps|full-pipeline)
     bash "$LIB/lab-pipeline-full-heal.sh" ;;
   backup|full-backup|backup-everything)

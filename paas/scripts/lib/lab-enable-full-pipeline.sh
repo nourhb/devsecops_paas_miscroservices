@@ -63,8 +63,8 @@ if ! grep -qE '^ZAP_TARGET_URL=.+' "${ENV_FILE}" 2>/dev/null; then
   fi
 fi
 
-echo "==> 5/6 Install monolith stages (ensureHelmTool + stub chart + ZAP kubectl)"
-bash "${SCRIPT_DIR}/install-jenkins-stages-monolith.sh"
+echo "==> 5/6 CPS-split Jenkins stages (ensureHelmTool + stub chart + ZAP kubectl)"
+bash "${SCRIPT_DIR}/fix-paas-deploy-cps-split-now.sh"
 
 echo "==> 6/6 Sync env + Jenkins params (do NOT touch June 17 job wrapper)"
 set -a

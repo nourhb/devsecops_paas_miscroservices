@@ -1,3 +1,4 @@
+#Builds and deploys the PaaS frontend to Kubernetes when you push to main.
 name: PaaS hosting
 
 on:
