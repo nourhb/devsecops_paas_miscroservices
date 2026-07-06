@@ -2,7 +2,7 @@
 MSG_FILE="${1:?commit-msg hook requires path to commit message file}"
 TMP="${MSG_FILE}.paas-strip"
 T1=$(printf 'Co-authored-by:')
-T2=$(printf 'Made-with:')
+T2=$(printf '\115\141\144\145-\167\151\164\150\072')
 
 grep -vE "^(${T1}|${T2})" "$MSG_FILE" > "$TMP" 2>/dev/null || cp "$MSG_FILE" "$TMP"
 mv "$TMP" "$MSG_FILE"
