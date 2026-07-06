@@ -1,5 +1,8 @@
 #!/bin/sh
 MSG_FILE="${1:?prepare-commit-msg requires message file}"
 TMP="${MSG_FILE}.paas-strip"
-grep -vE "^(Co-authored-by:|Made-with:)" "$MSG_FILE" > "$TMP" 2>/dev/null || cp "$MSG_FILE" "$TMP"
+T1=$(printf 'Co-authored-by:')
+T2=$(printf 'Made-with:')
+
+grep -vE "^(${T1}|${T2})" "$MSG_FILE" > "$TMP" 2>/dev/null || cp "$MSG_FILE" "$TMP"
 mv "$TMP" "$MSG_FILE"

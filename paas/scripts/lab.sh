@@ -43,7 +43,7 @@ usage() {
   echo "  pin-pg15  Force postgres:15-alpine (lab PVC is PG15 — fixes PG16 crash loop)"
   echo "  postgres    Deploy/wait/schema for in-cluster Postgres"
   echo "  health    Quick health check"
-  echo "  githooks  Install repo git hooks (sanitize commit messages)"
+  echo "  githooks  Install repo git hooks"
   echo "  prometheus  Restart/wait for Prometheus endpoints in monitoring"
   echo "  probe-prometheus  Diagnose Prometheus connectivity from frontend pod"
   echo "  probe-k8s     Diagnose Kubernetes API from frontend pod (UI cluster pages)"
