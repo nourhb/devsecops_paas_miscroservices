@@ -1,3 +1,4 @@
+// Full twelve step DevSecOps deploy pipeline for Jenkins.
 def nonEmptyNoSpace(String value, String label) {
   if (!value?.trim()) {
     error("${label} is required")

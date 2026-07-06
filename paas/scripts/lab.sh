@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Main VM lab operator command dispatcher entrypoint.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB="${DIR}/lib"

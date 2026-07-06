@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to k3s diagnose on VM cluster
 set -uo pipefail
 
 echo "=== k3s diagnose $(date -Is 2>/dev/null || date) ==="

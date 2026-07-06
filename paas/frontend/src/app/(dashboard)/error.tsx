@@ -1,4 +1,5 @@
 "use client";
+// Error boundary UI for dashboard route segment
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

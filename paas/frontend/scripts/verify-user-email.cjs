@@ -1,3 +1,4 @@
+// CLI marks user email verified in Postgres database.
 const { PrismaClient } = require("@prisma/client");
 async function main() {
     const raw = process.argv[2];

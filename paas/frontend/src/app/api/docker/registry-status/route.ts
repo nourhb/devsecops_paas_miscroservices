@@ -1,3 +1,4 @@
+// API route handles docker registry-status requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getRegistryStatus } from "@/server/docker/docker-service";

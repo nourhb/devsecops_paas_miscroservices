@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Splits Jenkins stages into CPS loadable Groovy files.
 from __future__ import annotations
 
 import argparse

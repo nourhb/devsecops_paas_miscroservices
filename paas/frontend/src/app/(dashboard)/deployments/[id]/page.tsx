@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard deployments [id]
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -11,9 +12,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeploymentPipelinePreview } from "@/components/deployments/deployment-pipeline-preview";
 import { DeploymentLogsView, deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
-import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
+import { shouldSkipAppReachabilityProbe } from "@/lib/resolve-project-id-from-path";
 import { pipelineApi, projectApi } from "@/lib/api";
-import { queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpMessage } from "@/lib/api-client";
 import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 function deploymentStatusVariant(status: string): "success" | "danger" | "warning" {
     const s = status.toUpperCase();

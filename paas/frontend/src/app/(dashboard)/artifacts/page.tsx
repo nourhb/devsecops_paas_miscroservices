@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard artifacts
 import { useEffect, useState } from "react";
 import { Download, Package, RefreshCw } from "lucide-react";
 import { artifactApi } from "@/lib/api";

@@ -1,8 +1,8 @@
 import { env } from "@/server/config/env";
-import { isPlaceholderValue, realValueOrEmpty } from "@/server/config/real-values";
+import { isPlaceholderValue, realValueOrEmpty } from "@/server/config/env";
 import { argocdIntegrationFetch } from "@/server/http/argocd-fetch";
-import { resolveArgoCdAuthHeader } from "@/server/services/argocd-auth";
-import { probeHostIsRemapSource } from "@/server/http/integration-probe-host";
+import { resolveArgoCdAuthHeader } from "@/server/services/argocd-service";
+import { probeHostIsRemapSource } from "@/server/http/integration-fetch";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { getCoreV1Api } from "@/server/integrations/kubernetes-client";
 import type { PlatformIntegrationItem, PlatformIntegrationReachability, PlatformIntegrationsResponse } from "@/types";

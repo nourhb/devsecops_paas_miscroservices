@@ -1,9 +1,10 @@
+// API route handles auth profile requests
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { updateUserProfile } from "@/server/auth/auth-service";
-import { buildSessionCookie } from "@/server/auth/session-cookie";
+import { buildSessionCookie } from "@/server/auth/auth-service";
 import { fail } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 export const runtime = "nodejs";
 export async function PATCH(request: NextRequest) {
     try {

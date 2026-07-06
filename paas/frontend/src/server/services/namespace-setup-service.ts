@@ -1,6 +1,6 @@
 import type { V1Secret } from "@kubernetes/client-node";
 import { env } from "@/server/config/env";
-import { harborDockerConfigSecretData } from "@/server/deploy/harbor-pull-secret";
+import { harborDockerConfigSecretData } from "@/server/deploy/harbor-registry-host";
 import { getCoreV1Api, readNamespacedSecretData, upsertNamespacedSecret } from "@/server/integrations/kubernetes-client";
 
 const HARBOR_PULL_SECRET = "harbor-regcred";

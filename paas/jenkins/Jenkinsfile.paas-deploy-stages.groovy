@@ -1,3 +1,4 @@
+// Shared Groovy stages loaded by paas deploy job.
 def agentLabel = params.JENKINS_AGENT_LABEL?.trim() ?: ""
 def branchName = params.BRANCH?.trim() ?: "main"
 def gitUrl = params.GIT_URL?.trim() ?: ""

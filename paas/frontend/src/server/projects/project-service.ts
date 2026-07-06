@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { resolveBuildPlan } from "@/server/build/build-planner";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
 import { prisma } from "@/server/db/prisma";
-import { ForbiddenError, NotFoundError, ValidationError } from "@/server/http/errors";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/server/http/response";
 import { detectRepositoryLanguage } from "@/server/projects/repository-language";
 import { normalizeBuildEnvInput } from "@/server/projects/project-build-env";
 import { hasBuildEnvStored, resolveBuildEnvFromStorage, serializeBuildEnvForStorage } from "@/server/projects/project-secrets-crypto";

@@ -1,3 +1,4 @@
+// CLI resets a user password in Postgres database.
 const bcrypt = require("bcryptjs");
 const { PrismaClient } = require("@prisma/client");
 const ROUNDS = 12;

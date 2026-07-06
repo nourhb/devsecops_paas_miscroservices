@@ -1,4 +1,4 @@
-# Lab kube-prometheus-stack — Prometheus + node-exporter only (charts need node_* metrics).
+# Kubernetes manifest for lab or hosted deploy
 # Grafana/Alertmanager disabled by default — enable via PROMETHEUS_LAB_FULL_STACK=1 on install.
 prometheus:
   service:

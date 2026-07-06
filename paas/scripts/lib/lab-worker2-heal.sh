@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to worker2 heal on VM cluster
 set -euo pipefail
 PAAS_NS="${PAAS_NS:-paas}"
 WORKER="${LAB_WORKER_NODE:-worker2}"

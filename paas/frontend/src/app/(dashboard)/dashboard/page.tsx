@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard dashboard
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Boxes, ExternalLink, FolderKanban, GitBranch, LayoutGrid, Loader2, Package, Percent, Plus, Rocket, Shield, ServerCog } from "lucide-react";
@@ -7,7 +8,7 @@ import { ChartCaption, ChartStatRow } from "@/components/charts/chart-stat-row";
 import { CHART_COLORS, chartYDomain, pieRowsForDisplay, sumRowValues } from "@/components/charts/chart-display-utils";
 import { OverviewStatCard } from "@/components/dashboard/overview-stat-card";
 import { DashboardPodsPanel } from "@/components/dashboard/dashboard-pods-panel";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

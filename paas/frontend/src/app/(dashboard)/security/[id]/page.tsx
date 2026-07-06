@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard security [id]
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -12,7 +13,7 @@ import { ChartCaption, ChartStatRow } from "@/components/charts/chart-stat-row";
 import { CHART_COLORS, chartYDomain, pieRowsForDisplay, sumSeverityCounts } from "@/components/charts/chart-display-utils";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { projectApi, securityApi } from "@/lib/api";
-import { queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpMessage } from "@/lib/api-client";
 import type { SecurityIntegrationProbeStatus } from "@/types";
 const SEVERITY_ROWS = [
     { key: "critical", label: "Critical", dotClassName: "bg-danger" },

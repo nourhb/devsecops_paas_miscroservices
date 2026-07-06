@@ -1,3 +1,4 @@
+// API route handles health requests
 import { NextResponse } from "next/server";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";

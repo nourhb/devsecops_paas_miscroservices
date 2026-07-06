@@ -1,7 +1,8 @@
+// API route handles dependency-track requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { fail, ok } from "@/server/http/response";
-import { ValidationError } from "@/server/http/errors";
+import { ValidationError } from "@/server/http/response";
 import { assertProjectAccess, getProjectById } from "@/server/projects/project-service";
 import { dependencyTrackClient } from "@/server/integrations/devsecops-clients";
 export const runtime = "nodejs";

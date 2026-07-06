@@ -2,17 +2,17 @@ import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { env } from "@/server/config/env";
-import { parseBuildMetadata } from "@/server/build/build-metadata";
+import { parseBuildMetadata } from "@/server/build/build-planner";
 import { getBuildBackend } from "@/server/build/build-backend";
 import { jenkinsClient, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
 import { promoteDeploymentAfterJenkinsSuccess, tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
-import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageFailure, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageFailure, recordDeploymentFailure } from "@/server/services/deployment-service";
 import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
-import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
-import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
+import { jenkinsResultUserMessage } from "@/server/jenkins/pipeline-step-verification";
+import { resolveVerifiedArtifactImage } from "@/server/jenkins/pipeline-step-verification";
 import { monitorDeployment } from "@/server/services/jenkins-monitor";
 import { updateProject } from "@/server/projects/project-service";
-import { TtlCache } from "@/server/http/ttl-cache";
+import { TtlCache } from "@/server/http/integration-fetch";
 
 const jenkinsUiRefreshThrottle = new TtlCache<true>(2500);
 

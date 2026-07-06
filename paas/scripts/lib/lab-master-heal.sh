@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to master heal on VM cluster
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lab-kube-env.sh"

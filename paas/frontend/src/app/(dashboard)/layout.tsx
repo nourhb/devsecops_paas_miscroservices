@@ -1,5 +1,5 @@
-import { AppShell } from "@/components/layout/app-shell";
-import { AuthGuard } from "@/components/layout/auth-guard";
+// Layout wrapper for (dashboard) pages
+import { AppShell, AuthGuard } from "@/components/layout/app-shell";
 export default function DashboardLayout({ children }: {
     children: React.ReactNode;
 }) {

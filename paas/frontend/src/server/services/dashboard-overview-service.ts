@@ -5,7 +5,7 @@ import { listPlatformArtifacts } from "@/server/artifacts/artifact-service";
 import { getPlatformTooling } from "@/server/platform/platform-tooling";
 import { getSecurityMetrics } from "@/server/security/security-service";
 import { resolveAppUrlForClient } from "@/server/deploy/app-public-url";
-import { TtlCache } from "@/server/http/ttl-cache";
+import { TtlCache } from "@/server/http/integration-fetch";
 import type { ArtifactRecord, PlatformToolGroup, SeverityBreakdown, UserRole } from "@/types";
 function accessibleProjectsWhere(userId: string, role: UserRole): Prisma.ProjectWhereInput {
     return role === "ADMIN" ? { deletedAt: null } : { createdById: userId, deletedAt: null };

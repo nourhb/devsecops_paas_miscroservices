@@ -1,3 +1,4 @@
+// Next.js build and runtime configuration settings
 const nextConfig = {
     reactStrictMode: true,
     output: "standalone",

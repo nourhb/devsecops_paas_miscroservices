@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to fix traefik app routing on VM cluster
 set -euo pipefail
 NODE_IP="${NODE_IP:-192.168.56.129}"
 INGRESS_PORT="${APPS_PUBLIC_INGRESS_HTTP_PORT:-30659}"

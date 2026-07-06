@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { env } from "@/server/config/env";
-import { IntegrationError } from "@/server/http/errors";
-import { formatFetchErrorChain } from "@/server/http/format-fetch-error";
+import { IntegrationError } from "@/server/http/response";
+import { formatFetchErrorChain } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { syncJenkinsfileConfigMapFromEmbeddedIfNeeded } from "@/server/jenkins/jenkinsfile-configmap-sync";
 import {

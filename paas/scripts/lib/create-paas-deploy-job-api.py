@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for create paas deploy job api
 """Create paas-deploy Jenkins job via REST (no Jenkinsfile assertions). Verbose for lab debugging."""
 from __future__ import annotations
 

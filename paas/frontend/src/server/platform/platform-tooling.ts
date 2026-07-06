@@ -1,6 +1,6 @@
 import { env } from "@/server/config/env";
 import { getCoreV1Api, getCustomObjectsApi, isKubernetesConfigured } from "@/server/integrations/kubernetes-client";
-import { TtlCache } from "@/server/http/ttl-cache";
+import { TtlCache } from "@/server/http/integration-fetch";
 import type { PlatformToolGroup } from "@/types";
 type ToolTone = "success" | "warning" | "danger" | "outline";
 function toneFromPods(running: number, total: number): ToolTone {

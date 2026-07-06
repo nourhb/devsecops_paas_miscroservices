@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for sync harbor jenkins job params
 """Sync HARBOR_* default parameter values on paas-deploy Jenkins job from docker-compose.env."""
 from __future__ import annotations
 

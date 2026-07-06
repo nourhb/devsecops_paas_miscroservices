@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Flattens env files for docker compose deployment.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

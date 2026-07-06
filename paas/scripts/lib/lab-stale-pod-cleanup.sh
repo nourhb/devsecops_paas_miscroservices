@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to stale pod cleanup on VM cluster
 set -euo pipefail
 
 bulk_delete_ns() {

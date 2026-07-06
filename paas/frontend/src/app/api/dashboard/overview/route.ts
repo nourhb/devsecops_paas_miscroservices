@@ -1,3 +1,4 @@
+// API route handles dashboard overview requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { fail, ok } from "@/server/http/response";

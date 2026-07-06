@@ -1,6 +1,7 @@
+// API route handles k8s pod-logs requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
-import { ValidationError } from "@/server/http/errors";
+import { ValidationError } from "@/server/http/response";
 import { fail, ok } from "@/server/http/response";
 import { readPodLog } from "@/server/integrations/kubernetes-client";
 export const runtime = "nodejs";

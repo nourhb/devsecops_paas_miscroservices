@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for harbor push rbac fix
 """Fix Harbor registry push RBAC: ensure paas project + push scope in token (actions must include push)."""
 from __future__ import annotations
 

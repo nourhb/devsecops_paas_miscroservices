@@ -1,7 +1,8 @@
+// API route handles auth verify-email requests
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/server/http/response";
 import { verifyEmailToken } from "@/server/auth/auth-service";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
     try {

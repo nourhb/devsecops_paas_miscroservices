@@ -1,3 +1,4 @@
+// API route handles argocd [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { assertProjectAccess, getProjectById } from "@/server/projects/project-service";

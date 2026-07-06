@@ -1,3 +1,4 @@
+// API route handles project [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { deleteProjectForUser, getProjectForUser, updateProjectForUser } from "@/server/projects/project-service";

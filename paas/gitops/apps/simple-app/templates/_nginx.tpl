@@ -1,3 +1,4 @@
+# Helm template helper definitions for chart rendering
 {{/*
 Static SPA (vite/angular) images use nginx on port 8080 as non-root UID 101.
 */}}

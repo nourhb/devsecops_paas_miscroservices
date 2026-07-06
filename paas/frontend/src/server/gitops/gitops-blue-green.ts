@@ -1,6 +1,5 @@
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository, buildDeployImageRepositoryForClusterPull, deployImageRepositoryForClusterPull, harborClusterPullImageRef, sanitizeDeployImageName } from "@/server/deploy/deploy-image";
-import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
 
 export type DeploymentStrategy = "Rolling" | "BlueGreen";
 export type BlueGreenSlot = "blue" | "green";
@@ -177,3 +176,74 @@ export function applyRollingImage(doc: Record<string, unknown>, projectName: str
         pullPolicy: "IfNotPresent"
     };
 }
+
+function gitopsProjectSlug(projectName: string): string {
+    return sanitizeDeployImageName(projectName);
+}
+function applyProjectPathPattern(pattern: string, projectName: string): string {
+    const slug = gitopsProjectSlug(projectName);
+    return pattern.replace(/\{\{projectName\}\}/gi, slug).replace(/\{\{project\}\}/gi, slug);
+}
+export function gitopsValuesPathForProject(projectName: string): string {
+    return applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName);
+}
+
+export function gitopsChartShortNameForProject(projectName: string): string {
+    const chartPath = gitopsHelmChartPathForProject(projectName).replace(/\\/g, "/").replace(/\/$/, "");
+    return chartPath.split("/").filter(Boolean).pop() ?? "simple-app";
+}
+
+export function gitopsHelmChartPathForProject(projectName: string): string {
+    const explicit = env.GITOPS_CHART_PATH_PATTERN.trim();
+    if (explicit) {
+        return applyProjectPathPattern(explicit, projectName);
+    }
+    const valuesPath = applyProjectPathPattern(env.GITOPS_VALUES_PATH_PATTERN, projectName).replace(/\\/g, "/");
+    if (valuesPath.endsWith("/values.yaml")) {
+        return valuesPath.slice(0, -"/values.yaml".length);
+    }
+    if (valuesPath.endsWith("values.yaml")) {
+        const slash = valuesPath.lastIndexOf("/");
+        return slash > 0 ? valuesPath.slice(0, slash) : `apps/${gitopsProjectSlug(projectName)}`;
+    }
+    return `apps/${gitopsProjectSlug(projectName)}`;
+}
+
+const repoLocks = new Map<string, Promise<void>>();
+
+async function withAsyncLock<T>(key: string, store: Map<string, Promise<void>>, fn: () => Promise<T>): Promise<T> {
+    const prior = store.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const tail = prior.then(() => gate);
+    store.set(key, tail);
+    await prior;
+    try {
+        return await fn();
+    }
+    finally {
+        release();
+        if (store.get(key) === tail) {
+            store.delete(key);
+        }
+    }
+}
+
+export async function withGitOpsRepoLock<T>(repoKey: string, fn: () => Promise<T>): Promise<T> {
+    const key = repoKey.trim().toLowerCase() || "default";
+    return withAsyncLock(key, repoLocks, fn);
+}
+
+const projectLocks = new Map<string, Promise<void>>();
+
+export async function withGitOpsProjectLock<T>(projectName: string, fn: () => Promise<T>): Promise<T> {
+    const key = projectName.trim().toLowerCase();
+    return withAsyncLock(key, projectLocks, fn);
+}
+
+export async function sleepMs(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+

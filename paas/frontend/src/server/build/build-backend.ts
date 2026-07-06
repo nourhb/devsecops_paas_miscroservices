@@ -81,5 +81,5 @@ export function getBuildBackend(): BuildBackend {
         return backend;
     }
     backend = resolveBuildProvider() === "tekton" ? new TektonBuildBackend() : new JenkinsBuildBackend();
-    return backend;
+    return backend!;
 }

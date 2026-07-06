@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard pipeline [id]
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo } from "react";
@@ -13,16 +14,16 @@ import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prom
 import { formatStageDurationMs, jenkinsStageRowUi, jenkinsStageStepIndexLabel, shortJenkinsStageTitle } from "@/components/jenkins/jenkins-pipeline-stage-ui";
 import { PipelineVerificationPanel } from "@/components/pipeline/pipeline-verification-panel";
 import { GitOpsStatusChart } from "@/components/charts/gitops-status-chart";
-import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help-provider";
-import { parseDeployVerificationFromLogs } from "@/lib/pipeline-verification-parse";
+import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help";
+import { parseDeployVerificationFromLogs } from "@/components/pipeline/pipeline-verification-panel";
 import { mergeJenkinsChecksByStep, parsePipelineVerificationLogs } from "@/server/jenkins/pipeline-step-verification";
 import { argocdApi, jenkinsUi, pipelineApi, projectApi, securityApi, type JenkinsPipelineStagesResponse } from "@/lib/api";
 import { PAAS_DEPLOY_INCREMENTAL_JENKINS_STAGES, buildPaasDeployDisplayStages, type PaasDeployDisplayStage } from "@/lib/paas-deploy-jenkins-stages";
-import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/api-client";
 import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 import type { DeploymentStatus, Project } from "@/types";
 import { computeDeliveryPathStates } from "@/lib/delivery-path-state";
-import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
+import { jenkinsUrlForBrowser } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 const STAGES = [
     { key: "build", label: "Build", description: "Jenkins compile & image" },

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for patch crane ip first
 """Patch nip-first Harbor crane push → IP-first. Safe to run repeatedly."""
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for jenkins merge cps wrapper
 """Merge CPS wrapper into paas-deploy config.xml (CDATA or XML-escaped script)."""
 from __future__ import annotations
 

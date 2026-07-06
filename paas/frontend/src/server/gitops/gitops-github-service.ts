@@ -11,12 +11,12 @@ import {
 } from "@/server/gitops/gitops-blue-green";
 import { applyDeployValuesDefaults, ensureGitOpsHelmChartFromReference, syncStaticNginxChartTemplates } from "@/server/gitops/gitops-chart-bootstrap";
 import { mergeBuildEnvIntoHelmValues } from "@/server/projects/project-build-env";
-import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-commit-lock";
-import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-paths";
-import { IntegrationError } from "@/server/http/errors";
+import { withGitOpsRepoLock, sleepMs } from "@/server/gitops/gitops-blue-green";
+import { gitopsHelmChartPathForProject, gitopsValuesPathForProject } from "@/server/gitops/gitops-blue-green";
+import { IntegrationError } from "@/server/http/response";
 import { integrationFetch } from "@/server/http/integration-fetch";
 import { allowSimulation } from "@/server/integrations/integration-mode";
-export { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-paths";
+export { gitopsHelmChartPathForProject } from "@/server/gitops/gitops-blue-green";
 function parseGithubRepo(url: string): {
     owner: string;
     repo: string;

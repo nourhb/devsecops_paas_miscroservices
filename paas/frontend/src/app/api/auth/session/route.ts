@@ -1,8 +1,9 @@
+// API route handles auth session requests
 import { NextRequest, NextResponse } from "next/server";
 import * as jwt from "jsonwebtoken";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getAuthUserById } from "@/server/auth/auth-service";
-import { buildSessionCookie, getSessionCookieName } from "@/server/auth/session-cookie";
+import { buildSessionCookie, getSessionCookieName } from "@/server/auth/auth-service";
 import { fail } from "@/server/http/response";
 import { signToken } from "@/server/security/jwt";
 

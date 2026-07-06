@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to k3s import image nodes on VM cluster
 set -euo pipefail
 
 IMAGE="${1:?usage: lab-k3s-import-image-nodes.sh <image-ref>}"

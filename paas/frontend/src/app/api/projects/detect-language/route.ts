@@ -1,8 +1,9 @@
+// API route handles projects detect-language requests
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { fail, ok } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 import { detectRepositoryLanguage } from "@/server/projects/repository-language";
 export const runtime = "nodejs";
 const requestSchema = z.object({

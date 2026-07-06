@@ -1,5 +1,5 @@
 import { env } from "@/server/config/env";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 import { integrationFetch } from "@/server/http/integration-fetch";
 type ParamDef = readonly [
     name: string,

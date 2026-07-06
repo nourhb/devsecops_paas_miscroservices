@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to frontend lab safety on VM cluster
 set -euo pipefail
 
 PAAS_NS="${PAAS_NS:-paas}"

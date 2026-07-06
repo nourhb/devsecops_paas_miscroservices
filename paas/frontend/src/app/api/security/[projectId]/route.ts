@@ -1,3 +1,4 @@
+// API route handles security [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getSecurityMetrics } from "@/server/security/security-service";

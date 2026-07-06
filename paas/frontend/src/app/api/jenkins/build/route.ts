@@ -1,6 +1,7 @@
+// API route handles jenkins build requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
-import { ValidationError } from "@/server/http/errors";
+import { ValidationError } from "@/server/http/response";
 import { fail, ok } from "@/server/http/response";
 import { jenkinsClient } from "@/server/integrations/devsecops-clients";
 export const runtime = "nodejs";

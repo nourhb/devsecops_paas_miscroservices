@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for pin postgres pg15 now
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

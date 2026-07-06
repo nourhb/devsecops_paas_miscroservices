@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for create jenkins paas deploy job
 from __future__ import annotations
 import base64
 import http.cookiejar

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to safe image prune on VM cluster
 set -euo pipefail
 
 collect_protected_images() {

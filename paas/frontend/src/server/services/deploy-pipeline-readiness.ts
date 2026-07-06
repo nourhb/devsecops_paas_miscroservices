@@ -1,5 +1,5 @@
 import { env } from "@/server/config/env";
-import { isRealConfigured, realValueOrEmpty } from "@/server/config/real-values";
+import { isRealConfigured, realValueOrEmpty } from "@/server/config/env";
 import { getCustomObjectsApi, isKubernetesConfigured } from "@/server/integrations/kubernetes-client";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 export interface DeployPipelineReadiness {

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for repair gitops app lab
 set -euo pipefail
 PROJECT_SLUG="${1:?usage: repair-gitops-app-lab.sh <project-slug e.g. roll-dice-app> [image-tag]}"
 IMAGE_TAG="${2:-655}"

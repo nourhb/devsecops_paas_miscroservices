@@ -1,5 +1,5 @@
 import { env } from "@/server/config/env";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 export function allowSimulation(): boolean {
     return env.DEVSECOPS_ALLOW_SIMULATION === "true";
 }

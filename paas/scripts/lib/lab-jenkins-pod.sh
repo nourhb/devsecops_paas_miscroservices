@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to jenkins pod on VM cluster
 JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 
 jenkins_discover_ns() {

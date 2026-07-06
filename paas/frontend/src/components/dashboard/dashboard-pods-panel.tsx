@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { kubernetesApi, type KubernetesPodRecord } from "@/lib/api";
-import { queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpMessage } from "@/lib/api-client";
 import type { DashboardOverviewResponse } from "@/types";
 import { cn } from "@/lib/utils";
 export type DashboardPodsFallbackProject = DashboardOverviewResponse["projects"][number];

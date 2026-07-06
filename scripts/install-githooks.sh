@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Points git at repo hooks for clean commits.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOKS="${ROOT}/.githooks"

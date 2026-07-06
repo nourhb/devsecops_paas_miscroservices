@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard integrations
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertCircle, Box, CheckCircle2, ExternalLink, GitBranch, Layers, Loader2, Package, RefreshCw, Server, Shield, Wrench } from "lucide-react";

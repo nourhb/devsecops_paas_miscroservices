@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to k3s unstick on VM cluster
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

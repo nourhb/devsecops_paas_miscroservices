@@ -1,3 +1,4 @@
+# Kubernetes manifest for lab or hosted deploy
 apiVersion: v1
 kind: Namespace
 metadata:

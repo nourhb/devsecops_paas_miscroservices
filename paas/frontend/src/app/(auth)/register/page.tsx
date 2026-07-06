@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for auth register
 import axios from "axios";
 import { FormEvent, useRef, useState } from "react";
 import Link from "next/link";

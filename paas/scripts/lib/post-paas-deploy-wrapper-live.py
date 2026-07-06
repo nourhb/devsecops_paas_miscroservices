@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for post paas deploy wrapper live
 """POST CPS 7-file wrapper to Jenkins LIVE job config (fixes stale-wrapper loop)."""
 from __future__ import annotations
 

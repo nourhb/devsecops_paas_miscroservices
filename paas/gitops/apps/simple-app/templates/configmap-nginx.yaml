@@ -1,3 +1,4 @@
+# Helm template file for configmap nginx.yaml
 {{- if include "simple-app.staticNginx" . | eq "true" }}
 apiVersion: v1
 kind: ConfigMap

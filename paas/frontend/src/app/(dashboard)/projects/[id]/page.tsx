@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard projects [id]
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,15 +10,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubPushBuildPrompt } from "@/components/build/github-push-build-prompt";
-import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help-provider";
+import { usePipelineHelpRebuild } from "@/components/pipeline/pipeline-help";
 import { deploymentFailureStageLabel } from "@/components/deployments/deployment-logs-view";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { shouldSkipAppReachabilityProbe } from "@/lib/app-reachability";
+import { shouldSkipAppReachabilityProbe } from "@/lib/resolve-project-id-from-path";
 import { argocdApi, pipelineApi, projectApi, securityApi } from "@/lib/api";
-import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/api-client";
 import { invalidatePostDeployQueries } from "@/lib/invalidate-post-deploy";
 import type { DeploymentStatus, Project } from "@/types";
-import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
+import { jenkinsUrlForBrowser } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 function statusBadgeVariant(status: string | undefined, ok: string[]): "success" | "warning" | "danger" | "outline" {
     const s = (status || "").toUpperCase();

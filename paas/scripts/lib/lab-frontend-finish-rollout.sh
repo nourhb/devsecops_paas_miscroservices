@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Roll out the latest local paas-frontend image without rebuilding (after disk-blocked build).
+# Lab script to frontend finish rollout on VM cluster
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

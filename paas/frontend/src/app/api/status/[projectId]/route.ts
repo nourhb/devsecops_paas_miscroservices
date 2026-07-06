@@ -1,3 +1,4 @@
+// API route handles status [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getProjectStatus } from "@/server/pipeline/pipeline-service";

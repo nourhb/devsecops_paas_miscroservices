@@ -1,9 +1,10 @@
+// API route handles build [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { writeAuditLog } from "@/server/audit/audit-log";
 import { assertProjectAccess, clearPendingGitHubPush } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 import { triggerBuild } from "@/server/pipeline/pipeline-service";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest, { params }: {

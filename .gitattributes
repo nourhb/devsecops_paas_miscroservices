@@ -1,3 +1,4 @@
+// Forces LF line endings on shell scripts for Linux.
 #Forces Unix line endings (LF) on .sh and .bash files so they run correctly on Linux/VM.
 *.sh text eol=lf
 *.bash text eol=lf

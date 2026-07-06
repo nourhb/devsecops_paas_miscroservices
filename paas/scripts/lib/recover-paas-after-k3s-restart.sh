@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for recover paas after k3s restart
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lab-kube-env.sh"

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help";
 import { useProjectIdFromRoute } from "@/hooks/use-project-id-from-route";
 import { useAuth } from "@/hooks/use-auth";
 export function TopNav() {

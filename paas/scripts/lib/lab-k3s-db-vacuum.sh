@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to k3s db vacuum on VM cluster
 set -uo pipefail
 
 DB_DIR="/var/lib/rancher/k3s/server/db"

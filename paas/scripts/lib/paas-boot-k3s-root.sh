@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for paas boot k3s root
 set -uo pipefail
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

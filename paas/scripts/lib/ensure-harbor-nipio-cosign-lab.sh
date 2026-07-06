@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for ensure harbor nipio cosign lab
 set -euo pipefail
 PROJECT_SLUG="${1:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"
 IMAGE_TAG="${2:?usage: ensure-harbor-nipio-cosign-lab.sh <slug> <tag>}"

@@ -1,3 +1,4 @@
+// API route handles projects [id] pipeline-help requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getPipelineHelp } from "@/server/help/pipeline-help-service";

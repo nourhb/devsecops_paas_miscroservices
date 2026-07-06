@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for probe k8s lab
 set -euo pipefail
 PAAS_NS="${PAAS_NS:-paas}"
 NODE_IP="${NODE_IP:-192.168.56.129}"

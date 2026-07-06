@@ -1,13 +1,10 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
-import { resolveBuildPlan } from "@/server/build/build-planner";
+import { resolveBuildPlan, buildMetadataLines, formatArtifactReference, resolveDeployProfileFromProject } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { prisma } from "@/server/db/prisma";
 import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
-import { buildMetadataLines, formatArtifactReference } from "@/server/build/build-metadata";
-import { buildAppPublicUrl } from "@/server/deploy/app-public-url";
-import { resolveDeployProfileFromProject } from "@/server/deploy/deploy-profile";
-import { probeAppUrlLiveQuick, probeAppUrlReachability } from "@/server/deploy/deploy-reachability";
+import { buildAppPublicUrl, probeAppUrlLiveQuick, probeAppUrlReachability } from "@/server/deploy/app-public-url";
 import {
     buildDeployImageRepository,
     deployImageRefsEquivalent,
@@ -32,10 +29,10 @@ import { updateProject } from "@/server/projects/project-service";
 import { invalidateDashboardOverviewCache } from "@/server/services/dashboard-overview-service";
 import { getSecurityMetrics } from "@/server/security/security-service";
 import { waitForArgoApplicationReady, syncArgoApplication } from "@/server/services/argocd-service";
-import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-service";
 import { ensureProjectNamespaceReady } from "@/server/services/namespace-setup-service";
 import { ensureRollingWorkloadManifests, ensureWorkloadNetworking } from "@/server/gitops/gitops-direct-apply-service";
-import { resolveVerifiedArtifactImage } from "@/server/jenkins/jenkins-build-artifact";
+import { resolveVerifiedArtifactImage } from "@/server/jenkins/pipeline-step-verification";
 
 const activePromotions = new Set<string>();
 

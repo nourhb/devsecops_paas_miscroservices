@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to emergency up on VM cluster
 set -uo pipefail
 REPO="${HOME}/devsecops_paas_miscroservices"
 LIB="${REPO}/paas/scripts/lib"

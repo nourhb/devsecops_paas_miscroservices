@@ -1,17 +1,17 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build/build-backend";
-import { prependBuildMetadata } from "@/server/build/build-metadata";
+import { prependBuildMetadata } from "@/server/build/build-planner";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import type { ResolvedBuildPlan } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 import { getCustomObjectsApi, isKubernetesConfigured, listPodsByLabel, readPodLog } from "@/server/integrations/kubernetes-client";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess } from "@/server/services/cluster-deploy-service";
-import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-service";
 type TektonRunStatus = "queued" | "running" | "succeeded" | "failed";
 function tail(value: string): string {
     return value.length <= DEPLOYMENT_LOG_TAIL_MAX_CHARS ? value : value.slice(-DEPLOYMENT_LOG_TAIL_MAX_CHARS);

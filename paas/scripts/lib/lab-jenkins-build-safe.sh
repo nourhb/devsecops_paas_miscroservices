@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to jenkins build safe on VM cluster
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

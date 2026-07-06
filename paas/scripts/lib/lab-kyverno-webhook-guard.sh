@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to kyverno webhook guard on VM cluster
 set -euo pipefail
 
 kyverno_admission_up() {

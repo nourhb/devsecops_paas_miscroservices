@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to break loop on VM cluster
 set -euo pipefail
 PAAS_NS="${PAAS_NS:-paas}"
 

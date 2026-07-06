@@ -2,7 +2,7 @@ import type { V1Deployment, V1Ingress, V1PodSpec, V1Service } from "@kubernetes/
 import { buildAppIngressHost } from "@/server/deploy/app-public-url";
 import { harborClusterPullImageRef } from "@/server/deploy/deploy-image";
 import { helmReleaseName, rollingDeploymentNameCandidates } from "@/server/gitops/gitops-blue-green";
-import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-paths";
+import { gitopsChartShortNameForProject } from "@/server/gitops/gitops-blue-green";
 import {
     getAppsV1Api,
     getCoreV1Api,

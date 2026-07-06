@@ -1,6 +1,6 @@
 import { env } from "@/server/config/env";
 import { coerceHarborRegistryHostForCosign, harborIpRegistryHostFromNipio, normalizeHarborImageRef } from "@/server/deploy/harbor-registry-host";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 
 export function sanitizeDeployImageName(projectName: string): string {
     return projectName

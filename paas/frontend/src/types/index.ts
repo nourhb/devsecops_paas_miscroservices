@@ -1,3 +1,4 @@
+// Shared TypeScript types for frontend API models
 import type { DeployPipelineReadiness } from "@/server/services/deploy-pipeline-readiness";
 export type UserRole = "ADMIN" | "DEVELOPER";
 export interface UserProfile {

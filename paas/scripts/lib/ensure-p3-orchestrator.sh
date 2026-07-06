@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for ensure p3 orchestrator
 set -euo pipefail
 P3="${1:?usage: ensure-p3-orchestrator.sh <path-to-paas-deploy-stages-p3.groovy>}"
 [[ -f "${P3}" ]] || { echo "ERROR: missing ${P3}" >&2; exit 1; }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for gitops lab lib
 gitops_abort_rebase() {
   local repo="${1:?repo path}"
   [[ -d "${repo}/.git" ]] || return 0

@@ -1,8 +1,9 @@
+// API route handles auth login requests
 import { NextRequest, NextResponse } from "next/server";
 import { loginUser } from "@/server/auth/auth-service";
 import { fail } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
-import { buildSessionCookie } from "@/server/auth/session-cookie";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
+import { buildSessionCookie } from "@/server/auth/auth-service";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
     try {

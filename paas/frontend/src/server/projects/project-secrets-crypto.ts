@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { env } from "@/server/config/env";
-import { ValidationError } from "@/server/http/errors";
+import { ValidationError } from "@/server/http/response";
 import { normalizeBuildEnvInput } from "@/server/projects/project-build-env";
 
 const ENVELOPE_VERSION = 1;

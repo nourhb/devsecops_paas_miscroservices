@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for auth verify-email
 export const dynamic = "force-dynamic";
 import axios from "axios";
 import { useEffect, useState } from "react";

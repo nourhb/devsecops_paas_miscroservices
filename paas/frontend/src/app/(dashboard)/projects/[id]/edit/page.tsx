@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard projects [id] edit
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

@@ -1,6 +1,6 @@
 import { INTEGRATION_HTTP_TIMEOUT_MS } from "@/server/constants/deploy";
 import { env } from "@/server/config/env";
-import { probeHostIsRemapSource, remapIntegrationProbeHost } from "@/server/http/integration-probe-host";
+import { probeHostIsRemapSource, remapIntegrationProbeHost } from "@/server/http/integration-fetch";
 import { Agent, fetch as undiciFetch } from "undici";
 const argoInsecureAgent = new Agent({
     connect: {

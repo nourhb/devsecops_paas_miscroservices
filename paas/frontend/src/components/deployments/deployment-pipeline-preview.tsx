@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { jenkinsUi, type JenkinsPipelineStageRow } from "@/lib/api";
-import { jenkinsUrlForBrowser } from "@/lib/jenkins-browser-url";
+import { jenkinsUrlForBrowser } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 type DeploymentPipelinePreviewProps = {
     projectId: string;

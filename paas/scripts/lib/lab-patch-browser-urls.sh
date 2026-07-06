@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirror browser-openable URLs into NEXT_PUBLIC_* keys (never .svc / .cluster.local).
+# Lab script to patch browser urls on VM cluster
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for auth reset-password
 export const dynamic = "force-dynamic";
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";

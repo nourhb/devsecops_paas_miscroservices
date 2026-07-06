@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to monitoring disk heal on VM cluster
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MON_NS="${PROMETHEUS_K8S_NAMESPACE:-monitoring}"

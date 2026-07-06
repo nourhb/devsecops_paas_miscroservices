@@ -1,7 +1,8 @@
+// API route handles auth register requests
 import { NextRequest } from "next/server";
 import { registerUser } from "@/server/auth/auth-service";
 import { created, fail } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
     try {

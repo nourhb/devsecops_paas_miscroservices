@@ -1,7 +1,8 @@
+// API route handles auth keycloak callback requests
 import { NextRequest, NextResponse } from "next/server";
 import { completeKeycloakLogin, keycloakSsoConfigured, readKeycloakOAuthFromRequestCookies } from "@/server/auth/keycloak-sso";
-import { buildSessionCookie } from "@/server/auth/session-cookie";
-import { buildExpiredKeycloakOAuthCookies } from "@/server/auth/keycloak-oauth-cookies";
+import { buildSessionCookie } from "@/server/auth/auth-service";
+import { buildExpiredKeycloakOAuthCookies } from "@/server/auth/keycloak-sso";
 import { env } from "@/server/config/env";
 export const runtime = "nodejs";
 function appOrigin(): string {

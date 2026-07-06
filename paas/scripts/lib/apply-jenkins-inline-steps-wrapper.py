@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Lab helper script for apply jenkins inline steps wrapper
 """POST CPS 7-file split wrapper to Jenkins LIVE (avoids MethodTooLarge monolith load)."""
 from __future__ import annotations
 

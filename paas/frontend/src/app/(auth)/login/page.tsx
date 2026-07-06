@@ -1,3 +1,4 @@
+// Next.js page UI for auth login
 import { keycloakSsoConfigured } from "@/server/auth/keycloak-sso";
 import { LoginForm } from "./login-form";
 export const dynamic = "force-dynamic";

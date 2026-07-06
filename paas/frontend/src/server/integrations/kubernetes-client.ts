@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { Agent, fetch as undiciFetch } from "undici";
 import { env } from "@/server/config/env";
 import { harborClusterPullImageRef } from "@/server/deploy/deploy-image";
-import { TtlCache } from "@/server/http/ttl-cache";
+import { TtlCache } from "@/server/http/integration-fetch";
 const kubeInsecureAgent = new Agent({
     connect: {
         rejectUnauthorized: false

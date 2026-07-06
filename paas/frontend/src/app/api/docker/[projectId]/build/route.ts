@@ -1,3 +1,4 @@
+// API route handles docker [projectId] build requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { assertProjectAccess } from "@/server/projects/project-service";

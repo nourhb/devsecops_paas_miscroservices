@@ -1,6 +1,7 @@
+// API route handles auth keycloak login requests
 import { NextRequest, NextResponse } from "next/server";
 import { startKeycloakLoginAsync, keycloakSsoConfigured } from "@/server/auth/keycloak-sso";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
     if (!keycloakSsoConfigured()) {

@@ -3,7 +3,7 @@ import { prisma } from "@/server/db/prisma";
 import { isTransientDbError } from "@/server/db/prisma-retry";
 import { getBuildBackend, toBuildProjectRecord } from "@/server/build/build-backend";
 import { resolveBuildPlan } from "@/server/build/build-planner";
-import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageMessage, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, isBuildMonitorPostgresOutageMessage, recordDeploymentFailure } from "@/server/services/deployment-service";
 
 const activeMonitors = new Set<string>();
 const TRANSIENT_RETRY_MS = 5000;

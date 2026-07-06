@@ -3,7 +3,7 @@ import type { ActionResponse, DeploymentStatus } from "@/types";
 import type { BuildTriggerOptions } from "@/server/build/build-backend";
 import { getBuildBackend, toBuildProjectRecord } from "@/server/build/build-backend";
 import { resolveBuildPlan } from "@/server/build/build-planner";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 import { getProjectById, mapProjectToResponse, updateProject } from "@/server/projects/project-service";
 import { getNamespacePodSummary } from "@/server/integrations/kubernetes-client";
 import { env } from "@/server/config/env";

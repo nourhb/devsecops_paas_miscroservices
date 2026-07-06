@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Heals one project GitOps deploy on lab VM.
 set -uo pipefail
 PROJECT_NAME="${1:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber> [8080|8000|3000]}"
 TAG="${2:?usage: heal-project-deploy-lab.sh <projectName> <jenkinsBuildNumber>}"

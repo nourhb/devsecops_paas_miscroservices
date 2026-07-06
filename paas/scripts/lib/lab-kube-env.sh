@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to kube env on VM cluster
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 lab_ensure_kubeconfig() {

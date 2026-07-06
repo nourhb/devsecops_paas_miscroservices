@@ -1,10 +1,11 @@
+// API route handles rollback [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { writeAuditLog } from "@/server/audit/audit-log";
 import { rollbackProject } from "@/server/pipeline/pipeline-service";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest, { params }: {
     params: {

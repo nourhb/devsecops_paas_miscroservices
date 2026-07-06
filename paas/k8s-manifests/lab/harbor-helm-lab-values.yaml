@@ -1,3 +1,4 @@
+# Kubernetes manifest for lab or hosted deploy
 expose:
   type: nodePort
   tls:

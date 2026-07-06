@@ -1,3 +1,4 @@
+// API route handles metrics [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { getRuntimeMetrics } from "@/server/metrics/metrics-service";

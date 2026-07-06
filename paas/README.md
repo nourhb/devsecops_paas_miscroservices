@@ -1,4 +1,4 @@
-# PaaS platform
+<!-- Overview of PaaS layout, lab commands, and architecture. -->
 
 ```
 paas/

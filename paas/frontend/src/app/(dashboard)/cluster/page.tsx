@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard cluster
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Activity, Boxes, FileText, RefreshCcw, ServerCog, ShipWheel } from "lucide-react";

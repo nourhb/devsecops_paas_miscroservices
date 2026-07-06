@@ -1,3 +1,4 @@
+# Helm deployment template for GitOps app rollout
 {{- if ne (.Values.deploymentStrategy | default "Rolling") "BlueGreen" }}
 {{- $staticNginx := include "simple-app.staticNginx" . | eq "true" }}
 apiVersion: apps/v1

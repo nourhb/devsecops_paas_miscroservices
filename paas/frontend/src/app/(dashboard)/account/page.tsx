@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard account
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { UserRound } from "lucide-react";

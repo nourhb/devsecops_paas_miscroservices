@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard monitoring [id]
 import axios from "axios";
 import Link from "next/link";
 import { useParams } from "next/navigation";

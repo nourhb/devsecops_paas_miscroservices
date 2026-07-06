@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for auth forgot-password
 import axios from "axios";
 import { FormEvent, useState } from "react";
 import Link from "next/link";

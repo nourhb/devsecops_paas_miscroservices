@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to quick up on VM cluster
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

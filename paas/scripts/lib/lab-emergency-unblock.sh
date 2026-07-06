@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to emergency unblock on VM cluster
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PAAS_NS="${PAAS_NS:-paas}"

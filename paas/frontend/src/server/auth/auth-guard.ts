@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { getAuthUserById } from "@/server/auth/auth-service";
 import { verifyToken } from "@/server/security/jwt";
-import { getSessionCookieName } from "@/server/auth/session-cookie";
+import { getSessionCookieName } from "@/server/auth/auth-service";
 import { withPrismaRetry } from "@/server/db/prisma-retry";
-import { ForbiddenError, ServiceUnavailableError, UnauthorizedError } from "@/server/http/errors";
+import { ForbiddenError, ServiceUnavailableError, UnauthorizedError } from "@/server/http/response";
 import type { UserRole } from "@/types";
 
 export interface AuthContext {

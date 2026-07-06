@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Build step embeds Jenkinsfile into TypeScript bundle.
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";

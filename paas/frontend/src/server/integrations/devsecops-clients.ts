@@ -2,7 +2,7 @@ import { augmentBuildEnvForPipeline, encodeBuildEnvForJenkins } from "@/server/p
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository, deployImageRepositoryMatchesProject } from "@/server/deploy/deploy-image";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 import { integrationFetch, type IntegrationFetchOptions } from "@/server/http/integration-fetch";
 import { isKubernetesServiceProxyUrl, kubernetesAuthenticatedFetch, prometheusKubernetesProxyBases } from "@/server/integrations/kubernetes-client";
 import { allowSimulation } from "@/server/integrations/integration-mode";

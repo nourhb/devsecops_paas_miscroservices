@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to harbor check image on VM cluster
 set -euo pipefail
 PROJECT="${1:?usage: lab-harbor-check-image.sh <project-slug> <build-tag>}"
 TAG="${2:?usage: lab-harbor-check-image.sh <project-slug> <build-tag>}"

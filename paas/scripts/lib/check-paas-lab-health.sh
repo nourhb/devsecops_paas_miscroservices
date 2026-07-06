@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab helper script for check paas lab health
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lab-kube-env.sh"

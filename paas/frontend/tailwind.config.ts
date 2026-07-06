@@ -1,3 +1,4 @@
+// Tailwind CSS theme and design token configuration
 import type { Config } from "tailwindcss";
 const config: Config = {
     darkMode: ["class"],

@@ -1,22 +1,21 @@
 import { DeploymentFailureReason, DeploymentJobStatus } from "@prisma/client";
 import type { BuildBackend, BuildDeploymentBaseline, BuildProjectRecord, BuildTriggerOptions, BuildTriggerResult, MonitorDeploymentArgs } from "@/server/build/build-backend";
-import { prependBuildMetadata } from "@/server/build/build-metadata";
+import { prependBuildMetadata } from "@/server/build/build-planner";
 import { DEPLOYMENT_LOG_TAIL_MAX_CHARS } from "@/server/constants/deploy";
 import { prisma } from "@/server/db/prisma";
 import { prismaDeploymentUpdate } from "@/server/db/prisma-retry";
 import type { ResolvedBuildPlan } from "@/server/build/build-planner";
 import { env } from "@/server/config/env";
 import { buildDeployImageRepository } from "@/server/deploy/deploy-image";
-import { IntegrationError } from "@/server/http/errors";
+import { IntegrationError } from "@/server/http/response";
 import { allowSimulation } from "@/server/integrations/integration-mode";
 import { jenkinsClient, resolveJenkinsJobNameForProject, usesSharedJenkinsDeployJob } from "@/server/integrations/devsecops-clients";
-import { jenkinsResultUserMessage } from "@/server/jenkins/jenkins-result-user-message";
-import { resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@/server/jenkins/jenkins-build-artifact";
+import { jenkinsResultUserMessage, resolveVerifiedArtifactImage, pickJenkinsLogForArtifactVerify } from "@/server/jenkins/pipeline-step-verification";
 import { syncInlinePaasDeployJenkinsJobBeforeTrigger } from "@/server/jenkins/sync-inline-pipeline-job";
 import { buildEnvJenkinsTriggerLog } from "@/server/projects/project-secrets-crypto";
 import { updateProject } from "@/server/projects/project-service";
 import { promoteDeploymentAfterBuildSuccess, tryCompleteDeploymentIfLive } from "@/server/services/cluster-deploy-service";
-import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-failure";
+import { clearDeploymentFailureFields, recordDeploymentFailure } from "@/server/services/deployment-service";
 import { extractJenkinsRunFromLogs } from "@/server/services/jenkins-deployment-reconcile";
 function jenkinsConfigured(): boolean {
     return Boolean(env.JENKINS_BASE_URL && env.JENKINS_USERNAME && env.JENKINS_API_TOKEN);

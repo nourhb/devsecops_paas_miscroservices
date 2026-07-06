@@ -1,4 +1,4 @@
-# Lab VM browser access — http://192.168.56.129:30100/login
+# Kubernetes manifest for lab or hosted deploy
 apiVersion: v1
 kind: Service
 metadata:

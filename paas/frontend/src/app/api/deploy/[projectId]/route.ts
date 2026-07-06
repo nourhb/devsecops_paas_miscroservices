@@ -1,9 +1,10 @@
+// API route handles deploy [projectId] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
 import { writeAuditLog } from "@/server/audit/audit-log";
 import { assertProjectAccess } from "@/server/projects/project-service";
 import { fail, ok } from "@/server/http/response";
-import { enforceRateLimit } from "@/server/http/rate-limit";
+import { enforceRateLimit } from "@/server/http/integration-fetch";
 import { runProjectDeployment } from "@/server/services/deployment-service";
 export const runtime = "nodejs";
 export async function POST(request: NextRequest, { params }: {

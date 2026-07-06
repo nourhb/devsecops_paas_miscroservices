@@ -1,3 +1,4 @@
+# Helm service template exposing GitOps app pods
 apiVersion: v1
 kind: Service
 metadata:

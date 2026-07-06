@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Lab script to jenkins pvc backup on VM cluster
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lab-kube-env.sh"

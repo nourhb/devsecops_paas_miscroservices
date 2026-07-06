@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { pipelineApi } from "@/lib/api";
-import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/query-http-message";
+import { queryHttpData, queryHttpDetails, queryHttpMessage } from "@/lib/api-client";
 import type { PendingGitHubPush } from "@/types";
 export function GitHubPushBuildPrompt({ projectId, pending, projectBranch, gitCredentialsId }: {
     projectId: string;

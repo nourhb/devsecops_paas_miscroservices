@@ -1,4 +1,5 @@
 "use client";
+// Next.js page UI for dashboard projects
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -8,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { projectApi } from "@/lib/api";
-import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help-trigger";
+import { PipelineHelpTrigger } from "@/components/pipeline/pipeline-help";
 import type { Project } from "@/types";
 export default function ProjectsPage() {
     const queryClient = useQueryClient();

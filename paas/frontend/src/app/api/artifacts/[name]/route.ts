@@ -1,6 +1,7 @@
+// API route handles artifacts [name] requests
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/server/auth/auth-guard";
-import { NotFoundError } from "@/server/http/errors";
+import { NotFoundError } from "@/server/http/response";
 import { fail, ok } from "@/server/http/response";
 import { getPlatformArtifactByName } from "@/server/artifacts/artifact-service";
 export const runtime = "nodejs";
